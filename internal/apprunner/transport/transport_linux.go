@@ -258,8 +258,10 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.slotsInUse.Add(1)
 		go func() {
 			defer workers.Done()
-			defer func() { <-slots }()
+			// The count drops only after the slot is released, so a count of zero
+			// means every slot is free.
 			defer s.slotsInUse.Add(-1)
+			defer func() { <-slots }()
 			// A session handed to the egress registry is no longer this endpoint's
 			// connection: its slot is freed at once, and the registry closes it.
 			if !s.handle(ctx, conn) {

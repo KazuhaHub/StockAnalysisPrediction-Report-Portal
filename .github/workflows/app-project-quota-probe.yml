@@ -94,6 +94,8 @@ on:
       - 'internal/app/app_platform_network_install*'
       - 'internal/app/app_platform_network_authority*'
       - 'internal/app/app_platform_network_roundtrip*'
+      - 'internal/app/app_platform_service_egress*'
+      - 'internal/app/app_platform_notifications*'
       - 'internal/app/app_platform_install_capabilities*'
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_checkpoint*'
@@ -192,6 +194,8 @@ on:
       - 'internal/app/app_platform_network_install*'
       - 'internal/app/app_platform_network_authority*'
       - 'internal/app/app_platform_network_roundtrip*'
+      - 'internal/app/app_platform_service_egress*'
+      - 'internal/app/app_platform_notifications*'
       - 'internal/app/app_platform_install_capabilities*'
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_checkpoint*'
@@ -260,7 +264,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: 882bbc0dd58f01d474cbc27ee79a658c42919a65
+          ref: f2223e202ed6063d9c949a4217d62683a17eb723
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -493,7 +497,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: 882bbc0dd58f01d474cbc27ee79a658c42919a65
+          ref: f2223e202ed6063d9c949a4217d62683a17eb723
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6

@@ -28,8 +28,14 @@ type platformDataIntent struct {
 // The data service is shared infrastructure. A static installation retains NULL
 // runtime_id and managed=false; only this typed data effect references the runner.
 func (s *Server) platformDataRuntime(e migExec, epoch string, dek []byte) (platformRuntimeRegistration, []byte, error) {
+	return s.platformDataRuntimeLocked(e, epoch, dek, " FOR UPDATE")
+}
+
+// platformDataRuntimeLocked reads the active runtime under the given row lock
+// clause on Postgres (" FOR SHARE" for a read-only caller).
+func (s *Server) platformDataRuntimeLocked(e migExec, epoch string, dek []byte, lock string) (platformRuntimeRegistration, []byte, error) {
 	var zero platformRuntimeRegistration
-	row, found, _, err := platformActiveRuntime(e, true)
+	row, found, _, err := platformActiveRuntimeLocked(e, lock)
 	if err != nil {
 		return zero, nil, err
 	}

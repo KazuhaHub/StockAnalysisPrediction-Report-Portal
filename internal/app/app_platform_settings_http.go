@@ -2,10 +2,12 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -85,6 +87,23 @@ type platformInstallationSettings struct {
 	// ImageDelivery is present while a release the installation needs has image blobs that are gone or unreadable,
 	// so the package must be uploaded again.
 	ImageDelivery *platformSettingsImageDelivery `json:"image_delivery,omitempty"`
+	// ServiceEgress is the background broker egress diagnostics (doc 174 F9): the last session event and the last
+	// summary of this installation, read from audit_log. Both are null until something was recorded.
+	ServiceEgress platformSettingsServiceEgress `json:"serviceEgress"`
+}
+
+// platformSettingsServiceEgress is {lastSession, lastSummary}.
+type platformSettingsServiceEgress struct {
+	LastSession *platformSettingsEgressEvent `json:"lastSession"`
+	LastSummary *platformSettingsEgressEvent `json:"lastSummary"`
+}
+
+// platformSettingsEgressEvent is one audit row of background egress: its time, which event it is
+// (opened, closed or summary) and the recorded detail, which never carries a path, query, body or header.
+type platformSettingsEgressEvent struct {
+	At     string          `json:"at"`
+	Event  string          `json:"event"`
+	Detail json.RawMessage `json:"detail"`
 }
 
 // platformSettingsImageDelivery says which release needs its package again, and why.
@@ -343,6 +362,12 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			return err
 		}
 
+		serviceEgress, err := loadPlatformSettingsServiceEgress(e, installation)
+		if err != nil {
+			return err
+		}
+		result.ServiceEgress = serviceEgress
+
 		var pending int
 		if err := e.queryRow(`SELECT COUNT(*)
 			FROM app_platform_operations
@@ -498,5 +523,37 @@ func platformMigrationRecoveryProjection(e migExec, installation string) (*platf
 	result.Choices = append(result.Choices,
 		platformSettingsMigrationChoice{Kind: "rollback", RecoverySetID: recoverySet},
 		platformSettingsMigrationChoice{Kind: "retry", RecoversOperationID: operation, ReleaseSHA256: release, TrustRevision: strconv.FormatInt(trust, 10)})
+	return result, nil
+}
+
+// loadPlatformSettingsServiceEgress reads the newest session event (opened or closed) and the newest summary of
+// one installation from audit_log. The rows are Portal's own (actor system); an installation sees only its own.
+func loadPlatformSettingsServiceEgress(e migExec, installation string) (platformSettingsServiceEgress, error) {
+	var result platformSettingsServiceEgress
+	read := func(first, second string) (*platformSettingsEgressEvent, error) {
+		var action, at, detail string
+		err := e.queryRow(`SELECT action,at,detail FROM audit_log
+			WHERE target_type='app_platform_installation' AND target_id=? AND actor='system'
+			AND action IN (?,?) ORDER BY id DESC LIMIT 1`,
+			installation, first, second).Scan(&action, &at, &detail)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !json.Valid([]byte(detail)) {
+			return nil, nil
+		}
+		event := strings.TrimPrefix(action, "app_platform.service_egress_")
+		return &platformSettingsEgressEvent{At: at, Event: event, Detail: json.RawMessage(detail)}, nil
+	}
+	var err error
+	if result.LastSession, err = read(platformServiceEgressAuditOpened, platformServiceEgressAuditClosed); err != nil {
+		return result, err
+	}
+	if result.LastSummary, err = read(platformServiceEgressAuditSummary, platformServiceEgressAuditSummary); err != nil {
+		return result, err
+	}
 	return result, nil
 }

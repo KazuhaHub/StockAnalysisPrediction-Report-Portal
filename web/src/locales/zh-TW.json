@@ -3694,6 +3694,8 @@
   "appPlatform.requiredPermissions": "必要許可權",
   "appPlatform.optionalPermissions": "可選許可權",
   "appPlatform.declinedPermissions": "未授予的可選許可權",
+  "appPlatform.backgroundNetwork": "背景網路存取",
+  "appPlatform.backgroundNetworkNote": "此應用可在無人登入時存取已審核的目的地。",
   "appPlatform.permissionDiffLabel": "許可權變更",
   "appPlatform.compatibility": "平臺相容性",
   "appPlatform.resources": "資源需求",

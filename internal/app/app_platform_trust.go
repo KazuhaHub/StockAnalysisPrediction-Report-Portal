@@ -386,8 +386,21 @@ func admitPlatformTrustQuarantine(
 }
 
 func lockPlatformPublisherTrust(e migExec) error {
+	return lockPlatformPublisherTrustMode(e, "SHARE ROW EXCLUSIVE")
+}
+
+// lockPlatformPublisherTrustShared is the guard of a read-only caller. Every
+// writer of the trust tables takes SHARE ROW EXCLUSIVE, which conflicts with
+// SHARE, so the reader still sees one consistent publisher/key snapshot that no
+// writer can change underneath it; unlike SHARE ROW EXCLUSIVE, SHARE does not
+// conflict with itself, so readers do not queue behind each other.
+func lockPlatformPublisherTrustShared(e migExec) error {
+	return lockPlatformPublisherTrustMode(e, "SHARE")
+}
+
+func lockPlatformPublisherTrustMode(e migExec, mode string) error {
 	if e.s.driver == "postgres" {
-		_, err := e.exec(`LOCK TABLE app_platform_publishers,app_platform_publisher_keys IN SHARE ROW EXCLUSIVE MODE`)
+		_, err := e.exec(`LOCK TABLE app_platform_publishers,app_platform_publisher_keys IN ` + mode + ` MODE`)
 		return err
 	}
 	_, err := e.exec(`UPDATE app_platform_publishers SET revision=revision WHERE 0`)
