@@ -146,7 +146,15 @@ jobs:
             echo "service started on a non-XFS fixture" >&2
             exit 1
           fi
-          test "$serve_output" = "runner service is not ready"
+          # The fixture root is on the worker's ext4: the refusal says so, names the recipe and never a path, and
+          # still ends with the fixed refusal line.
+          test "$(printf '%s\n' "$serve_output" | tail -n 1)" = "runner service is not ready"
+          printf '%s\n' "$serve_output" | grep -q 'data_root is on ext4'
+          printf '%s\n' "$serve_output" | grep -q 'provision-xfs-images'
+          if printf '%s\n' "$serve_output" | grep -q "$root"; then
+            echo "the refusal leaked a configured path" >&2
+            exit 1
+          fi
 
       - name: Start the managed service on an owned XFS project-quota mount
         shell: bash
@@ -399,6 +407,153 @@ jobs:
           go test -p 2 -race -c -o "$portal_binary" ./internal/app
           chmod 0500 "$portal_binary"
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_RUNTIME_CONFIRM_ACCEPTANCE=1 "$portal_binary" -test.v -test.timeout=90s -test.run='^TestPlatformRuntimeEndpointAcceptance$'
+  # Doc 182 section 3.2 / phases P0-P1: the provisioning command on an ext4 outer filesystem. A small ext4 image
+  # stands in for the host's ext4 /data (mkfs -m 0, so it can really be filled), the command makes two preallocated
+  # loop-mounted XFS images on it, and the evidence is: the runner's own data-root checks pass (the command
+  # runs them), a rerun is idempotent, foreign content is refused, a full outer filesystem leaves the images
+  # writable and their project quota native, the filesystems are repair-clean, and a reattached image keeps its
+  # limit. The doc 28 workload table itself stays in app-project-quota-probe.yml. The power-cut test needs a VM
+  # and is not run here.
+  provision-xfs-images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Provision, fill the outer filesystem, repair-check and reattach
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs e2fsprogs
+          work=$(mktemp -d /tmp/portal-provision.XXXXXXXX)
+          outer="$work/outer"
+          portal="$outer/portal"
+          data_mount="$portal/mnt-data"
+          checkpoint_mount="$portal/mnt-checkpoint"
+          outer_loop=
+          detach_associated() {
+            local loop
+            for loop in $(sudo -n losetup --associated "$1" --noheadings --output NAME 2>/dev/null || true); do
+              sudo -n losetup --detach "$loop" || true
+            done
+          }
+          cleanup() {
+            sudo -n umount "$data_mount" 2>/dev/null || true
+            sudo -n umount "$checkpoint_mount" 2>/dev/null || true
+            detach_associated "$portal/data.img"
+            detach_associated "$portal/checkpoint.img"
+            sudo -n umount "$outer" 2>/dev/null || true
+            if [ -n "$outer_loop" ]; then sudo -n losetup --detach "$outer_loop" 2>/dev/null || true; fi
+            sudo -n rm -rf "$work"
+          }
+          trap cleanup EXIT
+          runner="$RUNNER_TEMP/app-runner-provision"
+          go build -o "$runner" ./cmd/app-runner
+          # The stand-in host filesystem: ext4 with no reserved blocks, so "full" really means full.
+          truncate -s 4G "$work/outer.img"
+          outer_loop=$(sudo -n losetup --find --show "$work/outer.img")
+          sudo -n mkfs.ext4 -q -m 0 "$outer_loop"
+          install -d -m 0755 "$outer"
+          sudo -n mount -t ext4 "$outer_loop" "$outer"
+          sudo -n install -d -m 0700 -o root -g root "$portal"
+          provision() {
+            sudo -n "$runner" provision-xfs-images \
+              --data-image "$portal/data.img" --data-size 1G \
+              --checkpoint-image "$portal/checkpoint.img" --checkpoint-size 1G \
+              --mount-data "$data_mount" --mount-checkpoint "$checkpoint_mount" "$@"
+          }
+
+          echo "::group::dry run changes nothing"
+          provision --dry-run | tee "$work/dry.log"
+          sudo -n test ! -e "$portal/data.img"
+          echo "::endgroup::"
+
+          echo "::group::foreign content is refused before anything is made"
+          sudo -n install -d -m 0700 "$portal/junk"
+          sudo -n touch "$portal/junk/keep"
+          if sudo -n "$runner" provision-xfs-images \
+              --data-image "$portal/data.img" --data-size 1G \
+              --checkpoint-image "$portal/checkpoint.img" --checkpoint-size 1G \
+              --mount-data "$portal/junk" --mount-checkpoint "$checkpoint_mount" > "$work/refused.log" 2>&1; then
+            echo "a non-empty mount point was accepted" >&2
+            exit 1
+          fi
+          grep -q '^refused: data volume' "$work/refused.log"
+          sudo -n test ! -e "$portal/data.img"
+          sudo -n test -e "$portal/junk/keep"
+          echo "::endgroup::"
+
+          echo "::group::provision"
+          provision | tee "$work/provision.log"
+          grep -q '"data_root": "'"$data_mount"'/root"' "$work/provision.log"
+          grep -q "$portal/data.img $data_mount xfs loop,prjquota,nodev,nosuid,noexec 0 0" "$work/provision.log"
+          for image in data checkpoint; do
+            # Preallocated, not sparse: allocated bytes cover the whole size.
+            size=$(sudo -n stat -c %s "$portal/$image.img")
+            blocks=$(sudo -n stat -c %b "$portal/$image.img")
+            test "$size" = 1073741824
+            test $((blocks * 512)) -ge "$size"
+            test "$(sudo -n stat -c %a "$portal/$image.img")" = 600
+          done
+          for mount in "$data_mount" "$checkpoint_mount"; do
+            test "$(findmnt -no FSTYPE "$mount")" = xfs
+            findmnt -no OPTIONS "$mount" | grep -q prjquota
+            test "$(sudo -n stat -c %a "$mount/root")" = 700
+          done
+          # Direct I/O on the loop device, as the recipe attaches it.
+          sudo -n losetup --list --output NAME,DIO,BACK-FILE | grep "$portal/data.img" | awk '{ exit ($2 != 1) }'
+          echo "::endgroup::"
+
+          echo "::group::a rerun only reverifies"
+          before=$(sudo -n losetup --list --noheadings | wc -l)
+          provision | tee "$work/rerun.log"
+          test "$(grep -c already-provisioned "$work/rerun.log")" = 2
+          test "$(sudo -n losetup --list --noheadings | wc -l)" = "$before"
+          echo "::endgroup::"
+
+          echo "::group::project quota is native, also with the outer filesystem full"
+          sudo -n mkdir "$data_mount/root/app"
+          sudo -n xfs_quota -x -c "project -s -p $data_mount/root/app 4242" "$data_mount"
+          sudo -n xfs_quota -x -c "limit -p bhard=8m ihard=64 4242" "$data_mount"
+          avail=$(df --output=avail -B1 "$outer" | tail -n 1 | tr -d ' ')
+          # Leave a little for the fill file's own extent blocks, then take the rest, so the outer filesystem is full.
+          sudo -n fallocate -l $((avail - 524288)) "$outer/fill.bin"
+          sudo -n dd if=/dev/zero of="$outer/fill.tail" bs=4k status=none 2>/dev/null || true
+          test "$(df --output=avail -B1 "$outer" | tail -n 1 | tr -d ' ')" -lt 4096
+          # The preallocated image does not need a block from the full outer filesystem.
+          sudo -n dd if=/dev/zero of="$data_mount/root/preallocated.bin" bs=1M count=64 conv=fsync status=none
+          if sudo -n dd if=/dev/zero of="$data_mount/root/app/over.bin" bs=1M count=16 conv=fsync 2> "$work/dd.err"; then
+            echo "the project quota did not hold" >&2
+            exit 1
+          fi
+          grep -q 'No space left on device' "$work/dd.err"
+          test "$(sudo -n stat -c %s "$data_mount/root/app/over.bin")" -le 8388608
+          sudo -n rm -f "$data_mount/root/preallocated.bin"
+          echo "::endgroup::"
+
+          echo "::group::repair-check, then reattach keeps the limit"
+          sudo -n umount "$data_mount"
+          sudo -n umount "$checkpoint_mount"
+          for image in data checkpoint; do
+            loop=$(sudo -n losetup --associated "$portal/$image.img" --noheadings --output NAME)
+            sudo -n xfs_repair -n "$loop"
+            sudo -n losetup --detach "$loop"
+          done
+          sudo -n rm -f "$outer/fill.bin" "$outer/fill.tail"
+          provision | tee "$work/reattach.log"
+          test "$(grep -c 'attached image' "$work/reattach.log")" = 2
+          sudo -n xfs_quota -x -c 'report -p -b -N' "$data_mount" | awk '$1 == "#4242" { found = 1; exit ($4 != 8192) } END { exit !found }'
+          echo "::endgroup::"
   # Also runs, as root on a real daemon, the overlap checks that need privilege: a bind-backed local volume of a
   # namespace must conflict, and real bind mounts of the namespace, its parent and a descendant must be seen in
   # the mount table (TestBindMountAliasIsAnOverlap, which skips without root).
