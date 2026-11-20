@@ -305,6 +305,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) (detached bo
 	case NetworkTargetsQueryMagic:
 		s.handleNetworkTargets(ctx, conn)
 		return
+	case MachineSupportQueryMagic:
+		s.handleMachineSupport(ctx, conn)
+		return
 	case PostgresProbeQueryMagic:
 		s.handlePostgresProbeQuery(ctx, conn)
 		return

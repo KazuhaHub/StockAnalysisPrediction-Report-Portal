@@ -45,7 +45,7 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 	if stored == boolInt(reviewed) {
 		return true
 	}
-	return (capability == "principals.read" || capability == "public.projection" || capability == platformCapabilityNetworkPostgres || capability == "ingress.webhook") && !reviewed && stored == 1
+	return (capability == "principals.read" || capability == "public.projection" || capability == platformCapabilityNetworkPostgres || capability == "ingress.webhook" || capability == "machine.read") && !reviewed && stored == 1
 }
 
 // platformPolicyMatches compares a stored policy with the reviewed one. public.projection is the
@@ -59,7 +59,8 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 func platformPolicyMatches(capability string, granted int, stored, reviewed string) bool {
 	return stored == reviewed ||
 		(capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored)) ||
-		(capability == platformCapabilityNetworkPostgres && granted == 1 && reviewed == "{}" && appplatform.ValidPostgresPolicy(stored))
+		(capability == platformCapabilityNetworkPostgres && granted == 1 && reviewed == "{}" && appplatform.ValidPostgresPolicy(stored)) ||
+		(capability == "machine.read" && granted == 1 && reviewed == "{}" && appplatform.ValidMachinePolicyShape(stored))
 }
 
 // platformNetworkRowAccepted is the row test of one capability: the reviewed selection, or, for a

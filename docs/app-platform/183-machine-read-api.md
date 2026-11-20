@@ -1,8 +1,7 @@
 # Proposal: authenticated machine read API for apps (e.g. Dify)
 
-Status: Accepted 2026-11-20; implementation pending. Owner decisions are in
-section 11; the schema change (section 10) is approved as migration 0023. No
-code, schema or contract change is made by this document. Builds on [179](179-public-projection.md) (route list, limits,
+Status: Accepted 2026-11-20; implemented (section 12). Owner decisions are in
+section 11; the schema change (section 10) is migration 0023. Builds on [179](179-public-projection.md) (route list, limits,
 consent, `pub.` assertion) and [180](180-authenticated-ingress.md) (Portal-side
 verification of an external caller). Related: [175](175-reviewed-multi-origin-and-private-network.md),
 [182](182-cross-platform-backend-runtime.md).
@@ -601,3 +600,132 @@ Q12. Serve a generated OpenAPI document. Decided: yes, authenticated with the sa
 Q13. Default limits. Decided: 60/min per token (max 600), 5/s and 4 concurrent per installation (max 50 and 16).
 
 Q14. Approve the schema in section 10. Decided: approve as one additive migration after `0022`.
+
+## 12. Implementation notes
+
+Implemented on `feat/app-platform-machine-read-api` (on top of the ACS3 signing
+branch, with the docs branch merged). Where the code is, and where it differs from
+the text above:
+
+**What exists**
+
+- Contract: `machine.read` (optional, needs a backend, never required) and the
+  descriptor `machine` block, in the source schema and the generated Go and
+  TypeScript products (`internal/appplatform/descriptor_machine.go` validates the
+  block; the optional capability list now has 16 entries).
+- Formats (`internal/appplatform/machine.go`): the policy
+  `portal.machine-read-policy/1-dev.1`, the query canonicalisation shared with 179
+  (bounds 256 bytes per value, 1,024 in total, 16 names), the `pmr_` token
+  (`NewMachineToken`, `ParseMachineAuthorization`), and the `mch.` assertion with
+  its own MAC domain `rp-extension-machine-v1\n`, header
+  `X-Portal-Machine-Assertion`, 30 second lifetime and the claims of section 4.6
+  (`rid` for the request ID, as written there; 179's public claims call it `jti`).
+- Reserved route space: `ValidBackendRequestData` judges the DECODED path
+  (`backendRequestSpace`: decoded twice, no `;` in either spelling, case-insensitive,
+  no dot or empty segment; these refusals apply to a path that is in, or after
+  normalisation would reach, the public, ingress, machine or handshake space, and an ordinary
+  viewer path keeps its spelling). A `mch.` token is valid only on a bodiless GET in the
+  exact lower-case `/v1/machine/` spelling; a `pub.` token only in `/v1/public/`; a
+  viewer token in neither (Q11). The runner checks claims against the request
+  (`validateMachineAssertionData`) and the driver picks the header from the prefix.
+- Runner capability query (section 4.7): `PRMA0001`/`PRMB0001`
+  (`portal.runner.machine-assertions/1-dev.1`), modelled on the network targets
+  query, with one retry before a runner is concluded unsupported. Enabling is
+  refused (409) and requests are 503 against a runner that does not answer; the
+  definite answer is remembered for 60 seconds (10 when it is "unsupported"); a
+  failure to ask, such as a timeout, is not remembered.
+- Table `app_platform_machine_tokens` as migration 0023, DDL exactly as section 10
+  (a test compares the generated DDL with the text of that section). Restore keeps
+  every live revocation with the earlier revocation time, and the shorter of the live
+  and the restored expiry (a rotation retires the old token by shortening it); a revoked token whose
+  installation is not in the backup is skipped rather than refusing the restore;
+  the restore report and the `restore` command say how many unexpired active
+  tokens the backup does not hold.
+- Tokens (`app_platform_machine_token.go`): create, rotate (grace 0 to 7 days,
+  never lengthening the predecessor), revoke, list, last-used (at most once a
+  minute), sixteen active per installation, expiry 1 to 365 days (the console
+  defaults to 90), source list of at most eight addresses or prefixes. Disabling
+  the capability and uninstalling revoke every token in the same transaction.
+- Machine routes (`app_platform_machine_http.go`): the order of section 4.4, a new
+  route class `authMachine` (never a session route), a global cap of 32
+  concurrent pre-authentication database reads (the token lookup and the authority
+  read, answered 503 beyond it), a sharded LRU limiter per source, per token and
+  per installation (the per-source ceiling counts requests that fail to authenticate;
+  a valid token is held only to its own limit, so its configured rate is reachable
+  from one address), an installation concurrency counter, exclusion from the
+  request log, no CORS, no cookie read, `no-store`.
+- OpenAPI 3.0.3 document (`app_platform_machine_openapi.go`), generated from the
+  descriptor and the token's effective routes, with no backend call.
+- Audit: `machine_read_enabled`, `_policy_changed`, `_disabled`,
+  `machine_token_created`, `_rotated`, `_revoked`, `_expired` (a sweep every ten
+  minutes; the audit row is the record, so a restart repeats nothing; a token
+  a rotation retired is reported by the rotation, not as expired),
+  `machine_token_source` (once per token per day, the address in `detail`), and
+  `machine_read_summary` per token per 10 minutes. Requests that do not
+  authenticate are counted in one shared, address-free summary row.
+- Console: a panel on the application settings page (consent preview with digest,
+  route and limit choice, token table with last use, create, rotate, revoke, recent
+  use, secret shown once with the OpenAPI address), in en-US, zh-CN and zh-TW.
+
+**Decisions where the text left room**
+
+- A valid token for an installation whose `machine.read` grant is off answers 401
+  (the token no longer works); 503 is for an installation that is not ready, a
+  restore pause, a trust failure, a runner without support and a busy cap.
+- Switching the capability on (off to on) revokes any token an earlier period left
+  behind, because an update resets the grant row without a withdrawal. A policy
+  change while it stays on keeps tokens, as the intersection rule requires.
+- The access transaction of the relay re-reads the token as well as the grant, before and after
+  the backend call, so a revocation during a call withholds the answer (503) and
+  the assertion is signed only for the token that was admitted.
+- 405 for every method other than GET comes from the mux (`Allow: GET, HEAD`) and
+  from the handlers for HEAD; there is no body and no CORS header.
+- `machine.read` is not in the capability list the launch page gives the app's
+  frontend: the frontend has no use for it, and the Apps SDK treats that list as
+  closed. It is in the settings capability list and in the launch aggregate check.
+- The interim consent route of section 5.5 is used; the doc 175 capability policy
+  review does not carry `machine.read` yet.
+
+**Not as the proposal assumed**
+
+- `backendRequestSpace` is not on main: it exists only on
+  `feat/app-platform-heartbeat-ingress`. It is added here in the same shape with
+  the spaces `public` and `machine`. Merging the two branches needs
+  `((pub|ing|mch)\.)?` in `backendRequestAssertion`, the `machine` case beside
+  `ingress` in `ValidBackendRequestData`, and `"machine"` in the space list. That
+  branch's `platformAuthoritySlots` is added here identically so the file merges
+  cleanly; `anonymousMachine` is a second field beside its `anonymousIngress`, and
+  `platformReadMachineGrant` is called from the same two places in
+  `platformBackendReadTx` as its `platformReadAnonymousGrant`.
+- That merge is done: the ingress branch is on main, `backendRequestSpace` keeps this
+  branch's rule (strict spellings only where a path reaches the public, ingress,
+  machine or handshake space), so main's test that refused a semicolon on every path
+  now uses reserved-space paths, and an ordinary viewer path keeps its spelling.
+
+**Apps side (not part of this change)**
+
+1. Take the source schema `internal/appplatform/contract/descriptor-v2.schema.json`
+   and regenerate with `python3 scripts/generate_app_contract.py --apps-dir <Apps>`
+   (adds `Machine`, `MachineRoute`, the `machine.read` capability, the three
+   machine patterns and limits; the contract digest changes).
+2. `packages/extensionprotocol`: `VerifyMachineAssertion` and `MachineClaims`
+   (prefix `mch.`, domain `rp-extension-machine-v1\n`, header
+   `X-Portal-Machine-Assertion`, claims of section 4.6, 30 second lifetime). An
+   app serves `/v1/machine/*` only on that header, never on a viewer or public
+   assertion.
+3. market-monitor's planned Go wrapper exposes its query endpoints under
+   `/v1/machine/` and may vary by `client_id`.
+4. Pin the Apps checkout of `.github/workflows/app-project-quota-probe.yml`
+   (`ref:` of the Apps repository) to the Apps commit that carries 1 and 2.
+
+**Tests** are the ones named in section 9, except item 12's native fixture run,
+which needs the runner and is covered by the signing test that goes through the
+real relay signer and the runner's validation: `appplatform/machine_test.go`,
+`descriptor_machine_test.go`, `apprunner/control/backend_request_machine_test.go`,
+`apprunner/driver/backend_request_machine_linux_test.go`,
+`apprunner/transport/machine_support_linux_test.go`,
+`app/app_platform_machine_token_schema_test.go`,
+`app_platform_machine_token_restore_test.go`, `app_platform_machine_test.go`,
+`app_platform_machine_support_test.go`, `app_platform_machine_slots_test.go`,
+`app_platform_machine_log_test.go` and
+`web/src/pages/manage/AppMachineReadPanel.test.tsx`.

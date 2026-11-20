@@ -20,7 +20,7 @@ import (
 // Exact mutable viewer/access authority and immutable execution identity must
 // survive the entire operation. Short-lived envelope timestamps may renew.
 func samePlatformWritableBackendAccess(a, b platformWritableBackendAccess) bool {
-	return a.publicPolicy == b.publicPolicy && a.account == b.account && a.policy == b.policy && a.fence == b.fence && a.activationID == b.activationID && a.viewer.Subject == b.viewer.Subject && a.viewer.Role == b.viewer.Role && a.viewer.SessionRevision == b.viewer.SessionRevision && slices.Equal(a.viewer.OUs, b.viewer.OUs) && a.intent.applied && b.intent.applied && samePlatformWritableRegistrationIntent(a.intent, b.intent)
+	return a.publicPolicy == b.publicPolicy && a.machinePolicy == b.machinePolicy && a.account == b.account && a.policy == b.policy && a.fence == b.fence && a.activationID == b.activationID && a.viewer.Subject == b.viewer.Subject && a.viewer.Role == b.viewer.Role && a.viewer.SessionRevision == b.viewer.SessionRevision && slices.Equal(a.viewer.OUs, b.viewer.OUs) && a.intent.applied && b.intent.applied && samePlatformWritableRegistrationIntent(a.intent, b.intent)
 }
 
 // Private host execution path, not an HTTP route. Neither destination nor

@@ -142,6 +142,13 @@ func validManifest(m Manifest) bool {
 	if declaresIngress != (m.Ingress != nil) || (m.Ingress != nil && (m.Backend == nil || !validIngress(*m.Ingress))) {
 		return false
 	}
+	declaresMachine := false
+	for _, value := range m.Capabilities.Optional {
+		declaresMachine = declaresMachine || value == "machine.read"
+	}
+	if declaresMachine != (m.Machine != nil) || (m.Machine != nil && (m.Backend == nil || !validMachine(*m.Machine))) {
+		return false
+	}
 	if m.Data.Schema < minDescriptorDataSchema || m.Data.Schema > maxDescriptorDataSchema || m.Data.WritesOnStartup || len(m.Data.ReadableSchemas) == 0 || len(m.Data.ReadableSchemas) > maxDescriptorReadableSchemas {
 		return false
 	}
@@ -299,7 +306,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// administrator's decision, never a condition of install. network.postgres (doc 178) is
 		// optional only for the same reason: a database probe is granted by its own review, and so is
 		// ingress.webhook (doc 180).
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" || value == "ingress.webhook" {
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" || value == "ingress.webhook" || value == "machine.read" {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -310,7 +317,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres", "ingress.webhook"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres", "ingress.webhook", "machine.read"} {
 		if seen[value] && !hasBackend {
 			return false
 		}

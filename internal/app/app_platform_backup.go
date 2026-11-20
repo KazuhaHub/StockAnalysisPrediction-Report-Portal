@@ -34,6 +34,10 @@ type platformRestorePrior struct {
 	keys        []platformRestoreKey
 	credentials []platformRevokedCredential
 	bindings    []platformRevokedSecretBinding
+	// machineTokens are every machine token of the live database (doc 183 section 6.5); machineLost
+	// receives how many of them the restored database does not hold.
+	machineTokens []platformMachineTokenFloor
+	machineLost   *int
 }
 
 // Capture inside the destructive restore transaction, before clearing any rows.
@@ -44,6 +48,7 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	if e.s.driver == "postgres" {
 		names := append(migration0015().tables, migration0016().tables...)
 		names = append(names, migration0021().tables...)
+		names = append(names, migration0023().tables...)
 		sort.Strings(names)
 		if _, err := e.exec("LOCK TABLE " + strings.Join(names, ",") + " IN ACCESS EXCLUSIVE MODE"); err != nil {
 			return prior, err
@@ -88,7 +93,11 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	if err != nil {
 		return prior, err
 	}
-	err = capturePlatformCredentialFloors(e, &prior)
+	if err = capturePlatformCredentialFloors(e, &prior); err != nil {
+		return prior, err
+	}
+	prior.machineLost = new(int)
+	err = capturePlatformMachineTokens(e, &prior)
 	return prior, err
 }
 
@@ -122,6 +131,13 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 				return err
 			}
 		}
+	}
+	lost, err := restorePlatformMachineTokenFloors(e, prior, now)
+	if err != nil {
+		return err
+	}
+	if prior.machineLost != nil {
+		*prior.machineLost = lost
 	}
 	if err := restorePlatformCredentialFloors(e, prior, now); err != nil {
 		return err

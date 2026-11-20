@@ -636,7 +636,8 @@ func testPlatformObjectLegacyDumpRestoreMigratesRows(t *testing.T, pg bool) {
 	removedTables := append(append([]string{}, migration0018().tables...), migration0019().tables...)
 	removedTables = append(removedTables, migration0020().tables...)
 	removedTables = append(removedTables, migration0021().tables...)
-	dump := withoutSections(t, dumpOf(t, src), removedTables, []string{"0018", "0019", "0020", "0021", "0022"})
+	removedTables = append(removedTables, migration0023().tables...)
+	dump := withoutSections(t, dumpOf(t, src), removedTables, []string{"0018", "0019", "0020", "0021", "0022", "0023"})
 	var header backupHeader
 	if err := json.NewDecoder(bytes.NewReader(dump)).Decode(&header); err != nil {
 		t.Fatal(err)
@@ -952,6 +953,7 @@ func TestPlatformObjectBackupAndOlderDumpRestore(t *testing.T) {
 	older = withoutSections(t, older, migration0019().tables, []string{"0019"})
 	older = withoutSections(t, older, migration0020().tables, []string{"0020"})
 	older = withoutSections(t, older, migration0021().tables, []string{"0021", "0022"})
+	older = withoutSections(t, older, migration0023().tables, []string{"0023"})
 	oldTarget := newTestStore(t)
 	if _, err := oldTarget.restoreFrom(bytes.NewReader(older), true); err != nil {
 		t.Fatal(err)

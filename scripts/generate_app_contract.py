@@ -163,6 +163,12 @@ def render(raw):
         "minPublicCacheSeconds": p("PublicRoute", "cache_seconds")["minimum"],
         "maxPublicCacheSeconds": p("PublicRoute", "cache_seconds")["maximum"],
         "maxPublicResponseBytes": p("PublicRoute", "response_bytes")["maximum"],
+        "maxMachineRoutes": p("Machine", "routes")["maxItems"],
+        "maxMachineQueryNames": without_null(p("MachineRoute", "query"))["maxItems"],
+        "maxMachineResponseBytes": p("MachineRoute", "response_bytes")["maximum"],
+        "minMachineTimeoutMS": p("MachineRoute", "timeout_ms")["minimum"],
+        "maxMachineTimeoutMS": p("MachineRoute", "timeout_ms")["maximum"],
+        "maxMachineDescription": without_null(p("MachineRoute", "description"))["maxLength"],
         "maxIngressRoutes": p("Ingress", "routes")["maxItems"],
         "maxIngressBodyBytes": p("IngressRoute", "body_bytes")["maximum"],
         "maxIngressPerMinute": p("IngressRoute", "per_endpoint_per_minute")["maximum"],
@@ -201,6 +207,9 @@ def render(raw):
         "publicDocument": without_null(p("Public", "document"))["pattern"],
         "ingressRouteID": p("IngressRoute", "id")["pattern"],
         "ingressPath": p("IngressRoute", "path")["pattern"],
+        "machineRouteID": p("MachineRoute", "id")["pattern"],
+        "machinePath": p("MachineRoute", "path")["pattern"],
+        "machineQueryName": without_null(p("MachineRoute", "query"))["items"]["pattern"],
     }
     for key, value in patterns.items():
         if any(char in value for char in "`\r\n"):

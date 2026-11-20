@@ -75,6 +75,9 @@ func forwardBackendRequest(ctx context.Context, socket string, uid, gid uint32, 
 		header = appplatform.PublicAssertionHeader
 	case appplatform.IsIngressAssertion(assertion):
 		header = appplatform.IngressAssertionHeader
+	case appplatform.IsMachineAssertion(assertion):
+		// A machine token (doc 183) likewise reaches only its own header.
+		header = appplatform.MachineAssertionHeader
 	}
 	request.Header.Set(header, assertion)
 	response, err := client.Do(request)
