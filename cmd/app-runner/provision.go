@@ -19,7 +19,7 @@ whose own filesystem (for example ext4) has none. Run once, as root.
 SIZE is binary: 8G is 8 GiB (minimum 1G). It changes nothing under /etc, refuses
 paths that already hold other content and never touches a mount it did not
 create. Re-running after success only re-verifies. --dry-run reports the plan.
-See docs/app-platform/07-handbook.md and docs/app-platform/182-cross-platform-backend-runtime.md.
+See docs/app-platform/07-handbook.md section 4.2 and docs/app-platform/182-cross-platform-backend-runtime.md.
 `
 
 // provisionXFSImages is the operator command behind doc 182 section 3.2. The environment is a parameter so tests

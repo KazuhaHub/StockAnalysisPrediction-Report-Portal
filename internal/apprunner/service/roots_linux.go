@@ -13,7 +13,7 @@ var inspectRoot = rootfs.Inspect
 
 // recipeHint points an operator at the supported way to give an ext4 or other host an XFS project-quota root.
 const recipeHint = "provision loop-mounted XFS images with `app-runner provision-xfs-images --help` " +
-	"(docs/app-platform/182-cross-platform-backend-runtime.md section 3.2 and the handbook section 4.1)"
+	"(docs/app-platform/182-cross-platform-backend-runtime.md section 3.2 and the handbook section 4.2)"
 
 // requireXFSRoots refuses a runner whose data or checkpoint root is on a filesystem other than XFS, with a message
 // that names the cause and the recipe. The data layer would refuse the same root a step later with a generic

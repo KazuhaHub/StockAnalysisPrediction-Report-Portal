@@ -1,7 +1,7 @@
 # Proposal: backend apps on Linux (ext4 and others), macOS and Windows — runtime and data quota options
 
-Status: Accepted 2026-11-20; implementation pending. No code,
-schema or contract change is made by this document. Related: docs
+Status: Accepted 2026-11-20. Phases P0 to P2 are implemented (section 10);
+P3 and P4 are not. No schema or contract change. Related: docs
 [28](28-project-quota-acceptance.md), [46](46-native-xfs-data-primitive.md),
 [49](49-data-root-identity.md), [66](66-candidate-container-policy.md),
 [146](146-runner-service.md), [171](171-capacity-envelope-plan.md),
@@ -564,3 +564,62 @@ D9. Require native arm64 evidence before supporting Apple Silicon hosts. Decided
 D10. Initial market-monitor quota. Decided: 3 GiB bytes and 100,000 inodes, reviewed after one year of growth (about 300 MB per year, `pipeline/README.md:57`).
 
 D11. Preallocated image sizes for production. Decided: 8 GiB data, 8 GiB checkpoint (doc 167's reference budget), grown online when capacity reporting shows 80%.
+
+## 10. Implementation notes (P0 to P2)
+
+The document has no sections 10 to 12 before this one; these notes are section
+10. Nothing here changes a schema, a contract, the data layer, the journal or the
+managed runtime profile.
+
+### 10.1 What shipped
+
+| Phase | Shipped | Where |
+| --- | --- | --- |
+| P0 | `app-runner provision-xfs-images` (D1): validates the request, inspects both volumes before changing either, creates preallocated images, attaches with `losetup --direct-io=on`, runs `mkfs.xfs` without `-f`, mounts `prjquota,nodev,nosuid,noexec`, runs the runner's own data-root checks (`data.Open` and `Identity`) on `<mount>/root`, and prints the `service.json` roots, a `capacity.disk_bytes` and fstab or systemd mount lines. It edits nothing under `/etc`, refuses foreign content and foreign mounts, never unmounts or detaches what it did not create in the same run, rolls back only what the run made, and only re-verifies when run again. `--dry-run` reports the plan. | `cmd/app-runner/provision.go`, `internal/apprunner/provision/` |
+| P0 | Startup refusal: a data or checkpoint root on any filesystem other than XFS stops `serve` with an operator message naming the root's role, the filesystem kind and the recipe, and never a path. Each root's kind is logged at start, including whether it is loop-backed and the kind of the filesystem holding the backing file (read from `/sys/dev/block/7:N/loop/backing_file`, diagnostic only). A root that fails the data-root checks while on XFS now says so. No wire field, capability query or profile field was added; the profile comparison of doc 175 is untouched. | `internal/apprunner/service/roots_linux.go`, `internal/apprunner/rootfs/` |
+| P0 | Handbook sections 4.1 to 4.4: the runner binary, the XFS volume recipe with growth, repair and backup, the per-platform matrix of section 5, and the Linux VM recipe for macOS and Windows (D4, D7). | `07-handbook.md` |
+| P1 | A workflow job, `provision-xfs-images`, on an ext4 filesystem with no reserved blocks: dry run changes nothing, foreign content is refused, preallocation and direct I/O are checked, a rerun is idempotent, the outer filesystem is filled and the data image is still writable while a project limit still denies with the native error, `xfs_repair -n` is clean, and a reattached image keeps its limit. | `.github/workflows/app-runner-probe.yml` |
+| P2 | `app-runner` for `linux/amd64` and `linux/arm64` (D8) in `release.yml`: its own `build-runner` job (the six-platform matrix and the six portal archives are unchanged), the same provenance check (`check-release-build.sh` takes an optional command name), archives named `app-runner_<tag>_linux_<arch>.tar.gz` in the same `SHA256SUMS.txt`, an arm64 command-surface smoke before the tag, and a pre-merge compile in `test.yml`'s `release-targets` step. | `.github/workflows/release.yml`, `test.yml`, `scripts/check-release-build.sh` |
+| P2 | Native arm64 evidence jobs (D9): the doc 146 service workflow and the container probes run on `ubuntu-24.04-arm` (a matrix leg of `inspect-disposable-daemon`, whose amd64 check name is unchanged), the provisioning job runs on both architectures, and `native-quota-evidence-arm64` runs the doc 28, 46 and 49 native workload on an owned loop volume. | `.github/workflows/app-runner-probe.yml` |
+
+### 10.2 Findings and deviations
+
+- **D11's 8 GiB image does not satisfy the default capacity budget.** The runner
+  is not ready when `capacity.disk_bytes` (default 8 GiB) exceeds the data
+  volume's `statfs` size, or when the checkpoint volume is smaller than two
+  thirds of it (`capacity.go:173`, `:180`). XFS reserves part of an 8 GiB image
+  for its log, so an 8 GiB data image reports a little under 8 GiB. The
+  provisioning command therefore prints a `capacity.disk_bytes` (7 GiB for the
+  production images) and the handbook tells the operator to set it. The owner
+  may prefer larger images (for example 9 GiB data) instead; the sizes are
+  command arguments.
+- The recipe is a command, not only a document in `deploy/app-runner/`, which is
+  what P0 listed; `deploy/app-runner/` is unchanged and the handbook carries the
+  procedure.
+- **P1 is partial.** The host-full check is done as described. Not done: the
+  sparse-image negative control (test 4), the power-cut crash test (test 5, it
+  needs a VM), and running the doc 28 workload table against the provisioned
+  images themselves: `project_quota_probe.py` creates and owns its own loop
+  image, so it is run on that image (and on arm64) rather than refactored to
+  accept an external mount. The new job's quota check is a single byte limit.
+- **The new workflow jobs have not run yet.** Writing them needed root, loop
+  devices and `xfsprogs`, which the development host does not allow; they were
+  checked with `actionlint` and a syntax check of every run block only. The first
+  dispatch may need adjustments. The arm64 legs in particular are untested:
+  until `native-quota-evidence-arm64` and the arm64 legs have passed, Apple
+  Silicon guests stay unsupported (D9).
+- The release carries a `SHA256SUMS.txt` entry per archive and the embedded
+  provenance check; like the Portal archives there is no separate signature or
+  attestation, because the existing pipeline has none. `app-runner` has no
+  version stamp (it has no `version` command); the archive name and the build's
+  embedded commit identify it.
+
+### 10.3 Remaining
+
+- **P3:** the manual acceptance of the VM recipe on a macOS arm64 guest and a
+  Hyper-V guest (the handbook text is written, untested), plus a cloud-init or
+  provisioning script for the guest if the owner wants one.
+- **P1 leftovers:** sparse negative control, power-cut test, doc 28 table on a
+  provisioned image.
+- **P2 leftover:** passing arm64 evidence (the jobs exist).
+- **P4 (optional, not started):** native ext4 adapter (D2).
