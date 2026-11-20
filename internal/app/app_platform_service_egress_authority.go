@@ -134,6 +134,11 @@ type platformServiceEgressLoad struct {
 	// admit, when set with a credential, is judged against the reviewed policy
 	// before the binding is resolved or opened.
 	admit *transport.EgressAdmit
+	// destination is the method and URL of a call that is being checked rather
+	// than admitted, so that a target binding is judged for it too. An admit
+	// supplies its own. Neither means the binding is only checked to still be a
+	// target of the policy.
+	destination platformBindingDestination
 	// beforeCommit is a test seam: it runs with the transaction still open.
 	beforeCommit func()
 }
@@ -350,7 +355,11 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	if facts.networkPolicySHA != result.policy.SHA256 {
 		return errPlatformServiceEgressDenied
 	}
-	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, o.credential, facts, platformPrincipalService)
+	dest := o.destination
+	if o.admit != nil {
+		dest = platformBindingDestination{method: o.admit.Method, url: o.admit.URL}
+	}
+	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, o.credential, facts, platformPrincipalService, dest)
 	if err != nil {
 		return platformServiceEgressCredentialError(err)
 	}
@@ -544,7 +553,9 @@ func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformSe
 	if !call.consistent || (command.CredentialName != "") != (binding.id != "") {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
-	a, err := s.loadServiceEgressForSessionCredential(ctx, state, command.CredentialName, false)
+	a, err := s.loadServiceEgressForSessionLoad(ctx, state, platformServiceEgressLoad{
+		credential: command.CredentialName, destination: platformBindingDestination{method: command.Method, url: command.URL},
+	})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -22,6 +22,9 @@ const (
 
 var platformSecretBindingNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
+// platformTargetIDPattern is the spelling of a network target id.
+var platformTargetIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
+
 func platformValidCredentialHeaderValue(value []byte) bool {
 	if len(value) < 1 || len(value) > platformCredentialValueLimit {
 		return false
@@ -72,6 +75,12 @@ type platformSecretBindingReview struct {
 	Operation               string `json:"operation"`
 	NetworkPolicySHA256     string `json:"network_policy_sha256"`
 	ActorAuthority          string `json:"actor_authority"`
+	// NetworkTargetSHA256 is the digest of the one target the binding is for, and
+	// NetworkTarget its origin, for display. Both are absent in a review made
+	// before bindings were scoped to a target (the policy it writes is then the
+	// whole-policy scope of the older formats).
+	NetworkTargetSHA256 string `json:"network_target_sha256,omitempty"`
+	NetworkTarget       string `json:"network_target,omitempty"`
 	// Principals is absent for a viewer-only binding (every review made before
 	// doc 176 reads back unchanged) and otherwise the sorted list that includes
 	// "service".
@@ -105,6 +114,9 @@ type platformSecretBindingFacts struct {
 	generation, installationRevision, policyRevision int64
 	trustRevision                                    int64
 	networkPolicySHA                                 string
+	// networkPolicyRaw is the grant's policy bytes. It is what the digest above
+	// is of, so it is left out when facts are compared with a review's.
+	networkPolicyRaw string
 }
 
 type platformSecretBindingExisting struct {
@@ -115,6 +127,7 @@ type platformSecretBindingExisting struct {
 
 type platformSecretBindingUse struct {
 	id, credentialID, operation, header, principals   string
+	networkTargetSHA256                               string
 	revision, credentialValueRevision, policyRevision int64
 }
 
@@ -149,11 +162,11 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 		Scan(&networkRaw, &networkReview)
 	switch {
 	case err == nil:
-		network, parseErr := appplatform.ParseHTTPPolicy([]byte(networkRaw))
+		network, parseErr := appplatform.ParseHTTPPolicyAny([]byte(networkRaw))
 		if parseErr != nil || !platformValidUUID(networkReview) {
 			return f, errAppPlatformCredentialUnavailable
 		}
-		f.networkPolicySHA = network.SHA256
+		f.networkPolicySHA, f.networkPolicyRaw = network.SHA256, networkRaw
 	case errors.Is(err, sql.ErrNoRows) && allowNoNetwork:
 		f.networkPolicySHA = ""
 	default:
@@ -173,6 +186,84 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 
 func platformSecretBindingPolicyFor(operation, networkPolicySHA, principals string) ([]byte, error) {
 	return canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: operation, networkPolicySHA256: networkPolicySHA, principals: principals})
+}
+
+// platformBindingDestination is the request a binding is used for. The target
+// its URL selects in the grant's policy is what a target binding is judged
+// against. The zero value names no destination: a target binding is then only
+// checked to still be a target of the policy.
+type platformBindingDestination struct{ method, url string }
+
+// platformSecretBindingTargets is the grant's network policy, read as targets.
+func platformSecretBindingTargets(facts platformSecretBindingFacts) (appplatform.HTTPPolicyV2, error) {
+	parsed, err := appplatform.ParseHTTPPolicyAny([]byte(facts.networkPolicyRaw))
+	if err != nil || parsed.SHA256 != facts.networkPolicySHA {
+		return appplatform.HTTPPolicyV2{}, errAppPlatformCredentialUnavailable
+	}
+	return parsed.Policy, nil
+}
+
+// platformSecretBindingSelect is the target a destination selects in the grant,
+// judged before any binding or credential is read. A destination the policy does
+// not select, or one that selects a plain-http target, is refused: no binding
+// opens a credential for an unencrypted request.
+func platformSecretBindingSelect(facts platformSecretBindingFacts, dest platformBindingDestination) (appplatform.EffectiveHTTPTarget, error) {
+	var zero appplatform.EffectiveHTTPTarget
+	policy, err := platformSecretBindingTargets(facts)
+	if err != nil {
+		return zero, err
+	}
+	selected, err := policy.Select(dest.method, dest.url)
+	if err != nil || selected.Scheme != "https" {
+		return zero, errAppPlatformCredentialUnavailable
+	}
+	return selected, nil
+}
+
+// platformSecretBindingTargetAllowed says whether a target binding may be used
+// for dest now: its target must still be one of the policy and, when there is a
+// destination, the one the destination selects.
+func platformSecretBindingTargetAllowed(facts platformSecretBindingFacts, targetSHA string, dest platformBindingDestination) error {
+	policy, err := platformSecretBindingTargets(facts)
+	if err != nil {
+		return err
+	}
+	for _, t := range policy.Targets {
+		if digest, err := appplatform.HTTPTargetSHA256(t); err == nil && digest == targetSHA {
+			if dest.url == "" {
+				return nil
+			}
+			if selected, err := platformSecretBindingSelect(facts, dest); err == nil && selected.SHA256 == targetSHA {
+				return nil
+			}
+			return errAppPlatformCredentialUnavailable
+		}
+	}
+	return errAppPlatformCredentialUnavailable
+}
+
+// platformSecretBindingReviewTarget picks the target a review binds. An empty
+// id is the policy's only target and is refused when there are several. The
+// target must be https.
+func platformSecretBindingReviewTarget(facts platformSecretBindingFacts, id string) (digest, origin string, err error) {
+	policy, err := platformSecretBindingTargets(facts)
+	if err != nil {
+		return "", "", err
+	}
+	if id == "" && len(policy.Targets) == 1 {
+		id = policy.Targets[0].ID
+	}
+	for _, t := range policy.Targets {
+		if t.ID != id {
+			continue
+		}
+		digest, err := appplatform.HTTPTargetSHA256(t)
+		if err != nil || !strings.HasPrefix(t.Origin, "https://") {
+			return "", "", errPlatformManagementInput
+		}
+		return digest, t.Origin, nil
+	}
+	return "", "", errPlatformManagementInput
 }
 
 // platformSecretBindingPrincipalsOfPlan is the policy spelling of a review's
@@ -199,9 +290,16 @@ func (s *Server) createPlatformSecretBindingReview(session platformActorSession,
 // use the binding: principals is "" (the viewer only), "service" or
 // "service,viewer". Changing it is a new review of the same binding.
 func (s *Server) createPlatformSecretBindingReviewPrincipals(session platformActorSession, installation, name, credentialID, operation, principals string) (platformSecretBindingReviewResult, error) {
+	return s.createPlatformSecretBindingReviewTarget(session, installation, name, credentialID, operation, principals, "")
+}
+
+// createPlatformSecretBindingReviewTarget also names the target of the network
+// policy the binding is for (its id; empty is the policy's only target). An HTTP
+// binding is always scoped to that one target and a plain-http target is refused.
+func (s *Server) createPlatformSecretBindingReviewTarget(session platformActorSession, installation, name, credentialID, operation, principals, target string) (platformSecretBindingReviewResult, error) {
 	var result platformSecretBindingReviewResult
 	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") ||
-		!validPlatformSecretBindingPrincipals(principals) || (operation == "raw_read" && principals != "") {
+		!validPlatformSecretBindingPrincipals(principals) || (operation == "raw_read" && (principals != "" || target != "")) || (target != "" && !platformTargetIDPattern.MatchString(target)) {
 		return result, errPlatformManagementInput
 	}
 	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
@@ -254,6 +352,11 @@ func (s *Server) createPlatformSecretBindingReviewPrincipals(session platformAct
 		if principals != "" {
 			plan.Principals = platformSecretBindingPrincipalList(principals)
 		}
+		if operation != "raw_read" {
+			if plan.NetworkTargetSHA256, plan.NetworkTarget, err = platformSecretBindingReviewTarget(facts, target); err != nil {
+				return err
+			}
+		}
 		raw, err := json.Marshal(plan)
 		if err != nil || len(raw) > 65536 {
 			return errAppPlatformCredentialUnavailable
@@ -287,10 +390,19 @@ func parsePlatformSecretBindingReview(raw string) (platformSecretBindingReview, 
 		return plan, errAppPlatformCredentialUnavailable
 	}
 	canonical, err := json.Marshal(plan)
-	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read") || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation != "raw_read" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformPlanPrincipalsValid(plan) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
+	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read") || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation != "raw_read" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformPlanPrincipalsValid(plan) || !platformPlanTargetValid(plan) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
 		return platformSecretBindingReview{}, errAppPlatformCredentialUnavailable
 	}
 	return plan, nil
+}
+
+// platformPlanTargetValid: a review names its target (a digest and an https
+// origin) or neither, and a raw read names none.
+func platformPlanTargetValid(plan platformSecretBindingReview) bool {
+	if plan.NetworkTargetSHA256 == "" && plan.NetworkTarget == "" {
+		return true
+	}
+	return plan.Operation != "raw_read" && platformValidSHA(plan.NetworkTargetSHA256) && len(plan.NetworkTarget) <= 512 && strings.HasPrefix(plan.NetworkTarget, "https://")
 }
 
 func platformPlanPrincipalsValid(plan platformSecretBindingReview) bool {
@@ -342,6 +454,8 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 		planFacts := platformSecretBindingFacts{appID: plan.AppID, publisherID: plan.PublisherID, generation: plan.Generation, installationRevision: plan.InstallationRevision, policyRevision: plan.PolicyRevision, trustRevision: plan.TrustRevision, controllerEpoch: plan.ControllerEpoch, releaseSHA: plan.ReleaseSHA256, networkPolicySHA: plan.NetworkPolicySHA256}
 		current, err := loadPlatformSecretBindingFactsMode(
 			e, plan.InstallationID, true, plan.Operation == "raw_read")
+		networkRaw := current.networkPolicyRaw
+		current.networkPolicyRaw = ""
 		if err != nil || current != planFacts {
 			return errAppPlatformPlanChanged
 		}
@@ -351,7 +465,17 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			return errAppPlatformPlanChanged
 		}
 		principals, _ := platformSecretBindingPrincipalsOfPlan(plan.Principals)
-		policy, err := platformSecretBindingPolicyFor(plan.Operation, plan.NetworkPolicySHA256, principals)
+		// A review that names a target writes the target scope, if the target is
+		// still one the grant has; any other writes the whole-policy scope.
+		bindingScope := platformSecretBindingPolicy{operation: plan.Operation, networkPolicySHA256: plan.NetworkPolicySHA256, principals: principals}
+		if plan.NetworkTargetSHA256 != "" {
+			current.networkPolicyRaw = networkRaw
+			if platformSecretBindingTargetAllowed(current, plan.NetworkTargetSHA256, platformBindingDestination{}) != nil {
+				return errAppPlatformPlanChanged
+			}
+			bindingScope.networkPolicySHA256, bindingScope.networkTargetSHA256 = "", plan.NetworkTargetSHA256
+		}
+		policy, err := canonicalPlatformSecretBindingPolicy(bindingScope)
 		if err != nil {
 			return err
 		}
@@ -467,32 +591,49 @@ func (s *Server) revokePlatformSecretBinding(session platformActorSession, id st
 }
 
 // loadPlatformSecretBindingUse is the viewer path's binding read.
-func loadPlatformSecretBindingUse(e migExec, installation, name string, facts platformSecretBindingFacts) (platformSecretBindingUse, string, error) {
-	return loadPlatformSecretBindingUseFor(e, installation, name, facts, platformPrincipalViewer)
+func loadPlatformSecretBindingUse(e migExec, installation, name string, facts platformSecretBindingFacts, dest platformBindingDestination) (platformSecretBindingUse, string, error) {
+	return loadPlatformSecretBindingUseFor(e, installation, name, facts, platformPrincipalViewer, dest)
 }
 
 // loadPlatformSecretBindingUseFor reads the active binding for one principal
-// (platformPrincipalViewer or platformPrincipalService). The reviewed policy must
-// name that principal, and the consumed review must say the same. Nothing is
-// decrypted here.
-func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts platformSecretBindingFacts, principal string) (platformSecretBindingUse, string, error) {
+// (platformPrincipalViewer or platformPrincipalService) for a destination. The
+// reviewed policy must name that principal, and the consumed review must say the
+// same. Nothing is decrypted here.
+//
+// The destination is judged first: a URL the grant does not select, or one that
+// selects a plain-http target, is refused before any binding, review or
+// credential is read. A target binding (3-dev.1) is then valid while its target
+// is one of the current policy and the one the destination selects, whatever else
+// that policy gained or lost; it is not tied to the policy revision or the policy
+// digest. An older binding stays tied to both.
+func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts platformSecretBindingFacts, principal string, dest platformBindingDestination) (platformSecretBindingUse, string, error) {
 	var use platformSecretBindingUse
+	if dest.url != "" {
+		if _, err := platformSecretBindingSelect(facts, dest); err != nil {
+			return use, "", err
+		}
+	}
 	var policyRaw, reviewID, sealed string
 	if err := e.queryRow(`SELECT id,credential_id,credential_value_revision,operation,policy_json,policy_revision,review_plan_id,revision FROM app_platform_secret_bindings WHERE installation_id=? AND name=? AND state='active'`, installation, name).
 		Scan(&use.id, &use.credentialID, &use.credentialValueRevision, &use.operation, &policyRaw, &use.policyRevision, &reviewID, &use.revision); err != nil {
 		return use, "", platformBindingReadError(err)
 	}
-	if use.policyRevision != facts.policyRevision || !platformValidUUID(reviewID) || !platformValidUUID(use.id) || !platformValidUUID(use.credentialID) || use.credentialValueRevision < 1 || use.revision < 1 {
-		return use, "", errAppPlatformCredentialUnavailable
-	}
-	if err := validatePlatformHTTPSecretBindingPolicy([]byte(policyRaw), use.operation, facts.networkPolicySHA); err != nil {
+	if !platformValidUUID(reviewID) || !platformValidUUID(use.id) || !platformValidUUID(use.credentialID) || use.credentialValueRevision < 1 || use.revision < 1 {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	policy, err := parsePlatformSecretBindingPolicy([]byte(policyRaw))
-	if err != nil || !policy.allows(principal) {
+	if err != nil || !policy.allows(principal) || policy.operation != use.operation || (use.operation != "http_bearer" && use.operation != "http_api_key") {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
-	use.principals = policy.principals
+	wholePolicy := policy.networkTargetSHA256 == ""
+	if wholePolicy {
+		if use.policyRevision != facts.policyRevision || validatePlatformHTTPSecretBindingPolicy([]byte(policyRaw), use.operation, facts.networkPolicySHA) != nil {
+			return use, "", errAppPlatformCredentialUnavailable
+		}
+	} else if platformSecretBindingTargetAllowed(facts, policy.networkTargetSHA256, dest) != nil {
+		return use, "", errAppPlatformCredentialUnavailable
+	}
+	use.principals, use.networkTargetSHA256 = policy.principals, policy.networkTargetSHA256
 	switch use.operation {
 	case "http_bearer":
 		use.header = "Authorization"
@@ -509,7 +650,7 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	plan, err := parsePlatformSecretBindingReview(raw)
-	if planPrincipals, _ := platformSecretBindingPrincipalsOfPlan(plan.Principals); err != nil || planPrincipals != policy.principals || plan.InstallationID != installation || plan.AppID != facts.appID || plan.PublisherID != facts.publisherID || plan.Generation != facts.generation || plan.InstallationRevision != facts.installationRevision || plan.TrustRevision != facts.trustRevision || plan.BindingID != use.id || use.revision != plan.BindingRevision+1 || plan.Name != name || plan.CredentialID != use.credentialID || plan.CredentialValueRevision != use.credentialValueRevision || plan.Operation != use.operation || plan.PolicyRevision != facts.policyRevision || plan.NetworkPolicySHA256 != facts.networkPolicySHA || plan.ReleaseSHA256 != facts.releaseSHA || plan.ControllerEpoch != facts.controllerEpoch {
+	if planPrincipals, _ := platformSecretBindingPrincipalsOfPlan(plan.Principals); err != nil || planPrincipals != policy.principals || plan.InstallationID != installation || plan.AppID != facts.appID || plan.PublisherID != facts.publisherID || plan.Generation != facts.generation || plan.InstallationRevision != facts.installationRevision || plan.TrustRevision != facts.trustRevision || plan.BindingID != use.id || use.revision != plan.BindingRevision+1 || plan.Name != name || plan.CredentialID != use.credentialID || plan.CredentialValueRevision != use.credentialValueRevision || plan.Operation != use.operation || plan.NetworkTargetSHA256 != policy.networkTargetSHA256 || (wholePolicy && (plan.PolicyRevision != facts.policyRevision || plan.NetworkPolicySHA256 != facts.networkPolicySHA)) || plan.ReleaseSHA256 != facts.releaseSHA || plan.ControllerEpoch != facts.controllerEpoch {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	var label, state string
@@ -538,16 +679,16 @@ func platformBindingReadError(err error) error {
 	return fmt.Errorf("%w: %w: %v", errAppPlatformCredentialUnavailable, errPlatformSecretBindingStore, err)
 }
 
-func (s *Server) resolvePlatformSecretBindingCommand(e migExec, installation, name string) (platformSecretBindingUse, string, []byte, error) {
-	return s.resolvePlatformSecretBindingCommandFor(e, installation, name, platformPrincipalViewer)
+func (s *Server) resolvePlatformSecretBindingCommand(e migExec, installation, name string, dest platformBindingDestination) (platformSecretBindingUse, string, []byte, error) {
+	return s.resolvePlatformSecretBindingCommandFor(e, installation, name, platformPrincipalViewer, dest)
 }
 
-func (s *Server) resolvePlatformSecretBindingCommandFor(e migExec, installation, name, principal string) (platformSecretBindingUse, string, []byte, error) {
+func (s *Server) resolvePlatformSecretBindingCommandFor(e migExec, installation, name, principal string, dest platformBindingDestination) (platformSecretBindingUse, string, []byte, error) {
 	facts, err := loadPlatformSecretBindingFacts(e, installation, false)
 	if err != nil {
 		return platformSecretBindingUse{}, "", nil, err
 	}
-	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, name, facts, principal)
+	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, name, facts, principal, dest)
 	if err != nil {
 		return platformSecretBindingUse{}, "", nil, err
 	}

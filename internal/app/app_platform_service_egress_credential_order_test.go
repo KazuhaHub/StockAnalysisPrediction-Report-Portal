@@ -61,11 +61,11 @@ func testPlatformServiceEgressCredentialStoreErrorIsUnavailable(t *testing.T, pg
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, platformPrincipalService); err != nil {
+	if _, _, err := loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, platformPrincipalService, platformTargetDefaultURL); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
-	_, _, err = loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, platformPrincipalService)
+	_, _, err = loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, platformPrincipalService, platformTargetDefaultURL)
 	if err == nil || !errors.Is(err, errPlatformSecretBindingStore) {
 		t.Fatal("a store failure is not marked as one:", err)
 	}
@@ -78,7 +78,7 @@ func testPlatformServiceEgressCredentialStoreErrorIsUnavailable(t *testing.T, pg
 	// A binding that is simply absent is a verdict.
 	e = s.st.poolExec()
 	facts, _ = loadPlatformSecretBindingFacts(e, installation, false)
-	_, _, err = loadPlatformSecretBindingUseFor(e, installation, "no-such-binding", facts, platformPrincipalService)
+	_, _, err = loadPlatformSecretBindingUseFor(e, installation, "no-such-binding", facts, platformPrincipalService, platformTargetDefaultURL)
 	if err == nil || errors.Is(err, errPlatformSecretBindingStore) {
 		t.Fatal("an absent binding is not a plain refusal", err)
 	}
