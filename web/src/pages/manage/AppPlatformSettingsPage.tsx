@@ -9,6 +9,7 @@ import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
+import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppPublicProjectionPanel from './AppPublicProjectionPanel'
 
 type Audience = { type: 'user' | 'ou'; id: string; name: string }
@@ -236,6 +237,7 @@ export default function AppPlatformSettingsPage() {
   // it after reading the disclosure; withdrawal needs no second step because it only removes access.
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
   const publicProjection = settings.capabilities.find((item) => item.capability === 'public.projection' && !item.required)
+  const networkProxy = settings.capabilities.find((item) => item.capability === 'network.proxy' && !item.required)
   const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
   const changePrincipals = async (enabled: boolean) => {
     if (principalsBusy) return
@@ -449,6 +451,7 @@ export default function AppPlatformSettingsPage() {
         {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
       </Space>}
       {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {networkProxy && <AppNetworkProxyPanel root={root} installation={installation} granted={networkProxy.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>
     <Modal
       className="rp-platform-review-modal"
