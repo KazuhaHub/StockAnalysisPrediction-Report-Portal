@@ -184,32 +184,42 @@ func (s *Server) apiPlatformCredentialCommit(w http.ResponseWriter, r *http.Requ
 type platformSecretBindingPlanRequest struct {
 	name, credential, operation, principals string
 	acs3                                    []platformACS3Action
+	ingressRoute                            string
 }
 
 // platformSecretBindingPlanFields reads a binding review request: name,
 // credential_id and operation, and optionally principals, a sorted list of
 // "viewer" and "service" (absent means the viewer only), and, for an
-// acs3_hmac_sha256 binding, acs3_actions: the (action, version) pairs it may sign.
+// acs3_hmac_sha256 binding, acs3_actions: the (action, version) pairs it may sign, and, for an
+// ingress_hmac_sha256 binding, ingress_route: the descriptor route its endpoint authenticates.
 func platformSecretBindingPlanFields(w http.ResponseWriter, r *http.Request) (platformSecretBindingPlanRequest, error) {
 	var zero, out platformSecretBindingPlanRequest
 	raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
 	if readErr != nil {
 		return zero, errPlatformManagementInput
 	}
-	fields, err := platformManagementObject(raw, "name", "credential_id", "operation", "principals", "acs3_actions")
+	fields, err := platformManagementObject(raw, "name", "credential_id", "operation", "principals", "acs3_actions", "ingress_route")
 	_, hasPrincipals := fields["principals"]
 	_, hasActions := fields["acs3_actions"]
-	if err != nil || len(fields) != 3+boolInt(hasPrincipals)+boolInt(hasActions) {
+	_, hasRoute := fields["ingress_route"]
+	if err != nil || len(fields) != 3+boolInt(hasPrincipals)+boolInt(hasActions)+boolInt(hasRoute) {
 		return zero, errPlatformManagementInput
 	}
 	name, nameErr := platformManagementString(fields, "name")
 	credential, credentialErr := platformManagementString(fields, "credential_id")
 	operation, operationErr := platformManagementString(fields, "operation")
 	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) ||
-		(operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256") {
+		(operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256" && operation != "ingress_hmac_sha256") {
 		return zero, errPlatformManagementInput
 	}
 	out.name, out.credential, out.operation = name, credential, operation
+	if hasRoute {
+		route, routeErr := platformManagementString(fields, "ingress_route")
+		if routeErr != nil || !appplatform.ValidIngressRouteID(route) {
+			return zero, errPlatformManagementInput
+		}
+		out.ingressRoute = route
+	}
 	if hasPrincipals {
 		var list []string
 		if json.Unmarshal(fields["principals"], &list) != nil || list == nil {
@@ -274,6 +284,12 @@ func platformSecretBindingReviewResponse(review platformSecretBindingReview, pri
 	if len(review.ACS3Actions) > 0 {
 		out["acs3_actions"] = review.ACS3Actions
 	}
+	if review.Operation == "ingress_hmac_sha256" {
+		// The sender's URL and what it signs, never a secret: the administrator entered the value and
+		// Portal shows none (doc 180 section 4).
+		out["ingress_route"] = review.IngressRoute
+		out["ingress_url"] = platformIngressURL(review.InstallationID, review.IngressRoute, review.Name)
+	}
 	return out
 }
 
@@ -288,7 +304,7 @@ func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, err)
 		return
 	}
-	plan, err := s.createPlatformSecretBindingReviewWith(actor, r.PathValue("installation"), request.name, request.credential, request.operation, request.principals, request.acs3)
+	plan, err := s.createPlatformSecretBindingReviewFull(actor, r.PathValue("installation"), request.name, request.credential, request.operation, request.principals, request.acs3, request.ingressRoute)
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -421,7 +437,7 @@ func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	plan, err := s.createPlatformSecretBindingReviewWith(actor, installation, request.name, request.credential, request.operation, request.principals, request.acs3)
+	plan, err := s.createPlatformSecretBindingReviewFull(actor, installation, request.name, request.credential, request.operation, request.principals, request.acs3, request.ingressRoute)
 	if err != nil {
 		platformManagementError(w, err)
 		return

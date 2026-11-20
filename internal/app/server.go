@@ -172,6 +172,11 @@ type Server struct {
 	platformPublicArchiveReads atomic.Int64
 	platformPublicFetchHook    func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
 
+	// platformIngress is the limiters, nonce cache and counters of authenticated inbound ingress
+	// (doc 180). platformIngressForwardHook replaces the runner forward in tests only.
+	platformIngress            platformIngressState
+	platformIngressForwardHook func(ctx context.Context, l platformIngressLight, body []byte, nonce string, received time.Time) (driver.BackendResponse, error)
+
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.
 	forecastSignals    forecastSignals
@@ -217,7 +222,9 @@ func (s *Server) logMiddleware(next http.Handler) http.Handler {
 			p == "/pwa-icon" || p == "/sw.js" ||
 			// The public projection is anonymous traffic: a log line would carry the visitor's address
 			// and query. Its aggregate, address-free summary is the audit record (doc 179 section 5).
-			strings.HasPrefix(p, "/public/apps/") {
+			strings.HasPrefix(p, "/public/apps/") ||
+			// Inbound ingress is machine traffic from senders the Portal does not know: the same rule.
+			strings.HasPrefix(p, "/ingress/apps/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -375,7 +382,8 @@ func RunServer(cfgPath string) {
 	go s.forecastWatchdog()
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
-	go s.platformPublicSummaryLoop() // writes the public projection traffic windows that have ended
+	go s.platformPublicSummaryLoop()  // writes the public projection traffic windows that have ended
+	go s.platformIngressSummaryLoop() // writes the ingress traffic windows that have ended
 	s.wireExportCleanup()
 	s.exportRecover()        // return jobs a restart interrupted to the queue before the worker starts
 	s.platformImageRecover() // drop what a crash left in the managed image stores before any operation uses them
@@ -396,7 +404,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic, s.stopPlatformIngress)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter

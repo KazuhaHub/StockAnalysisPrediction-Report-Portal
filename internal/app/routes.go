@@ -492,6 +492,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/principals-read", s.apiPlatformPrincipalsGrant)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicPreview)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicGrant)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/ingress", s.apiPlatformIngressPreview)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/ingress", s.apiPlatformIngressGrant)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/catalogue", s.apiPlatformMarketCatalogue)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/stage", s.apiPlatformMarketStage)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/offline", s.apiPlatformMarketOffline)
@@ -539,6 +541,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// The anonymous reviewed public projection (doc 179). GET only; no cookie, session or POST.
 	s.public(mux, "GET /public/apps/{installation}/data/{route}", s.publicAppData)
 	s.public(mux, "GET /public/apps/{installation}/{asset...}", s.publicAppDocument)
+	// Authenticated inbound ingress (doc 180). POST only, signed by the sender, never a session.
+	s.public(mux, "POST /ingress/apps/{installation}/{route}/{endpoint}", s.ingressRequest)
 
 	// ---- Outbound event webhooks (extension point; see docs/adr/0002-extension-architecture.md) ----
 	s.admin(mux, "GET /api/admin/webhooks", s.apiWebhooks)
