@@ -31,6 +31,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -178,9 +179,10 @@ type Server struct {
 	// platformMachine is the limiters, caches and counters of the machine read API (doc 183).
 	// platformMachineReads counts its session-less authority reads; platformMachineFetchHook replaces
 	// the runner relay in tests only.
-	platformMachine          platformMachineState
-	platformMachineReads     atomic.Int64
-	platformMachineFetchHook func(ctx context.Context, a platformMachineAuthority, token platformMachineToken, route appplatform.MachineRoute, query string) (driver.BackendResponse, error)
+	platformMachine             platformMachineState
+	platformMachineReads        atomic.Int64
+	platformMachineSupportQuery func(ctx context.Context, e platformRuntimeEndpoint) (transport.MachineSupport, error)
+	platformMachineFetchHook    func(ctx context.Context, a platformMachineAuthority, token platformMachineToken, route appplatform.MachineRoute, query string) (driver.BackendResponse, error)
 
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.

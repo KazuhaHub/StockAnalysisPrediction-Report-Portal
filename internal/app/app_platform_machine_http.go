@@ -376,11 +376,15 @@ func (s *Server) machineAppData(w http.ResponseWriter, r *http.Request) {
 // requestPlatformMachineBackend runs one reviewed GET through the same signed relay a viewer request
 // uses, with the sessionless access and a machine assertion in place of the viewer's.
 func (s *Server) requestPlatformMachineBackend(ctx context.Context, a platformMachineAuthority, token platformMachineToken, route appplatform.MachineRoute, query string) (driver.BackendResponse, error) {
+	var zero driver.BackendResponse
+	endpoint := s.platformBackendEndpoint.Load()
+	// The runner must say it forwards machine assertions before one is relayed to it.
+	if endpoint != nil && !s.machineRunnerSupport(ctx, *endpoint, time.Now()) {
+		return zero, errPlatformMachineRunner
+	}
 	if hook := s.platformMachineFetchHook; hook != nil {
 		return hook(ctx, a, token, route, query)
 	}
-	var zero driver.BackendResponse
-	endpoint := s.platformBackendEndpoint.Load()
 	if endpoint == nil {
 		return zero, errAppPlatformRuntimeConflict
 	}

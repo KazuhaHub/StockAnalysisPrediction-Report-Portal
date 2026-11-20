@@ -54,6 +54,7 @@ type platformMachineState struct {
 	sourceDay   map[string]string
 	descriptors map[string]platformMachineDescriptor
 	order       []string
+	support     platformMachineSupportState
 
 	stopOnce sync.Once
 	stop     chan struct{}

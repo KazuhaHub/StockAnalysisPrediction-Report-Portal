@@ -75,6 +75,9 @@ type platformMachinePreview struct {
 	OpenAPIPath      string                     `json:"openapi_path"`
 	Disclosure       string                     `json:"disclosure"`
 	DisclosureSHA256 string                     `json:"disclosure_sha256"`
+	// RunnerSupport is "supported", "unsupported" or "unknown": whether the runner forwards machine
+	// assertions (doc 183 section 4.7). Enabling is refused against one that does not.
+	RunnerSupport string `json:"runner_support"`
 }
 
 type platformMachineDeclared struct {
@@ -142,6 +145,7 @@ func (s *Server) apiPlatformMachinePreview(w http.ResponseWriter, r *http.Reques
 		platformManagementError(w, err)
 		return
 	}
+	out.RunnerSupport = s.platformMachineRunnerState(r.Context())
 	writeJSON(w, out)
 }
 
@@ -201,6 +205,10 @@ func (s *Server) apiPlatformMachineGrant(w http.ResponseWriter, r *http.Request,
 	session, err := s.platformHTTPReader(r, user)
 	if err != nil {
 		platformManagementError(w, err)
+		return
+	}
+	if change.enabled && s.platformMachineRunnerState(r.Context()) == "unsupported" {
+		jsonErrorCode(w, 409, "app_platform_runner_machine_unsupported", "the runner does not forward machine assertions")
 		return
 	}
 	if err := s.setPlatformMachineGrant(r.Context(), session, installation, change); err != nil {
