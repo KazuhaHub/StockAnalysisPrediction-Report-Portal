@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func platformCredentialValueField(raw []byte, required bool) ([]byte, error) {
@@ -246,9 +248,29 @@ func platformSecretBindingPlanFields(w http.ResponseWriter, r *http.Request) (pl
 	return out, nil
 }
 
+// platformBindingNetworkOrigin is the origin of the installation's reviewed network policy, which is
+// where a binding's credential will be sent, or "" when it cannot be read. It is shown to the
+// reviewer; it decides nothing.
+func (s *Server) platformBindingNetworkOrigin(session platformActorSession, installation string) string {
+	var origin string
+	_ = s.withAppPlatformActor(session, false, func(e migExec, _ platformActorFacts, _ platformActorControl) error {
+		var raw string
+		if err := e.queryRow(`SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http' AND granted=1`, installation).Scan(&raw); err != nil {
+			return err
+		}
+		policy, err := appplatform.ParseHTTPPolicy([]byte(raw))
+		if err != nil {
+			return err
+		}
+		origin = policy.Policy.Origin
+		return nil
+	})
+	return origin
+}
+
 // platformSecretBindingReviewResponse is the review a plan response shows.
-func platformSecretBindingReviewResponse(review platformSecretBindingReview, principals string) map[string]any {
-	out := map[string]any{"name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "principals": platformSecretBindingPrincipalList(principals)}
+func platformSecretBindingReviewResponse(review platformSecretBindingReview, principals, origin string) map[string]any {
+	out := map[string]any{"network_origin": origin, "name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "principals": platformSecretBindingPrincipalList(principals)}
 	if len(review.ACS3Actions) > 0 {
 		out["acs3_actions"] = review.ACS3Actions
 	}
@@ -276,7 +298,7 @@ func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, errAppPlatformCredentialUnavailable)
 		return
 	}
-	writeJSON(w, map[string]any{"plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": platformSecretBindingReviewResponse(review, request.principals)})
+	writeJSON(w, map[string]any{"plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": platformSecretBindingReviewResponse(review, request.principals, s.platformBindingNetworkOrigin(actor, review.InstallationID))})
 }
 
 func (s *Server) apiPlatformSecretBindingCommit(w http.ResponseWriter, r *http.Request, user string) {
@@ -409,5 +431,5 @@ func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.
 		platformManagementError(w, errAppPlatformCredentialUnavailable)
 		return
 	}
-	writeJSON(w, map[string]any{"installation_id": installation, "plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": platformSecretBindingReviewResponse(review, request.principals)})
+	writeJSON(w, map[string]any{"installation_id": installation, "plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": platformSecretBindingReviewResponse(review, request.principals, s.platformBindingNetworkOrigin(actor, review.InstallationID))})
 }

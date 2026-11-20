@@ -115,10 +115,11 @@ func TestPlatformSecretBindingManagementHTTPACS3(t *testing.T) {
 		SHA    string `json:"plan_sha256"`
 		Review struct {
 			Operation string               `json:"operation"`
+			Origin    string               `json:"network_origin"`
 			Actions   []platformACS3Action `json:"acs3_actions"`
 		} `json:"review"`
 	}
-	if err := json.Unmarshal(got.Body.Bytes(), &review); err != nil || review.Review.Operation != "acs3_hmac_sha256" || len(review.Review.Actions) != 1 || review.Review.Actions[0].Action != "QueryAccountBalance" {
+	if err := json.Unmarshal(got.Body.Bytes(), &review); err != nil || review.Review.Operation != "acs3_hmac_sha256" || review.Review.Origin != "https://api.example.com" || len(review.Review.Actions) != 1 || review.Review.Actions[0].Action != "QueryAccountBalance" {
 		t.Fatal("review response", err, got.Body.String())
 	}
 	commit := sessionTestRequest(mux, "POST", "/api/admin/app-platform/secret-binding-reviews/"+review.ID, cookie, fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q}`, review.ID, review.SHA))
