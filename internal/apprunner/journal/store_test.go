@@ -127,7 +127,7 @@ func TestUnknownOrNewerJournalIsNotModified(t *testing.T) {
 		want error
 	}{
 		{"unknown", []string{`CREATE TABLE unrelated(value TEXT)`, `INSERT INTO unrelated VALUES('fixture')`}, ErrIncompatible},
-		{"future", []string{`PRAGMA user_version=5`}, ErrNewerVersion},
+		{"future", []string{`PRAGMA user_version=6`}, ErrNewerVersion},
 		{"partial", []string{`CREATE TABLE runner_deployment(singleton INTEGER)`}, ErrIncompatible},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {

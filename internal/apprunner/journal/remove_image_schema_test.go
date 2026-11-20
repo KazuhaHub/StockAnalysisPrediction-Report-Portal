@@ -132,8 +132,8 @@ func TestV1AndV2UpgradesProduceTheCurrentV3Shape(t *testing.T) {
 			}
 			defer store.Close()
 			var got string
-			if err := store.db.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='runner_commands'`).Scan(&got); err != nil || strings.TrimSpace(got) != commandsSQL(3) {
-				t.Fatalf("upgraded runner_commands is not the v3 product: %v\n%s", err, got)
+			if err := store.db.QueryRow(`SELECT sql FROM sqlite_schema WHERE name='runner_commands'`).Scan(&got); err != nil || strings.TrimSpace(got) != commandsSQL(schemaVersion) {
+				t.Fatalf("upgraded runner_commands is not the current product: %v\n%s", err, got)
 			}
 			if _, err := store.db.Exec(importKindCommand, fixtureID(251), fixtureID(351), fixtureID(5), "remove-image", strings.Repeat("c", 64), fixtureID(2)); err != nil {
 				t.Fatalf("remove-image refused after the upgrade: %v", err)

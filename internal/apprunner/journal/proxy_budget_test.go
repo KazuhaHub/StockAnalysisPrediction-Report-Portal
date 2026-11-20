@@ -36,7 +36,7 @@ func versionJournal(t *testing.T, version int) string {
 }
 
 func TestJournalIsVersionFourWithTheBudgetTable(t *testing.T) {
-	if schemaVersion != 4 {
+	if schemaVersion != 5 {
 		t.Fatalf("schema version %d", schemaVersion)
 	}
 	store, err := Open(privateDirectory(t))
@@ -49,7 +49,7 @@ func TestJournalIsVersionFourWithTheBudgetTable(t *testing.T) {
 	}
 }
 
-// A v3 journal upgrades by adding the table: its rows stay and it is then exactly a v4 journal.
+// A v3 journal upgrades by adding the table: its rows stay and it is then exactly a v5 journal.
 func TestV3JournalUpgradesToTheBudgetTable(t *testing.T) {
 	directory := versionJournal(t, 3)
 	db, err := sql.Open(journalDriver, journalDSN(directory, "rw"))
@@ -65,7 +65,7 @@ func TestV3JournalUpgradesToTheBudgetTable(t *testing.T) {
 		t.Fatalf("a v3 journal was not upgraded: %v", err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 4 || scalar(t, store.db, `SELECT COUNT(*) FROM runner_deployment`) != 1 {
+	if scalar(t, store.db, `PRAGMA user_version`) != 5 || scalar(t, store.db, `SELECT COUNT(*) FROM runner_deployment`) != 1 {
 		t.Fatal("upgrade lost the journal's rows or did not set the version")
 	}
 	if _, err := inspect(context.Background(), store.db); err != nil {
@@ -83,8 +83,8 @@ func TestOlderJournalsUpgradeToVersionFour(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 4 || scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE name='runner_proxy_budget'`) != 1 {
-		t.Fatal("v1 journal did not reach v4")
+	if scalar(t, store.db, `PRAGMA user_version`) != 5 || scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE name='runner_proxy_budget'`) != 1 {
+		t.Fatal("v1 journal did not reach v5")
 	}
 }
 
