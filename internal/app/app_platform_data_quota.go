@@ -174,26 +174,57 @@ func platformPlanQuota(raw string) (bytes, inodes int64, err error) {
 
 // platformUpdateQuotaReview is what an update review shows when the target release asks for more data quota
 // than the installation has approved. The approved quota only ever rises, so an equal or smaller request is
-// not shown. RaiseApplied is false in this phase: the update keeps the approved quota, and the raise is its
-// own reviewed action (set_data_quota), which the review says.
+// not shown. Approving the update raises the quota to New (per dimension, the larger of the current value and the
+// request) as one of the update's effects, between the checkpoint and the start (doc 185 section 3.2); the raise
+// stays in force if the update later rolls back, because lowering is refused in version 1.
+//
+// RaiseApplied is true for every review written since the update raises the quota. An older review stored it
+// false (the update then kept the approved quota); such a review is no longer consumable and has to be reviewed
+// again, while an update admitted from it runs on to the end with no raise.
+//
+// Capacity is the runner's answer to whether its admission can hold the new reservation: "fits", or "short" with
+// the dimension and the shortfall. It is part of the canonical bytes but not of the facts a rebuild compares.
 type platformUpdateQuotaReview struct {
-	CurrentBytes    int64 `json:"current_bytes"`
-	CurrentInodes   int64 `json:"current_inodes"`
-	RequestedBytes  int64 `json:"requested_bytes"`
-	RequestedInodes int64 `json:"requested_inodes"`
-	RaiseBytes      int64 `json:"raise_bytes"`
-	RaiseInodes     int64 `json:"raise_inodes"`
-	RaiseApplied    bool  `json:"raise_applied"`
+	CurrentBytes      int64  `json:"current_bytes"`
+	CurrentInodes     int64  `json:"current_inodes"`
+	RequestedBytes    int64  `json:"requested_bytes"`
+	RequestedInodes   int64  `json:"requested_inodes"`
+	RaiseBytes        int64  `json:"raise_bytes"`
+	RaiseInodes       int64  `json:"raise_inodes"`
+	RaiseApplied      bool   `json:"raise_applied"`
+	NewBytes          int64  `json:"new_bytes,omitempty"`
+	NewInodes         int64  `json:"new_inodes,omitempty"`
+	Capacity          string `json:"capacity,omitempty"`
+	CapacityDimension string `json:"capacity_dimension,omitempty"`
+	CapacityRequested int64  `json:"capacity_requested,omitempty"`
+	CapacityRemaining int64  `json:"capacity_remaining,omitempty"`
 }
 
-// platformUpdateQuotaDifference compares the quota the installation runs with against the target's request.
+// platformUpdateQuotaDifference compares the quota the installation runs with against the target's request. The
+// new quota is the larger of the two in each dimension, so a request that asks for more of one and less of the
+// other raises only the one.
 func platformUpdateQuotaDifference(currentBytes, currentInodes int64, target appplatform.Manifest) *platformUpdateQuotaReview {
 	requestedBytes, requestedInodes := target.Data.QuotaOrDefault()
 	raiseBytes, raiseInodes := max(requestedBytes-currentBytes, 0), max(requestedInodes-currentInodes, 0)
 	if raiseBytes == 0 && raiseInodes == 0 {
 		return nil
 	}
-	return &platformUpdateQuotaReview{CurrentBytes: currentBytes, CurrentInodes: currentInodes, RequestedBytes: requestedBytes, RequestedInodes: requestedInodes, RaiseBytes: raiseBytes, RaiseInodes: raiseInodes}
+	return &platformUpdateQuotaReview{
+		CurrentBytes: currentBytes, CurrentInodes: currentInodes, RequestedBytes: requestedBytes, RequestedInodes: requestedInodes,
+		RaiseBytes: raiseBytes, RaiseInodes: raiseInodes, RaiseApplied: true,
+		NewBytes: currentBytes + raiseBytes, NewInodes: currentInodes + raiseInodes, Capacity: "fits",
+	}
+}
+
+// sameFacts compares two builds of a review without the runner's capacity answer.
+func (q *platformUpdateQuotaReview) sameFacts(other *platformUpdateQuotaReview) bool {
+	if q == nil || other == nil {
+		return q == other
+	}
+	a, b := *q, *other
+	a.Capacity, a.CapacityDimension, a.CapacityRequested, a.CapacityRemaining = "", "", 0, 0
+	b.Capacity, b.CapacityDimension, b.CapacityRequested, b.CapacityRemaining = "", "", 0, 0
+	return a == b
 }
 
 // platformValidQuotaBytes is the platform's bound on one namespace's byte limit.
