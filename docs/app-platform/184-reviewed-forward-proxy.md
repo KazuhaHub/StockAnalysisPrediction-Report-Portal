@@ -69,7 +69,7 @@ The two capabilities coexist. An app can hold both: `network.http` for credentia
 | Wildcard used to reach anything under a public suffix | A wildcard's base must be a registrable domain or deeper (Public Suffix List, compiled in); `*.com`, `*.com.cn` and `*.github.io` are refused at review |
 | DNS rebinding, or a reviewed name resolving to an internal address | Broker resolves, applies the 175 address guard to every answer (always-denied ranges, interfaces, bridges, private allowlist), dials one pinned address |
 | IP literal in CONNECT | Refused; private addresses stay reachable only through `network.http` and the 175 allowlist |
-| Domain fronting (CONNECT to a reviewed host, TLS to another) | First record must be a ClientHello whose SNI equals the CONNECT host; missing SNI, mismatch, or a non-TLS first record closes the tunnel before anything is forwarded |
+| Domain fronting (CONNECT to a reviewed host, TLS to another) | First record must be a ClientHello whose outer SNI equals the CONNECT host (an ECH extension alone is not refused, Q3); missing SNI, mismatch, or a non-TLS first record closes the tunnel before anything is forwarded |
 | Exfiltration to a reviewed host | Same exposure as a reviewed `network.http` target, now without per-call body caps; bounded by the daily byte budget and audited per host |
 | Starving the shared runner | Per-installation and runner-wide tunnel caps, separate from the `network.http` pool |
 | Tunnels outliving revocation | Tunnels belong to the egress session; any drift, revocation, restore pause or runner shutdown closes all of them |
@@ -202,6 +202,7 @@ Most of this runs locally (broker unit tests, the forwarder against a test broke
 - A reviewed name resolving to loopback, link-local, metadata or private addresses is `address_denied`.
 - A mixed answer dials only the allowed address.
 - An SNI mismatch, a missing SNI and a plain-HTTP first record close the tunnel, with nothing forwarded to the dialled host.
+- A ClientHello carrying a GREASE `encrypted_client_hello` extension with the right outer SNI (a recorded Chrome / `curl_cffi` handshake) passes, and one with real ECH (outer SNI a different public name) closes as `sni_mismatch`.
 - Limits:
   - the 17th open tunnel is `busy`, and so is the 51st burst open;
   - the idle and lifetime timers close the tunnel;
@@ -261,7 +262,10 @@ Q1. **Ports other than 443.** Decided: 443 only in version 1. An exact entry may
 
 Q2. **Does a `network.proxy` grant require `background.run`.** Decided: yes. The proxy rides the egress session, which exists only with `background.run`. There is no foreground proxy in version 1.
 
-Q3. **Handling of Encrypted ClientHello.** Decided: refuse. When the outer SNI is not the CONNECT host, the tunnel closes as `sni_mismatch`. Browsers' ECH GREASE carries the real SNI outside, so impersonation still works.
+Q3. **Handling of Encrypted ClientHello.** Decided, as clarified by the owner on 2026-11-20:
+- The broker judges only the outer SNI. It must equal the CONNECT host, or the tunnel closes as `sni_mismatch`.
+- The presence of an `encrypted_client_hello` extension is never a reason to refuse by itself. Chrome, and `curl_cffi` impersonating it, send a GREASE ECH extension with no real configuration and the real host as the outer SNI, so those handshakes pass.
+- Only a ClientHello whose outer SNI differs from the CONNECT host is refused. That is what real ECH looks like: the public name outside, the real host encrypted inside.
 
 Q4. **A per-installation throughput cap on the shared host.** Decided: 50 Mbit/s per installation, enforced in the splice. This protects other apps and the second user's desktop without slowing market-monitor's few hundred MB a day.
 
