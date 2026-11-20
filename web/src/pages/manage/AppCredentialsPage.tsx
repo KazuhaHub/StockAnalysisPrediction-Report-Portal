@@ -45,6 +45,13 @@ interface Binding {
   policy_revision: number
   revision: number
   principals?: Principal[]
+  network_target?: string
+  network_target_sha256?: string
+}
+
+interface TargetChoice {
+  id: string
+  origin: string
 }
 
 type Principal = 'viewer' | 'service'
@@ -62,6 +69,7 @@ interface BindingForm {
   credential_id: string
   operation: string
   use: Use
+  target?: string
 }
 
 interface CredentialReview {
@@ -81,6 +89,7 @@ interface BindingPlan {
     credential_label: string
     operation: string
     network_policy_sha256: string
+    network_target?: string
     principals?: Principal[]
   }
 }
@@ -104,6 +113,7 @@ export default function AppCredentialsPage() {
   const app = apps.find((value) => value.key === appKey)
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [bindings, setBindings] = useState<Binding[]>([])
+  const [targets, setTargets] = useState<TargetChoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [credentialOpen, setCredentialOpen] = useState(false)
@@ -130,11 +140,12 @@ export default function AppCredentialsPage() {
         if (!page.next_after || page.next_after === after || all.length >= 256) break
         after = page.next_after
       }
-      const current = await api.get<{ bindings: Binding[] }>(
+      const current = await api.get<{ bindings: Binding[]; targets?: TargetChoice[] }>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings`,
       )
       setCredentials(all)
       setBindings(current.bindings ?? [])
+      setTargets(current.targets ?? [])
       setError('')
     } catch (cause) {
       setError(errText(cause, t))
@@ -259,6 +270,8 @@ export default function AppCredentialsPage() {
         operation: values.operation,
       }
       if (values.operation !== 'raw_read') request.principals = principalsForUse(values.use ?? 'viewer')
+      // A grant with several targets needs the one the binding is for named.
+      if (values.operation !== 'raw_read' && targets.length > 1 && values.target) request.target = values.target
       const plan = await api.post<BindingPlan>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings/plan`,
         request,
@@ -273,6 +286,11 @@ export default function AppCredentialsPage() {
               <Typography.Text type="secondary">
                 {plan.review.operation} · {plan.review.network_policy_sha256.slice(0, 12)}
               </Typography.Text>
+              {plan.review.network_target && (
+                <Typography.Text>
+                  {t('appCredentials.bindingTarget', { origin: plan.review.network_target })}
+                </Typography.Text>
+              )}
               <Typography.Text>
                 {t(`appCredentials.principals.${principalsToUse(plan.review.principals)}`)}
               </Typography.Text>
@@ -329,12 +347,14 @@ export default function AppCredentialsPage() {
             credential_id: binding.credential_id,
             operation: binding.operation,
             use: principalsToUse(binding.principals),
+            target: targets.find((choice) => choice.origin === binding.network_target)?.id,
           }
         : {
             name: appKey === 'scheduled-digest' ? 'digest-feed' : '',
             credential_id: '',
             operation: appKey === 'scheduled-digest' ? 'raw_read' : 'http_bearer',
             use: 'viewer',
+            target: undefined,
           },
     )
     setBindingOpen(true)
@@ -385,6 +405,11 @@ export default function AppCredentialsPage() {
       title: t('appCredentials.operation'),
       dataIndex: 'operation',
       render: (operation: string) => t(`appCredentials.operation.${operation}`),
+    },
+    {
+      title: t('appCredentials.target'),
+      key: 'target',
+      render: (_: unknown, binding: Binding) => binding.network_target ?? null,
     },
     {
       title: t('appCredentials.usedBy'),
@@ -520,6 +545,13 @@ export default function AppCredentialsPage() {
               ]}
             />
           </Form.Item>
+          {bindingOperation !== 'raw_read' && targets.length > 1 && (
+            <Form.Item name="target" label={t('appCredentials.target')} rules={[{ required: true }]}>
+              <Select
+                options={targets.map((choice) => ({ value: choice.id, label: `${choice.id} · ${choice.origin}` }))}
+              />
+            </Form.Item>
+          )}
           {bindingOperation !== 'raw_read' && (
             <Form.Item
               name="use"

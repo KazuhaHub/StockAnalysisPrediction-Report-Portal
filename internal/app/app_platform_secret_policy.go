@@ -11,6 +11,7 @@ import (
 const (
 	platformSecretBindingPolicyFormat   = "portal.secret-binding-policy/1-dev.1"
 	platformSecretBindingPolicyFormatV2 = "portal.secret-binding-policy/2-dev.1"
+	platformSecretBindingPolicyFormatV3 = "portal.secret-binding-policy/3-dev.1"
 )
 
 // The principals that may use a binding (doc 176). A binding no review has
@@ -27,10 +28,13 @@ const (
 // Stored restrictions only. This object cannot select a credential, destination,
 // header or installation, and parsing it conveys no use authority. principals is
 // "" (viewer only), "service" or "service,viewer"; the review that created the
-// binding is the only thing that sets it.
+// binding is the only thing that sets it. A binding is scoped either to the whole
+// network policy (networkPolicySHA256: the v1 and 2-dev.1 formats) or to one
+// target of it (networkTargetSHA256: the 3-dev.1 format); never both.
 type platformSecretBindingPolicy struct {
 	operation           string
 	networkPolicySHA256 string
+	networkTargetSHA256 string
 	principals          string
 }
 type platformSecretBindingPolicyWire struct {
@@ -42,6 +46,13 @@ type platformSecretBindingPolicyWireV2 struct {
 	Format              string   `json:"format"`
 	Operation           string   `json:"operation"`
 	NetworkPolicySHA256 string   `json:"network_policy_sha256"`
+	Principals          []string `json:"principals"`
+}
+
+type platformSecretBindingPolicyWireV3 struct {
+	Format              string   `json:"format"`
+	Operation           string   `json:"operation"`
+	NetworkTargetSHA256 string   `json:"network_target_sha256"`
 	Principals          []string `json:"principals"`
 }
 
@@ -72,15 +83,19 @@ func canonicalPlatformSecretBindingPolicy(p platformSecretBindingPolicy) ([]byte
 	}
 	switch p.operation {
 	case "http_bearer", "http_api_key":
-		if !platformValidSHA(p.networkPolicySHA256) {
+		// Exactly one scope: the whole policy (older formats) or one target.
+		if (p.networkTargetSHA256 == "") == (p.networkPolicySHA256 == "") || !platformValidSHA(p.networkPolicySHA256+p.networkTargetSHA256) {
 			return nil, errAppPlatformCredentialUnavailable
 		}
 	case "raw_read":
-		if p.networkPolicySHA256 != "" || p.principals != "" {
+		if p.networkPolicySHA256 != "" || p.networkTargetSHA256 != "" || p.principals != "" {
 			return nil, errAppPlatformCredentialUnavailable
 		}
 	default:
 		return nil, errAppPlatformCredentialUnavailable
+	}
+	if p.networkTargetSHA256 != "" {
+		return json.Marshal(platformSecretBindingPolicyWireV3{platformSecretBindingPolicyFormatV3, p.operation, p.networkTargetSHA256, platformSecretBindingPrincipalList(p.principals)})
 	}
 	if p.principals != "" {
 		return json.Marshal(platformSecretBindingPolicyWireV2{platformSecretBindingPolicyFormatV2, p.operation, p.networkPolicySHA256, platformSecretBindingPrincipalList(p.principals)})
@@ -119,6 +134,17 @@ func parsePlatformSecretBindingPolicy(raw []byte) (platformSecretBindingPolicy, 
 			return zero, errAppPlatformCredentialUnavailable
 		}
 		p = platformSecretBindingPolicy{operation: w.Operation, networkPolicySHA256: w.NetworkPolicySHA256, principals: strings.Join(w.Principals, ",")}
+	case platformSecretBindingPolicyFormatV3:
+		var w platformSecretBindingPolicyWireV3
+		if d.Decode(&w) != nil {
+			return zero, errAppPlatformCredentialUnavailable
+		}
+		// ["viewer"] is the viewer-only spelling, which the struct keeps as "".
+		principals := strings.Join(w.Principals, ",")
+		if principals == platformPrincipalViewer {
+			principals = ""
+		}
+		p = platformSecretBindingPolicy{operation: w.Operation, networkTargetSHA256: w.NetworkTargetSHA256, principals: principals}
 	default:
 		return zero, errAppPlatformCredentialUnavailable
 	}
@@ -133,7 +159,9 @@ func parsePlatformSecretBindingPolicy(raw []byte) (platformSecretBindingPolicy, 
 // never a digest supplied by an application. This still proves no live grant.
 func validatePlatformHTTPSecretBindingPolicy(raw []byte, operation, networkPolicySHA256 string) error {
 	p, err := parsePlatformSecretBindingPolicy(raw)
-	if err != nil || (operation != "http_bearer" && operation != "http_api_key") || p.operation != operation || !platformValidSHA(networkPolicySHA256) || p.networkPolicySHA256 != networkPolicySHA256 {
+	// Only a whole-policy binding is judged against the policy digest; a target
+	// binding is judged against the target (platformSecretBindingTargetAllowed).
+	if err != nil || (operation != "http_bearer" && operation != "http_api_key") || p.operation != operation || !platformValidSHA(networkPolicySHA256) || p.networkTargetSHA256 != "" || p.networkPolicySHA256 != networkPolicySHA256 {
 		return errAppPlatformCredentialUnavailable
 	}
 	return nil
