@@ -374,6 +374,13 @@ func TestPlatformProxyPlanCodecAcrossFormats(t *testing.T) {
 	if _, err := parsePlatformProxyPlan(string(raw1)); err != nil {
 		t.Fatalf("a valid 1-dev.1 plan: %v", err)
 	}
+	// A 1-dev.1 plan predates pins: one whose policy holds a pin is refused, since no runner pins or diff bind it.
+	v1Pinned := v1
+	v1Pinned.Policy, v1Pinned.PolicySHA256 = string(policy), platformDigest(policy)
+	rawV1Pinned, err := json.Marshal(v1Pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mutate := func(edit func(*platformProxyPlan)) string {
 		p := base
 		edit(&p)
@@ -395,11 +402,12 @@ func TestPlatformProxyPlanCodecAcrossFormats(t *testing.T) {
 			p.Policy = string(mustProxyPolicy(t, []string{"qt.gtimg.cn"}, nil))
 			p.PolicySHA256 = platformDigest([]byte(p.Policy))
 		}),
-		"extra member":                      strings.TrimSuffix(string(raw), "}") + `,"x":1}`,
-		"trailing space":                    string(raw) + " ",
-		"1-dev.2 member in a 1-dev.1 plan":  strings.Replace(string(raw1), `"runner":`, `"runner_pins":[],"runner":`, 1),
-		"1-dev.1 format on 1-dev.2 members": strings.Replace(string(raw), "1-dev.2", "1-dev.1", 1),
-		"unknown format":                    strings.Replace(string(raw), "1-dev.2", "1-dev.3", 1),
+		"extra member":                         strings.TrimSuffix(string(raw), "}") + `,"x":1}`,
+		"trailing space":                       string(raw) + " ",
+		"1-dev.2 member in a 1-dev.1 plan":     strings.Replace(string(raw1), `"runner":`, `"runner_pins":[],"runner":`, 1),
+		"1-dev.1 format on 1-dev.2 members":    strings.Replace(string(raw), "1-dev.2", "1-dev.1", 1),
+		"unknown format":                       strings.Replace(string(raw), "1-dev.2", "1-dev.3", 1),
+		"1-dev.1 plan writing a pinned policy": string(rawV1Pinned),
 	} {
 		if _, err := parsePlatformProxyPlan(bad); err == nil {
 			t.Errorf("%s: accepted", name)
