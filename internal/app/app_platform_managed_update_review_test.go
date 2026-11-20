@@ -500,6 +500,10 @@ func TestPlatformManagedUpdateQuiesceCommitsSnapshotStagePostgres(t *testing.T) 
 func testPlatformManagedUpdateQuiesceCommitsSnapshotStage(t *testing.T, pg bool) {
 	s, lease, intent, _ := platformManagedUpdateQuiesceFixture(t, pg)
 	receipt := platformManagedUpdateQuiesceReceipt(intent)
+	// The fixture's operation ID is fixed and the PostgreSQL database is shared between tests, so count
+	// only the audit row this commit adds.
+	before := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
+		WHERE action='app_platform.managed_update_quiesced' AND target_id=?`, lease.id)
 	next, err := s.commitPlatformManagedUpdateQuiesce(
 		context.Background(), lease, intent, receipt)
 	if err != nil || next.snapshot.Stage != appplatform.StageSnapshot ||
@@ -510,7 +514,7 @@ func testPlatformManagedUpdateQuiesceCommitsSnapshotStage(t *testing.T, pg bool)
 			WHERE operation_id=? AND stage='quiesce'`, lease.id) != "applied" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
 			WHERE action='app_platform.managed_update_quiesced'
-			AND target_id=?`, lease.id) != 1 {
+			AND target_id=?`, lease.id) != before+1 {
 		t.Fatal("managed update quiesce commit", next, err)
 	}
 }
