@@ -105,6 +105,28 @@ func LoadBootstrapConfig(path string) (BootstrapConfig, error) {
 	return cfg, nil
 }
 
+// ParseEnrollment reads the public enrollment document an administrator prepares in Portal (doc 187 section
+// 8.2): a bootstrap document in the same format, checked as strictly as LoadBootstrapConfig checks it. Its
+// journal_dir is not required and, when present, is ignored: host-setup owns where the journal lives. It reads
+// no file; the caller supplies the bytes.
+func ParseEnrollment(raw []byte) (BootstrapConfig, error) {
+	var cfg BootstrapConfig
+	if len(raw) == 0 || len(raw) > maxConfigBytes || decodeStrict(raw, &cfg) != nil || cfg.Format != BootstrapFormat || !validController(cfg.Controller) {
+		return BootstrapConfig{}, ErrConfig
+	}
+	if cfg.JournalDir != "" && !validAbsolute(cfg.JournalDir) {
+		return BootstrapConfig{}, ErrConfig
+	}
+	if _, err := controllerPublicKey(cfg); err != nil {
+		return BootstrapConfig{}, ErrConfig
+	}
+	cfg.JournalDir = ""
+	return cfg, nil
+}
+
+// EnrollmentPublicKey returns the decoded controller public key of a loaded bootstrap document.
+func EnrollmentPublicKey(cfg BootstrapConfig) ([]byte, error) { return controllerPublicKey(cfg) }
+
 func controllerPublicKey(cfg BootstrapConfig) ([]byte, error) {
 	key, err := base64.RawURLEncoding.DecodeString(cfg.ControllerPublicKey)
 	if err != nil || len(key) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(key) != cfg.ControllerPublicKey {

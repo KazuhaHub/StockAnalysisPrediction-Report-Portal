@@ -15,11 +15,15 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/imagestore"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/version"
 	"golang.org/x/sys/unix"
 )
 
 // hostInterfaces is the interface source of the startup refusal; tests replace it.
 var hostInterfaces InterfaceLister = SystemInterfaces
+
+// checkDaemonNamespaces is the fail-fast namespace check (doc 187 section 7); tests replace it.
+var checkDaemonNamespaces = driver.CheckDaemonNamespaces
 
 var ErrUnsupported = errors.New("app-runner service requires native Linux amd64 or arm64")
 
@@ -40,6 +44,9 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	store, err := journal.Open(cfg.JournalDir)
 	if err != nil {
+		if errors.Is(err, journal.ErrInUse) {
+			logger.Printf("app-runner not ready: in use: another runner or host-setup holds the journal")
+		}
 		return ErrNotReady
 	}
 	defer store.Close()
@@ -86,6 +93,18 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	report, err := driver.InspectDaemon(ctx, cfg.DockerSocket)
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
+		return ErrNotReady
+	}
+	// The runner and dockerd must share a mount namespace and a network namespace (doc 187 section 2). Checked
+	// before anything is created or bound, so a runner started without the container entry, or beside another
+	// daemon, fails here and not in the first operation that needs the guarantee.
+	if err := checkDaemonNamespaces(ctx, cfg.DockerSocket); err != nil {
+		logger.Printf("app-runner not ready: namespaces: the container daemon is not identified as a local dockerd in the runner's mount and network namespaces (a Compose runner starts through its entry with pid: host and network_mode: host)")
+		return ErrNotReady
+	}
+	// The IPC root lives on /run and does not survive a reboot: serve makes it (doc 187 section 7).
+	if err := ensureIPCRoot(cfg.IPCRoot, rootIdentity); err != nil {
+		logger.Printf("app-runner not ready: ipc_root: %v", err)
 		return ErrNotReady
 	}
 	// A pinned proxy destination is an address of the runner's own network namespace (doc 186 section 3): with
@@ -143,6 +162,12 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil {
 		return ErrNotReady
 	}
+	// A socket left by a runner that was killed would be refused by the listener. The journal's owner lock is held
+	// here, so no live runner can own it; only a socket of exactly the runner's shape is removed.
+	if err := transport.RemoveStaleControlSocket(cfg.ControlSocket, cfg.ControllerGID, store); err != nil {
+		logger.Printf("app-runner not ready: control_socket: something other than a runner's own stale socket is at the configured path, or its directory is not root:controller-gid 0750; it is left in place")
+		return ErrNotReady
+	}
 	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries, transport.WithPrivateNetworks(cfg.PrivateNetworks), transport.WithProxyPins(cfg.ProxyPins))
 	if err != nil {
 		return ErrNotReady
@@ -154,7 +179,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	} else if quarantined.Files > 0 {
 		logger.Printf("app-runner checkpoint quarantine: %d file(s), %d bytes, moved aside by a checkpoint removal and never deleted by the runner", quarantined.Files, quarantined.Bytes)
 	}
-	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s refined_rows=%d estimated_rows=%d", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets), refined, estimated)
+	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s refined_rows=%d estimated_rows=%d version=%s commit=%s", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets), refined, estimated, version.Display(), version.Commit)
 	if err := server.Serve(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil

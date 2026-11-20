@@ -65,6 +65,27 @@ func CheckHostNetworkNamespace(ctx context.Context, socket string) error {
 	return checkHostNetworkNamespace(ctx, client)
 }
 
+// CheckDaemonNamespaces is the start-time check of doc 187 section 7: serve refuses before it binds anything
+// unless the daemon is identified as a local dockerd in the runner's mount namespace AND its network
+// namespace. Without the first, mount sources and paths sent to Docker mean different things to the two
+// processes; without the second, the address guard and network volumes see another host. A namespace that
+// cannot be read, a holder that is not a dockerd and a daemon that does not answer all refuse.
+func CheckDaemonNamespaces(ctx context.Context, socket string) error {
+	client, closeClient := newDockerClient(socket, time.Second, probeTimeout)
+	defer closeClient()
+	return checkDaemonNamespaces(ctx, client)
+}
+
+func checkDaemonNamespaces(ctx context.Context, client *http.Client) error {
+	netErr := checkHostNetworkNamespace(ctx, client)
+	// A refusal of the mount namespace is reported as such: it is the more basic fault, and it also makes the
+	// network check fail because an unidentified daemon has no known namespace.
+	if err := requireDaemonIdentified(client); err != nil {
+		return err
+	}
+	return netErr
+}
+
 func checkHostNetworkNamespace(ctx context.Context, client *http.Client) error {
 	requireHostNetworkNamespace(client)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dockerRequestHost+"/version", nil)
