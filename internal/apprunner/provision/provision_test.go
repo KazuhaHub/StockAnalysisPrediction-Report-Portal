@@ -33,6 +33,7 @@ type fakeHost struct {
 	imageType map[string]string
 	log       []string
 	failOn    string
+	punches   bool // mkfs.xfs hole-punches the image, as a discard through a loop device does
 	verifyErr error
 	euid      int
 	verified  []string
@@ -42,6 +43,8 @@ type fakeHost struct {
 func newHost() *fakeHost {
 	return &fakeHost{
 		files: map[string]FileInfo{
+			"/":           {Exists: true, Dir: true, Perm: 0o755},
+			"/srv":        {Exists: true, Dir: true, Perm: 0o755},
 			"/srv/portal": {Exists: true, Dir: true, Perm: 0o755},
 		},
 		nonEmpty: map[string]bool{}, kind: "ext4", loops: map[string]string{}, imageType: map[string]string{}, nextLoop: 3,
@@ -110,7 +113,13 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) (string, 
 		info.Allocated = info.Size
 		h.files[args[2]] = info
 	case "mkfs.xfs":
-		h.imageType[h.loops[args[0]]] = "xfs"
+		image := h.loops[args[len(args)-1]]
+		h.imageType[image] = "xfs"
+		if h.punches {
+			info := h.files[image]
+			info.Allocated = 1 << 20
+			h.files[image] = info
+		}
 	case "mount":
 		opts := map[string]bool{}
 		for _, o := range strings.Split(args[3], ",") {
@@ -245,7 +254,7 @@ func TestFreshProvisioningRunsTheStepsInOrderAndPrintsPersistence(t *testing.T) 
 	order := []string{
 		"fallocate -l 8589934592 " + dataImage,
 		"losetup --find --show --direct-io=on " + dataImage,
-		"mkfs.xfs /dev/loop3",
+		"mkfs.xfs -K /dev/loop3",
 		"mount -t xfs -o prjquota,nodev,nosuid,noexec /dev/loop3 " + dataMount,
 	}
 	last := -1
@@ -256,7 +265,7 @@ func TestFreshProvisioningRunsTheStepsInOrderAndPrintsPersistence(t *testing.T) 
 		}
 		last = i
 	}
-	if indexOf(h.log, "mkfs.xfs -f") >= 0 || indexOf(h.log, "mount -t xfs -o prjquota,nodev,nosuid,noexec /dev/loop4 "+ckptMount) < 0 {
+	if indexOf(h.log, "mkfs.xfs -f") >= 0 || indexOf(h.log, "mkfs.xfs -K /dev/loop4") < 0 || indexOf(h.log, "mount -t xfs -o prjquota,nodev,nosuid,noexec /dev/loop4 "+ckptMount) < 0 {
 		t.Fatalf("unexpected mkfs force or missing checkpoint mount: %v", h.log)
 	}
 	if h.files[dataImage].Perm != 0o600 || h.files[dataMount].Perm != 0o700 || h.files[dataMount+"/root"].Perm != 0o700 {
@@ -268,7 +277,8 @@ func TestFreshProvisioningRunsTheStepsInOrderAndPrintsPersistence(t *testing.T) 
 	for _, want := range []string{
 		`"data_root": "` + dataMount + `/root"`, `"checkpoint_root": "` + ckptMount + `/root"`,
 		`"disk_bytes": 7516192768`, // 7 GiB: below 8 GiB minus the XFS log, as the runner requires
-		dataImage + " " + dataMount + " xfs loop,prjquota,nodev,nosuid,noexec 0 0",
+		dataImage + " " + dataMount + " xfs loop,prjquota,nodev,nosuid,noexec,nofail,X-fstrim.notrim 0 0",
+		"WantedBy=local-fs.target", "fstrim.timer",
 		"# /etc/systemd/system/srv-portal-mnt\\x2ddata.mount", "RequiresMountsFor=" + dataMount + " " + ckptMount,
 		"nothing under /etc was changed",
 	} {
@@ -320,12 +330,6 @@ func TestExistingContentIsRefusedAndNothingIsChanged(t *testing.T) {
 			h.place(dataImage, g)
 			h.imageType[dataImage] = "xfs"
 		},
-		"image is sparse": func(h *fakeHost) {
-			g := good
-			g.Allocated = 1 << 20
-			h.place(dataImage, g)
-			h.imageType[dataImage] = "xfs"
-		},
 		"image has loose permissions": func(h *fakeHost) {
 			g := good
 			g.Perm = 0o644
@@ -367,12 +371,18 @@ func TestExistingContentIsRefusedAndNothingIsChanged(t *testing.T) {
 			h.imageType[dataImage] = "xfs"
 			h.loops["/dev/loop5"] = dataImage
 		},
-		"checkpoint image is foreign": func(h *fakeHost) { h.place(ckptImage, good); h.imageType[ckptImage] = "ext4" },
-		"parent is world writable":    func(h *fakeHost) { h.place("/srv/portal", FileInfo{Exists: true, Dir: true, Perm: 0o777}) },
-		"parent is not root-owned":    func(h *fakeHost) { h.place("/srv/portal", FileInfo{Exists: true, Dir: true, Perm: 0o755, UID: 1000}) },
-		"parent is missing":           func(h *fakeHost) { delete(h.files, "/srv/portal") },
-		"image directory on tmpfs":    func(h *fakeHost) { h.kind = "tmpfs" },
-		"image directory on zfs":      func(h *fakeHost) { h.kind = "zfs" },
+		"checkpoint image is foreign":  func(h *fakeHost) { h.place(ckptImage, good); h.imageType[ckptImage] = "ext4" },
+		"parent is world writable":     func(h *fakeHost) { h.place("/srv/portal", FileInfo{Exists: true, Dir: true, Perm: 0o777}) },
+		"parent is not root-owned":     func(h *fakeHost) { h.place("/srv/portal", FileInfo{Exists: true, Dir: true, Perm: 0o755, UID: 1000}) },
+		"parent is missing":            func(h *fakeHost) { delete(h.files, "/srv/portal") },
+		"grandparent not root-owned":   func(h *fakeHost) { h.place("/srv", FileInfo{Exists: true, Dir: true, Perm: 0o755, UID: 1000}) },
+		"grandparent group-writable":   func(h *fakeHost) { h.place("/srv", FileInfo{Exists: true, Dir: true, Perm: 0o775}) },
+		"grandparent world-writable":   func(h *fakeHost) { h.place("/srv", FileInfo{Exists: true, Dir: true, Perm: 0o777}) },
+		"root dir not root-owned":      func(h *fakeHost) { h.place("/", FileInfo{Exists: true, Dir: true, Perm: 0o755, UID: 1000}) },
+		"image directory on nfs":       func(h *fakeHost) { h.kind = "nfs" },
+		"image directory on a mystery": func(h *fakeHost) { h.kind = "other(0x1234)" },
+		"image directory on tmpfs":     func(h *fakeHost) { h.kind = "tmpfs" },
+		"image directory on zfs":       func(h *fakeHost) { h.kind = "zfs" },
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -512,5 +522,108 @@ func TestRecommendedDiskBytes(t *testing.T) {
 	}
 	if got := RecommendedDiskBytes(1<<20, 1<<30); got != 0 {
 		t.Fatal(got)
+	}
+}
+
+func TestARootOwnedStickyAncestorLikeTmpIsAcceptedButAPlainWritableOneIsNot(t *testing.T) {
+	h := newHost()
+	h.place("/srv", FileInfo{Exists: true, Dir: true, Perm: 0o777, Sticky: true})
+	if _, err := run(h, spec(), true); err != nil {
+		t.Fatalf("root-owned sticky /tmp-style ancestor refused: %v", err)
+	}
+	h.place("/srv", FileInfo{Exists: true, Dir: true, Perm: 0o777})
+	if _, err := run(h, spec(), true); err == nil {
+		t.Fatal("a non-sticky world-writable ancestor was accepted")
+	}
+}
+
+func TestASparseExistingImageIsRepreallocatedInPlaceNeverDeleted(t *testing.T) {
+	h := newHost()
+	for _, image := range []string{dataImage, ckptImage} {
+		h.place(image, FileInfo{Exists: true, Regular: true, Perm: 0o600, Size: eightGiB, Allocated: 1 << 20})
+		h.imageType[image] = "xfs"
+	}
+	dry, err := run(h, spec(), true)
+	if err != nil || !strings.Contains(dry, "re-preallocate the sparse XFS image") || strings.Contains(dry, "remove") {
+		t.Fatalf("dry run: %v\n%s", err, dry)
+	}
+	h.log = nil
+	out, err := run(h, spec(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fa, lo := indexOf(h.log, "fallocate -l 8589934592 "+dataImage), indexOf(h.log, "losetup --find")
+	if fa < 0 || lo < 0 || fa > lo || indexOf(h.log, "mkfs.xfs") >= 0 || indexOf(h.log, "remove ") >= 0 {
+		t.Fatalf("expected an in-place fallocate before attaching, no mkfs, no removal: %v", h.log)
+	}
+	if !strings.Contains(out, "warning: "+dataImage+" was sparse and has been re-preallocated in place") || strings.Contains(out, "delete") {
+		t.Fatalf("no degraded warning:\n%s", out)
+	}
+}
+
+func TestASparseImageThatIsAlreadyMountedOnlyWarns(t *testing.T) {
+	h := newHost()
+	if _, err := run(h, spec(), false); err != nil {
+		t.Fatal(err)
+	}
+	info := h.files[dataImage]
+	info.Allocated = 1 << 20
+	h.files[dataImage] = info
+	h.log = nil
+	out, err := run(h, spec(), false)
+	if err != nil || len(h.mutations()) != 0 || !strings.Contains(out, "unmount it and run this command again") {
+		t.Fatalf("a mounted sparse image was touched or not reported: %v %v\n%s", err, h.log, out)
+	}
+}
+
+func TestFormattingThatPunchesHolesIsCaughtAndRolledBack(t *testing.T) {
+	h := newHost()
+	h.punches = true
+	_, err := run(h, spec(), false)
+	if err == nil || !strings.Contains(err.Error(), "formatting left the image sparse") || len(h.mounts) != 0 || len(h.loops) != 0 || h.files[dataImage].Exists {
+		t.Fatalf("not caught: %v mounts=%v loops=%v", err, h.mounts, h.loops)
+	}
+	if indexOf(h.log, "mount -t xfs") >= 0 {
+		t.Fatal("mounted a filesystem that was formatted with holes")
+	}
+}
+
+func TestRollbackStopsAtAFailedUnmount(t *testing.T) {
+	h := newHost()
+	h.verifyErr = errors.New("prjquota is off")
+	env := h.env()
+	exec := env.Exec
+	env.Exec = execFunc(func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "umount" {
+			h.log = append(h.log, "umount "+strings.Join(args, " "))
+			return "", errors.New("target is busy")
+		}
+		return exec.Run(ctx, name, args...)
+	})
+	var out bytes.Buffer
+	err := Run(context.Background(), env, spec(), false, &out)
+	if err == nil || !strings.Contains(err.Error(), "rollback stopped") {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if indexOf(h.log, "losetup --detach") >= 0 || !h.files[dataImage].Exists || !h.files[dataMount].Exists || len(h.loops) != 1 {
+		t.Fatalf("rollback went past a failed umount: %v", h.log)
+	}
+}
+
+type execFunc func(ctx context.Context, name string, args ...string) (string, error)
+
+func (f execFunc) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return f(ctx, name, args...)
+}
+
+func TestTheSmallestImagesStillYieldAUsableBudget(t *testing.T) {
+	min := MinImageBytes
+	if got := RecommendedDiskBytes(min-64<<20, min-64<<20); got < 1<<30 {
+		t.Fatalf("minimum images recommend %d, below the runner's 1 GiB floor", got)
+	}
+	s := spec()
+	s.DataSize = MinImageBytes - 1<<20
+	if err := s.Validate(); !errors.Is(err, ErrInvalid) {
+		t.Fatal("an image below the minimum was accepted")
 	}
 }

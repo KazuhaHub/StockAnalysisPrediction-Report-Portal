@@ -115,15 +115,21 @@ func render(out io.Writer, spec Spec, results []VolumeResult) {
 	fmt.Fprintf(out, "\nRunner configuration (service.json):\n  \"data_root\": %q,\n  \"checkpoint_root\": %q,\n", data.RootDir, checkpoint.RootDir)
 	recommended := RecommendedDiskBytes(data.UsableBytes, checkpoint.UsableBytes)
 	fmt.Fprintf(out, "  \"capacity\": {\"disk_bytes\": %d}\n", recommended)
+	if recommended == 0 {
+		fmt.Fprintf(out, "WARNING: the volumes are too small for any capacity.disk_bytes of at least 1 GiB; the runner will not be ready.\n")
+	}
 	fmt.Fprintf(out, "The runner is not ready when capacity.disk_bytes (default 8 GiB) exceeds the data volume's usable size, or\n"+
 		"when the checkpoint volume is smaller than two thirds of it. XFS reserves part of an image for its log, so an\n"+
 		"8 GiB image needs the lower value above. Usable: data %d bytes, checkpoint %d bytes.\n", data.UsableBytes, checkpoint.UsableBytes)
 	fmt.Fprintf(out, "\nPersist the mounts after a reboot with ONE of the following (nothing under /etc was changed).\n\n")
-	fmt.Fprintf(out, "A. /etc/fstab\n")
+	fmt.Fprintf(out, "A. /etc/fstab (preferred). nofail keeps a missing image from failing the boot; X-fstrim.notrim keeps\n"+
+		"fstrim.timer from trimming these filesystems, because a trim on a loop device punches holes in the preallocated image.\n")
 	for _, r := range []VolumeResult{data, checkpoint} {
-		fmt.Fprintf(out, "%s %s xfs loop,%s 0 0\n", r.Image, r.Mount, MountOptions)
+		fmt.Fprintf(out, "%s %s xfs loop,%s,nofail,X-fstrim.notrim 0 0\n", r.Image, r.Mount, MountOptions)
 	}
-	fmt.Fprintf(out, "\nB. systemd mount units\n")
+	fmt.Fprintf(out, "\nB. systemd mount units. WantedBy (not Requires) keeps boot going without them; the runner drop-in below still\n"+
+		"stops the runner starting without them. A mount unit cannot carry X-fstrim.notrim: with units, also disable or\n"+
+		"override fstrim.timer for these mounts (verify on the host), or use option A.\n")
 	for _, r := range []VolumeResult{data, checkpoint} {
 		fmt.Fprintf(out, "# /etc/systemd/system/%s\n[Unit]\nDescription=Portal app-runner %s volume\n[Mount]\nWhat=%s\nWhere=%s\nType=xfs\nOptions=loop,%s\n[Install]\nWantedBy=local-fs.target\n\n",
 			UnitName(r.Mount), r.Name, r.Image, r.Mount, MountOptions)

@@ -59,7 +59,7 @@ func (systemFS) Stat(path string) (FileInfo, error) {
 	if err != nil {
 		return FileInfo{}, err
 	}
-	out := FileInfo{Exists: true, Dir: info.IsDir(), Regular: info.Mode().IsRegular(), Perm: uint32(info.Mode().Perm()), Size: info.Size()}
+	out := FileInfo{Exists: true, Dir: info.IsDir(), Regular: info.Mode().IsRegular(), Perm: uint32(info.Mode().Perm()), Sticky: info.Mode()&os.ModeSticky != 0, Size: info.Size()}
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
 		out.UID = st.Uid
 		out.Allocated = st.Blocks * 512

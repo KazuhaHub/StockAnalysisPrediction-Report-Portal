@@ -20,7 +20,7 @@ const (
 	// MountOptions are the options every provisioned volume is mounted with.
 	MountOptions = "prjquota,nodev,nosuid,noexec"
 	// MinImageBytes and MaxImageBytes bound a requested image.
-	MinImageBytes int64 = 1 << 30
+	MinImageBytes int64 = 2 << 30
 	MaxImageBytes int64 = 16 << 40
 	// RootDirName is the directory inside each volume the runner is configured to use as its root. The volume's
 	// own root stays an ordinary mount point.
@@ -91,7 +91,7 @@ func (s Spec) Validate() error {
 	}
 	for _, v := range s.volumes() {
 		if v.Size < MinImageBytes || v.Size > MaxImageBytes || v.Size%(1<<20) != 0 {
-			return invalid("the %s size must be a whole number of MiB between 1 GiB and 16 TiB", v.Name)
+			return invalid("the %s size must be a whole number of MiB between 2 GiB and 16 TiB", v.Name)
 		}
 	}
 	all := []string{s.DataImage, s.CheckpointImage, s.DataMount, s.CheckpointMount}
@@ -138,6 +138,7 @@ type Executor interface {
 type FileInfo struct {
 	Exists, Dir, Regular bool
 	Perm, UID            uint32
+	Sticky               bool
 	Size, Allocated      int64
 }
 
@@ -177,6 +178,7 @@ type VolumeResult struct {
 	Name, Image, Mount, RootDir, Loop string
 	Action                            string // created, attached, already-provisioned
 	UsableBytes                       int64
+	Warning                           string
 }
 
 type action string
@@ -192,6 +194,7 @@ type plan struct {
 	action       action
 	loop         string
 	cow          bool
+	sparse       bool
 	mountExisted bool
 }
 
@@ -240,6 +243,9 @@ func Run(ctx context.Context, env Env, spec Spec, dryRun bool, out io.Writer) er
 		}
 		results = append(results, r)
 		fmt.Fprintf(out, "%s: %s image %s, mounted at %s on %s, usable %d bytes\n", r.Name, r.Action, r.Image, r.Mount, r.Loop, r.UsableBytes)
+		if r.Warning != "" {
+			fmt.Fprintf(out, "%s: warning: %s\n", r.Name, r.Warning)
+		}
 	}
 	render(out, spec, results)
 	return nil
@@ -250,29 +256,39 @@ func describe(p plan) string {
 	case actCreate:
 		return fmt.Sprintf("create %s (%d bytes, preallocated), format XFS, attach a loop device and mount at %s", p.vol.Image, p.vol.Size, p.vol.Mount)
 	case actAttach:
+		if p.sparse {
+			return fmt.Sprintf("re-preallocate the sparse XFS image %s in place (fallocate, data kept), attach it and mount it at %s", p.vol.Image, p.vol.Mount)
+		}
 		return fmt.Sprintf("attach the existing XFS image %s and mount it at %s", p.vol.Image, p.vol.Mount)
 	default:
 		return fmt.Sprintf("find %s already provisioned at %s and re-verify it", p.vol.Image, p.vol.Mount)
 	}
 }
 
+// parentCheck requires every directory from the path's parent up to / to be a real directory (no symbolic link)
+// owned by root and not group- or world-writable. A root-owned sticky directory such as /tmp is allowed as an
+// ancestor, because nobody else can replace the root-owned entry below it.
 func parentCheck(env Env, v volume, label, path string) error {
-	parent := filepath.Dir(path)
-	info, err := env.FS.Stat(parent)
-	if err != nil {
-		return refuse(v, "cannot read the parent directory of the %s: %v", label, err)
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		info, err := env.FS.Stat(dir)
+		if err != nil {
+			return refuse(v, "cannot read the directory %s above the %s: %v", dir, label, err)
+		}
+		if !info.Exists || !info.Dir {
+			return refuse(v, "the directory %s above the %s does not exist; create it first", dir, label)
+		}
+		sticky := info.Sticky
+		if info.UID != 0 || (info.Perm&0o022 != 0 && !sticky) {
+			return refuse(v, "the directory %s above the %s must be owned by root and not group- or world-writable", dir, label)
+		}
+		resolved, err := env.FS.Resolve(dir)
+		if err != nil || resolved != dir {
+			return refuse(v, "the directory %s above the %s must not be or pass through a symbolic link", dir, label)
+		}
+		if dir == "/" {
+			return nil
+		}
 	}
-	if !info.Exists || !info.Dir {
-		return refuse(v, "the parent directory %s of the %s does not exist; create it first", parent, label)
-	}
-	if info.UID != 0 || info.Perm&0o022 != 0 {
-		return refuse(v, "the parent directory %s must be owned by root and not group- or world-writable", parent)
-	}
-	resolved, err := env.FS.Resolve(parent)
-	if err != nil || resolved != parent {
-		return refuse(v, "the parent directory %s must not be or pass through a symbolic link", parent)
-	}
-	return nil
 }
 
 func inspect(ctx context.Context, env Env, v volume) (plan, error) {
@@ -288,10 +304,11 @@ func inspect(ctx context.Context, env Env, v volume) (plan, error) {
 		return p, refuse(v, "cannot read the filesystem under the image: %v", err)
 	}
 	switch kind {
-	case "tmpfs", "overlay", "zfs", "nfs", "cifs", "fuse", "ceph":
-		return p, refuse(v, "the image directory is on %s; use a local ext4, XFS or btrfs filesystem (for ZFS, put XFS on a zvol instead)", kind)
+	case "ext4", "xfs":
 	case "btrfs":
 		p.cow = true
+	default:
+		return p, refuse(v, "the image directory is on %s; only ext4, XFS and btrfs are supported backing filesystems (for ZFS, put XFS on a zvol instead)", kind)
 	}
 	image, err := env.FS.Stat(v.Image)
 	if err != nil {
@@ -305,9 +322,8 @@ func inspect(ctx context.Context, env Env, v volume) (plan, error) {
 		if image.Size != v.Size {
 			return p, refuse(v, "%s exists with size %d bytes, not the requested %d; growth is a separate procedure (handbook)", v.Image, image.Size, v.Size)
 		}
-		if image.Allocated < image.Size {
-			return p, refuse(v, "%s is sparse; a preallocated image is mandatory, so remove it and run again", v.Image)
-		}
+		// A sparse image is degraded, not wrong: it is re-preallocated in place below, while it is unmounted.
+		p.sparse = image.Allocated < image.Size
 		typ, err := env.Exec.Run(ctx, "blkid", "-p", "-o", "value", "-s", "TYPE", v.Image)
 		if err != nil {
 			return p, refuse(v, "%s exists and holds no recognised filesystem; it is not touched", v.Image)
@@ -383,41 +399,56 @@ func contains(list []string, item string) bool {
 func apply(ctx context.Context, env Env, p plan) (VolumeResult, error) {
 	v := p.vol
 	result := VolumeResult{Name: v.Name, Image: v.Image, Mount: v.Mount, RootDir: filepath.Join(v.Mount, RootDirName)}
-	var undo []func()
+	// Only what this run made is undone, newest first. The first undo step that fails stops the rollback: a
+	// failed umount must never be followed by detaching the loop device or deleting the image under it.
+	var undo []func() error
 	rollback := func(err error) (VolumeResult, error) {
-		// Only what this run made is undone, newest first; every step is best effort.
 		for i := len(undo) - 1; i >= 0; i-- {
-			undo[i]()
+			if uerr := undo[i](); uerr != nil {
+				return result, fmt.Errorf("%w (rollback stopped, left in place for the operator: %v)", err, uerr)
+			}
 		}
 		return result, err
+	}
+	preallocated := func() bool {
+		info, err := env.FS.Stat(v.Image)
+		return err == nil && info.Exists && info.Allocated >= v.Size
 	}
 	switch p.action {
 	case actVerify:
 		result.Action, result.Loop = "already-provisioned", p.loop
+		if p.sparse {
+			result.Warning = fmt.Sprintf("%s is sparse and mounted; unmount it and run this command again to re-preallocate it in place (data is kept)", v.Image)
+		}
 	default:
 		if !p.mountExisted {
 			if err := env.FS.Mkdir(v.Mount, 0o700); err != nil {
 				return rollback(fmt.Errorf("create the mount point: %w", err))
 			}
-			undo = append(undo, func() { _ = env.FS.Remove(v.Mount) })
+			undo = append(undo, func() error { return env.FS.Remove(v.Mount) })
 		}
 		if p.action == actCreate {
 			if err := env.FS.CreateExclusive(v.Image, 0o600); err != nil {
 				return rollback(fmt.Errorf("create the image: %w", err))
 			}
-			undo = append(undo, func() { _ = env.FS.Remove(v.Image) })
+			undo = append(undo, func() error { return env.FS.Remove(v.Image) })
 			if p.cow {
 				// Copy-on-write would fragment a database-like image; the flag only works on an empty file.
 				if _, err := env.Exec.Run(ctx, "chattr", "+C", v.Image); err != nil {
 					return rollback(fmt.Errorf("chattr +C on the image: %w", err))
 				}
 			}
+		}
+		if p.action == actCreate || p.sparse {
+			// For a sparse existing image this fills the holes in place and keeps every written block.
 			if _, err := env.Exec.Run(ctx, "fallocate", "-l", strconv.FormatInt(v.Size, 10), v.Image); err != nil {
 				return rollback(fmt.Errorf("preallocate the image: %w", err))
 			}
-			info, err := env.FS.Stat(v.Image)
-			if err != nil || info.Allocated < v.Size {
+			if !preallocated() {
 				return rollback(fmt.Errorf("the image is not fully preallocated; the filesystem under it does not support fallocate"))
+			}
+			if p.sparse {
+				result.Warning = fmt.Sprintf("%s was sparse and has been re-preallocated in place", v.Image)
 			}
 		}
 		out, err := env.Exec.Run(ctx, "losetup", "--find", "--show", "--direct-io=on", v.Image)
@@ -428,17 +459,27 @@ func apply(ctx context.Context, env Env, p plan) (VolumeResult, error) {
 		if !loopDevice.MatchString(loop) {
 			return rollback(fmt.Errorf("losetup returned an unexpected device name"))
 		}
-		undo = append(undo, func() { _, _ = env.Exec.Run(ctx, "losetup", "--detach", loop) })
+		undo = append(undo, func() error {
+			_, err := env.Exec.Run(ctx, "losetup", "--detach", loop)
+			return err
+		})
 		if p.action == actCreate {
-			// No -f: mkfs.xfs itself refuses a device that already carries a signature.
-			if _, err := env.Exec.Run(ctx, "mkfs.xfs", loop); err != nil {
+			// -K: no discard. A discard on a loop device punches holes in the preallocated image. No -f:
+			// mkfs.xfs itself refuses a device that already carries a signature.
+			if _, err := env.Exec.Run(ctx, "mkfs.xfs", "-K", loop); err != nil {
 				return rollback(fmt.Errorf("format XFS: %w", err))
+			}
+			if !preallocated() {
+				return rollback(fmt.Errorf("formatting left the image sparse; the loop device passed a discard down"))
 			}
 		}
 		if _, err := env.Exec.Run(ctx, "mount", "-t", "xfs", "-o", MountOptions, loop, v.Mount); err != nil {
 			return rollback(fmt.Errorf("mount: %w", err))
 		}
-		undo = append(undo, func() { _, _ = env.Exec.Run(ctx, "umount", v.Mount) })
+		undo = append(undo, func() error {
+			_, err := env.Exec.Run(ctx, "umount", v.Mount)
+			return err
+		})
 		if err := env.FS.Chmod(v.Mount, 0o700); err != nil {
 			return rollback(fmt.Errorf("restrict the mount point: %w", err))
 		}

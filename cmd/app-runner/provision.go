@@ -16,7 +16,7 @@ const provisionUsage = `usage: app-runner provision-xfs-images [--dry-run]
 
 Creates two preallocated, loop-mounted XFS images with project quota, for a host
 whose own filesystem (for example ext4) has none. Run once, as root.
-SIZE is binary: 8G is 8 GiB (minimum 1G). It changes nothing under /etc, refuses
+SIZE is binary: 8G is 8 GiB (minimum 2G). It changes nothing under /etc, refuses
 paths that already hold other content and never touches a mount it did not
 create. Re-running after success only re-verifies. --dry-run reports the plan.
 See docs/app-platform/07-handbook.md section 4.2 and docs/app-platform/182-cross-platform-backend-runtime.md.
