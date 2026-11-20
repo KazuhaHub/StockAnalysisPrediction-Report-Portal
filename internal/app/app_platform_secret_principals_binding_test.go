@@ -30,7 +30,7 @@ func testPlatformSecretBindingPrincipals(t *testing.T, pg bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, principal)
+		_, _, err = loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, principal, platformTargetDefaultURL)
 		return err
 	}
 	for _, c := range []struct {
@@ -40,10 +40,10 @@ func testPlatformSecretBindingPrincipals(t *testing.T, pg bool) {
 		listed        string
 		auditContains string
 	}{
-		{"", true, false, "/1-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
-		{platformPrincipalsServiceOnly, false, true, "/2-dev.1", `["service"]`, `"Principals":["service"]`},
-		{platformPrincipalsBoth, true, true, "/2-dev.1", `["service","viewer"]`, `"Principals":["service","viewer"]`},
-		{"", true, false, "/1-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
+		{"", true, false, "/3-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
+		{platformPrincipalsServiceOnly, false, true, "/3-dev.1", `["service"]`, `"Principals":["service"]`},
+		{platformPrincipalsBoth, true, true, "/3-dev.1", `["service","viewer"]`, `"Principals":["service","viewer"]`},
+		{"", true, false, "/3-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
 	} {
 		binding := platformBindingWithPrincipals(t, s, admin, installation, credential, c.principals)
 		if got := scalar[string](t, s.st, `SELECT policy_json FROM app_platform_secret_bindings WHERE id=?`, binding.ID); !strings.Contains(got, c.stored) {
@@ -54,12 +54,12 @@ func testPlatformSecretBindingPrincipals(t *testing.T, pg bool) {
 		}
 		// The foreground loader is the viewer path, whatever the binding says.
 		facts, _ := loadPlatformSecretBindingFacts(e, installation, false)
-		if _, _, err := loadPlatformSecretBindingUse(e, installation, "upstream-api", facts); (err == nil) != c.viewer {
+		if _, _, err := loadPlatformSecretBindingUse(e, installation, "upstream-api", facts, platformTargetDefaultURL); (err == nil) != c.viewer {
 			t.Fatal("foreground loader ignored principals", c.principals)
 		}
 		// The command resolver the foreground request path calls, too: a service-only
 		// binding is never placed into a viewer's request.
-		if _, _, value, err := s.resolvePlatformSecretBindingCommand(e, installation, "upstream-api"); (err == nil) != c.viewer {
+		if _, _, value, err := s.resolvePlatformSecretBindingCommand(e, installation, "upstream-api", platformTargetDefaultURL); (err == nil) != c.viewer {
 			t.Fatal("foreground resolver ignored principals", c.principals)
 		} else {
 			clear(value)
