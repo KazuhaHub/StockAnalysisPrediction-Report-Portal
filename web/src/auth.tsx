@@ -169,3 +169,9 @@ export function useAuth(): AuthCtx {
   if (!c) throw new Error('useAuth must be used within AuthProvider')
   return c
 }
+
+// Whether the signed-in user is an administrator; false outside a provider, so a component that
+// only gates a control on it can be rendered on its own.
+export function useIsAdmin(): boolean {
+  return useContext(Ctx)?.admin ?? false
+}
