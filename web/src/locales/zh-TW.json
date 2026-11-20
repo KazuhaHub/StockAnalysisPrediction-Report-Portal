@@ -3615,6 +3615,7 @@
   "appCredentials.reviewBinding": "稽核綁定",
   "appCredentials.confirmBinding": "確認憑據綁定",
   "appCredentials.confirmBindingBody": "應用只能透過已稽核的網路策略收到這個固定請求頭。",
+  "appCredentials.bindingTarget": "僅用於發往 {{origin}} 的請求",
   "appCredentials.approve": "批准綁定",
   "appCredentials.rotationConfirm": "輪換這個憑據？",
   "appCredentials.affected": "{{count}} 個應用綁定需要重新稽核。",

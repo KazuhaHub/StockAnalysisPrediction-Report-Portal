@@ -3615,6 +3615,7 @@
   "appCredentials.reviewBinding": "Review binding",
   "appCredentials.confirmBinding": "Confirm credential binding",
   "appCredentials.confirmBindingBody": "The application will receive only this fixed header through its reviewed network policy.",
+  "appCredentials.bindingTarget": "Only for requests to {{origin}}",
   "appCredentials.approve": "Approve binding",
   "appCredentials.rotationConfirm": "Rotate this credential?",
   "appCredentials.affected": "{{count}} application binding(s) will require new approval.",

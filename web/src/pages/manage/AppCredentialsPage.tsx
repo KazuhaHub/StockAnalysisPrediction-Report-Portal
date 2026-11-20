@@ -81,6 +81,7 @@ interface BindingPlan {
     credential_label: string
     operation: string
     network_policy_sha256: string
+    network_target?: string
     principals?: Principal[]
   }
 }
@@ -273,6 +274,11 @@ export default function AppCredentialsPage() {
               <Typography.Text type="secondary">
                 {plan.review.operation} · {plan.review.network_policy_sha256.slice(0, 12)}
               </Typography.Text>
+              {plan.review.network_target && (
+                <Typography.Text>
+                  {t('appCredentials.bindingTarget', { origin: plan.review.network_target })}
+                </Typography.Text>
+              )}
               <Typography.Text>
                 {t(`appCredentials.principals.${principalsToUse(plan.review.principals)}`)}
               </Typography.Text>

@@ -108,6 +108,7 @@ describe('application credential settings', () => {
           credential_label: credential.label,
           operation: 'http_bearer',
           network_policy_sha256: 'b'.repeat(64),
+          network_target: 'https://api.example.com',
         },
       })
       .mockResolvedValueOnce({ ...binding, name: 'second-api' })
@@ -119,6 +120,7 @@ describe('application credential settings', () => {
     fireEvent.click(await screen.findByText('Upstream API', { selector: '.ant-select-item-option-content' }))
     await user.click(screen.getByRole('button', { name: 'appCredentials.reviewBinding' }))
     expect(await screen.findAllByText('appCredentials.confirmBinding')).toHaveLength(2)
+    expect(screen.getByText('appCredentials.bindingTarget:{"origin":"https://api.example.com"}')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'appCredentials.approve' }))
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenLastCalledWith(
