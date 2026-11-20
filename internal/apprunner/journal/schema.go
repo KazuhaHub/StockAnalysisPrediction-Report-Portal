@@ -9,7 +9,7 @@ import (
 // schemaVersion is the newest journal schema this binary writes. Version 1 is
 // frozen: its table SQL is reproduced here only to recognise and upgrade files
 // written by earlier binaries.
-const schemaVersion = 4
+const schemaVersion = 5
 
 type schemaProduct struct{ kind, name, sql, rowCheck string }
 
@@ -21,7 +21,8 @@ type schemaProduct struct{ kind, name, sql, rowCheck string }
 // (doc 171, PR 4c) and delete-checkpoint (doc 172, owner decision 2026-11-16);
 // every other version 2 product is unchanged. Version 4 adds runner_proxy_budget (doc 184): the bytes an
 // installation moved through the reviewed forward proxy in a UTC day, so a runner restart does not reset the
-// daily budget; every version 3 product is unchanged.
+// daily budget; every version 3 product is unchanged. Version 5 widens the runner_commands kind list once more with
+// set-data-quota and import-data (doc 185, owner decision 2026-11-20); every version 4 product is otherwise unchanged.
 func schemaProducts(version int) []schemaProduct {
 	return buildSchemaProducts(version, len(v3AddedKinds))
 }
@@ -66,6 +67,9 @@ func buildSchemaProducts(version int, addedKinds int) []schemaProduct {
 	}
 	if version >= 3 {
 		kinds = append(kinds, v3AddedKinds[:addedKinds]...)
+	}
+	if version >= 5 {
+		kinds = append(kinds, "set-data-quota", "import-data")
 	}
 	tables := []struct {
 		name, fields, keys string

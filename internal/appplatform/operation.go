@@ -18,6 +18,12 @@ const (
 	ActionUninstall  Action = "uninstall"
 	ActionDeleteData Action = "delete_data"
 	ActionRestore    Action = "restore"
+	// ActionSetDataQuota raises the data quota of one installation's namespace in one reviewed effect (doc 185).
+	// It changes no generation: the installation keeps running while the runner applies the larger limit.
+	ActionSetDataQuota Action = "set_data_quota"
+	// ActionImportData replaces the contents of a disabled installation's namespace with an inbox archive and
+	// starts it again (doc 185). It is a same-release lifecycle like enable and repair, with one more stage.
+	ActionImportData Action = "import_data"
 	// ActionRestoreImport re-homes a restored installation onto a replacement runtime and imports
 	// one retained checkpoint by content. It exists only while a restored Portal is in recovery.
 	ActionRestoreImport Action = "restore_import"
@@ -29,6 +35,7 @@ const (
 	StagePrepareData      Stage = "prepare_data"
 	StageQuiesce          Stage = "quiesce"
 	StageSnapshot         Stage = "snapshot"
+	StageImport           Stage = "import"
 	StageMigrate          Stage = "migrate"
 	StageStart            Stage = "start"
 	StageProbe            Stage = "probe"
@@ -203,7 +210,7 @@ func (o Operation) SettleStartNeverRan(expectedRevision uint64) (Operation, erro
 		return Operation{}, err
 	}
 	stages := operationStages(o.action, o.managed)
-	if (o.action != ActionEnable && o.action != ActionRepair) || !o.managed || o.stage != StageRecoveryRequired ||
+	if (o.action != ActionEnable && o.action != ActionRepair && o.action != ActionImportData) || !o.managed || o.stage != StageRecoveryRequired ||
 		o.revision < 2 || o.revision-2 >= uint64(len(stages)) || stages[o.revision-2] != StageStart || o.revision+1 > uint64(len(stages)) {
 		return Operation{}, ErrInvalidTransition
 	}
@@ -278,6 +285,16 @@ func operationStages(action Action, managed bool) []Stage {
 		stages = append(stages, StageDownload, StageStage, StageQuiesce, StageSnapshot, StageMigrate)
 		startAndProbe()
 		stages = append(stages, StageActivate)
+	case ActionSetDataQuota:
+		if !managed {
+			return nil
+		}
+		stages = append(stages, StagePrepareData)
+	case ActionImportData:
+		if !managed {
+			return nil
+		}
+		stages = append(stages, StageQuiesce, StageSnapshot, StageImport, StageStart, StageProbe, StageActivate)
 	case ActionDisable:
 		stages = append(stages, StageRevoke)
 		if managed {

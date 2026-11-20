@@ -58,6 +58,18 @@ func lifecycleSignature(t *testing.T, action WritableLifecycleAction, a control.
 			t.Fatal(err)
 		}
 		return signature
+	case SetDataQuotaRead:
+		signature, err := control.SignSetDataQuotaRead(raw, key, a, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signature
+	case ImportDataRead:
+		signature, err := control.SignImportDataRead(raw, key, a, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signature
 	case UpdateStartReceipt:
 		signature, err := control.SignUpdateStartRead(raw, key, a, now)
 		if err != nil {

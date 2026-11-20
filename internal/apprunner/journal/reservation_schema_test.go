@@ -121,7 +121,7 @@ func TestNewerThanV3Refused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`PRAGMA user_version=5`); err != nil {
+	if _, err := store.db.Exec(`PRAGMA user_version=6`); err != nil {
 		t.Fatal(err)
 	}
 	store.Close()

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Empty, Modal, Result, Space, Tag, Typography, theme } from 'antd'
-import { AppstoreOutlined, ArrowLeftOutlined, DeleteOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined } from '@ant-design/icons'
+import { Alert, App, Button, Card, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
+import { AppstoreOutlined, ArrowLeftOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
@@ -9,6 +9,7 @@ import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
+import { confirmAction } from '../../components/Confirm'
 import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
 import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
@@ -50,6 +51,8 @@ type Settings = {
   recovery: { count: number; state?: string; pending: boolean; points: RecoveryPoint[] }
   configuration_gaps: string[]
   repair_eligible: boolean
+  quota_raise_eligible?: boolean
+  import_eligible?: boolean
   control_paused: boolean
   operation_pending?: boolean
   migration_recovery?: MigrationRecovery | null
@@ -102,6 +105,46 @@ type RepairReview = {
   data_effect: 'checkpoint_and_retain'
 }
 type RepairPlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: RepairReview }
+type QuotaReview = {
+  action: 'set_data_quota'
+  installation_id: string
+  app_id: string
+  publisher_id: string
+  current_data_quota_bytes: string
+  current_data_quota_inodes: string
+  data_quota_bytes: string
+  data_quota_inodes: string
+  observed_bytes: string
+  capacity: 'fits' | 'short'
+  capacity_dimension?: string
+  capacity_requested?: string
+  capacity_remaining?: string
+}
+type QuotaPlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: QuotaReview }
+type ImportReview = {
+  action: 'import_data'
+  installation_id: string
+  app_id: string
+  publisher_id: string
+  archive_sha256: string
+  archive_bytes: string
+  archive_entries: string
+  content_bytes: string
+  archive_data_format: string
+  release_data_format: string
+  data_quota_bytes: string
+  data_quota_inodes: string
+  replaces_contents: true
+  keeps_checkpoint: true
+  requires_disabled: true
+}
+type ImportPlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: ImportReview }
+// Platform bounds for a raised quota: the runner accepts any positive size up to 16 GiB.
+const maxQuotaBytes = 17179869184n
+const minQuotaInodes = 65536n
+const maxQuotaInodes = 1000000n
+const decimal = /^[1-9][0-9]*$/
+const digits = /^[0-9]+$/
 type RestoreReview = {
   action: 'restore'
   installation_id: string
@@ -139,6 +182,7 @@ function phaseTone(settings: Settings): StatusTone {
 
 export default function AppPlatformSettingsPage() {
   const { t } = useTranslation()
+  const { modal } = App.useApp()
   const { lang } = usePrefs()
   const { token } = theme.useToken()
   const navigate = useNavigate()
@@ -156,6 +200,17 @@ export default function AppPlatformSettingsPage() {
   const [repairPlan, setRepairPlan] = useState<RepairPlan | null>(null)
   const [repairError, setRepairError] = useState('')
   const [repairing, setRepairing] = useState(false)
+  const [raiseOpen, setRaiseOpen] = useState(false)
+  const [raiseBytes, setRaiseBytes] = useState('')
+  const [raiseInodes, setRaiseInodes] = useState('')
+  const [raisePlan, setRaisePlan] = useState<QuotaPlan | null>(null)
+  const [raiseError, setRaiseError] = useState('')
+  const [raising, setRaising] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importDigest, setImportDigest] = useState('')
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null)
+  const [importError, setImportError] = useState('')
+  const [importing, setImporting] = useState(false)
   const [restorePlan, setRestorePlan] = useState<RestorePlan | null>(null)
   const [restoreError, setRestoreError] = useState('')
   const [restoring, setRestoring] = useState(false)
@@ -174,6 +229,8 @@ export default function AppPlatformSettingsPage() {
     setRepairPlan(null)
     setRepairError('')
     setRepairing(false)
+    setRaiseOpen(false); setRaisePlan(null); setRaiseError(''); setRaising(false)
+    setImportOpen(false); setImportPlan(null); setImportError(''); setImporting(false); setImportDigest('')
     setRestorePlan(null)
     setRestoreError('')
     setRestoring(false)
@@ -345,6 +402,134 @@ export default function AppPlatformSettingsPage() {
       setRepairing(false)
     }
   }
+  const openRaise = () => {
+    if (!settings.data) return
+    setRaiseBytes(settings.data.quota_bytes); setRaiseInodes(settings.data.quota_inodes)
+    setRaisePlan(null); setRaiseError(''); setRaiseOpen(true)
+  }
+  const closeRaise = () => { if (!raising) { setRaiseOpen(false); setRaisePlan(null); setRaiseError('') } }
+  const prepareRaise = async () => {
+    if (!settings.data || !settings.quota_raise_eligible || raising) return
+    setRaiseError('')
+    const bytesValue = raiseBytes.trim()
+    const inodesValue = raiseInodes.trim()
+    if (!decimal.test(bytesValue) || !decimal.test(inodesValue) ||
+      BigInt(bytesValue) > maxQuotaBytes || BigInt(inodesValue) < minQuotaInodes || BigInt(inodesValue) > maxQuotaInodes) {
+      setRaiseError(t('err.data_quota_invalid'))
+      return
+    }
+    const nextBytes = BigInt(bytesValue)
+    const nextInodes = BigInt(inodesValue)
+    const currentBytes = BigInt(settings.data.quota_bytes)
+    const currentInodes = BigInt(settings.data.quota_inodes)
+    if (nextBytes < currentBytes || nextInodes < currentInodes || (nextBytes === currentBytes && nextInodes === currentInodes)) {
+      setRaiseError(t('err.data_quota_lower_refused'))
+      return
+    }
+    setRaising(true)
+    try {
+      const result = await api.post<{ plan_id: string; plan_sha256: string; expires_ms: string; review: QuotaReview }>(
+        `${root}/plans`,
+        { action: 'set_data_quota', installation_id: installation, data_quota_bytes: bytesValue, data_quota_inodes: inodesValue },
+      )
+      const review = result.review
+      if (review.action !== 'set_data_quota' ||
+        review.installation_id !== installation ||
+        review.data_quota_bytes !== bytesValue || review.data_quota_inodes !== inodesValue ||
+        !digits.test(review.current_data_quota_bytes) || !digits.test(review.current_data_quota_inodes) ||
+        !digits.test(review.observed_bytes) ||
+        (review.capacity !== 'fits' && review.capacity !== 'short') ||
+        (review.capacity_requested != null && !digits.test(review.capacity_requested)) ||
+        (review.capacity_remaining != null && !digits.test(review.capacity_remaining)) ||
+        !uuid.test(result.plan_id) || !/^[0-9a-f]{64}$/.test(result.plan_sha256)) {
+        throw new Error(t('appPlatform.invalidOperation'))
+      }
+      setRaisePlan({ ...result, idempotency_key: crypto.randomUUID() })
+    } catch (failure) {
+      setRaiseError(errText(failure, t))
+    } finally {
+      setRaising(false)
+    }
+  }
+  const confirmRaise = async () => {
+    if (!raisePlan || raisePlan.review.capacity !== 'fits' || raising) return
+    setRaising(true); setRaiseError('')
+    try {
+      const result = await api.post<{ operation_id: string }>(`${root}/operations`, {
+        plan_id: raisePlan.plan_id,
+        plan_sha256: raisePlan.plan_sha256,
+        idempotency_key: raisePlan.idempotency_key,
+      })
+      if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
+      setRaiseOpen(false); setRaisePlan(null)
+      navigate(`/manage/apps?operation=${result.operation_id}`)
+    } catch (failure) {
+      setRaiseError(errText(failure, t))
+    } finally {
+      setRaising(false)
+    }
+  }
+  const openImport = () => { setImportDigest(''); setImportPlan(null); setImportError(''); setImportOpen(true) }
+  const closeImport = () => { if (!importing) { setImportOpen(false); setImportPlan(null); setImportError('') } }
+  const prepareImport = async () => {
+    if (!settings.import_eligible || importing) return
+    setImportError('')
+    const digest = importDigest.trim()
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+      setImportError(t('appPlatform.settings.importDigestInvalid'))
+      return
+    }
+    setImporting(true)
+    try {
+      const result = await api.post<{ plan_id: string; plan_sha256: string; expires_ms: string; review: ImportReview }>(
+        `${root}/plans`,
+        { action: 'import_data', installation_id: installation, archive_sha256: digest },
+      )
+      const review = result.review
+      if (review.action !== 'import_data' ||
+        review.installation_id !== installation ||
+        review.archive_sha256 !== digest ||
+        !digits.test(review.archive_bytes) || !digits.test(review.archive_entries) || !digits.test(review.content_bytes) ||
+        !digits.test(review.data_quota_bytes) || !digits.test(review.data_quota_inodes) ||
+        review.replaces_contents !== true || review.keeps_checkpoint !== true || review.requires_disabled !== true ||
+        !uuid.test(result.plan_id) || !/^[0-9a-f]{64}$/.test(result.plan_sha256)) {
+        throw new Error(t('appPlatform.invalidOperation'))
+      }
+      setImportPlan({ ...result, idempotency_key: crypto.randomUUID() })
+    } catch (failure) {
+      setImportError(errText(failure, t))
+    } finally {
+      setImporting(false)
+    }
+  }
+  // The import replaces the namespace's contents, so the review's confirmation asks once more, with the shared rules.
+  const confirmImport = () => {
+    if (!importPlan || importing) return
+    confirmAction(modal, {
+      title: t('appPlatform.settings.importConfirmTitle'),
+      description: t('appPlatform.settings.importConfirmBody'),
+      okText: t('appPlatform.settings.importAction'),
+      onOk: () => commitImport(),
+    }, t)
+  }
+  const commitImport = async () => {
+    if (!importPlan || importing) return
+    setImporting(true); setImportError('')
+    try {
+      const result = await api.post<{ operation_id: string }>(`${root}/operations`, {
+        plan_id: importPlan.plan_id,
+        plan_sha256: importPlan.plan_sha256,
+        idempotency_key: importPlan.idempotency_key,
+      })
+      if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
+      setImportOpen(false); setImportPlan(null)
+      navigate(`/manage/apps?operation=${result.operation_id}`)
+    } catch (failure) {
+      setImportError(errText(failure, t))
+    } finally {
+      setImporting(false)
+    }
+  }
   const prepareRestore = async (point: RecoveryPoint) => {
     if (!point.restore_eligible) return
     await requestRestorePlan(point.id, point.id, point)
@@ -504,9 +689,14 @@ export default function AppPlatformSettingsPage() {
       ]} />
     </Card>
 
-    <Card title={t('appPlatform.settings.data')} extra={canDeleteData
-      ? <Button danger loading={deleting} icon={<DeleteOutlined aria-hidden="true" />} onClick={() => void prepareDelete()}>{t('appPlatform.settings.deleteData')}</Button>
+    <Card title={t('appPlatform.settings.data')} extra={(canDeleteData || settings.quota_raise_eligible || settings.data)
+      ? <Space wrap>
+        {settings.quota_raise_eligible && <Button icon={<VerticalAlignTopOutlined aria-hidden="true" />} onClick={openRaise}>{t('appPlatform.settings.raiseQuota')}</Button>}
+        {settings.data && <Button disabled={!settings.import_eligible} icon={<ImportOutlined aria-hidden="true" />} onClick={openImport}>{t('appPlatform.settings.importData')}</Button>}
+        {canDeleteData && <Button danger loading={deleting} icon={<DeleteOutlined aria-hidden="true" />} onClick={() => void prepareDelete()}>{t('appPlatform.settings.deleteData')}</Button>}
+      </Space>
       : undefined}>
+      {settings.data && !settings.import_eligible && <Typography.Paragraph type="secondary" data-testid="import-disabled-hint">{t('appPlatform.settings.importDisabledHint')}</Typography.Paragraph>}
       {deleteError && !deletePlan && <Alert type="error" showIcon title={deleteError} style={{ marginBottom: 12 }} />}
       {settings.data ? <Descriptions column={1} size="small" items={[
         { key: 'namespace', label: t('appPlatform.settings.dataNamespace'), children: <Typography.Text code>{settings.data.id}</Typography.Text> },
@@ -630,6 +820,84 @@ export default function AppPlatformSettingsPage() {
           ]} />
         </Space>
       </div>}
+    </Modal>
+    <Modal
+      className="rp-platform-review-modal"
+      open={raiseOpen}
+      title={t('appPlatform.settings.raiseQuotaTitle')}
+      okText={raisePlan ? t('appPlatform.settings.raiseQuotaAction') : t('appPlatform.settings.reviewPlan')}
+      cancelText={t('common.cancel')}
+      okButtonProps={{ disabled: raisePlan ? raisePlan.review.capacity !== 'fits' : false }}
+      confirmLoading={raising}
+      closable={!raising}
+      mask={{ closable: false }}
+      onOk={() => void (raisePlan ? confirmRaise() : prepareRaise())}
+      onCancel={closeRaise}
+    >
+      <div role="document" tabIndex={0} className="rp-platform-review-scroll">
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          {raiseError && <Alert type="error" showIcon title={raiseError} />}
+          {!raisePlan && settings.data && <>
+            <Typography.Text type="secondary">{t('appPlatform.settings.raiseQuotaHint', { bytes: bytes(settings.data.quota_bytes), inodes: new Intl.NumberFormat(lang).format(BigInt(settings.data.quota_inodes)) })}</Typography.Text>
+            <label>{t('appPlatform.settings.raiseQuotaBytes')}
+              <Input inputMode="numeric" value={raiseBytes} onChange={(event) => setRaiseBytes(event.target.value)} aria-label={t('appPlatform.settings.raiseQuotaBytes')} />
+            </label>
+            <label>{t('appPlatform.settings.raiseQuotaInodes')}
+              <Input inputMode="numeric" value={raiseInodes} onChange={(event) => setRaiseInodes(event.target.value)} aria-label={t('appPlatform.settings.raiseQuotaInodes')} />
+            </label>
+          </>}
+          {raisePlan && <>
+            <Alert type="info" showIcon title={t('appPlatform.settings.raiseQuotaWarning')} />
+            <Descriptions column={1} size="small" items={[
+              { key: 'bytes', label: t('appPlatform.settings.dataQuota'), children: `${bytes(raisePlan.review.current_data_quota_bytes)} → ${bytes(raisePlan.review.data_quota_bytes)}` },
+              { key: 'inodes', label: t('appPlatform.settings.dataQuotaInodes'), children: `${new Intl.NumberFormat(lang).format(BigInt(raisePlan.review.current_data_quota_inodes))} → ${new Intl.NumberFormat(lang).format(BigInt(raisePlan.review.data_quota_inodes))}` },
+              { key: 'observed', label: t('appPlatform.settings.dataObserved'), children: bytes(raisePlan.review.observed_bytes) },
+              { key: 'capacity', label: t('appPlatform.settings.raiseQuotaCapacity'), children: <StatusTag tone={raisePlan.review.capacity === 'fits' ? 'success' : 'error'}>{t(`appPlatform.settings.raiseQuota${raisePlan.review.capacity === 'fits' ? 'Fits' : 'NotFit'}`)}</StatusTag> },
+            ]} />
+            {raisePlan.review.capacity === 'short' && <Alert type="error" showIcon data-testid="raise-capacity-short"
+              title={t('appPlatform.settings.raiseQuotaShort', {
+                dimension: raisePlan.review.capacity_dimension ?? '—',
+                requested: raisePlan.review.capacity_requested ?? '—',
+                remaining: raisePlan.review.capacity_remaining ?? '—',
+              })} />}
+          </>}
+        </Space>
+      </div>
+    </Modal>
+    <Modal
+      className="rp-platform-review-modal"
+      open={importOpen}
+      title={t('appPlatform.settings.importTitle')}
+      okText={importPlan ? t('appPlatform.settings.importAction') : t('appPlatform.settings.reviewPlan')}
+      cancelText={t('common.cancel')}
+      okButtonProps={{ danger: !!importPlan }}
+      confirmLoading={importing}
+      closable={!importing}
+      mask={{ closable: false }}
+      onOk={() => void (importPlan ? confirmImport() : prepareImport())}
+      onCancel={closeImport}
+    >
+      <div role="document" tabIndex={0} className="rp-platform-review-scroll">
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          {importError && <Alert type="error" showIcon title={importError} />}
+          {!importPlan && <>
+            <Typography.Text type="secondary">{t('appPlatform.settings.importHint')}</Typography.Text>
+            <Input value={importDigest} onChange={(event) => setImportDigest(event.target.value)} spellCheck={false} placeholder="sha256" aria-label={t('appPlatform.settings.importDigest')} />
+          </>}
+          {importPlan && <>
+            <Alert type="error" showIcon title={t('appPlatform.settings.importReplaces')} />
+            <Alert type="info" showIcon title={t('appPlatform.settings.importCheckpoint')} />
+            <Alert type="warning" showIcon title={t('appPlatform.settings.importDisabled')} />
+            <Descriptions column={1} size="small" items={[
+              { key: 'digest', label: t('appPlatform.settings.importDigest'), children: <Typography.Text code copyable>{importPlan.review.archive_sha256}</Typography.Text> },
+              { key: 'size', label: t('appPlatform.settings.importSize'), children: t('appPlatform.settings.importOfQuota', { value: bytes(importPlan.review.content_bytes), quota: bytes(importPlan.review.data_quota_bytes) }) },
+              { key: 'archive', label: t('appPlatform.settings.importArchiveBytes'), children: bytes(importPlan.review.archive_bytes) },
+              { key: 'entries', label: t('appPlatform.settings.importEntries'), children: t('appPlatform.settings.importOfQuota', { value: new Intl.NumberFormat(lang).format(BigInt(importPlan.review.archive_entries)), quota: new Intl.NumberFormat(lang).format(BigInt(importPlan.review.data_quota_inodes)) }) },
+              { key: 'format', label: t('appPlatform.settings.dataFormat'), children: t('appPlatform.settings.importFormats', { archive: importPlan.review.archive_data_format, release: importPlan.review.release_data_format }) },
+            ]} />
+          </>}
+        </Space>
+      </div>
     </Modal>
     <Modal
       className="rp-platform-review-modal"

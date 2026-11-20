@@ -265,13 +265,17 @@ type MigrateDataStatus struct {
 	EffectID         string `json:"effect_id"`
 	PayloadSHA256    string `json:"payload_sha256"`
 	State            string `json:"state"`
-	ObservedMS       string `json:"observed_ms"`
+	// Code is the failure code of a "failed" status, which only a set-data-quota or import-data effect can answer
+	// with: a definite, durable end. It is empty for every other state.
+	Code       string `json:"code,omitempty"`
+	ObservedMS string `json:"observed_ms"`
 }
 
 func validMigrateStatus(s MigrateDataStatus) bool {
 	if s.Format != migrateStatusFormat || !dataSHA(s.PayloadSHA256) ||
-		!((s.Stage == "migrate" && (s.Kind == "migrate-data" || s.Kind == "discard-migration")) || (s.Stage == "restore_data" && s.Kind == "restore")) ||
-		(s.State != "pending" && s.State != "orphaned" && s.State != "absent") ||
+		!((s.Stage == "migrate" && (s.Kind == "migrate-data" || s.Kind == "discard-migration")) || (s.Stage == "restore_data" && (s.Kind == "restore" || s.Kind == "import-data")) || (s.Stage == "prepare_data" && s.Kind == "set-data-quota")) ||
+		(s.State != "pending" && s.State != "orphaned" && s.State != "absent" && s.State != "failed") ||
+		(s.State == "failed") != (s.Code != "") || (s.State == "failed" && (!dataFailureCodes[s.Code] || (s.Kind != "import-data" && s.Kind != "set-data-quota"))) ||
 		!dataNumber(s.TargetGeneration, true) || !dataNumber(s.EffectNumber, true) || !dataNumber(s.ObservedMS, true) {
 		return false
 	}

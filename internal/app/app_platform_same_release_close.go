@@ -95,7 +95,7 @@ func closePlatformSameReleaseStartNeverRan(e migExec, lease platformOperationLea
 	}
 	if stage != string(appplatform.StageRecoveryRequired) || managed != 1 || !completed.Valid || owner.Valid || leaseUntil.Valid || !errorCode.Valid || errorCode.String == "" ||
 		errorCode.String == platformStartNeverRanErrorCode || epoch != lease.controllerEpoch || fence != lease.fence ||
-		(action != string(appplatform.ActionEnable) && action != string(appplatform.ActionRepair)) {
+		(action != string(appplatform.ActionEnable) && action != string(appplatform.ActionRepair) && action != string(appplatform.ActionImportData)) {
 		return false, nil
 	}
 	var phase, desired, installationEpoch string

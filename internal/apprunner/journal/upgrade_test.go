@@ -148,12 +148,12 @@ func TestCurrentJournalRefusedByOlderInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, older := range []int{1, 2, 3} {
+	for _, older := range []int{1, 2, 3, 4} {
 		if _, err := inspectAt(context.Background(), store.db, older); !errors.Is(err, ErrNewerVersion) {
-			t.Fatalf("v%d inspector accepted a v4 journal: %v", older, err)
+			t.Fatalf("v%d inspector accepted a v5 journal: %v", older, err)
 		}
 	}
-	if _, err := inspectAt(context.Background(), store.db, 4); err != nil {
+	if _, err := inspectAt(context.Background(), store.db, 5); err != nil {
 		t.Fatal(err)
 	}
 }

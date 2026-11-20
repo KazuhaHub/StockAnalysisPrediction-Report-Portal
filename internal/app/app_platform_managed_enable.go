@@ -412,6 +412,15 @@ func (s *Server) consumePlatformManagedSameReleaseReviewWithRuntimeContext(
 		if err != nil {
 			return err
 		}
+		if action == appplatform.ActionImportData {
+			// The reviewed archive is part of the plan; the validate stage asks the runner again before anything
+			// is changed.
+			var stored platformManagedUpdatePlan
+			if json.Unmarshal([]byte(raw), &stored) != nil || stored.Import == nil || !stored.Import.valid() {
+				return errAppPlatformPlanChanged
+			}
+			current.Import = stored.Import
+		}
 		currentRaw, err := json.Marshal(current)
 		if err != nil || len(raw) > 65536 ||
 			platformDigest([]byte(raw)) != digest || digest != planSHA ||
@@ -631,6 +640,7 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 			plan.CheckpointArchiveBytes <= 0)) ||
 		(!hasRecovery && lease.snapshot.Stage != appplatform.StageQueued &&
 			lease.snapshot.Stage != appplatform.StageValidate &&
+			lease.snapshot.Stage != appplatform.StageQuiesce &&
 			lease.snapshot.Stage != appplatform.StageDownload &&
 			lease.snapshot.Stage != appplatform.StageStage &&
 			lease.snapshot.Stage != platformSameReleaseCheckpointStage(
@@ -652,6 +662,14 @@ func (s *Server) advancePlatformManagedEnableStage(ctx context.Context, expected
 			appplatform.StageValidate: appplatform.StageDownload,
 			appplatform.StageDownload: appplatform.StageStage,
 			appplatform.StageStage:    appplatform.StageQuiesce,
+		}
+	}
+	if expected.snapshot.Action == appplatform.ActionImportData {
+		// The quiesce of an import is the verified stopped state of the installation, which its review required.
+		nextByStage = map[appplatform.Stage]appplatform.Stage{
+			appplatform.StageQueued:   appplatform.StageValidate,
+			appplatform.StageValidate: appplatform.StageQuiesce,
+			appplatform.StageQuiesce:  appplatform.StageSnapshot,
 		}
 	}
 	next, ok := nextByStage[expected.snapshot.Stage]
@@ -872,13 +890,29 @@ func (s *Server) runPlatformManagedSameRelease(
 		var next platformOperationLease
 		var err error
 		switch result.snapshot.Stage {
-		case appplatform.StageQueued, appplatform.StageValidate,
-			appplatform.StageDownload, appplatform.StageStage:
+		case appplatform.StageQueued, appplatform.StageDownload, appplatform.StageStage:
 			next, err = s.advancePlatformManagedEnableStage(ctx, result)
+		case appplatform.StageValidate:
+			// An import's validate asks the runner again for the reviewed inbox archive before anything changes.
+			if result.snapshot.Action == appplatform.ActionImportData {
+				next, err = s.validatePlatformImportData(ctx, result, endpoint)
+			} else {
+				next, err = s.advancePlatformManagedEnableStage(ctx, result)
+			}
 		case appplatform.StageSnapshot:
 			next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
 		case appplatform.StageQuiesce:
-			next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
+			// An import's quiesce is the stopped state its review required: it only moves on to the snapshot.
+			if result.snapshot.Action == appplatform.ActionImportData {
+				next, err = s.advancePlatformManagedEnableStage(ctx, result)
+			} else {
+				next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
+			}
+		case appplatform.StageImport:
+			if result.snapshot.Action != appplatform.ActionImportData {
+				return result, errAppPlatformStageEvidence
+			}
+			next, err = s.dispatchPlatformImportData(ctx, result, endpoint)
 		case appplatform.StageStart:
 			next, err = s.executePlatformUpdateStart(ctx, result, endpoint)
 		case appplatform.StageProbe:
@@ -969,14 +1003,29 @@ func (s *Server) finishPlatformManagedSameReleaseForReview(
 			errorCode = "managed_repair_unavailable"
 		}
 	}
+	if expected.snapshot.Action == appplatform.ActionImportData {
+		errorCode = "managed_import_data_recovery_required"
+		audit = "app_platform.managed_import_data_failed"
+		switch {
+		case platformImportRolledBack(ctx):
+			outcome, errorCode = appplatform.EffectsReverted, "managed_import_data_rolled_back"
+		case expected.snapshot.Stage == appplatform.StageQueued || expected.snapshot.Stage == appplatform.StageValidate ||
+			expected.snapshot.Stage == appplatform.StageQuiesce || expected.snapshot.Stage == appplatform.StageSnapshot:
+			outcome, errorCode = appplatform.EffectsNone, "managed_import_data_unavailable"
+		}
+	}
 	failed, err := model.Fail(expected.snapshot.Revision, outcome)
 	if err != nil {
 		return errAppPlatformStageEvidence
 	}
 	phase := "disabled"
 	desired := "disabled"
+	restoredGeneration := plan.SourceGeneration
 	if failed.Snapshot().Stage == appplatform.StageRecoveryRequired {
 		phase = "recovery_required"
+	} else if expected.snapshot.Action == appplatform.ActionImportData {
+		// The installation is exactly as it was before the import: disabled, at the generation it had.
+		restoredGeneration = plan.TargetGeneration
 	}
 	changed, err := e.exec(`UPDATE app_platform_installations
 		SET desired_state=?,phase=?,generation=?,revision=revision+1,
@@ -984,7 +1033,7 @@ func (s *Server) finishPlatformManagedSameReleaseForReview(
 		WHERE id=? AND desired_state='enabled' AND phase='pending'
 		AND generation=? AND revision=? AND policy_revision=?
 		AND control_fence=? AND controller_epoch=? AND runtime_id IS NOT NULL`,
-		desired, phase, plan.SourceGeneration, now, plan.InstallationID,
+		desired, phase, restoredGeneration, now, plan.InstallationID,
 		plan.TargetGeneration, facts.installationRevision,
 		plan.TargetPolicyRevision, expected.fence, plan.ControllerEpoch)
 	if err := platformLeaseCAS(changed, err); err != nil {

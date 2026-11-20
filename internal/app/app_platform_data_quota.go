@@ -201,25 +201,11 @@ func platformValidQuotaBytes(bytes int64) bool {
 	return appplatform.ValidDataQuota(bytes, appplatform.DataQuotaMinInodes)
 }
 
-// platformApprovedNamespaceQuota returns the namespace's byte quota after proving that both its limits are the
-// ones the installation's install review approved. The quota only changes through a reviewed action, so until
-// one exists the row and the approved plan agree.
+// platformApprovedNamespaceQuota returns the namespace's byte quota after proving that both its limits are the last
+// link of its quota chain: the install review's approved pair, or the pair of the latest completed raise
+// (set_data_quota). The quota only changes through a reviewed action, and the operation that completes one updates
+// the row in the same transaction, so the row and the chain always agree.
 func platformApprovedNamespaceQuota(e migExec, installation, namespace string) (int64, error) {
-	var raw string
-	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.installation_id=? AND o.action='install' ORDER BY o.created_ms,o.id LIMIT 1`, installation).Scan(&raw); err != nil {
-		return 0, err
-	}
-	approvedBytes, approvedInodes, err := platformPlanQuota(raw)
-	if err != nil {
-		return 0, err
-	}
-	var bytes, inodes int64
-	if err := e.queryRow(`SELECT quota_bytes,quota_inodes FROM app_platform_data_namespaces WHERE id=?`, namespace).Scan(&bytes, &inodes); err != nil {
-		return 0, err
-	}
-	if bytes != approvedBytes || inodes != approvedInodes {
-		return 0, errAppPlatformStageEvidence
-	}
-	return bytes, nil
+	bytes, _, _, err := platformCurrentNamespaceQuota(e, installation, namespace)
+	return bytes, err
 }

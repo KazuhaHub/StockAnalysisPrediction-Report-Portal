@@ -87,7 +87,7 @@ func platformSettlementLease(e migExec, operation string) (platformOperationLeas
 	var completed sql.NullInt64
 	var owner sql.NullString
 	if err := e.queryRow(`SELECT id,installation_id,controller_epoch,fence,target_generation,state_revision,row_revision,stage,completed_ms,lease_owner,action
-		FROM app_platform_operations WHERE id=? AND action IN ('update','enable','repair','restore') AND managed=1`, operation).
+		FROM app_platform_operations WHERE id=? AND action IN ('update','enable','repair','import_data','restore') AND managed=1`, operation).
 		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &completed, &owner, &action); err != nil ||
 		stage != "recovery_required" || !completed.Valid || owner.Valid || generation < 2 {
 		return platformOperationLease{}, errAppPlatformStageEvidence

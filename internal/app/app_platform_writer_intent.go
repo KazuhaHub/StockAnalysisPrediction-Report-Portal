@@ -18,17 +18,20 @@ import (
 type platformWriterIntent struct {
 	namespaceID, resourceID, effectID                                                                                                string
 	dataCreated, dataUpdated, namespaceCreated, namespaceUpdated, namespaceRevision, effectCreated, effectUpdated, activationCreated int64
-	activationUpdated                                                                                                                int64
-	activationReadiness                                                                                                              string
-	activationObserved                                                                                                               sql.NullInt64
-	runtime                                                                                                                          platformRuntimeRegistration
-	authority                                                                                                                        control.Authority
-	command                                                                                                                          control.DataWriterCommand
-	raw, signature, descriptor                                                                                                       []byte
-	data                                                                                                                             journal.DataPreparationReceipt
-	dataSHA                                                                                                                          string
-	applied                                                                                                                          bool
-	receipt                                                                                                                          journal.DataWriterReceipt
+	// laterRaiseMS is when the last quota raise after the install took effect, zero when there is none. A history
+	// read after a raise finds the namespace row touched by it.
+	laterRaiseMS               int64
+	activationUpdated          int64
+	activationReadiness        string
+	activationObserved         sql.NullInt64
+	runtime                    platformRuntimeRegistration
+	authority                  control.Authority
+	command                    control.DataWriterCommand
+	raw, signature, descriptor []byte
+	data                       journal.DataPreparationReceipt
+	dataSHA                    string
+	applied                    bool
+	receipt                    journal.DataWriterReceipt
 }
 
 func validPlatformWriterStage(lease platformOperationLease) bool {

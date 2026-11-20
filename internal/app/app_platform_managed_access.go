@@ -488,7 +488,12 @@ func (s *Server) loadPlatformManagedBackendHistory(e migExec, installation, acti
 	if err := e.queryRow(`SELECT origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE id=?`, namespace).Scan(&origin, &owner, &state, &storedFormat, &quota, &used, &writer, &revision, &retained, &deleted, &created, &updated); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if origin != installation || !owner.Valid || owner.String != installation || state != "active" || storedFormat != format || quota != plan.DataQuotaBytes || used < 0 || used > quota || writer != 1 || revision != 2 || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > completed {
+	quotaChain, chainErr := platformNamespaceQuotaChain(e, installation, namespace)
+	if chainErr != nil || quotaChain[0].Bytes != plan.DataQuotaBytes {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	raises, lastRaise := platformNamespaceRaises(quotaChain)
+	if origin != installation || !owner.Valid || owner.String != installation || state != "active" || storedFormat != format || quota != quotaChain[len(quotaChain)-1].Bytes || used < 0 || used > quota || writer != 1 || revision != 2+raises || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > max(completed, lastRaise) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?`, installation, installation).Scan(&count); err != nil || count != 1 {

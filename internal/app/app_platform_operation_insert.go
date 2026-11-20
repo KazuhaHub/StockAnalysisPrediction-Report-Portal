@@ -56,9 +56,9 @@ func insertPlatformOperation(e migExec, row platformOperationRow) error {
 // rows and a load touches only the daemon's image storage, never data, fences or containers; and it is necessary
 // because a trust quarantine must never be deferred. platformNonStartActions is the rest; a test requires every
 // operation kind to be in exactly one of the two lists.
-var platformStartBearingActions = []string{"install", "update", "enable", "repair", "restore"}
+var platformStartBearingActions = []string{"install", "update", "enable", "repair", "restore", "import_data"}
 
-var platformNonStartActions = []string{"disable", "uninstall", "delete_data", "restore_import"}
+var platformNonStartActions = []string{"disable", "uninstall", "delete_data", "restore_import", "set_data_quota"}
 
 func platformStartsBackend(action string) bool {
 	for _, a := range platformStartBearingActions {

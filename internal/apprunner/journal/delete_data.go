@@ -238,6 +238,10 @@ func loadDeleteDataSource(
 			"%w: delete-data preparation receipt missing",
 			ErrFenceReconciliation)
 	}
+	chain, chainErr := loadQuotaChain(ctx, tx, c.Payload.NamespaceID, result.data.QuotaBytes, result.data.QuotaInodes)
+	if chainErr != nil {
+		return result, chainErr
+	}
 	dataFormat, formatErr := strconv.ParseInt(
 		c.Payload.DataFormat, 10, 64)
 	storedFormat, storedFormatErr := strconv.ParseInt(
@@ -250,8 +254,7 @@ func loadDeleteDataSource(
 		result.data.Device != c.Payload.ExpectedDevice ||
 		result.data.NamespaceInode !=
 			c.Payload.ExpectedNamespaceInode ||
-		result.data.QuotaBytes != c.Payload.QuotaBytes ||
-		result.data.QuotaInodes != c.Payload.QuotaInodes {
+		!quotaInChain(chain[len(chain)-1:], c.Payload.QuotaBytes, c.Payload.QuotaInodes) {
 		return result, fmt.Errorf(
 			"%w: delete-data preparation binding",
 			ErrFenceReconciliation)

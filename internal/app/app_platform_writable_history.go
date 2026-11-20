@@ -113,10 +113,15 @@ func (s *Server) loadPlatformWritableBackendHistoryPhased(e migExec, b platformB
 	if err := e.queryRow(`SELECT origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE id=?`, b.namespace).Scan(&origin, &owner, &state, &format, &quota, &used, &writer, &revision, &retained, &deleted, &w.namespaceCreated, &w.namespaceUpdated); err != nil {
 		return nil, errAppPlatformLaunchUnavailable
 	}
-	if origin != b.installation || !owner.Valid || owner.String != b.installation || state != "active" || format != b.format || quota != plan.DataQuotaBytes || used < 0 || used > quota || writer != 1 || revision != 3 || retained.Valid || deleted.Valid || w.namespaceCreated < 0 || w.namespaceUpdated < w.namespaceCreated || w.namespaceUpdated > completed {
+	quotaChain, chainErr := platformNamespaceQuotaChain(e, b.installation, b.namespace)
+	if chainErr != nil || quotaChain[0].Bytes != plan.DataQuotaBytes {
 		return nil, errAppPlatformLaunchUnavailable
 	}
-	w.namespaceRevision = revision
+	raises, lastRaise := platformNamespaceRaises(quotaChain)
+	if origin != b.installation || !owner.Valid || owner.String != b.installation || state != "active" || format != b.format || quota != quotaChain[len(quotaChain)-1].Bytes || used < 0 || used > quota || writer != 1 || revision != 3+raises || retained.Valid || deleted.Valid || w.namespaceCreated < 0 || w.namespaceUpdated < w.namespaceCreated || w.namespaceUpdated > max(completed, lastRaise) {
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	w.namespaceRevision, w.laterRaiseMS = revision, lastRaise
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?`, b.installation, b.installation).Scan(&count); err != nil || count != 1 {
 		return nil, errAppPlatformLaunchUnavailable
 	}
@@ -188,7 +193,7 @@ func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runti
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	w.dataCreated, w.dataUpdated, w.dataSHA = dataEffect.created, dataEffect.updated, platformDigest([]byte(dataEffect.receipt))
-	if writerEffect.created < dataEffect.updated || w.namespaceUpdated != writerEffect.updated || w.activationCreated != writerEffect.created || b.activation == dataEffect.id || b.activation == b.namespace || writerEffect.id == b.namespace {
+	if writerEffect.created < dataEffect.updated || (w.laterRaiseMS == 0 && w.namespaceUpdated != writerEffect.updated) || (w.laterRaiseMS != 0 && (w.namespaceUpdated < writerEffect.updated || w.namespaceUpdated > w.laterRaiseMS)) || w.activationCreated != writerEffect.created || b.activation == dataEffect.id || b.activation == b.namespace || writerEffect.id == b.namespace {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	w.effectID, w.effectCreated, w.effectUpdated = writerEffect.id, writerEffect.created, writerEffect.updated

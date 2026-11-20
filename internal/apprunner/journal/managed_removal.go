@@ -102,19 +102,21 @@ func ParseManagedRemovalReceipt(raw []byte) (ManagedRemovalReceipt, error) {
 }
 
 type managedRemovalSource struct {
-	command            control.ManagedRemovalCommand
-	source             CandidateRunningReceipt
-	writable           *WritableCandidateRunningReceipt
-	update             *UpdateStartRunningReceipt
-	data               DataPreparationReceipt
-	sourceFence        int64
-	generation         int64
-	writerFence        int64
-	nativeID, platform string
-	ownership          string
-	resource           managedRemovalResource
-	raw                []byte
-	signature          []byte
+	command  control.ManagedRemovalCommand
+	source   CandidateRunningReceipt
+	writable *WritableCandidateRunningReceipt
+	update   *UpdateStartRunningReceipt
+	data     DataPreparationReceipt
+	// currentQuotaBytes and currentQuotaInodes are the namespace's limits now: the last link of its quota chain.
+	currentQuotaBytes, currentQuotaInodes int64
+	sourceFence                           int64
+	generation                            int64
+	writerFence                           int64
+	nativeID, platform                    string
+	ownership                             string
+	resource                              managedRemovalResource
+	raw                                   []byte
+	signature                             []byte
 }
 
 type managedRemovalResource struct {
@@ -328,13 +330,17 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 			data.Generation != strconv.FormatInt(result.generation, 10)) {
 		return result, fmt.Errorf("%w: managed removal data generation", ErrFenceReconciliation)
 	}
+	chain, chainErr := loadQuotaChain(ctx, tx, c.Payload.DataNamespaceID, data.QuotaBytes, data.QuotaInodes)
+	if chainErr != nil {
+		return result, chainErr
+	}
+	result.currentQuotaBytes, result.currentQuotaInodes = chain[len(chain)-1].Bytes, chain[len(chain)-1].Inodes
 	if result.update != nil {
 		if result.update.Claim.Preflight == nil ||
 			data.ProjectID != result.update.Claim.Preflight.ProjectID ||
 			data.Device != result.update.Claim.Preflight.Device ||
 			data.NamespaceInode != result.update.Claim.Preflight.NamespaceInode ||
-			data.QuotaBytes != result.update.Claim.Preflight.QuotaBytes ||
-			data.QuotaInodes != result.update.Claim.Preflight.QuotaInodes {
+			!quotaInChain(chain, result.update.Claim.Preflight.QuotaBytes, result.update.Claim.Preflight.QuotaInodes) {
 			return result, fmt.Errorf("%w: managed removal update data identity", ErrFenceReconciliation)
 		}
 	} else if result.writable != nil {
@@ -467,13 +473,9 @@ func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte)
 	if err != nil {
 		return zero, fmt.Errorf("%w: managed removal namespace inode", ErrFenceReconciliation)
 	}
-	quotaBytes, err := strconv.ParseInt(source.data.QuotaBytes, 10, 64)
-	if err != nil {
-		return zero, fmt.Errorf("%w: managed removal quota bytes", ErrFenceReconciliation)
-	}
-	quotaInodes, err := strconv.ParseInt(source.data.QuotaInodes, 10, 64)
-	if err != nil {
-		return zero, fmt.Errorf("%w: managed removal quota inodes", ErrFenceReconciliation)
+	quotaBytes, quotaInodes := source.currentQuotaBytes, source.currentQuotaInodes
+	if quotaBytes <= 0 || quotaInodes <= 0 {
+		return zero, fmt.Errorf("%w: managed removal quota", ErrFenceReconciliation)
 	}
 	result := managedRemovalNativeInput{request: driver.CandidateLaunchRequest{
 		Identity: driver.CandidateIdentity{

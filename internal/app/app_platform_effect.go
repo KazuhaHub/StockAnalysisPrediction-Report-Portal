@@ -32,7 +32,9 @@ func platformEffectKindAllowed(stage appplatform.Stage, kind string) bool {
 	case appplatform.StageStage:
 		return kind == "stage" || kind == "verify" || kind == platformRemoveImageKind
 	case appplatform.StagePrepareData:
-		return kind == "prepare-data"
+		return kind == "prepare-data" || kind == "set-data-quota"
+	case appplatform.StageImport:
+		return kind == "import-data" || kind == "restore"
 	case appplatform.StageStart:
 		return kind == "start-candidate"
 	case appplatform.StageProbe:

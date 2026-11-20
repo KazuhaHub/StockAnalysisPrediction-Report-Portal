@@ -171,6 +171,9 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	nextStage := appplatform.StageMigrate
 	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		nextStage = appplatform.StageStart
+		if expected.snapshot.Action == appplatform.ActionImportData {
+			nextStage = appplatform.StageImport
+		}
 	}
 	next, err := model.Advance(expected.snapshot.Revision, nextStage)
 	if err != nil {

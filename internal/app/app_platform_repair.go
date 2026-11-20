@@ -10,12 +10,16 @@ const platformManagedRepairFormat = "portal.managed-repair-review/1-dev.1"
 
 func platformSameReleaseLifecycle(action appplatform.Action) bool {
 	return action == appplatform.ActionEnable ||
-		action == appplatform.ActionRepair
+		action == appplatform.ActionRepair ||
+		action == appplatform.ActionImportData
 }
 
 func platformSameReleaseLifecycleFormat(action appplatform.Action) string {
 	if action == appplatform.ActionRepair {
 		return platformManagedRepairFormat
+	}
+	if action == appplatform.ActionImportData {
+		return platformManagedImportDataFormat
 	}
 	return platformManagedEnableFormat
 }

@@ -39,7 +39,7 @@ func samePlatformManagedUpdateRuntime(a, b *platformManagedInstallTarget) bool {
 
 func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int, allowDisabled bool) (platformCheckpointSource, error) {
 	if action != "update" && action != "enable" &&
-		action != "repair" && action != "restore" {
+		action != "repair" && action != "restore" && action != "import_data" {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	var sourceOperation, planRaw, planSHA, release string
@@ -79,7 +79,7 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	var startEffect, startKind, startPayload, startState, startRaw string
 	var startFence int64
 	expectedStartKind := action + "-start"
-	if action == "enable" || action == "repair" {
+	if action == "enable" || action == "repair" || action == "import_data" {
 		expectedStartKind = platformSameReleaseStartKind(
 			appplatform.Action(action))
 	}
@@ -145,7 +145,7 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	}
 	var checkpoint journal.CheckpointReceipt
 	switch action {
-	case "update", "enable", "repair":
+	case "update", "enable", "repair", "import_data":
 		effectStage := "snapshot"
 		if action == "repair" {
 			effectStage = string(appplatform.StageQuiesce)
@@ -272,13 +272,15 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 			generation, activePolicy, installationPolicy, activeFormat,
 			running.DataFormat, errAppPlatformStageEvidence)
 	}
-	if action == "update" || action == "enable" || action == "repair" {
+	if action == "update" || action == "enable" || action == "repair" || action == "import_data" {
 		var plan platformManagedUpdatePlan
 		expectedFormat := platformManagedUpdateFormat
 		if action == "enable" {
 			expectedFormat = platformManagedEnableFormat
 		} else if action == "repair" {
 			expectedFormat = platformManagedRepairFormat
+		} else if action == "import_data" {
+			expectedFormat = platformManagedImportDataFormat
 		}
 		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
 			plan.Format != expectedFormat ||
@@ -332,6 +334,10 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		WHERE sha256=?`, release).Scan(&currentDescriptor); err != nil {
 		return platformCheckpointSource{}, err
 	}
+	currentQuotaBytes, currentQuotaInodes, _, quotaErr := platformCurrentNamespaceQuota(e, expected.installationID, running.NamespaceID)
+	if quotaErr != nil {
+		return platformCheckpointSource{}, fmt.Errorf("enable source quota: %w", errAppPlatformStageEvidence)
+	}
 	source := platformCheckpointSource{
 		operationID: sourceOperation, startEffectID: startEffect,
 		dataEffectID:            checkpoint.SourceDataEffectID,
@@ -342,7 +348,7 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		namespaceID:             running.NamespaceID, releaseSHA256: release,
 		projectID: data.ProjectID, namespaceInode: data.NamespaceInode,
 		device: data.Device, dataFormat: running.DataFormat,
-		quotaBytes: data.QuotaBytes, quotaInodes: data.QuotaInodes,
+		quotaBytes: strconv.FormatInt(currentQuotaBytes, 10), quotaInodes: strconv.FormatInt(currentQuotaInodes, 10),
 		rootFilesystemUUID: data.Claim.RootFilesystemUUID,
 		rootInode:          data.Claim.RootInode,
 		writerFence:        running.TargetWriterFence,
@@ -386,7 +392,7 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.installation_id=?
-		AND o.action IN ('install','update','enable','repair','restore')
+		AND o.action IN ('install','update','enable','repair','import_data','restore')
 		AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL
@@ -424,7 +430,7 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		}
 		result.format = plan.Format
 		result.runtime = plan.Runtime
-	case "update", "enable", "repair", "restore":
+	case "update", "enable", "repair", "restore", "import_data":
 		switch action {
 		case "update":
 			var plan platformManagedUpdatePlan
@@ -450,6 +456,19 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 				plan.TargetGeneration != generation {
 				return platformManagedUpdateSource{}, fmt.Errorf(
 					"%w: managed update enable source plan",
+					errAppPlatformStageEvidence)
+			}
+		case "import_data":
+			var plan platformManagedUpdatePlan
+			unmarshalErr := json.Unmarshal([]byte(planRaw), &plan)
+			canonical, marshalErr := json.Marshal(plan)
+			if unmarshalErr != nil || marshalErr != nil ||
+				string(canonical) != planRaw ||
+				plan.Format != platformManagedImportDataFormat ||
+				plan.TargetReleaseSHA256 != release ||
+				plan.TargetGeneration != generation {
+				return platformManagedUpdateSource{}, fmt.Errorf(
+					"%w: managed update import source plan",
 					errAppPlatformStageEvidence)
 			}
 		case "repair":
@@ -482,7 +501,7 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		var effectID, kind, digest, state, receipt string
 		var observed int64
 		expectedStartKind := action + "-start"
-		if action == "enable" || action == "repair" {
+		if action == "enable" || action == "repair" || action == "import_data" {
 			expectedStartKind = platformSameReleaseStartKind(
 				appplatform.Action(action))
 		}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
@@ -34,7 +35,7 @@ const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.
 func bulkDataAction(action WritableLifecycleAction) bool {
-	return action == RestoreExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
+	return action == RestoreExecute || action == ImportDataExecute || action == DataQueryAnswer || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
 }
 
 // loadImageExecutionTimeout bounds the connection of a load-image execute: the longest a claimed load may run
@@ -202,7 +203,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 			return zero, &journal.UpdateStartHeldError{State: absence.State}
 		}
 	}
-	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) || removeImageAbsenceReply(action, body) || deleteCheckpointAbsenceReply(action, body) {
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) || removeImageAbsenceReply(action, body) || deleteCheckpointAbsenceReply(action, body) || dataEffectAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.
 		return zero, journal.ErrNoSuchEffect
@@ -355,6 +356,37 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchDeleteCheckpoint(ctx, raw, sig, journal.NewDeleteCheckpointNative(provider.checkpointRoot, provider.checkpointPin))
 	case DeleteCheckpointRead:
 		result, err = provider.store.ReadDeleteCheckpointOrStatus(ctx, raw, sig)
+	case DataQueryAnswer:
+		if provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.AnswerDataQuery(ctx, raw, sig, provider.checkpointRoot, provider.checkpointPin)
+	case SetDataQuotaExecute:
+		if provider.dataRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchSetDataQuota(ctx, raw, sig, func(ctx context.Context, request data.QuotaRaiseRequest) (data.QuotaRaiseSnapshot, error) {
+			observation, err := provider.dataRoot.RaiseQuota(ctx, provider.dataPin, request)
+			if err != nil {
+				return data.QuotaRaiseSnapshot{}, err
+			}
+			return observation.Snapshot()
+		})
+	case SetDataQuotaRead:
+		result, err = provider.store.ReadSetDataQuotaOrStatus(ctx, raw, sig)
+	case ImportDataExecute:
+		if provider.dataRoot == nil || provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchImportData(ctx, raw, sig, func(ctx context.Context, request data.ImportDataRequest) (data.ImportDataSnapshot, error) {
+			observation, err := provider.checkpointRoot.ImportData(ctx, provider.checkpointPin, provider.dataRoot, provider.dataPin, request)
+			if err != nil {
+				return data.ImportDataSnapshot{}, err
+			}
+			return observation.Snapshot()
+		})
+	case ImportDataRead:
+		result, err = provider.store.ReadImportDataOrStatus(ctx, raw, sig)
 	case SettleUpdateStartExecute:
 		result, err = provider.store.SettleUpdateStart(ctx, raw, sig, provider.native)
 	case SettleUpdateStartRead:
@@ -402,6 +434,14 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		var orphan *journal.CandidateOrphanSettledError
 		if errors.As(err, &orphan) {
 			result, err = orphan.Receipt, nil
+		}
+	}
+	if err != nil && (action == SetDataQuotaExecute || action == ImportDataExecute) {
+		var failed *journal.DataEffectFailedError
+		if errors.As(err, &failed) {
+			// A raise or an import that ended failed is replied as a typed, definite status: the sender must not
+			// mistake it for a lost answer and wait for a receipt that will never come.
+			result, err = failed.Status(time.Now().UTC().UnixMilli()), nil
 		}
 	}
 	if err != nil && capacityRefusalAction(action) {

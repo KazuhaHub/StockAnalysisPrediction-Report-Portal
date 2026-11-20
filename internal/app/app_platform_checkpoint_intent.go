@@ -91,7 +91,7 @@ func loadPlatformCheckpointSourceMode(e migExec, expected platformOperationLease
 	var action string
 	if err := e.queryRow(`SELECT action FROM app_platform_operations
 		WHERE installation_id=?
-		AND action IN ('install','update','enable','repair','restore')
+		AND action IN ('install','update','enable','repair','import_data','restore')
 		AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL
 		AND lease_owner IS NULL AND lease_until_ms IS NULL
 		AND error_code IS NULL
@@ -336,7 +336,12 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 	source.sourceReceiptSHA256 = platformDigest([]byte(startEffect.receipt))
 	source.sourceDataReceiptSHA256 = platformDigest([]byte(dataEffect.receipt))
 	source.projectID, source.namespaceInode, source.device = data.ProjectID, data.NamespaceInode, data.Device
-	source.quotaBytes, source.quotaInodes = data.QuotaBytes, data.QuotaInodes
+	// The install's receipt keeps the limits the namespace was created with; a command carries the current ones.
+	currentBytes, currentInodes, _, quotaErr := platformCurrentNamespaceQuota(e, expected.installationID, source.namespaceID)
+	if quotaErr != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	source.quotaBytes, source.quotaInodes = strconv.FormatInt(currentBytes, 10), strconv.FormatInt(currentInodes, 10)
 	source.rootFilesystemUUID, source.rootInode = data.Claim.RootFilesystemUUID, data.Claim.RootInode
 	if allowDisabled {
 		source.writerFence = strconv.FormatInt(writerFence, 10)

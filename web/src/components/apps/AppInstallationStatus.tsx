@@ -25,11 +25,11 @@ type AppStatus = {
 }
 
 const states = new Set(['installed', 'pending', 'setup_required', 'disabled', 'attention'])
-const actions = new Set(['install', 'update', 'disable', 'enable', 'repair', 'uninstall', 'delete_data', 'restore'])
+const actions = new Set(['install', 'update', 'disable', 'enable', 'repair', 'uninstall', 'delete_data', 'restore', 'set_data_quota', 'import_data'])
 const stages = new Set([
   'queued', 'validate', 'download', 'stage', 'prepare_data', 'quiesce',
   'snapshot', 'migrate', 'start', 'probe', 'activate', 'revoke', 'stop',
-  'remove_code', 'remove_data', 'restore_data', 'complete', 'failed',
+  'remove_code', 'remove_data', 'restore_data', 'import', 'complete', 'failed',
   'recovery_required',
 ])
 const errors = new Set([
@@ -43,6 +43,13 @@ const errors = new Set([
   'capacity_exhausted_cpu',
   'capacity_exhausted_disk',
   'data_quota_capacity',
+  'data_import_archive_missing',
+  'data_import_archive_invalid',
+  'data_import_too_large',
+  'data_quota_lower_refused',
+  'data_format_mismatch',
+  'data_import_requires_disabled',
+  'data_quota_invalid',
   'capacity_exhausted_image_store',
   'capacity_exhausted_running_backends',
 ])

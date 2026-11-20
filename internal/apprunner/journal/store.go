@@ -382,7 +382,7 @@ func checkProfile(ctx context.Context, db *sql.DB) error {
 // inspection that precedes the upgrade; it is not converted. From v1, v2 or v3 the additive v4 budget table is
 // created (empty: nothing was counted before it existed).
 func upgrade(ctx context.Context, db *sql.DB, from int) error {
-	if from < 1 || from > 3 {
+	if from < 1 || from > 4 {
 		return ErrIncompatible
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -390,18 +390,22 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 		return err
 	}
 	defer tx.Rollback()
+	// Every older journal rebuilds runner_commands to the current declaration once: the v5 kind list is a
+	// superset of every earlier one, so the copy keeps each row as it was.
+	if err := rebuildCommands(ctx, tx); err != nil {
+		return err
+	}
 	if from < 3 {
-		if err := upgradeCommandsToV3(ctx, tx); err != nil {
-			return err
-		}
 		if err := upgradeReservationsV2ToV3(ctx, tx); err != nil {
 			return err
 		}
 	}
-	for _, product := range schemaProducts(4) {
-		if product.name == "runner_proxy_budget" {
-			if _, err := tx.ExecContext(ctx, product.sql); err != nil {
-				return err
+	if from < 4 {
+		for _, product := range schemaProducts(4) {
+			if product.name == "runner_proxy_budget" {
+				if _, err := tx.ExecContext(ctx, product.sql); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -425,9 +429,9 @@ func isEarlierV3CommandsSQL(definition string) bool {
 	return false
 }
 
-func upgradeCommandsToV3(ctx context.Context, tx *sql.Tx) error {
+func rebuildCommands(ctx context.Context, tx *sql.Tx) error {
 	products := map[string]schemaProduct{}
-	for _, product := range schemaProducts(3) {
+	for _, product := range schemaProducts(schemaVersion) {
 		products[product.name] = product
 	}
 	var before int
@@ -453,7 +457,7 @@ func upgradeCommandsToV3(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `DROP TABLE runner_commands_v1`); err != nil {
 		return err
 	}
-	for _, product := range schemaProducts(3) {
+	for _, product := range schemaProducts(schemaVersion) {
 		if product.kind == "index" && strings.Contains(product.sql, " ON runner_commands(") {
 			if _, err := tx.ExecContext(ctx, product.sql); err != nil {
 				return err
