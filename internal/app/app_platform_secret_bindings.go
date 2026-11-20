@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,6 +77,9 @@ type platformSecretBindingReview struct {
 	// doc 176 reads back unchanged) and otherwise the sorted list that includes
 	// "service".
 	Principals []string `json:"principals,omitempty"`
+	// ACS3Actions is the (action, version) allowlist of an acs3_hmac_sha256 binding (doc 177),
+	// sorted and unique; absent for every other operation.
+	ACS3Actions []platformACS3Action `json:"acs3_actions,omitempty"`
 }
 
 type platformSecretBindingReviewResult struct {
@@ -98,6 +102,8 @@ type platformSecretBindingMetadata struct {
 	// Principals is who may use the binding: "viewer", "service" or both, as
 	// the reviewed policy says.
 	Principals []string `json:"principals"`
+	// ACS3Actions is what an acs3_hmac_sha256 binding may sign, as the reviewed policy says.
+	ACS3Actions []platformACS3Action `json:"acs3_actions,omitempty"`
 }
 
 type platformSecretBindingFacts struct {
@@ -116,6 +122,9 @@ type platformSecretBindingExisting struct {
 type platformSecretBindingUse struct {
 	id, credentialID, operation, header, principals   string
 	revision, credentialValueRevision, policyRevision int64
+	// acs3 is the reviewed action list of an acs3_hmac_sha256 binding (see
+	// platformSecretBindingPolicy.acs3), empty for every other operation.
+	acs3 string
 }
 
 func loadPlatformSecretBindingFacts(e migExec, installation string, lock bool) (platformSecretBindingFacts, error) {
@@ -172,7 +181,11 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 }
 
 func platformSecretBindingPolicyFor(operation, networkPolicySHA, principals string) ([]byte, error) {
-	return canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: operation, networkPolicySHA256: networkPolicySHA, principals: principals})
+	return platformSecretBindingPolicyWith(operation, networkPolicySHA, principals, "")
+}
+
+func platformSecretBindingPolicyWith(operation, networkPolicySHA, principals, acs3 string) ([]byte, error) {
+	return canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: operation, networkPolicySHA256: networkPolicySHA, principals: principals, acs3: acs3})
 }
 
 // platformSecretBindingPrincipalsOfPlan is the policy spelling of a review's
@@ -199,9 +212,16 @@ func (s *Server) createPlatformSecretBindingReview(session platformActorSession,
 // use the binding: principals is "" (the viewer only), "service" or
 // "service,viewer". Changing it is a new review of the same binding.
 func (s *Server) createPlatformSecretBindingReviewPrincipals(session platformActorSession, installation, name, credentialID, operation, principals string) (platformSecretBindingReviewResult, error) {
+	return s.createPlatformSecretBindingReviewWith(session, installation, name, credentialID, operation, principals, nil)
+}
+
+// createPlatformSecretBindingReviewWith is that review for any operation: an acs3_hmac_sha256
+// binding also carries the (action, version) pairs it may sign (doc 177), and its credential value
+// is validated in custody before the plan exists. Adding an action is a new review.
+func (s *Server) createPlatformSecretBindingReviewWith(session platformActorSession, installation, name, credentialID, operation, principals string, acs3 []platformACS3Action) (platformSecretBindingReviewResult, error) {
 	var result platformSecretBindingReviewResult
-	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") ||
-		!validPlatformSecretBindingPrincipals(principals) || (operation == "raw_read" && principals != "") {
+	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256") ||
+		!validPlatformSecretBindingPrincipals(principals) || (operation == "raw_read" && principals != "") || !platformACS3ListFits(operation, acs3) {
 		return result, errPlatformManagementInput
 	}
 	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
@@ -220,8 +240,15 @@ func (s *Server) createPlatformSecretBindingReviewPrincipals(session platformAct
 		}
 		var label, credentialState string
 		var credentialRevision, valueRevision int64
-		if err := e.queryRow(`SELECT label,state,revision,value_revision FROM app_platform_credentials WHERE id=?`, credentialID).Scan(&label, &credentialState, &credentialRevision, &valueRevision); err != nil || credentialState != "active" || credentialRevision < 1 || valueRevision < 1 {
+		var sealed sql.NullString
+		if err := e.queryRow(`SELECT label,state,revision,value_revision,sealed_value FROM app_platform_credentials WHERE id=?`, credentialID).Scan(&label, &credentialState, &credentialRevision, &valueRevision, &sealed); err != nil || credentialState != "active" || credentialRevision < 1 || valueRevision < 1 {
 			return errAppPlatformCredentialUnavailable
+		}
+		if operation == "acs3_hmac_sha256" {
+			// The value must be an AccessKey (and optional token) before anything is reviewed.
+			if err := s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String); err != nil {
+				return err
+			}
 		}
 		bindingID, err := platformNewUUID()
 		if err != nil {
@@ -253,6 +280,9 @@ func (s *Server) createPlatformSecretBindingReviewPrincipals(session platformAct
 		}
 		if principals != "" {
 			plan.Principals = platformSecretBindingPrincipalList(principals)
+		}
+		if operation == "acs3_hmac_sha256" {
+			plan.ACS3Actions = slices.Clone(acs3)
 		}
 		raw, err := json.Marshal(plan)
 		if err != nil || len(raw) > 65536 {
@@ -287,7 +317,7 @@ func parsePlatformSecretBindingReview(raw string) (platformSecretBindingReview, 
 		return plan, errAppPlatformCredentialUnavailable
 	}
 	canonical, err := json.Marshal(plan)
-	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read") || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation != "raw_read" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformPlanPrincipalsValid(plan) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
+	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read" && plan.Operation != "acs3_hmac_sha256") || !platformACS3ListFits(plan.Operation, plan.ACS3Actions) || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation != "raw_read" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformPlanPrincipalsValid(plan) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
 		return platformSecretBindingReview{}, errAppPlatformCredentialUnavailable
 	}
 	return plan, nil
@@ -351,9 +381,21 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			return errAppPlatformPlanChanged
 		}
 		principals, _ := platformSecretBindingPrincipalsOfPlan(plan.Principals)
-		policy, err := platformSecretBindingPolicyFor(plan.Operation, plan.NetworkPolicySHA256, principals)
+		acs3Spelling, _ := platformACS3Spelling(plan.ACS3Actions)
+		policy, err := platformSecretBindingPolicyWith(plan.Operation, plan.NetworkPolicySHA256, principals, acs3Spelling)
 		if err != nil {
 			return err
+		}
+		if plan.Operation == "acs3_hmac_sha256" {
+			// The value is validated again at commit: the plan is a statement about the credential
+			// it names, and the credential is checked at the revision the plan carries.
+			var sealed sql.NullString
+			if err := e.queryRow(`SELECT sealed_value FROM app_platform_credentials WHERE id=?`, plan.CredentialID).Scan(&sealed); err != nil {
+				return errAppPlatformPlanChanged
+			}
+			if err := s.checkPlatformACS3CredentialValue(plan.CredentialID, plan.CredentialValueRevision, sealed.String); err != nil {
+				return errAppPlatformPlanChanged
+			}
 		}
 		now := control.nowMS
 		if plan.BindingRevision == 0 {
@@ -364,13 +406,13 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			if _, err := e.exec(`INSERT INTO app_platform_secret_bindings(id,installation_id,name,credential_id,credential_value_revision,operation,state,policy_json,policy_revision,review_plan_id,revision,created_ms,updated_ms,revoked_ms) VALUES(?,?,?,?,?,?,'active',?,?,?,1,?,?,NULL)`, plan.BindingID, plan.InstallationID, plan.Name, plan.CredentialID, plan.CredentialValueRevision, plan.Operation, string(policy), plan.PolicyRevision, planID, now, now); err != nil {
 				return err
 			}
-			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals)}
+			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals), ACS3Actions: slices.Clone(plan.ACS3Actions)}
 		} else {
 			changed, err := e.exec(`UPDATE app_platform_secret_bindings SET credential_id=?,credential_value_revision=?,operation=?,state='active',policy_json=?,policy_revision=?,review_plan_id=?,revision=revision+1,updated_ms=?,revoked_ms=NULL WHERE id=? AND installation_id=? AND name=? AND revision=? AND state IN ('active','review_required')`, plan.CredentialID, plan.CredentialValueRevision, plan.Operation, string(policy), plan.PolicyRevision, planID, now, plan.BindingID, plan.InstallationID, plan.Name, plan.BindingRevision)
 			if err := platformObjectCAS(changed, err); err != nil {
 				return errAppPlatformPlanChanged
 			}
-			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: plan.BindingRevision + 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals)}
+			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: plan.BindingRevision + 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals), ACS3Actions: slices.Clone(plan.ACS3Actions)}
 		}
 		if err := platformApplySetupPhase(
 			e, plan.InstallationID, now); err != nil {
@@ -384,7 +426,8 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			Name, Operation string
 			Revision        int64
 			Principals      []string
-		}{plan.Name, plan.Operation, result.Revision, result.Principals})
+			Actions         []platformACS3Action `json:"Actions,omitempty"`
+		}{plan.Name, plan.Operation, result.Revision, result.Principals, plan.ACS3Actions})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.secret_binding_active','app_platform_secret_binding',?,?,'')`, time.UnixMilli(now).UTC().Format(time.RFC3339), actor.username, actor.ouID, result.ID, string(detail)); err != nil {
 			return err
 		}
@@ -415,6 +458,7 @@ func (s *Server) listPlatformSecretBindings(session platformActorSession, instal
 			m.Principals = []string{}
 			if policy, err := parsePlatformSecretBindingPolicy([]byte(policyRaw)); err == nil {
 				m.Principals = platformSecretBindingPrincipalList(policy.principals)
+				m.ACS3Actions = platformACS3ActionList(policy.acs3)
 			}
 			result = append(result, m)
 		}
@@ -492,12 +536,14 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 	if err != nil || !policy.allows(principal) {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
-	use.principals = policy.principals
+	use.principals, use.acs3 = policy.principals, policy.acs3
 	switch use.operation {
 	case "http_bearer":
 		use.header = "Authorization"
 	case "http_api_key":
 		use.header = "X-API-Key"
+	case "acs3_hmac_sha256":
+		// No fixed header: the call is signed (signPlatformACS3).
 	default:
 		return use, "", errAppPlatformCredentialUnavailable
 	}
@@ -509,7 +555,8 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	plan, err := parsePlatformSecretBindingReview(raw)
-	if planPrincipals, _ := platformSecretBindingPrincipalsOfPlan(plan.Principals); err != nil || planPrincipals != policy.principals || plan.InstallationID != installation || plan.AppID != facts.appID || plan.PublisherID != facts.publisherID || plan.Generation != facts.generation || plan.InstallationRevision != facts.installationRevision || plan.TrustRevision != facts.trustRevision || plan.BindingID != use.id || use.revision != plan.BindingRevision+1 || plan.Name != name || plan.CredentialID != use.credentialID || plan.CredentialValueRevision != use.credentialValueRevision || plan.Operation != use.operation || plan.PolicyRevision != facts.policyRevision || plan.NetworkPolicySHA256 != facts.networkPolicySHA || plan.ReleaseSHA256 != facts.releaseSHA || plan.ControllerEpoch != facts.controllerEpoch {
+	planACS3, _ := platformACS3Spelling(plan.ACS3Actions)
+	if planPrincipals, _ := platformSecretBindingPrincipalsOfPlan(plan.Principals); err != nil || planPrincipals != policy.principals || planACS3 != policy.acs3 || plan.InstallationID != installation || plan.AppID != facts.appID || plan.PublisherID != facts.publisherID || plan.Generation != facts.generation || plan.InstallationRevision != facts.installationRevision || plan.TrustRevision != facts.trustRevision || plan.BindingID != use.id || use.revision != plan.BindingRevision+1 || plan.Name != name || plan.CredentialID != use.credentialID || plan.CredentialValueRevision != use.credentialValueRevision || plan.Operation != use.operation || plan.PolicyRevision != facts.policyRevision || plan.NetworkPolicySHA256 != facts.networkPolicySHA || plan.ReleaseSHA256 != facts.releaseSHA || plan.ControllerEpoch != facts.controllerEpoch {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	var label, state string
@@ -550,6 +597,10 @@ func (s *Server) resolvePlatformSecretBindingCommandFor(e migExec, installation,
 	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, name, facts, principal)
 	if err != nil {
 		return platformSecretBindingUse{}, "", nil, err
+	}
+	if use.header == "" {
+		// An operation that places no fixed header (a signing one) is not a plain credential.
+		return platformSecretBindingUse{}, "", nil, errAppPlatformCredentialUnavailable
 	}
 	plain, err := s.openPlatformCredentialValue(use.credentialID, use.credentialValueRevision, sealed)
 	if err != nil {
