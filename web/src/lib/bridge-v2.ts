@@ -2837,16 +2837,16 @@ export function createBridgeHost(
       !BRIDGE_PROTOCOLS.some((value) => (data.protocols as string[]).includes(value))
     )
       return;
-    // The newest protocol both sides speak. The challenge and the envelope carry it, so an app
-    // that only knows 2-dev.8 sees exactly what it expects.
-    negotiated = BRIDGE_PROTOCOLS.find((value) =>
-      (data.protocols as string[]).includes(value),
-    )!;
     if (
       Object.prototype.hasOwnProperty.call(data, "hostNonce") &&
       !nonce(data.hostNonce)
     )
       return;
+    // The newest protocol both sides speak. The challenge and the envelope carry it, so an app
+    // that only knows 2-dev.8 sees exactly what it expects.
+    negotiated = BRIDGE_PROTOCOLS.find((value) =>
+      (data.protocols as string[]).includes(value),
+    )!;
     if (data.hostNonce !== hostNonce) {
       challenge();
       return;
@@ -4090,7 +4090,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         "capabilities",
         "backend",
       ]) ||
-      data.protocol !== BRIDGE_PROTOCOL ||
+      !BRIDGE_PROTOCOLS.includes(data.protocol as string) ||
       !nonce(data.hostNonce) ||
       !nonce(data.channelNonce) ||
       data.revision !== "1" ||
@@ -4145,7 +4145,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       parentWindow.postMessage(
         {
           type: "app:hello",
-          protocols: [BRIDGE_PROTOCOL],
+          // Both, so a new SDK still works against a Portal that only speaks 2-dev.8.
+          protocols: [BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_PREVIOUS],
           childNonce,
           ...(expectedHostNonce === undefined
             ? {}
@@ -4398,7 +4399,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     ): Promise<NetworkTargetsResult> {
       if (terminal() || !applied || !port || !envelope || !context)
         return Promise.reject(new AppNetworkError("not_ready"));
-      if (!context.capabilities.includes("network.http"))
+      if (
+        !context.capabilities.includes("network.http") ||
+        envelope.protocol !== BRIDGE_PROTOCOL
+      )
         return Promise.reject(new AppNetworkError("unsupported"));
       const targets = parseNetworkTargets(value);
       if (!targets)

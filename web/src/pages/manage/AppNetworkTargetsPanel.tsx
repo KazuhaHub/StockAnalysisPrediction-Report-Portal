@@ -31,7 +31,8 @@ export default function AppNetworkTargetsPanel({ installation, policyRevision, p
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState({ id: '', origin: '', paths: '', methods: ['GET'], network: 'public', requestBytes: null as number | null, responseBytes: null as number | null, deadlineMs: null as number | null })
-  const [bounds, setBounds] = useState({ requestBytes: policy.bounds.request_bytes, responseBytes: policy.bounds.response_bytes, deadlineMs: policy.bounds.deadline_ms, concurrency: policy.bounds.concurrency })
+  const fromPolicy = () => ({ requestBytes: policy.bounds.request_bytes, responseBytes: policy.bounds.response_bytes, deadlineMs: policy.bounds.deadline_ms, concurrency: policy.bounds.concurrency })
+  const [bounds, setBounds] = useState(fromPolicy)
 
   const propose = async (change: NetworkChange) => {
     if (busy) return
@@ -100,7 +101,7 @@ export default function AppNetworkTargetsPanel({ installation, policyRevision, p
         { key: 'actions', title: '', render: (_: unknown, item) => <Button size="small" danger disabled={!ready || busy} icon={<DeleteOutlined aria-hidden="true" />} aria-label={t('appPlatform.network.removeTarget', { id: item.id })} onClick={() => void propose({ add: [], remove: [item.id] })}>{t('appPlatform.network.remove')}</Button> },
       ]}
     />
-    <Descriptions column={1} size="small" title={t('appPlatform.network.sharedLimits')} extra={<Button size="small" disabled={!ready || busy} icon={<EditOutlined aria-hidden="true" />} onClick={() => { setError(''); setEditing(true) }}>{t('appPlatform.network.editLimits')}</Button>} items={[
+    <Descriptions column={1} size="small" title={t('appPlatform.network.sharedLimits')} extra={<Button size="small" disabled={!ready || busy} icon={<EditOutlined aria-hidden="true" />} onClick={() => { setError(''); setBounds(fromPolicy()); setEditing(true) }}>{t('appPlatform.network.editLimits')}</Button>} items={[
       { key: 'request', label: t('appPlatform.network.limit.requestBytesName'), children: policy.bounds.request_bytes },
       { key: 'response', label: t('appPlatform.network.limit.responseBytesName'), children: policy.bounds.response_bytes },
       { key: 'deadline', label: t('appPlatform.network.limit.deadlineMsName'), children: policy.bounds.deadline_ms },
@@ -137,6 +138,6 @@ export default function AppNetworkTargetsPanel({ installation, policyRevision, p
       </Space>
     </Modal>
 
-    <NetworkChangeReview plan={plan} busy={busy} error={dialogError} onConfirm={() => void confirm()} onCancel={() => { setPlan(null); setDialogError('') }} />
+    <NetworkChangeReview plan={plan} busy={busy} error={dialogError} onConfirm={() => void confirm()} onCancel={() => { setPlan(null); setDialogError(''); setBounds(fromPolicy()) }} />
   </Space>
 }

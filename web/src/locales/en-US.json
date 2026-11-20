@@ -3793,6 +3793,8 @@
   "appPlatform.network.review.targetLimits": "Limits for {{id}}",
   "appPlatform.network.review.allowlistDigest": "Runner allowlist digest",
   "appPlatform.network.review.paused": "These credential bindings are paused until they are reviewed again:",
+  "appPlatform.network.review.fromApp": "The application “{{app}}” is asking to add these network destinations. The details below come from Portal's own review, not from the application.",
+  "appPlatform.network.review.appChosenId": "App-chosen ID: {{id}}",
   "appPlatform.settings.notFound": "Application installation not found",
   "appPlatform.settings.back": "Back to applications",
   "appPlatform.settings.state": "Desired state",

@@ -1,6 +1,7 @@
 // The trusted confirmation for a network.http destination change. Everything shown is the server's
 // own diff of the plan about to be consumed, plus fixed translations. Nothing an app asked for is
 // ever rendered as text: the app's request only chose which plan the server drew up.
+import { useEffect, useState } from 'react'
 import { Alert, Descriptions, Modal, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -26,14 +27,16 @@ function boundsRows(t: TFunction, before: PolicyBounds, after: PolicyBounds, pre
   return rows
 }
 
-function TargetBlock({ item, tone }: { item: AddedTarget | PolicyTarget; tone: 'add' | 'remove' }) {
+function TargetBlock({ item, tone, fromApp }: { item: AddedTarget | PolicyTarget; tone: 'add' | 'remove'; fromApp: boolean }) {
   const { t } = useTranslation()
   const added = tone === 'add' ? (item as AddedTarget) : null
   const privateTarget = item.network === 'private'
   return <div data-testid={`network-${tone}-${item.id}`} style={{ border: '1px solid var(--ant-color-border-secondary, #f0f0f0)', borderRadius: 8, padding: 12 }}>
     <Space size={[6, 6]} wrap style={{ marginBottom: 8 }}>
       <Tag color={tone === 'add' ? 'success' : 'default'}>{t(tone === 'add' ? 'appPlatform.network.review.adding' : 'appPlatform.network.review.removing')}</Tag>
-      <Typography.Text strong>{item.id}</Typography.Text>
+      {fromApp && tone === 'add'
+        ? <Typography.Text strong>{t('appPlatform.network.review.appChosenId', { id: item.id })}</Typography.Text>
+        : <Typography.Text strong>{item.id}</Typography.Text>}
       <Tag color={privateTarget ? 'error' : 'default'} data-testid={privateTarget ? 'network-private-tag' : undefined}>{t(`appPlatform.network.class.${item.network}`, { defaultValue: item.network })}</Tag>
       {added?.plain_http && <Tag color="error" data-testid="network-plain-http-tag">{t('appPlatform.network.review.plainHTTP')}</Tag>}
     </Space>
@@ -47,8 +50,14 @@ function TargetBlock({ item, tone }: { item: AddedTarget | PolicyTarget; tone: '
   </div>
 }
 
-export default function NetworkChangeReview({ plan, busy, error, onConfirm, onCancel }: {
+// How long confirm stays disabled after a plan appears, so a click or key press meant for the page
+// underneath cannot approve it.
+export const REVIEW_ARM_MS = 1000
+
+export default function NetworkChangeReview({ plan, appName, busy, error, onConfirm, onCancel }: {
   plan: CapabilityPlan | null
+  // Present when the request came from an application: the dialog then says so.
+  appName?: string
   busy: boolean
   error: string
   onConfirm: () => void
@@ -57,6 +66,14 @@ export default function NetworkChangeReview({ plan, busy, error, onConfirm, onCa
 }) {
   const { t } = useTranslation()
   const diff = plan?.diff
+  const [armed, setArmed] = useState(false)
+  const planId = plan?.plan_id
+  useEffect(() => {
+    setArmed(false)
+    if (!planId) return
+    const timer = setTimeout(() => setArmed(true), REVIEW_ARM_MS)
+    return () => clearTimeout(timer)
+  }, [planId])
   const risky = !!diff?.added.some(item => item.network === 'private' || item.plain_http)
   const boundsChanged = diff ? boundsRows(t, diff.bounds.old, diff.bounds.new, 'shared-') : []
   return <Modal
@@ -65,19 +82,20 @@ export default function NetworkChangeReview({ plan, busy, error, onConfirm, onCa
     title={t('appPlatform.network.review.title')}
     okText={t('appPlatform.network.review.confirm')}
     cancelText={t('common.cancel')}
-    okButtonProps={{ danger: risky, disabled: !!error }}
+    okButtonProps={{ danger: risky, disabled: !!error || !armed }}
     confirmLoading={busy}
     closable={!busy}
     mask={{ closable: false }}
-    onOk={onConfirm}
+    onOk={() => { if (armed) onConfirm() }}
     onCancel={() => { if (!busy) onCancel() }}
   >
     {diff && <div role="document" tabIndex={0} className="rp-platform-review-scroll" data-testid="network-review">
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        {appName !== undefined && <Alert type="info" showIcon data-testid="network-from-app" title={t('appPlatform.network.review.fromApp', { app: appName })} />}
         <Alert type={risky ? 'error' : 'warning'} showIcon title={t(risky ? 'appPlatform.network.review.riskyWarning' : 'appPlatform.network.review.warning')} />
         {error && <Alert type="error" showIcon title={error} />}
-        {diff.added.map(item => <TargetBlock key={`add-${item.id}`} item={item} tone="add" />)}
-        {diff.removed.map(item => <TargetBlock key={`remove-${item.id}`} item={item} tone="remove" />)}
+        {diff.added.map(item => <TargetBlock key={`add-${item.id}`} item={item} tone="add" fromApp={appName !== undefined} />)}
+        {diff.removed.map(item => <TargetBlock key={`remove-${item.id}`} item={item} tone="remove" fromApp={appName !== undefined} />)}
         {boundsChanged.length > 0 && <div data-testid="network-bounds-change">
           <Typography.Text strong>{t('appPlatform.network.review.boundsChange')}</Typography.Text>
           <Descriptions column={1} size="small" items={boundsChanged} />

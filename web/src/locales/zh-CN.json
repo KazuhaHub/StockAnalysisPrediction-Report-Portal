@@ -3793,6 +3793,8 @@
   "appPlatform.network.review.targetLimits": "{{id}} 的限额",
   "appPlatform.network.review.allowlistDigest": "运行器允许列表摘要",
   "appPlatform.network.review.paused": "以下凭据绑定将被暂停，需重新审阅：",
+  "appPlatform.network.review.fromApp": "应用“{{app}}”请求添加以下网络目的地。以下内容来自 Portal 自身的审阅，而非应用。",
+  "appPlatform.network.review.appChosenId": "应用选择的标识：{{id}}",
   "appPlatform.settings.notFound": "找不到应用安装记录",
   "appPlatform.settings.back": "返回应用列表",
   "appPlatform.settings.state": "期望状态",

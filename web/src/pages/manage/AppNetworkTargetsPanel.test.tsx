@@ -20,6 +20,11 @@ const plan = (diff: Record<string, unknown>) => ({
   plan_id: '22222222-2222-4222-8222-222222222222', plan_sha256: 'e'.repeat(64), expires_ms: '1', policy_revision: '5',
   diff: { added: [], removed: [], paused_bindings: [], bounds: { old: limits, new: limits }, narrowing: [], allowlist: { old_sha256: '', new_sha256: '' }, ...diff },
 })
+async function confirm(dialog: HTMLElement) {
+  const button = within(dialog).getByRole('button', { name: 'appPlatform.network.review.confirm' })
+  await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false), { timeout: 3000 })
+  fireEvent.click(button)
+}
 const changed = vi.fn()
 function mount(ready = true) {
   return render(<AppNetworkTargetsPanel installation={installation} policyRevision="4" policy={policy} ready={ready} onChanged={changed} />)
@@ -49,7 +54,7 @@ describe('network destinations panel', () => {
     expect(within(dialog).getByTestId('network-remove-lan')).toBeTruthy()
     expect(within(dialog).getByTestId('network-paused-bindings').textContent).toContain('lan-token')
     expect(changed).not.toHaveBeenCalled()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'appPlatform.network.review.confirm' }))
+    await confirm(dialog)
     await waitFor(() => expect(apiMock.post).toHaveBeenLastCalledWith('/api/admin/app-platform/capability-policy-reviews/22222222-2222-4222-8222-222222222222', { sha256: 'e'.repeat(64) }))
     await waitFor(() => expect(changed).toHaveBeenCalledOnce())
   })

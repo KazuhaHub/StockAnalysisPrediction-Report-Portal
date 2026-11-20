@@ -2225,3 +2225,11 @@ test("a host that offers only an unknown protocol never answers", () => {
   );
   expect(w.sent.filter((item) => item.data.type === "app:init")).toHaveLength(0);
 });
+
+test("a new client offers both protocols and, against a 2-dev.8 host, has no network.targets", async () => {
+  const w = clientOnly();
+  expect(w.sent[0].data.protocols).toEqual([BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_PREVIOUS]);
+  w.deliver({ ...w.init, protocol: BRIDGE_PROTOCOL_PREVIOUS, capabilities: ["network.http"] });
+  await vi.waitFor(() => expect(w.client.state()).toBe("ready"));
+  await expect(w.client.requestNetworkTargets([target])).rejects.toMatchObject({ code: "unsupported" });
+});

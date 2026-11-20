@@ -3793,6 +3793,8 @@
   "appPlatform.network.review.targetLimits": "{{id}} 的限額",
   "appPlatform.network.review.allowlistDigest": "執行器允許清單摘要",
   "appPlatform.network.review.paused": "以下憑證綁定將被暫停，需重新審閱：",
+  "appPlatform.network.review.fromApp": "應用「{{app}}」請求新增以下網路目的地。以下內容來自 Portal 自身的審閱，而非應用。",
+  "appPlatform.network.review.appChosenId": "應用選擇的識別碼：{{id}}",
   "appPlatform.settings.notFound": "找不到應用程式安裝記錄",
   "appPlatform.settings.back": "返回應用程式列表",
   "appPlatform.settings.state": "期望狀態",

@@ -455,7 +455,7 @@ export default function AppPlatformSettingsPage() {
       {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>
     {settings.networkPolicy && <Card title={t('appPlatform.network.title')}>
-      <AppNetworkTargetsPanel installation={installation} policyRevision={settings.policy_revision} policy={settings.networkPolicy}
+      <AppNetworkTargetsPanel key={settings.networkPolicy.policy_sha256} installation={installation} policyRevision={settings.policy_revision} policy={settings.networkPolicy}
         ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />
     </Card>}
     <Modal
