@@ -95,11 +95,6 @@ func platformACS3Spelling(list []platformACS3Action) (string, bool) {
 	return strings.Join(items, ","), true
 }
 
-// allowsACS3 says whether the policy lists the pair.
-func (p platformSecretBindingPolicy) allowsACS3(action, version string) bool {
-	return p.acs3 != "" && slices.Contains(strings.Split(p.acs3, ","), action+"@"+version)
-}
-
 // platformSecretBindingPrincipalList is the sorted principal list of a spelling.
 func platformSecretBindingPrincipalList(principals string) []string {
 	switch principals {
