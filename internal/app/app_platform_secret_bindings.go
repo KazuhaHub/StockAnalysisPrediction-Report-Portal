@@ -365,6 +365,19 @@ func (s *Server) createPlatformSecretBindingReviewFull(session platformActorSess
 			!platformRequiredSetupBinding(facts.appID, name) {
 			return errPlatformManagementInput
 		}
+		// The target is judged before the credential is looked at, so a refused target (a plain-http
+		// one, an unknown one) never reaches the custody.
+		var targetSHA, targetLabel string
+		switch operation {
+		case "http_bearer", "http_api_key":
+			if targetSHA, targetLabel, err = platformSecretBindingReviewTarget(facts, target); err != nil {
+				return err
+			}
+		case "pg_password":
+			if targetSHA, targetLabel, err = platformPostgresReviewTarget(facts, target); err != nil {
+				return err
+			}
+		}
 		var label, credentialState string
 		var credentialRevision, valueRevision int64
 		var sealed sql.NullString
@@ -415,20 +428,13 @@ func (s *Server) createPlatformSecretBindingReviewFull(session platformActorSess
 			Name: name, CredentialID: credentialID, CredentialLabel: label, CredentialRevision: credentialRevision, CredentialValueRevision: valueRevision,
 			Operation: operation, NetworkPolicySHA256: facts.networkPolicySHA, ActorAuthority: actor.authorityFingerprint,
 		}
+		plan.NetworkTargetSHA256, plan.NetworkTarget = targetSHA, targetLabel
 		if operation == "pg_password" {
 			// Not scoped to the HTTP policy: only to the one PostgreSQL target it names.
 			plan.NetworkPolicySHA256 = ""
-			if plan.NetworkTargetSHA256, plan.NetworkTarget, err = platformPostgresReviewTarget(facts, target); err != nil {
-				return err
-			}
 		}
 		if principals != "" {
 			plan.Principals = platformSecretBindingPrincipalList(principals)
-		}
-		if operation == "http_bearer" || operation == "http_api_key" {
-			if plan.NetworkTargetSHA256, plan.NetworkTarget, err = platformSecretBindingReviewTarget(facts, target); err != nil {
-				return err
-			}
 		}
 		if operation == "acs3_hmac_sha256" {
 			plan.ACS3Actions = slices.Clone(acs3)
