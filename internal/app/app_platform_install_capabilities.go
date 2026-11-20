@@ -85,7 +85,9 @@ func platformNetworkTargetPolicies(target *platformManagedInstallTarget) (string
 		return "", "", errAppPlatformInstallUnavailable
 	}
 	if target.NetworkPolicy != "" {
-		if _, err := appplatform.ParseHTTPPolicy([]byte(target.NetworkPolicy)); err != nil {
+		// A v2 policy at install carries public targets only: a private target is granted by a
+		// capability review, which can bind the runner allowlist digest an install review cannot.
+		if parsed, err := appplatform.ParseHTTPPolicyAny([]byte(target.NetworkPolicy)); err != nil || parsed.Policy.HasPrivate() {
 			return "", "", errAppPlatformInstallUnavailable
 		}
 	}

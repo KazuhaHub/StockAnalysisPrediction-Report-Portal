@@ -9,7 +9,7 @@ import (
 
 func (s *Server) observePlatformNetworkInstallRuntime(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint, policy string) (platformManagedRuntimeFacts, error) {
 	if policy != "" {
-		if _, err := appplatform.ParseHTTPPolicy([]byte(policy)); err != nil {
+		if parsed, err := appplatform.ParseHTTPPolicyAny([]byte(policy)); err != nil || parsed.Policy.HasPrivate() {
 			return platformManagedRuntimeFacts{}, errAppPlatformInstallUnavailable
 		}
 	}

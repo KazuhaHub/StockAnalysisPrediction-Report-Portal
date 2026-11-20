@@ -197,7 +197,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 		if err != nil {
 			return err
 		}
-		var policySHA string
+		var policySHA, privateSHA string
 		var duration time.Duration
 		if stream {
 			policy, err := appplatform.ParseHTTPStreamPolicy([]byte(grant.policy))
@@ -208,11 +208,23 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			duration = policy.Policy.Duration
 		} else {
 			policy, err := appplatform.ParseHTTPPolicyAny([]byte(grant.policy))
-			if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
+			if err != nil {
+				return errAppPlatformNetworkUnavailable
+			}
+			// The target decides the limits (a target may only narrow the shared ones), and a URL no
+			// target admits is denied before anything is signed.
+			selected, err := policy.Policy.Select(method, target)
+			if err != nil || int64(len(body)) > selected.RequestBytes || (credential != "" && selected.Scheme != "https") {
 				return errAppPlatformNetworkUnavailable
 			}
 			policySHA = policy.SHA256
-			duration = policy.Policy.Deadline
+			duration = selected.Deadline
+			if policy.Policy.HasPrivate() {
+				if !platformValidSHA(grant.privateNetworksSHA) {
+					return errAppPlatformNetworkUnavailable
+				}
+				privateSHA = grant.privateNetworksSHA
+			}
 		}
 		maxLifetime := platformNetworkRequestLifetime
 		if stream {
@@ -252,7 +264,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			lifetime = platformNetworkStreamRequestLifetime
 		}
 		result.stream = stream
-		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}
+		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, PrivateNetworksSHA256: privateSHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}
 		key := ed25519.NewKeyFromSeed(seed)
 		defer clear(key)
 		if stream {
