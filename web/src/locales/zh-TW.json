@@ -3993,5 +3993,21 @@
   "forecast.eval.benchNext": "（{{from}} 起新預測改用{{bench}}）",
   "confirm.irreversible": "此操作無法撤銷。",
   "table.noMatches": "沒有符合條件的結果",
-  "table.clearFilters": "清除篩選"
+  "table.clearFilters": "清除篩選",
+  "appPlatform.capability.ingress.webhook": "持有端點簽名金鑰的任何人都可以傳送到達此應用程式後端的請求。Portal 會驗證每個請求，並且從不把金鑰交給應用程式。",
+  "appPlatform.settings.ingress.enable": "接受已簽名請求",
+  "appPlatform.settings.ingress.withdraw": "停止接受已簽名請求",
+  "appPlatform.settings.ingress.title": "允許持有簽名金鑰的傳送方存取此應用程式？",
+  "appPlatform.settings.ingress.confirm": "接受",
+  "appPlatform.settings.ingress.pattern": "位址格式",
+  "appPlatform.settings.ingress.route": "{{id}}：{{path}}（最多 {{bytes}} 位元組，每個端點每分鐘 {{rate}} 次）",
+  "appPlatform.settings.ingress.hint": "預設關閉。只有在「憑證」頁為應用程式建立端點後才會有端點，其金鑰由您在 Portal 之外產生；Portal 不會建立或顯示金鑰。撤回會在下一次請求時生效。",
+  "appPlatform.settings.ingress.notReady": "僅當應用程式已啟用且就緒，並且沒有安裝、更新或其他作業進行中時，才能啟用已簽名請求。任何時候都可以停止。",
+  "appCredentials.operation.ingress_hmac_sha256": "已簽名的入站請求（端點）",
+  "appCredentials.ingressRoute": "路由",
+  "appCredentials.ingressRouteHint": "應用程式為此端點宣告的路由。憑證必須是您在 Portal 之外產生並交給傳送方的 32 到 256 個字元的金鑰。",
+  "appCredentials.ingressDisclosure": "Portal 驗證傳送方的簽名，只把已驗證的請求和其隨機數的摘要交給應用程式。應用程式看不到金鑰，Portal 也不會再次顯示金鑰。",
+  "appCredentials.ingressRecipe": "傳送方需傳送 X-Portal-Ingress-Timestamp、X-Portal-Ingress-Nonce 和 X-Portal-Ingress-Signature: v1=hex(HMAC-SHA256(金鑰, \"portal-ingress/v1\"、安裝、路由、端點、時間戳記、隨機數和請求本文的十六進位 SHA-256，每項單獨一行))。",
+  "appCredentials.ingressUrl": "端點位址",
+  "appCredentials.ingressTraffic": "自 {{since}} 起：已接受 {{accepted}}，已拒絕 {{refused}}"
 }
