@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -27,6 +28,10 @@ type platformNetworkGrant struct {
 	review  string
 	profile transport.NetworkRuntimeProfile
 	stream  bool
+	// privateNetworksSHA is the runner allowlist digest the consumed capability review
+	// checked a private target against. It is empty for every grant an install or an
+	// update made, whose policy has no private target.
+	privateNetworksSHA string
 }
 type platformNetworkRequestIntent struct {
 	access         platformWritableBackendAccess
@@ -97,6 +102,9 @@ func loadPlatformNetworkGrantForIntent(e migExec, installation string, t platfor
 		AND o.controller_epoch=p.controller_epoch`,
 		installation, capability, t.policy, release).
 		Scan(&g.policy, &g.review, &raw, &digest, &action); err != nil {
+		if errors.Is(err, sql.ErrNoRows) && capability == platformCapabilityNetworkHTTP {
+			return loadPlatformCapabilityNetworkGrant(e, installation, t)
+		}
 		return g, errAppPlatformNetworkUnavailable
 	}
 	if len(raw) > 65536 || !platformValidUUID(g.review) || platformDigest([]byte(raw)) != digest {
@@ -200,7 +208,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 		if err != nil {
 			return err
 		}
-		var policySHA string
+		var policySHA, privateSHA string
 		var duration time.Duration
 		if stream {
 			policy, err := appplatform.ParseHTTPStreamPolicy([]byte(grant.policy))
@@ -210,16 +218,23 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			policySHA = policy.SHA256
 			duration = policy.Policy.Duration
 		} else {
-			policy, err := appplatform.ParseHTTPPolicy([]byte(grant.policy))
-			if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
+			policy, err := appplatform.ParseHTTPPolicyAny([]byte(grant.policy))
+			if err != nil {
+				return errAppPlatformNetworkUnavailable
+			}
+			// The target decides the limits (a target may only narrow the shared ones), and a URL no
+			// target admits is denied before anything is signed.
+			selected, err := policy.Policy.Select(method, target)
+			if err != nil || int64(len(body)) > selected.RequestBytes || ((credential != "" || signed) && selected.Scheme != "https") {
 				return errAppPlatformNetworkUnavailable
 			}
 			policySHA = policy.SHA256
-			duration = policy.Policy.Deadline
-			// A call that names a credential is judged against the reviewed policy before the
-			// credential is opened, as a background call is.
-			if (credential != "" || signed) && appplatform.ValidateHTTPPolicyTarget(policy.Policy, method, target) != nil {
-				return errAppPlatformNetworkUnavailable
+			duration = selected.Deadline
+			if policy.Policy.HasPrivate() {
+				if !platformValidSHA(grant.privateNetworksSHA) {
+					return errAppPlatformNetworkUnavailable
+				}
+				privateSHA = grant.privateNetworksSHA
 			}
 		}
 		maxLifetime := platformNetworkRequestLifetime
@@ -282,7 +297,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 		if signed {
 			credential = signing.Credential
 		}
-		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}
+		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, PrivateNetworksSHA256: privateSHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}
 		if signed {
 			result.command.SigningScheme = signing.Scheme
 			result.command.SetSignedHeaders(cloneSignedHeaders(signedHeaders))

@@ -71,7 +71,7 @@ type platformServiceEgressAuthority struct {
 	authority    control.Authority
 	controlSeed  []byte
 	grant        platformNetworkGrant
-	policy       appplatform.ParsedHTTPPolicy
+	policy       appplatform.ParsedHTTPPolicyAny
 	concurrency  int
 	identity     appplatform.ServiceIdentityGrant
 	history      *platformServiceBackendHistory
@@ -283,9 +283,9 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		grant, err := loadPlatformNetworkGrantForIntent(e, installation, platformNetworkGrantTarget{
 			release: facts.release, generation: tuple.generation, policy: tuple.policy, runtime: runtime,
 		}, platformServiceEgressNetwork)
-		var parsed appplatform.ParsedHTTPPolicy
+		var parsed appplatform.ParsedHTTPPolicyAny
 		if err == nil {
-			parsed, err = appplatform.ParseHTTPPolicy([]byte(grant.policy))
+			parsed, err = appplatform.ParseHTTPPolicyAny([]byte(grant.policy))
 		}
 		if err == nil && (parsed.Policy.Deadline <= 0 || parsed.Policy.Deadline > platformNetworkRequestLifetime ||
 			parsed.Policy.Concurrency < 1 || parsed.Policy.Concurrency > 4) {
@@ -350,9 +350,11 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	// The destination comes first (doc 176 section 3.3): a call the reviewed
 	// policy does not allow is denied without the binding being looked at, and
 	// so never reaches the custody.
-	if o.admit != nil && (appplatform.ValidateHTTPPolicyTarget(result.policy.Policy, o.admit.Method, o.admit.URL) != nil ||
-		int64(o.admit.BodyBytes) > result.policy.Policy.RequestBytes) {
-		return errPlatformServiceEgressDenied
+	if o.admit != nil {
+		selected, err := result.policy.Policy.Select(o.admit.Method, o.admit.URL)
+		if err != nil || int64(o.admit.BodyBytes) > selected.RequestBytes || selected.Scheme != "https" {
+			return errPlatformServiceEgressDenied
+		}
 	}
 	facts, err := loadPlatformSecretBindingFacts(e, installation, false)
 	if err != nil {
@@ -476,9 +478,16 @@ func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID strin
 	if limit := min(sessionExpiresMS, platformServiceEgressIdentityExpiry(a.identity, sessionExpiresMS)); limit-nowMS < platformServiceEgressMinAdmitLeft.Milliseconds() {
 		return zero, nil, nil, errPlatformServiceEgressExpiring
 	}
-	if appplatform.ValidateHTTPPolicyTarget(a.policy.Policy, admit.Method, admit.URL) != nil ||
-		int64(admit.BodyBytes) > a.policy.Policy.RequestBytes {
+	selected, err := a.policy.Policy.Select(admit.Method, admit.URL)
+	if err != nil || int64(admit.BodyBytes) > selected.RequestBytes || (admit.Credential != "" && selected.Scheme != "https") {
 		return zero, nil, nil, errPlatformServiceEgressDenied
+	}
+	privateSHA := ""
+	if a.policy.Policy.HasPrivate() {
+		if !platformValidSHA(a.grant.privateNetworksSHA) {
+			return zero, nil, nil, errPlatformServiceEgressUnavailable
+		}
+		privateSHA = a.grant.privateNetworksSHA
 	}
 	// A call carries a credential only when its admit named exactly the binding
 	// this authority resolved and opened; a signed call carries Portal's headers instead.
@@ -505,7 +514,7 @@ func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID strin
 		RequestID: id, InstallationID: a.installation, ReviewPlanID: a.grant.review,
 		Generation: a.facts.generation, PolicyRevision: a.facts.policyRevision,
 		ReleaseSHA256: a.facts.release, ActorScope: platformServiceEgressActorScope(sessionID),
-		PolicyRaw: []byte(a.grant.policy), PolicySHA256: a.policy.SHA256,
+		PolicyRaw: []byte(a.grant.policy), PolicySHA256: a.policy.SHA256, PrivateNetworksSHA256: privateSHA,
 		Method: admit.Method, URL: admit.URL, Accept: admit.Accept, ContentType: admit.ContentType,
 		BodyBytes: strconv.Itoa(admit.BodyBytes), BodySHA256: admit.BodySHA256,
 		CredentialName: a.credentialName, CredentialHeader: a.credentialHeader, CredentialValue: bytes.Clone(a.credentialValue),
