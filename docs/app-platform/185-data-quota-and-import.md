@@ -1,6 +1,6 @@
 # Proposal: per-installation data quota and administrator data import
 
-Status: Accepted 2026-11-20; implementation pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20. Phase P1 (quota) is implemented; see the implementation notes at the end. P2 and P3 are pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
