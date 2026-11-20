@@ -423,8 +423,9 @@ func (s *egressSession) checkCommand(c control.NetworkHTTPRequestCommand, admit 
 		c.ReleaseSHA256 != s.command.ReleaseSHA256,
 		// A service call is made as the service of this session, never as a viewer.
 		c.ActorScope != hex.EncodeToString(scope[:]),
-		// Credentials belong to a later capability; none may ride on this one.
-		c.CredentialName != "", c.CredentialHeader != "", len(c.CredentialValue) != 0,
+		// A credential rides on a call only when the call asked for exactly that
+		// binding and the session carries secrets.use; Portal places it.
+		!s.credentialMatches(c, admit),
 		c.Method != admit.Method, c.URL != admit.URL, c.Accept != admit.Accept, c.ContentType != admit.ContentType,
 		c.BodyBytes != strconv.Itoa(admit.BodyBytes), c.BodySHA256 != admit.BodySHA256,
 		len(body) != admit.BodyBytes, hex.EncodeToString(digest[:]) != admit.BodySHA256,
@@ -432,6 +433,13 @@ func (s *egressSession) checkCommand(c control.NetworkHTTPRequestCommand, admit 
 		return errEgressCommand
 	}
 	return nil
+}
+
+func (s *egressSession) credentialMatches(c control.NetworkHTTPRequestCommand, admit EgressAdmit) bool {
+	if admit.Credential == "" {
+		return c.CredentialName == "" && c.CredentialHeader == "" && len(c.CredentialValue) == 0
+	}
+	return s.allows("secrets.use") && c.CredentialName == admit.Credential && c.CredentialHeader != "" && len(c.CredentialValue) != 0
 }
 
 func parseCounter(s string) (int64, bool) {

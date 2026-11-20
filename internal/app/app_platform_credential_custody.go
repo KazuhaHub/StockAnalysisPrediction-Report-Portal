@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -60,10 +61,19 @@ func (s *Server) sealPlatformCredentialValue(id string, revision int64, value []
 	return sealPrefix + sealed, nil
 }
 
+// platformCredentialOpenCount counts every attempt to open a sealed value. It
+// holds no value and no name; tests read it to prove that a refused use never
+// reached the custody. It is process-wide because the custody primitive is, and
+// that is safe: an atomic counter that decides nothing, read by tests as a before
+// and after inside one test that opens no other credential concurrently (none of
+// them runs in parallel).
+var platformCredentialOpenCount atomic.Int64
+
 // Custody primitive only. A future use adapter must prove current installation,
 // principal, reviewed binding and network policy before calling this function.
 // There is deliberately no HTTP/SDK/raw-read endpoint to this primitive.
 func (s *Server) openPlatformCredentialValue(id string, revision int64, sealed string) ([]byte, error) {
+	platformCredentialOpenCount.Add(1)
 	if !platformValidUUID(id) || revision < 1 || len(sealed) > 32768 || !strings.HasPrefix(sealed, sealPrefix) {
 		return nil, errAppPlatformCredentialUnavailable
 	}

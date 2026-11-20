@@ -458,6 +458,8 @@ func (m *EgressMux) write(t byte, id EgressCallID, payload []byte) error {
 	if err != nil {
 		return err
 	}
+	// The frame is a copy of the payload, which may carry a credential value.
+	defer clear(frame)
 	m.wmu.Lock()
 	defer m.wmu.Unlock()
 	// Per-write deadline only: SetDeadline would also cut the shared read side.
@@ -585,6 +587,9 @@ type EgressAdmit struct {
 	ContentType string `json:"contentType"`
 	BodyBytes   int    `json:"bodyBytes"`
 	BodySHA256  string `json:"bodySha256"`
+	// Credential names the reviewed binding the call asks Portal to place (doc
+	// 176), or is empty and then absent from the frame.
+	Credential string `json:"credential,omitempty"`
 }
 
 // EncodeEgressAdmit encodes the closed admit JSON.
@@ -627,7 +632,7 @@ func DecodeEgressAdmit(payload []byte) (EgressAdmit, error) {
 
 func validEgressAdmit(a EgressAdmit) bool {
 	digest, err := hex.DecodeString(a.BodySHA256)
-	return appplatform.ValidHTTPRequestMethod(a.Method) && len(a.URL) > 0 && len(a.URL) <= appplatform.MaxHTTPTargetBytes &&
+	return (a.Credential == "" || appplatform.ValidCredentialBindingName(a.Credential)) && appplatform.ValidHTTPRequestMethod(a.Method) && len(a.URL) > 0 && len(a.URL) <= appplatform.MaxHTTPTargetBytes &&
 		appplatform.ValidHTTPPolicyHeaderValue(a.Accept) && appplatform.ValidHTTPPolicyHeaderValue(a.ContentType) &&
 		a.BodyBytes >= 0 && a.BodyBytes <= appplatform.MaxHTTPRequestBytes &&
 		err == nil && len(digest) == sha256.Size && hex.EncodeToString(digest) == a.BodySHA256

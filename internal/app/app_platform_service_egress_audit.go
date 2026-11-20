@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,6 +84,14 @@ type platformServiceEgressWindow struct {
 	bytesOut, bytesIn int64
 	origins           map[string]bool
 	deniedSuppressed  int
+	// bindings counts the calls that named a credential binding (doc 176) which
+	// resolved to a reviewed one, by binding name and outcome class. Names are
+	// reviewed binding names, never values; at most platformSecretBindingLimit.
+	bindings map[string]map[string]int
+	// unresolved counts, by outcome class, the calls that named a binding that did
+	// not resolve (unknown, revoked, awaiting review, not for the service, or for
+	// another target). The application chose that name, so it is not recorded.
+	unresolved map[string]int
 }
 
 // platformServiceEgressAggregator turns the per-call facts into one summary row
@@ -176,6 +185,39 @@ func (a *platformServiceEgressAggregator) recordCall(installation, session strin
 	}
 }
 
+// recordBinding counts one finished call that named a credential binding:
+// against the binding if it resolved (binding is its reviewed name), else as
+// unresolved.
+func (a *platformServiceEgressAggregator) recordBinding(installation, session string, now time.Time, binding string, class byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	w := a.window(installation, session, now)
+	if w == nil {
+		return
+	}
+	name, ok := platformServiceEgressClassNames[class]
+	if !ok {
+		return
+	}
+	if binding == "" {
+		if w.unresolved == nil {
+			w.unresolved = map[string]int{}
+		}
+		w.unresolved[name]++
+		return
+	}
+	if w.bindings == nil {
+		w.bindings = map[string]map[string]int{}
+	}
+	if _, known := w.bindings[binding]; !known && len(w.bindings) >= platformSecretBindingLimit {
+		return
+	}
+	if w.bindings[binding] == nil {
+		w.bindings[binding] = map[string]int{}
+	}
+	w.bindings[binding][name]++
+}
+
 func (a *platformServiceEgressAggregator) recordNotice(installation, session string, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -234,11 +276,32 @@ func (a *platformServiceEgressAggregator) due(now time.Time, flush bool) []platf
 		for name, n := range w.counts {
 			counts[name] = n
 		}
-		detail, err := json.Marshal(map[string]any{
+		summary := map[string]any{
 			"session_id": w.session, "window_start_ms": w.start.UnixMilli(), "window_end_ms": now.UnixMilli(),
 			"counts": counts, "notices": w.notices, "bytes_out": w.bytesOut, "bytes_in": w.bytesIn,
 			"origins": origins, "denied_suppressed": w.deniedSuppressed,
-		})
+		}
+		if len(w.bindings) > 0 {
+			type bindingCount struct {
+				Binding  string         `json:"binding"`
+				Count    int            `json:"count"`
+				Outcomes map[string]int `json:"outcomes"`
+			}
+			used := make([]bindingCount, 0, len(w.bindings))
+			for name, outcomes := range w.bindings {
+				total := 0
+				for _, n := range outcomes {
+					total += n
+				}
+				used = append(used, bindingCount{name, total, outcomes})
+			}
+			slices.SortFunc(used, func(x, y bindingCount) int { return strings.Compare(x.Binding, y.Binding) })
+			summary["bindings"] = used
+		}
+		if len(w.unresolved) > 0 {
+			summary["credential_unresolved"] = w.unresolved
+		}
+		detail, err := json.Marshal(summary)
 		if err == nil {
 			rows = append(rows, platformServiceEgressSummaryRow{installation: installation, detail: detail})
 		}

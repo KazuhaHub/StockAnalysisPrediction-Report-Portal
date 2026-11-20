@@ -3,8 +3,10 @@ package app
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func platformCredentialValueField(raw []byte, required bool) ([]byte, error) {
@@ -176,17 +178,48 @@ func (s *Server) apiPlatformCredentialCommit(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, item)
 }
 
-func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Request, user string) {
-	fields, err := platformManagementRead(w, r, "name", "credential_id", "operation")
-	if err != nil {
-		platformManagementError(w, err)
-		return
+// platformSecretBindingPlanFields reads a binding review request: name,
+// credential_id and operation, and optionally principals, a sorted list of
+// "viewer" and "service". Absent means the viewer only.
+func platformSecretBindingPlanFields(w http.ResponseWriter, r *http.Request) (name, credential, operation, principals string, err error) {
+	raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
+	if readErr != nil {
+		return "", "", "", "", errPlatformManagementInput
+	}
+	fields, err := platformManagementObject(raw, "name", "credential_id", "operation", "principals")
+	_, hasPrincipals := fields["principals"]
+	if err != nil || len(fields) != 3+boolInt(hasPrincipals) {
+		return "", "", "", "", errPlatformManagementInput
 	}
 	name, nameErr := platformManagementString(fields, "name")
 	credential, credentialErr := platformManagementString(fields, "credential_id")
 	operation, operationErr := platformManagementString(fields, "operation")
 	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") {
-		platformManagementError(w, errPlatformManagementInput)
+		return "", "", "", "", errPlatformManagementInput
+	}
+	if hasPrincipals {
+		var list []string
+		if json.Unmarshal(fields["principals"], &list) != nil || list == nil {
+			return "", "", "", "", errPlatformManagementInput
+		}
+		switch strings.Join(list, ",") {
+		case platformPrincipalViewer:
+			principals = ""
+		case platformPrincipalsServiceOnly:
+			principals = platformPrincipalsServiceOnly
+		case platformPrincipalsBoth:
+			principals = platformPrincipalsBoth
+		default:
+			return "", "", "", "", errPlatformManagementInput
+		}
+	}
+	return name, credential, operation, principals, nil
+}
+
+func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Request, user string) {
+	name, credential, operation, principals, err := platformSecretBindingPlanFields(w, r)
+	if err != nil {
+		platformManagementError(w, err)
 		return
 	}
 	actor, err := s.platformHTTPReader(r, user)
@@ -194,7 +227,7 @@ func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, err)
 		return
 	}
-	plan, err := s.createPlatformSecretBindingReview(actor, r.PathValue("installation"), name, credential, operation)
+	plan, err := s.createPlatformSecretBindingReviewPrincipals(actor, r.PathValue("installation"), name, credential, operation, principals)
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -204,7 +237,7 @@ func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, errAppPlatformCredentialUnavailable)
 		return
 	}
-	writeJSON(w, map[string]any{"plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": map[string]any{"name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256}})
+	writeJSON(w, map[string]any{"plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": map[string]any{"name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "principals": platformSecretBindingPrincipalList(principals)}})
 }
 
 func (s *Server) apiPlatformSecretBindingCommit(w http.ResponseWriter, r *http.Request, user string) {
@@ -312,16 +345,9 @@ func (s *Server) apiPlatformAppSecretBindingList(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.Request, user string) {
-	fields, err := platformManagementRead(w, r, "name", "credential_id", "operation")
+	name, credential, operation, principals, err := platformSecretBindingPlanFields(w, r)
 	if err != nil {
 		platformManagementError(w, err)
-		return
-	}
-	name, nameErr := platformManagementString(fields, "name")
-	credential, credentialErr := platformManagementString(fields, "credential_id")
-	operation, operationErr := platformManagementString(fields, "operation")
-	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") {
-		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
 	actor, err := s.platformHTTPReader(r, user)
@@ -334,7 +360,7 @@ func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	plan, err := s.createPlatformSecretBindingReview(actor, installation, name, credential, operation)
+	plan, err := s.createPlatformSecretBindingReviewPrincipals(actor, installation, name, credential, operation, principals)
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -344,5 +370,5 @@ func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.
 		platformManagementError(w, errAppPlatformCredentialUnavailable)
 		return
 	}
-	writeJSON(w, map[string]any{"installation_id": installation, "plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": map[string]any{"name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256}})
+	writeJSON(w, map[string]any{"installation_id": installation, "plan_id": plan.ID, "plan_sha256": plan.SHA256, "expires_ms": strconv.FormatInt(plan.ExpiresMS, 10), "review": map[string]any{"name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "principals": platformSecretBindingPrincipalList(principals)}})
 }

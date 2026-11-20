@@ -1,8 +1,9 @@
 # Proposal: background credential use
 
-Status: accepted 2026-11-17; implementation pending. Depends on
-[174](174-background-broker-egress.md); uses the target digest from
-[175](175-reviewed-multi-origin-and-private-network.md). Index and order: doc 174.
+Status: accepted 2026-11-17; implemented for background broker calls (section
+10). Depends on [174](174-background-broker-egress.md); uses the target digest
+from [175](175-reviewed-multi-origin-and-private-network.md) once that lands
+(section 10 says what stands in for it now). Index and order: doc 174.
 
 ## 1. Problem and evidence
 
@@ -155,3 +156,85 @@ The owner decided every question below on 2026-11-17.
 2. Should tasks (doc 153) also use credentials through the broker? Decided:
    yes, through the same egress session, with doc 153's rule narrowed to "no
    credential in task payload or result"; needed by no Status feature now.
+
+## 10. Implementation notes (2026-11-17)
+
+What shipped, and where it differs from sections 3 to 5.
+
+- **Target scope.** Doc 175 has not landed: a policy still has exactly one
+  origin and the binding binds the whole network policy digest
+  (`network_policy_sha256`) plus the installation policy revision, as v1 does.
+  Policy v2 therefore carries `network_policy_sha256` where section 3.1 shows
+  `network_target_sha256`, in the same position. A single-origin policy is one
+  target, so "the target the URL selects" is the policy the call is signed for.
+  Doc 175 renames the field and narrows the scope; that change does not alter
+  the principals list.
+- **Spelling.** A viewer-only binding keeps the v1 policy bytes and its review
+  has no `principals` member, so every binding and review made before this
+  change reads back unchanged. v2 is written only when `service` is a principal,
+  and `["viewer"]` has no v2 spelling (a v2 policy naming only the viewer is
+  refused as non-canonical).
+- **Tasks stay out.** Decision 2 of section 9 is not implemented here: a task
+  handler cannot ask for `secrets.use` and a pinned test keeps it so. Only the
+  egress session of doc 174 carries the resource.
+- **Admit.** The app's `credential` is a binding name only. It travels in the
+  admit frame as a closed optional member, Portal resolves and opens the value in
+  the same read that checks the session, and the runner accepts credential
+  fields in a command only when the admit named exactly that binding and the
+  session carries `secrets.use`. Every authority challenge resolves the binding
+  again without opening the value and refuses unless it is the one the admit
+  resolved (revoked or reviewed binding, rotated or revoked credential, changed
+  principals or policy all differ).
+- **Order and errors.** The admit's target and method are judged against the
+  reviewed policy before the binding is read, so a wrong target never reaches the
+  custody. An unknown, revoked, unreviewed, wrong-principal or wrong-target
+  binding is `denied`; a store failure or an expired budget is `unavailable`
+  (no denied row, no spend of the denied cap).
+- **Where the value lives.** In Portal it exists in the authority transaction and
+  in the signed command; once the command is sent the call keeps its fields and
+  the digest of the signed bytes and signs its proofs from those
+  (`SignNetworkHTTPCheckDigest`), and the value, the signed bytes and the frame
+  copy are wiped. In the runner the frame payload, the decoded and verified
+  copies and the pool's clones are wiped when the call ends.
+- **Echo.** The runner withholds a response (body or content type) that gives the
+  value back as it is, in any letter case, in base64 (both alphabets, any byte
+  alignment), hex, URL-encoded or JSON-escaped, for the value and for a Bearer
+  token without its prefix, on the foreground, background and stream paths.
+  Values shorter than 8 bytes are matched as they are, and transformed forms are
+  looked for only for values up to 4096 bytes; a longer value is matched as it
+  is and ASCII case-folded, so the longest form stays proportional to the value.
+  This is a recognition of those forms, not a guarantee against every encoding;
+  the console says so.
+- **Streams.** The stream guard holds back only the suffix of what it has that is
+  a proper prefix of a recognised form, since only that can still become a
+  match; everything before it is released at once, so a 4-byte NDJSON event with
+  no partial match pending is delivered without waiting for the next chunk. A
+  held suffix is released as soon as a later chunk shows it cannot match, and at
+  the end of the stream. It is not released on an idle timer, because releasing
+  a partial match would let its remainder through undetected. Each chunk scans
+  the carry plus the new bytes, with an ASCII-only lower-casing that keeps
+  offsets. A 1 MiB stream of small events with a 47-byte Bearer value took
+  596 ms, 42 ms, 6.6 ms and 3.0 ms in 1-byte, 16-byte, 256-byte and 4 KiB
+  chunks before, and 136 ms, 10.8 ms, 3.3 ms and 1.8 ms after.
+- **Audit.** The binding review audit detail carries `Principals`. The summary
+  row gains `bindings: [{binding, count, outcomes}]` for calls whose binding
+  resolved to a reviewed one, and `credential_unresolved` (outcome counts, no
+  names) for calls whose binding did not, so a name the application made up is
+  never recorded.
+- **Test plan (section 7).** Items 1 to 7 are tests. Item 4 is covered in two
+  halves that share no process: Portal's coordinator with a fake runner (log and
+  audit scan) and the real runner registry and broker with a signing stand-in
+  for Portal (log and reply scan); the per-call path does not write the runner
+  journal (the journal is written when a session is bound), which a test pins by
+  counting binds. Item 5 runs in the broker package on the background pool.
+- **Item 8, native Scheduled Digest fixture: deferred.** The native lane needs
+  root, Docker and a published Apps checkout; the Scheduled Digest probe that
+  would exercise it is the cross-repo follow-up of doc 174 (7.10), and a
+  service-principal binding for it does not exist until that app asks for one.
+  It lands with that probe. The SQLite and PostgreSQL pairs of items 1 to 3 and
+  6 to 7 run in the normal suite.
+- **Console.** The binding form has a "who may use it" field (viewer only,
+  also background, background only; never offered for setup-only credentials)
+  with a disclosure in the approval step, and an active binding can be reviewed
+  again to change it. The install review adds one informational sentence when
+  `background.run` and `secrets.use` are granted.

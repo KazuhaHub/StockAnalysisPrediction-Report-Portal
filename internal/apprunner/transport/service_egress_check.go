@@ -72,9 +72,13 @@ func (p *networkProvider) executeEgress(ctx context.Context, call *EgressCall, r
 	if err != nil || control.ValidateNetworkHTTPBody(verified, body) != nil {
 		return zero, broker.ErrDenied
 	}
+	defer verified.Clear()
 	digest := sha256.Sum256(raw)
 	checker := &egressCheck{call: call, commandSHA: hex.EncodeToString(digest[:])}
-	id := verified.Command().RequestID
+	// Only the request id is wanted: do not keep the clone that carries the value.
+	view := verified.Command()
+	id := view.RequestID
+	clear(view.CredentialValue)
 	p.mu.Lock()
 	if p.sessions[id] != nil || p.streamSessions[id] != nil {
 		p.mu.Unlock()
