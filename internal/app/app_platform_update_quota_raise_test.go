@@ -193,6 +193,7 @@ func testUpdateRaisesTheQuotaWithoutAMigration(t *testing.T, pg bool) {
 	namespace := platformNamespaceOf(t, s, installation)
 	revision := scalar[int64](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE id=?`, namespace)
 	bytes0 := scalar[int64](t, s.st, `SELECT quota_bytes FROM app_platform_data_namespaces WHERE id=?`, namespace)
+	audited := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id)
 	raise.execute = func(i platformSetDataQuotaIntent) (platformSetDataQuotaObservation, error) {
 		if effectState(t, s, lease.id, "migrate", platformUpdateRaiseEffectNumber) != "prepared" {
 			t.Error("the raise was sent before its effect was recorded")
@@ -216,8 +217,8 @@ func testUpdateRaisesTheQuotaWithoutAMigration(t *testing.T, pg bool) {
 		scalar[int64](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces WHERE id=?`, namespace) != 4096 {
 		t.Fatal("the namespace row does not hold the raised limits, one more revision and the receipt's usage")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id) != 1 {
-		t.Fatal("the raise is not audited")
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id) != audited+1 {
+		t.Fatal("the raise is not audited exactly once")
 	}
 	rowsBefore := platformAppliedRaiseRows(t, s)
 	registered, startIntent := platformCompleteUpdateFromStart(t, s, next, endpoint)
@@ -341,6 +342,7 @@ func testUpdateRaiseDefiniteEnds(t *testing.T, pg bool) {
 			namespace := platformNamespaceOf(t, s, lease.installationID)
 			bytes0 := scalar[int64](t, s.st, `SELECT quota_bytes FROM app_platform_data_namespaces WHERE id=?`, namespace)
 			raise.execute = func(i platformSetDataQuotaIntent) (platformSetDataQuotaObservation, error) { return c.answer(raise, i) }
+			refused := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.capacity_refused' AND target_id=?`, lease.id)
 			_, err := s.runPlatformManagedUpdate(context.Background(), lease, endpoint)
 			if !errors.Is(err, errPlatformMigrationEnded) {
 				t.Fatalf("the update did not end at once: %v", err)
@@ -362,7 +364,7 @@ func testUpdateRaiseDefiniteEnds(t *testing.T, pg bool) {
 			if err := platformRequireSettledRaise(s.st.poolExec(), lease.id); err != nil {
 				t.Fatal("a reverted raise blocks the recovery choice", err)
 			}
-			if name == "capacity refusal" && scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.capacity_refused' AND target_id=?`, lease.id) != 1 {
+			if name == "capacity refusal" && scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.capacity_refused' AND target_id=?`, lease.id) != refused+1 {
 				t.Fatal("the refusal was not recorded")
 			}
 			// The rollback is allowed: the restore review loads for the update's recovery set.
@@ -605,6 +607,8 @@ func TestUpdateRaiseConvergenceAbsentAfterTheWindowPostgres(t *testing.T) {
 // not send again.
 func testUpdateRaiseLostAckCommitsOnce(t *testing.T, pg bool) {
 	s, lease, endpoint, raise, _ := platformUpdateRaiseFixture(t, pg, false)
+	revision := scalar[int64](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID)
+	audited := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id)
 	raise.execute = func(platformSetDataQuotaIntent) (platformSetDataQuotaObservation, error) {
 		return nil, errors.New("connection reset after the raise")
 	}
@@ -615,9 +619,10 @@ func testUpdateRaiseLostAckCommitsOnce(t *testing.T, pg bool) {
 	if err != nil || next.snapshot.Stage != appplatform.StageStart || raise.count("execute") != 1 || raise.count("read") != 1 {
 		t.Fatalf("read-back did not commit: %v %v %v", next.snapshot, err, raise.calls)
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id) != 1 ||
-		scalar[int64](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != 3 {
-		t.Fatal("the raise was committed more than once")
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id) != audited+1 ||
+		scalar[int64](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != revision+1 {
+		t.Fatal("the raise was committed more than once", revision, scalar[int64](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID),
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_quota_raised' AND target_id=?`, lease.id))
 	}
 	// A later dispatch of the stage sends nothing: the row is applied and the operation is past the stage.
 	if _, err := s.dispatchPlatformUpdateRaise(context.Background(), lease, endpoint); err == nil {
