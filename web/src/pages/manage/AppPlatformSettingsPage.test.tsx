@@ -555,3 +555,132 @@ describe('application installation settings', () => {
     })
   })
 })
+
+describe('data quota raise and data import', () => {
+  const plan = '99999999-9999-4999-8999-999999999999'
+  const operation = '77777777-7777-4777-8777-777777777777'
+  const quotaReview = (capacity: 'fits' | 'short') => ({
+    action: 'set_data_quota',
+    installation_id: installation,
+    app_id: 'notes',
+    publisher_id: 'publisher',
+    current_data_quota_bytes: '268435456',
+    current_data_quota_inodes: '65536',
+    data_quota_bytes: '536870912',
+    data_quota_inodes: '131072',
+    observed_bytes: '128',
+    capacity,
+    ...(capacity === 'short' ? { capacity_dimension: 'disk', capacity_requested: '1000', capacity_remaining: '10' } : {}),
+  })
+  const importReview = {
+    action: 'import_data',
+    installation_id: installation,
+    app_id: 'notes',
+    publisher_id: 'publisher',
+    archive_sha256: 'f'.repeat(64),
+    archive_bytes: '2048',
+    archive_entries: '12',
+    content_bytes: '4096',
+    archive_data_format: '2',
+    release_data_format: '2',
+    data_quota_bytes: '268435456',
+    data_quota_inodes: '65536',
+    replaces_contents: true,
+    keeps_checkpoint: true,
+    requires_disabled: true,
+  }
+  const serve = (extra: Record<string, unknown>, review: unknown) => {
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, ...extra } : { bindings: [] })
+    apiMock.post.mockImplementation(async (url: string) => url.endsWith('/plans')
+      ? { plan_id: plan, plan_sha256: 'e'.repeat(64), expires_ms: '1', review }
+      : { operation_id: operation })
+  }
+  const fillRaise = async (user: ReturnType<typeof userEvent.setup>, bytes: string, inodes: string) => {
+    const bytesInput = screen.getByLabelText('appPlatform.settings.raiseQuotaBytes')
+    await user.clear(bytesInput)
+    await user.type(bytesInput, bytes)
+    const inodesInput = screen.getByLabelText('appPlatform.settings.raiseQuotaInodes')
+    await user.clear(inodesInput)
+    await user.type(inodesInput, inodes)
+  }
+
+  it('posts the raise plan, refuses a lower value, and commits a fitting plan', async () => {
+    const user = userEvent.setup()
+    serve({ quota_raise_eligible: true }, quotaReview('fits'))
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.raiseQuota' }))
+    await fillRaise(user, '134217728', '65536')
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.reviewPlan' }))
+    expect(await screen.findByText('err.data_quota_lower_refused')).toBeTruthy()
+    expect(apiMock.post).not.toHaveBeenCalled()
+
+    await fillRaise(user, '536870912', '131072')
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.reviewPlan' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+      action: 'set_data_quota',
+      installation_id: installation,
+      data_quota_bytes: '536870912',
+      data_quota_inodes: '131072',
+    }))
+    await user.click(await screen.findByRole('button', { name: /appPlatform\.settings\.raiseQuotaAction$/ }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'e'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('disables confirmation when the runner capacity is short', async () => {
+    const user = userEvent.setup()
+    serve({ quota_raise_eligible: true }, quotaReview('short'))
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.raiseQuota' }))
+    await fillRaise(user, '536870912', '131072')
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.reviewPlan' }))
+    expect((await screen.findByTestId('raise-capacity-short')).textContent).toContain('disk')
+    const confirm = screen.getByRole('button', { name: /appPlatform\.settings\.raiseQuotaAction$/ }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+  })
+
+  it('validates the import digest, states the replace, checkpoint and disabled facts, and commits', async () => {
+    const user = userEvent.setup()
+    serve({ desired_state: 'disabled', phase: 'disabled', import_eligible: true }, importReview)
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.importData' }))
+    const digest = screen.getByLabelText('appPlatform.settings.importDigest')
+    await user.type(digest, 'NOT-A-DIGEST')
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.reviewPlan' }))
+    expect(await screen.findByText('appPlatform.settings.importDigestInvalid')).toBeTruthy()
+    expect(apiMock.post).not.toHaveBeenCalled()
+
+    await user.clear(digest)
+    await user.type(digest, 'f'.repeat(64))
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.reviewPlan' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+      action: 'import_data',
+      installation_id: installation,
+      archive_sha256: 'f'.repeat(64),
+    }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(dialog.textContent).toContain('appPlatform.settings.importReplaces'))
+    expect(dialog.textContent).toContain('appPlatform.settings.importCheckpoint')
+    expect(dialog.textContent).toContain('appPlatform.settings.importDisabled')
+    expect(dialog.textContent).toContain('f'.repeat(64))
+    await user.click(await screen.findByRole('button', { name: /appPlatform\.settings\.importAction$/ }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'e'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('does not offer import when the installation is not eligible and says it must be disabled', async () => {
+    serve({ import_eligible: false }, importReview)
+    mount()
+    const button = await screen.findByRole('button', { name: 'appPlatform.settings.importData' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(screen.getByTestId('import-disabled-hint').textContent).toContain('appPlatform.settings.importDisabledHint')
+  })
+})
