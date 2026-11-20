@@ -145,13 +145,9 @@ func testMigration0023Upgrade(t *testing.T, pg bool) {
 func TestMigration0023UpgradeSQLite(t *testing.T)   { testMigration0023Upgrade(t, false) }
 func TestMigration0023UpgradePostgres(t *testing.T) { testMigration0023Upgrade(t, true) }
 
-func TestMigration0023IsTheLastStepAndAnOlderDumpRestoresWithAnEmptyTable(t *testing.T) {
-	steps := newTestStore(t).migrations()
-	if steps[len(steps)-1].id != "0023" {
-		t.Fatalf("last step = %s", steps[len(steps)-1].id)
-	}
+func TestMigration0023AnOlderDumpRestoresWithAnEmptyTable(t *testing.T) {
 	src := newTestStore(t)
-	dump := withoutSections(t, dumpOf(t, src), migration0023().tables, []string{"0023"})
+	dump := withoutSections(t, dumpOf(t, src), migration0023().tables, []string{"0023", "0024"})
 	if bytes.Contains(dump, []byte("app_platform_machine_tokens")) || bytes.Contains(dump, []byte(`"0023"`)) {
 		t.Fatal("fixture still describes 0023")
 	}
