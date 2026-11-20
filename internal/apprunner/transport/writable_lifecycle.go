@@ -62,10 +62,11 @@ const (
 	SetDataQuotaRead
 	ImportDataExecute
 	ImportDataRead
+	DataQueryAnswer
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= ImportDataRead
+	return a >= WritableWriterExecute && a <= DataQueryAnswer
 }
 func (a WritableLifecycleAction) mutating() bool {
 	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute || a == RemoveImageExecute || a == DeleteCheckpointExecute || a == SetDataQuotaExecute || a == ImportDataExecute
@@ -285,6 +286,7 @@ type writableLifecycleReference struct {
 	removeImage             control.RemoveImageCommand
 	deleteCheckpoint        control.DeleteCheckpointCommand
 	setDataQuota            control.SetDataQuotaCommand
+	dataQuery               control.DataQueryCommand
 	importData              control.ImportDataCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
@@ -476,6 +478,19 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.deleteCheckpoint = v.Command()
 		r.release = r.deleteCheckpoint.Payload.ReleaseSHA256
+	case action == DataQueryAnswer:
+		var v control.VerifiedDataQueryCommand
+		var err error
+		if settling {
+			v, err = control.VerifyDataQuerySettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyDataQuery(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.dataQuery = v.Command()
+		r.release = r.dataQuery.Payload.ReleaseSHA256
 	case action == SetDataQuotaExecute || action == SetDataQuotaRead:
 		var v control.VerifiedSetDataQuotaCommand
 		var err error
@@ -609,6 +624,13 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 	}
 	if action == DeleteCheckpointExecute || action == DeleteCheckpointRead {
 		return validDeleteCheckpointReply(body, r.deleteCheckpoint, received)
+	}
+	if action == DataQueryAnswer {
+		report, err := journal.ParseDataQueryReport(body)
+		observed, observedErr := strconv.ParseInt(report.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(r.dataQuery.IssuedMS, 10, 64)
+		return err == nil && journal.DataQueryReportMatchesCommand(report, r.dataQuery) && observedErr == nil && issuedErr == nil &&
+			observed >= issued && observed <= received.UnixMilli()
 	}
 	if action == SetDataQuotaExecute || action == SetDataQuotaRead {
 		return validDataEffectReply(body, r.setDataQuota.CommandHeader, func() bool {
@@ -1089,6 +1111,14 @@ func (o WritableLifecycleObservation) DataEffectStatus() (journal.MigrateDataSta
 		return journal.MigrateDataStatus{}, driver.ErrContainerUncertain
 	}
 	return journal.ParseMigrateDataStatus([]byte(o.body))
+}
+
+// DataQueryReport returns the report of a data query.
+func (o WritableLifecycleObservation) DataQueryReport() (journal.DataQueryReport, error) {
+	if o.action != DataQueryAnswer {
+		return journal.DataQueryReport{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseDataQueryReport([]byte(o.body))
 }
 
 // SetDataQuotaReceipt returns the receipt of a raise execute or read-back.

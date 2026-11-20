@@ -35,7 +35,7 @@ const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.
 func bulkDataAction(action WritableLifecycleAction) bool {
-	return action == RestoreExecute || action == ImportDataExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
+	return action == RestoreExecute || action == ImportDataExecute || action == DataQueryAnswer || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
 }
 
 // loadImageExecutionTimeout bounds the connection of a load-image execute: the longest a claimed load may run
@@ -356,6 +356,11 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchDeleteCheckpoint(ctx, raw, sig, journal.NewDeleteCheckpointNative(provider.checkpointRoot, provider.checkpointPin))
 	case DeleteCheckpointRead:
 		result, err = provider.store.ReadDeleteCheckpointOrStatus(ctx, raw, sig)
+	case DataQueryAnswer:
+		if provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.AnswerDataQuery(ctx, raw, sig, provider.checkpointRoot, provider.checkpointPin)
 	case SetDataQuotaExecute:
 		if provider.dataRoot == nil {
 			return
