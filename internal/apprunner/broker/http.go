@@ -5,7 +5,9 @@ package broker
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +48,25 @@ type HTTPRequest struct {
 	Body        []byte
 	HeaderName  string
 	HeaderValue []byte
+	// SignedHeaders are the headers Portal computed for a provider that signs each request (doc
+	// 177), mutually exclusive with HeaderName. The executor sets exactly these (and Accept,
+	// Accept-Encoding and User-Agent); it checks that they are the closed set for this very
+	// request, so a request it could alter is refused rather than sent.
+	SignedHeaders []appplatform.SignedHeader
+}
+
+// signedRequestOK reports whether the signed headers are exactly what Portal produces for this
+// request: no credential header beside them, a body whose digest is the signed
+// x-acs-content-sha256, and the closed header set of package appplatform.
+func signedRequestOK(input HTTPRequest) bool {
+	if len(input.SignedHeaders) == 0 {
+		return true
+	}
+	if input.HeaderName != "" || len(input.HeaderValue) != 0 {
+		return false
+	}
+	sum := sha256.Sum256(input.Body)
+	return appplatform.CheckACS3SignedHeaders(input.Method, input.URL, input.ContentType, hex.EncodeToString(sum[:]), input.SignedHeaders) == nil
 }
 
 // HTTPResponse deliberately excludes arbitrary upstream headers, cookies and URLs.
@@ -264,8 +285,9 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if len(input.HeaderValue) == 0 && input.HeaderName != "" {
 		return zero, ErrDenied
 	}
-	// A credential is never sent over plain HTTP.
-	if target.Scheme != "https" && input.HeaderName != "" {
+	// The target was selected above. A signed request must carry exactly the reviewed signed headers, and a
+	// credential or signature is never sent over plain HTTP.
+	if !signedRequestOK(input) || target.Scheme != "https" && (input.HeaderName != "" || len(input.SignedHeaders) > 0) {
 		return zero, ErrDenied
 	}
 	ctx, cancel := context.WithTimeout(parent, target.Deadline)
@@ -346,6 +368,12 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if input.HeaderName != "" {
 		req.Header.Set(input.HeaderName, string(input.HeaderValue))
 	}
+	for _, signed := range input.SignedHeaders {
+		// host is carried by the URL, which the check above tied to the signed value.
+		if signed.Name != "host" {
+			req.Header.Set(signed.Name, string(signed.Value))
+		}
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return zero, ErrUncertain
@@ -360,7 +388,7 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if err != nil || int64(len(body)) > target.ResponseBytes || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
-	echo := newEchoMatcher(input.HeaderName, input.HeaderValue)
+	echo := newRequestEchoMatcher(input)
 	defer echo.Clear()
 	if echo.Match(body) {
 		clear(body)

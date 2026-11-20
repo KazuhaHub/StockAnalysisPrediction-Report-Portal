@@ -29,6 +29,16 @@ test("network wire rejects ambient authority and malformed inputs",()=>{
  expect(parseNetworkRequest({...request(),credential:"upstream-api"})).toEqual({...request(),credential:"upstream-api"});
  for(const bad of [{status:302,contentType:"",bodyBase64:""},{status:199,contentType:"",bodyBase64:""},{status:600,contentType:"",bodyBase64:""},{status:200,contentType:"x\n",bodyBase64:""},{status:200,contentType:"",bodyBase64:"",headers:{}},{status:200,contentType:"",bodyBase64:"YQ"}])expect(parseNetworkResponse(bad)).toBeNull();
 });
+test("a signed request is a closed nested object, never beside a credential",()=>{
+ const signing={credential:"qwen-billing",scheme:"acs3",action:"QueryAccountBalance",version:"2017-12-14"};
+ expect(parseNetworkRequest({...request(),signing})).toEqual({...request(),signing});
+ expect(Object.isFrozen(parseNetworkRequest({...request(),signing})?.signing)).toBe(true);
+ const source={...request(),signing:{...signing}},copy=parseNetworkRequest(source);source.signing.action="Other";
+ expect(copy?.signing?.action).toBe("QueryAccountBalance");
+ for(const bad of [{...request(),signing,credential:"qwen-billing"},{...request(),signing:null},{...request(),signing:"acs3"},{...request(),signing:{}},{...request(),signing:[]},
+  {...request(),signing:{...signing,scheme:"aws4"}},{...request(),signing:{...signing,action:"Query Account"}},{...request(),signing:{...signing,action:"1Query"}},{...request(),signing:{...signing,version:"2017"}},
+  {...request(),signing:{...signing,credential:"Qwen"}},{...request(),signing:{...signing,key:"secret"}},{...request(),signing:{...signing,action:7}},{...request(),signing:{credential:"qwen-billing",scheme:"acs3",action:"A"}}])expect(parseNetworkRequest(bad)).toBeNull();
+});
 test("network results are copied, empty bodies allowed and failures never retry",()=>{
  const value=request(),copy=parseNetworkRequest(value);value.url="https://other.example/";
  expect(copy?.url).toContain("api.example.com");expect(Object.isFrozen(copy)).toBe(true);

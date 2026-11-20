@@ -13,7 +13,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { KeyOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { DeleteOutlined, KeyOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -40,11 +40,12 @@ interface Binding {
   credential_id: string
   credential_label: string
   credential_value_revision: number
-  operation: 'http_bearer' | 'http_api_key' | 'raw_read'
+  operation: 'http_bearer' | 'http_api_key' | 'raw_read' | 'acs3_hmac_sha256'
   state: 'active' | 'revoked' | 'review_required'
   policy_revision: number
   revision: number
   principals?: Principal[]
+  acs3_actions?: Acs3Action[]
   network_target?: string
   network_target_sha256?: string
 }
@@ -53,6 +54,22 @@ interface TargetChoice {
   id: string
   origin: string
 }
+
+// One API action an Alibaba Cloud signed-request binding may sign (doc 177).
+interface Acs3Action {
+  action: string
+  version: string
+}
+
+const isHttpOperation = (operation?: string) => operation === 'http_bearer' || operation === 'http_api_key'
+
+const acs3Label = (item: Acs3Action) => `${item.action} · ${item.version}`
+
+// The reviewed list is sorted by action then version and has no duplicate; the console sends it that way.
+const acs3Sorted = (items: Acs3Action[]): Acs3Action[] =>
+  [...items].sort((a, b) =>
+    a.action === b.action ? (a.version < b.version ? -1 : a.version > b.version ? 1 : 0) : a.action < b.action ? -1 : 1,
+  )
 
 type Principal = 'viewer' | 'service'
 // Who may use a binding, as the review form offers it.
@@ -69,8 +86,29 @@ interface BindingForm {
   credential_id: string
   operation: string
   use: Use
+  acs3_actions?: Acs3Action[]
   target?: string
 }
+
+// What a credential is made of: one secret value, or an Alibaba Cloud AccessKey (doc 177).
+type CredentialKind = 'secret' | 'acs3'
+
+interface CredentialFormValues {
+  label?: string
+  kind?: CredentialKind
+  value?: string
+  access_key_id?: string
+  access_key_secret?: string
+  security_token?: string
+}
+
+// The AccessKey credential value: canonical JSON of its parts, sent once like any other value.
+const acs3CredentialValue = (values: CredentialFormValues): string =>
+  JSON.stringify({
+    access_key_id: values.access_key_id ?? '',
+    access_key_secret: values.access_key_secret ?? '',
+    security_token: values.security_token ?? '',
+  })
 
 interface CredentialReview {
   direct: boolean
@@ -89,8 +127,10 @@ interface BindingPlan {
     credential_label: string
     operation: string
     network_policy_sha256: string
+    network_origin?: string
     network_target?: string
     principals?: Principal[]
+    acs3_actions?: Acs3Action[]
   }
 }
 
@@ -120,9 +160,10 @@ export default function AppCredentialsPage() {
   const [credentialTarget, setCredentialTarget] = useState<Credential | null>(null)
   const [bindingOpen, setBindingOpen] = useState(false)
   const [bindingSeed, setBindingSeed] = useState<Binding | null>(null)
-  const [credentialForm] = Form.useForm<{ label: string; value: string }>()
+  const [credentialForm] = Form.useForm<CredentialFormValues>()
   const [bindingForm] = Form.useForm<BindingForm>()
   const bindingOperation = Form.useWatch('operation', bindingForm)
+  const credentialKind = Form.useWatch('kind', credentialForm) ?? 'secret'
 
   const load = async () => {
     if (!appKey) return
@@ -165,12 +206,13 @@ export default function AppCredentialsPage() {
     [credentials],
   )
 
-  const finishCredential = async (values: { label?: string; value: string }) => {
+  const finishCredential = async (values: CredentialFormValues) => {
     try {
+      const value = values.kind === 'acs3' ? acs3CredentialValue(values) : (values.value ?? '')
       if (!credentialTarget) {
         await api.post('/api/admin/app-platform/credentials', {
           label: values.label ?? '',
-          value_base64: encodeValue(values.value),
+          value_base64: encodeValue(value),
         })
       } else {
         const review = await api.post<CredentialReview>(
@@ -186,7 +228,7 @@ export default function AppCredentialsPage() {
             action: 'replace',
             revision: String(credentialTarget.revision),
             value_revision: String(credentialTarget.value_revision),
-            value_base64: encodeValue(values.value),
+            value_base64: encodeValue(value),
             plan_id: review.plan_id ?? '',
             plan_sha256: review.plan_sha256 ?? '',
           })
@@ -270,8 +312,14 @@ export default function AppCredentialsPage() {
         operation: values.operation,
       }
       if (values.operation !== 'raw_read') request.principals = principalsForUse(values.use ?? 'viewer')
-      // A grant with several targets needs the one the binding is for named.
-      if (values.operation !== 'raw_read' && targets.length > 1 && values.target) request.target = values.target
+      if (values.operation === 'acs3_hmac_sha256') {
+        request.acs3_actions = acs3Sorted(
+          (values.acs3_actions ?? []).map((item) => ({ action: item.action?.trim() ?? '', version: item.version?.trim() ?? '' })),
+        )
+      }
+      // A grant with several targets needs the one the binding is for named (an HTTP binding only:
+      // a signed-request binding covers the whole network policy).
+      if (isHttpOperation(values.operation) && targets.length > 1 && values.target) request.target = values.target
       const plan = await api.post<BindingPlan>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings/plan`,
         request,
@@ -284,12 +332,20 @@ export default function AppCredentialsPage() {
               <span>{t('appCredentials.confirmBindingBody')}</span>
               <Typography.Text code>{plan.review.credential_label}</Typography.Text>
               <Typography.Text type="secondary">
-                {plan.review.operation} · {plan.review.network_policy_sha256.slice(0, 12)}
+                {t(`appCredentials.operation.${plan.review.operation}`)} · {plan.review.network_policy_sha256.slice(0, 12)}
               </Typography.Text>
-              {plan.review.network_target && (
+              {plan.review.network_target ? (
                 <Typography.Text>
                   {t('appCredentials.bindingTarget', { origin: plan.review.network_target })}
                 </Typography.Text>
+              ) : (
+                plan.review.network_origin && <Typography.Text code>{plan.review.network_origin}</Typography.Text>
+              )}
+              {plan.review.acs3_actions?.map((item) => (
+                <Typography.Text key={acs3Label(item)}>{acs3Label(item)}</Typography.Text>
+              ))}
+              {plan.review.operation === 'acs3_hmac_sha256' && (
+                <Alert type="info" showIcon title={t('appCredentials.acs3Disclosure')} />
               )}
               <Typography.Text>
                 {t(`appCredentials.principals.${principalsToUse(plan.review.principals)}`)}
@@ -347,13 +403,14 @@ export default function AppCredentialsPage() {
             credential_id: binding.credential_id,
             operation: binding.operation,
             use: principalsToUse(binding.principals),
-            target: targets.find((choice) => choice.origin === binding.network_target)?.id,
+            acs3_actions: binding.acs3_actions?.length ? binding.acs3_actions : undefined,
           }
         : {
             name: appKey === 'scheduled-digest' ? 'digest-feed' : '',
             credential_id: '',
             operation: appKey === 'scheduled-digest' ? 'raw_read' : 'http_bearer',
             use: 'viewer',
+            acs3_actions: undefined,
             target: undefined,
           },
     )
@@ -405,6 +462,18 @@ export default function AppCredentialsPage() {
       title: t('appCredentials.operation'),
       dataIndex: 'operation',
       render: (operation: string) => t(`appCredentials.operation.${operation}`),
+    },
+    {
+      title: t('appCredentials.acs3Actions'),
+      key: 'acs3_actions',
+      render: (_: unknown, binding: Binding) =>
+        binding.acs3_actions?.length ? (
+          <Space orientation="vertical" size={0}>
+            {binding.acs3_actions.map((item) => (
+              <span key={acs3Label(item)}>{acs3Label(item)}</span>
+            ))}
+          </Space>
+        ) : null,
     },
     {
       title: t('appCredentials.target'),
@@ -505,9 +574,41 @@ export default function AppCredentialsPage() {
               <Input maxLength={160} autoComplete="off" />
             </Form.Item>
           )}
-          <Form.Item name="value" label={t('appCredentials.value')} extra={t('appCredentials.valueHint')} rules={[{ required: true, min: 1, max: 16384 }]}>
-            <Input.Password autoComplete="new-password" />
+          <Form.Item name="kind" label={t('appCredentials.kind')} initialValue="secret">
+            <Select
+              options={(['secret', 'acs3'] as CredentialKind[]).map((kind) => ({
+                value: kind,
+                label: t(`appCredentials.kind.${kind}`),
+              }))}
+            />
           </Form.Item>
+          {credentialKind === 'acs3' ? (
+            <>
+              <Form.Item name="access_key_id" label={t('appCredentials.accessKeyId')} rules={[{ required: true, max: 128, pattern: /^[\x21-\x7e]+$/ }]}>
+                <Input autoComplete="off" />
+              </Form.Item>
+              <Form.Item
+                name="access_key_secret"
+                label={t('appCredentials.accessKeySecret')}
+                extra={t('appCredentials.valueHint')}
+                rules={[{ required: true, max: 256, pattern: /^[\x20-\x7e]+$/ }]}
+              >
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+              <Form.Item
+                name="security_token"
+                label={t('appCredentials.securityToken')}
+                extra={t('appCredentials.securityTokenHint')}
+                rules={[{ max: 4096, pattern: /^[\x20-\x7e]*$/ }]}
+              >
+                <Input.Password autoComplete="new-password" />
+              </Form.Item>
+            </>
+          ) : (
+            <Form.Item name="value" label={t('appCredentials.value')} extra={t('appCredentials.valueHint')} rules={[{ required: true, min: 1, max: 16384 }]}>
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+          )}
           <Button type="primary" htmlType="submit">
             {t('common.save')}
           </Button>
@@ -542,10 +643,51 @@ export default function AppCredentialsPage() {
                   : []),
                 { value: 'http_bearer', label: t('appCredentials.operation.http_bearer') },
                 { value: 'http_api_key', label: t('appCredentials.operation.http_api_key') },
+                { value: 'acs3_hmac_sha256', label: t('appCredentials.operation.acs3_hmac_sha256') },
               ]}
             />
           </Form.Item>
-          {bindingOperation !== 'raw_read' && targets.length > 1 && (
+          {bindingOperation === 'acs3_hmac_sha256' && (
+            <Form.Item label={t('appCredentials.acs3Actions')} extra={t('appCredentials.acs3ActionsHint')} required>
+              <Form.List name="acs3_actions" initialValue={[{ action: '', version: '' }]}>
+                {(fields, { add, remove }) => (
+                  <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                    {fields.map((field) => (
+                      <Space key={field.key} align="start" wrap>
+                        <Form.Item
+                          name={[field.name, 'action']}
+                          noStyle
+                          rules={[{ required: true, pattern: /^[A-Za-z][A-Za-z0-9]{0,63}$/ }]}
+                        >
+                          <Input aria-label={t('appCredentials.acs3Action')} placeholder="QueryAccountBalance" autoComplete="off" />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, 'version']}
+                          noStyle
+                          rules={[{ required: true, pattern: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/ }]}
+                        >
+                          <Input aria-label={t('appCredentials.acs3Version')} placeholder="2017-12-14" autoComplete="off" />
+                        </Form.Item>
+                        {fields.length > 1 && (
+                          <Button
+                            aria-label={t('appCredentials.acs3RemoveAction')}
+                            icon={<DeleteOutlined aria-hidden="true" />}
+                            onClick={() => remove(field.name)}
+                          />
+                        )}
+                      </Space>
+                    ))}
+                    {fields.length < 16 && (
+                      <Button icon={<PlusOutlined aria-hidden="true" />} onClick={() => add({ action: '', version: '' })}>
+                        {t('appCredentials.acs3AddAction')}
+                      </Button>
+                    )}
+                  </Space>
+                )}
+              </Form.List>
+            </Form.Item>
+          )}
+          {isHttpOperation(bindingOperation) && targets.length > 1 && (
             <Form.Item name="target" label={t('appCredentials.target')} rules={[{ required: true }]}>
               <Select
                 options={targets.map((choice) => ({ value: choice.id, label: `${choice.id} · ${choice.origin}` }))}

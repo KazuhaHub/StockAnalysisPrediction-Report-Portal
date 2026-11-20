@@ -64,21 +64,31 @@ func platformImportGrantSchemaIndexes() []platformIndex {
 	}
 }
 
-// platformActionCheckName is the constraint name of the action list on one of the checked tables. The
-// name follows from the declaration, so it is derived rather than repeated.
-func platformActionCheckName(table string) (string, error) {
-	for _, t := range platformSchemaTables() {
+// platformCheckName is the PostgreSQL constraint name of the check on table that renders as expr. The
+// name follows from the declaration (the position of the expression among the table's checks), so it
+// is derived rather than repeated.
+func platformCheckName(tables []platformTable, table, expr string) (string, error) {
+	for _, t := range tables {
 		if t.name != table {
 			continue
 		}
 		for i, check := range t.checkExpressions("postgres") {
-			if check == platformActions() {
+			if check == expr {
 				return platformPrefix + t.name + "_ck_" + strconv.Itoa(i+1), nil
 			}
 		}
 	}
-	return "", fmt.Errorf("table %s has no action check", table)
+	return "", fmt.Errorf("table %s has no check %q", table, expr)
 }
+
+// platformActionCheckName is the constraint name of the action list on one of the checked tables.
+func platformActionCheckName(table string) (string, error) {
+	return platformCheckName(platformSchemaTables(), table, platformActions())
+}
+
+// platformCheckTarget is one table whose stored CHECK list a step widens: the short table name and the
+// PostgreSQL constraint that carries the list.
+type platformCheckTarget struct{ table, constraint string }
 
 // setPlatformActionChecks replaces the action list `from` with `to` on the checked tables, in place.
 //
@@ -89,13 +99,23 @@ func platformActionCheckName(table string) (string, error) {
 // idempotent: a table that already carries `to` is left as it is, and one that carries neither is an
 // error, never a guess.
 func setPlatformActionChecks(e migExec, from, to string) error {
+	var targets []platformCheckTarget
+	for _, table := range platformActionCheckedTables {
+		name, err := platformActionCheckName(table)
+		if err != nil {
+			return err
+		}
+		targets = append(targets, platformCheckTarget{table, name})
+	}
+	return rewritePlatformChecks(e, targets, from, to)
+}
+
+// rewritePlatformChecks is setPlatformActionChecks for any list of targets.
+func rewritePlatformChecks(e migExec, targets []platformCheckTarget, from, to string) error {
 	if e.s.driver == "postgres" {
-		for _, table := range platformActionCheckedTables {
-			name, err := platformActionCheckName(table)
-			if err != nil {
-				return err
-			}
-			full := platformPrefix + table
+		for _, target := range targets {
+			name := target.constraint
+			full := platformPrefix + target.table
 			// The constraint must exist. Dropping it only if present would add a fresh one over a table
 			// that is not the expected shape and hide that.
 			var present int
@@ -104,7 +124,7 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 				return err
 			}
 			if present != 1 {
-				return fmt.Errorf("application control table %s lacks its action check %s", full, name)
+				return fmt.Errorf("application control table %s lacks its check %s", full, name)
 			}
 			if _, err := e.exec("ALTER TABLE " + full + " DROP CONSTRAINT " + name); err != nil {
 				return err
@@ -124,8 +144,8 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 	}
 	// The flag belongs to the connection, not the transaction, so it is cleared even on failure.
 	defer e.exec(`PRAGMA writable_schema=OFF`)
-	for _, table := range platformActionCheckedTables {
-		full := platformPrefix + table
+	for _, target := range targets {
+		full := platformPrefix + target.table
 		oldText, newText := "CHECK ("+from+")", "CHECK ("+to+")"
 		result, err := e.exec(`UPDATE sqlite_master SET sql=replace(sql,?,?) WHERE type='table' AND name=? AND instr(sql,?)>0`,
 			oldText, newText, full, oldText)
@@ -142,7 +162,7 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 				return err
 			}
 			if present != 1 {
-				return fmt.Errorf("application control table %s carries an unexpected action check", full)
+				return fmt.Errorf("application control table %s carries an unexpected check", full)
 			}
 		}
 	}
@@ -152,17 +172,17 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 	if _, err := e.exec(`PRAGMA schema_version=` + strconv.FormatInt(cookie+1, 10)); err != nil {
 		return err
 	}
-	for _, table := range platformActionCheckedTables {
+	for _, target := range targets {
 		var result string
-		if err := e.queryRow(`PRAGMA integrity_check(` + platformPrefix + table + `)`).Scan(&result); err != nil {
+		if err := e.queryRow(`PRAGMA integrity_check(` + platformPrefix + target.table + `)`).Scan(&result); err != nil {
 			return err
 		}
 		if result != "ok" {
-			return fmt.Errorf("integrity check of %s failed after the action check rewrite", platformPrefix+table)
+			return fmt.Errorf("integrity check of %s failed after the check rewrite", platformPrefix+target.table)
 		}
 	}
-	for _, table := range platformActionCheckedTables {
-		rows, err := e.query(`PRAGMA foreign_key_check(` + platformPrefix + table + `)`)
+	for _, target := range targets {
+		rows, err := e.query(`PRAGMA foreign_key_check(` + platformPrefix + target.table + `)`)
 		if err != nil {
 			return err
 		}
@@ -173,7 +193,7 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 			return err
 		}
 		if violated {
-			return fmt.Errorf("foreign key check of %s failed after the action check rewrite", platformPrefix+table)
+			return fmt.Errorf("foreign key check of %s failed after the check rewrite", platformPrefix+target.table)
 		}
 	}
 	return nil

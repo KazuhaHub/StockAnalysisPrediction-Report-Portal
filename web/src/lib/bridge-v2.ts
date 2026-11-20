@@ -1761,7 +1761,9 @@ export function createBridgeHost(
       if (
         !options.onNetworkStreamRequest ||
         !granted?.includes("network.stream") ||
-        (request.credential !== undefined && !granted.includes("secrets.use"))
+        (request.credential !== undefined && !granted.includes("secrets.use")) ||
+        // A stream carries no signing: a signed call is a buffered one.
+        request.signing !== undefined
       ) {
         result({ code: "unsupported", retryable: false });
         return;
@@ -2609,7 +2611,7 @@ export function createBridgeHost(
           fail("transport_error");
         }
       };
-      if (!options.onNetworkRequest || !granted?.includes("network.http") || (request.credential !== undefined && !granted.includes("secrets.use"))) {
+      if (!options.onNetworkRequest || !granted?.includes("network.http") || ((request.credential !== undefined || request.signing !== undefined) && !granted.includes("secrets.use"))) {
         result({ code: "unsupported" });
         return;
       }
@@ -4350,7 +4352,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       const request = parseNetworkRequest(value);
       if (!request)
         return Promise.reject(new AppNetworkError("invalid_request"));
-      if (request.credential !== undefined && !context.capabilities.includes("secrets.use"))
+      if ((request.credential !== undefined || request.signing !== undefined) && !context.capabilities.includes("secrets.use"))
         return Promise.reject(new AppNetworkError("unsupported"));
       if (signal?.aborted)
         return Promise.reject(new AppNetworkError("not_ready"));
@@ -4452,8 +4454,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       if (!request)
         return Promise.reject(new AppNetworkError("invalid_request"));
       if (
-        request.credential !== undefined &&
-        !context.capabilities.includes("secrets.use")
+        // A stream carries no signing: a signed call is a buffered one.
+        request.signing !== undefined ||
+        (request.credential !== undefined &&
+          !context.capabilities.includes("secrets.use"))
       )
         return Promise.reject(new AppNetworkError("unsupported"));
       if (options.signal?.aborted)
