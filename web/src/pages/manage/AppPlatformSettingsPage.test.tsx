@@ -152,6 +152,17 @@ describe('application installation settings', () => {
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.public\./ })).toBeNull()
     })
 
+    it('offers machine access only for an optional machine.read capability', async () => {
+      apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: false }] } : { bindings: [] })
+      mount()
+      expect(await screen.findByRole('button', { name: 'appPlatform.settings.machine.enable' })).toBeTruthy()
+      cleanup()
+      apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: true }] } : { bindings: [] })
+      mount()
+      await screen.findByText('notes')
+      expect(screen.queryByRole('button', { name: /appPlatform\.settings\.machine\./ })).toBeNull()
+    })
+
     it('offers no control for other capabilities or without the capability', async () => {
       mount()
       await screen.findByText('notes')

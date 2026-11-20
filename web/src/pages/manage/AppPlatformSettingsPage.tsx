@@ -10,6 +10,7 @@ import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import AppPublicProjectionPanel from './AppPublicProjectionPanel'
+import AppMachineReadPanel from './AppMachineReadPanel'
 
 type Audience = { type: 'user' | 'ou'; id: string; name: string }
 type Capability = { capability: string; granted: boolean; required: boolean }
@@ -236,6 +237,7 @@ export default function AppPlatformSettingsPage() {
   // it after reading the disclosure; withdrawal needs no second step because it only removes access.
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
   const publicProjection = settings.capabilities.find((item) => item.capability === 'public.projection' && !item.required)
+  const machineRead = settings.capabilities.find((item) => item.capability === 'machine.read' && !item.required)
   const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
   const changePrincipals = async (enabled: boolean) => {
     if (principalsBusy) return
@@ -449,6 +451,7 @@ export default function AppPlatformSettingsPage() {
         {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
       </Space>}
       {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {machineRead && <AppMachineReadPanel root={root} installation={installation} granted={machineRead.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>
     <Modal
       className="rp-platform-review-modal"
