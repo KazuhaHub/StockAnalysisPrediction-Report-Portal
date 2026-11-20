@@ -14,7 +14,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
-func (s *Server) requestPlatformUpdateStartBackend(ctx context.Context, session platformActorSession, installation string, binding *platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint, initial platformWritableBackendAccess) (driver.BackendResponse, error) {
+func (s *Server) requestPlatformUpdateStartBackend(ctx context.Context, session platformActorSession, installation string, binding *platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint, initial platformWritableBackendAccess, assert platformBackendAssertionFunc) (driver.BackendResponse, error) {
 	var zero driver.BackendResponse
 	if initial.intent.update == nil ||
 		initial.intent.generation < 2 ||
@@ -73,7 +73,7 @@ func (s *Server) requestPlatformUpdateStartBackend(ctx context.Context, session 
 			var err error
 			raw, signature, assertion, command, err =
 				signPlatformUpdateStartBackendRequest(
-					a, seed, method, path, body, boot)
+					a, seed, method, path, body, boot, assert)
 			return err
 		})
 	if err != nil {
@@ -107,7 +107,7 @@ func (s *Server) requestPlatformUpdateStartBackend(ctx context.Context, session 
 	return proofResult.Result().Response, nil
 }
 
-func signPlatformUpdateStartBackendRequest(a platformWritableBackendAccess, seed []byte, method, path string, body []byte, boot string) ([]byte, []byte, string, control.UpdateStartBackendRequestCommand, error) {
+func signPlatformUpdateStartBackendRequest(a platformWritableBackendAccess, seed []byte, method, path string, body []byte, boot string, assert platformBackendAssertionFunc) ([]byte, []byte, string, control.UpdateStartBackendRequestCommand, error) {
 	var zero control.UpdateStartBackendRequestCommand
 	if len(seed) != ed25519.SeedSize || a.intent.update == nil {
 		return nil, nil, "", zero, errAppPlatformLaunchUnavailable
@@ -117,8 +117,13 @@ func signPlatformUpdateStartBackendRequest(a platformWritableBackendAccess, seed
 		return nil, nil, "", zero, err
 	}
 	defer clear(signer.Key)
-	assertion, err := signer.Sign(
-		method, path, body, a.viewer, time.Now())
+	var assertion string
+	if assert != nil {
+		assertion, err = assert(signer, a, time.Now())
+	} else {
+		assertion, err = signer.Sign(
+			method, path, body, a.viewer, time.Now())
+	}
 	if err != nil {
 		return nil, nil, "", zero, err
 	}

@@ -141,6 +141,17 @@ describe('application installation settings', () => {
       }
     })
 
+    it('offers the public projection only for an optional public.projection capability', async () => {
+      apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'public.projection', granted: false, required: false }] } : { bindings: [] })
+      mount()
+      expect(await screen.findByRole('button', { name: 'appPlatform.settings.public.enable' })).toBeTruthy()
+      cleanup()
+      apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'public.projection', granted: false, required: true }] } : { bindings: [] })
+      mount()
+      await screen.findByText('notes')
+      expect(screen.queryByRole('button', { name: /appPlatform\.settings\.public\./ })).toBeNull()
+    })
+
     it('offers no control for other capabilities or without the capability', async () => {
       mount()
       await screen.findByText('notes')
