@@ -3,6 +3,7 @@ import { Alert, Button, Descriptions, Input, InputNumber, Modal, Select, Space, 
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { errText } from '../../api/client'
+import StatusTag from '../../components/StatusTag'
 import NetworkChangeReview from '../../components/apps/NetworkChangeReview'
 import {
   consumeNetworkPlan, planNetworkChange,
@@ -94,7 +95,7 @@ export default function AppNetworkTargetsPanel({ installation, policyRevision, p
       columns={[
         { key: 'id', title: t('appPlatform.network.id'), dataIndex: 'id' },
         { key: 'origin', title: t('appPlatform.network.origin'), dataIndex: 'origin', render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
-        { key: 'network', title: t('appPlatform.network.class.title'), dataIndex: 'network', render: (value: string) => <Tag color={value === 'private' ? 'error' : 'default'}>{t(`appPlatform.network.class.${value}`, { defaultValue: value })}</Tag> },
+        { key: 'network', title: t('appPlatform.network.class.title'), dataIndex: 'network', render: (value: string) => value === 'private' ? <StatusTag tone="error">{t(`appPlatform.network.class.${value}`, { defaultValue: value })}</StatusTag> : <Tag>{t(`appPlatform.network.class.${value}`, { defaultValue: value })}</Tag> },
         { key: 'paths', title: t('appPlatform.network.paths'), dataIndex: 'paths', render: (value: string[]) => value.join(', ') },
         { key: 'methods', title: t('appPlatform.network.methods'), dataIndex: 'methods', render: (value: string[]) => value.join(', ') },
         { key: 'limits', title: t('appPlatform.network.limits'), render: (_: unknown, item) => limits(item) },

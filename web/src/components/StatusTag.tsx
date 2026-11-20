@@ -40,15 +40,17 @@ export default function StatusTag({
   title,
   style,
   className,
+  testId,
 }: {
   tone: StatusTone
   children: ReactNode
   title?: string
   style?: CSSProperties
   className?: string
+  testId?: string
 }) {
   return (
-    <Tag className={className} color={COLOR[tone]} icon={ICON[tone]} title={title} style={style}>
+    <Tag className={className} color={COLOR[tone]} icon={ICON[tone]} title={title} style={style} data-testid={testId}>
       {children}
     </Tag>
   )

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { Alert, Descriptions, Modal, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
+import StatusTag from '../StatusTag'
 import type { AddedTarget, CapabilityPlan, PolicyBounds, PolicyTarget } from '../../lib/appNetworkTargetsV2'
 
 function limits(t: TFunction, item: Pick<PolicyTarget, 'request_bytes' | 'response_bytes' | 'deadline_ms'>) {
@@ -31,14 +32,16 @@ function TargetBlock({ item, tone, fromApp }: { item: AddedTarget | PolicyTarget
   const { t } = useTranslation()
   const added = tone === 'add' ? (item as AddedTarget) : null
   const privateTarget = item.network === 'private'
-  return <div data-testid={`network-${tone}-${item.id}`} style={{ border: '1px solid var(--ant-color-border-secondary, #f0f0f0)', borderRadius: 8, padding: 12 }}>
+  return <div data-testid={`network-${tone}-${item.id}`} style={{ border: '1px solid var(--ant-color-border-secondary, #f0f0f0)', borderRadius: 'var(--ant-border-radius)', padding: 12 }}>
     <Space size={[6, 6]} wrap style={{ marginBottom: 8 }}>
-      <Tag color={tone === 'add' ? 'success' : 'default'}>{t(tone === 'add' ? 'appPlatform.network.review.adding' : 'appPlatform.network.review.removing')}</Tag>
+      <StatusTag tone={tone === 'add' ? 'success' : 'neutral'}>{t(tone === 'add' ? 'appPlatform.network.review.adding' : 'appPlatform.network.review.removing')}</StatusTag>
       {fromApp && tone === 'add'
         ? <Typography.Text strong>{t('appPlatform.network.review.appChosenId', { id: item.id })}</Typography.Text>
         : <Typography.Text strong>{item.id}</Typography.Text>}
-      <Tag color={privateTarget ? 'error' : 'default'} data-testid={privateTarget ? 'network-private-tag' : undefined}>{t(`appPlatform.network.class.${item.network}`, { defaultValue: item.network })}</Tag>
-      {added?.plain_http && <Tag color="error" data-testid="network-plain-http-tag">{t('appPlatform.network.review.plainHTTP')}</Tag>}
+      {privateTarget
+        ? <StatusTag tone="error" testId="network-private-tag">{t(`appPlatform.network.class.${item.network}`, { defaultValue: item.network })}</StatusTag>
+        : <Tag>{t(`appPlatform.network.class.${item.network}`, { defaultValue: item.network })}</Tag>}
+      {added?.plain_http && <StatusTag tone="error" testId="network-plain-http-tag">{t('appPlatform.network.review.plainHTTP')}</StatusTag>}
     </Space>
     <Descriptions column={1} size="small" items={[
       { key: 'origin', label: t('appPlatform.network.origin'), children: <Typography.Text code>{item.origin}</Typography.Text> },
