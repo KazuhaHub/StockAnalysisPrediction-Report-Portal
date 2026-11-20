@@ -421,6 +421,7 @@ func (s *Store) DispatchSetDataQuota(ctx context.Context, raw, signature []byte,
 	if replay != nil {
 		return *replay, nil
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
 	snapshot, err := native(ctx, quotaRaiseRequestFor(command))
@@ -429,10 +430,18 @@ func (s *Store) DispatchSetDataQuota(ctx context.Context, raw, signature []byte,
 		// effect unknown: the raise may have applied, and sending the same command again converges.
 		if code, known := classifyRaiseFailure(err); known {
 			failure := &DataEffectFailedError{Header: command.CommandHeader, Code: code, Cause: err}
-			if failErr := s.failDataEffect(ctx, command.CommandHeader, command.Payload.NamespaceID, code, false, func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error {
+			rp := command.Payload
+			recordCtx, recordCancel := failureRecordContext(parent)
+			defer recordCancel()
+			failErr := s.failDataEffect(recordCtx, command.CommandHeader, rp.NamespaceID, code, false, func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error {
 				_, err := control.VerifySetDataQuotaSettlement(raw, signature, a, now)
 				return err
-			}); failErr != nil {
+			}, func(ctx context.Context, tx *sql.Tx, now int64) error {
+				// The claim enlarged the namespace's reservations before the native call; the raise did not happen.
+				return s.restoreNamespaceReservation(ctx, tx, rp.NamespaceID, command.InstallationID,
+					mustDataInt(rp.OldBytes), mustDataInt(rp.OldInodes), mustDataInt(rp.NewBytes), mustDataInt(rp.NewInodes), now)
+			})
+			if failErr != nil {
 				return zero, fmt.Errorf("raise data quota: %w", errors.Join(err, failErr))
 			}
 			return zero, fmt.Errorf("raise data quota: %w", failure)
@@ -527,7 +536,14 @@ func importDataRequestFor(c control.ImportDataCommand) data.ImportDataRequest {
 	}
 }
 
-func (s *Store) claimImportData(ctx context.Context, raw, signature []byte) (command control.ImportDataCommand, receipt *ImportDataReceipt, err error) {
+func (s *Store) claimImportData(ctx context.Context, raw, signature []byte) (control.ImportDataCommand, *ImportDataReceipt, error) {
+	var resumed bool
+	return s.claimImportDataResuming(ctx, raw, signature, &resumed)
+}
+
+// claimImportDataResuming claims an import and reports through resumed whether it took over a row an earlier run left
+// unknown: that run may already have cleared the namespace.
+func (s *Store) claimImportDataResuming(ctx context.Context, raw, signature []byte, resumed *bool) (command control.ImportDataCommand, receipt *ImportDataReceipt, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return command, nil, err
@@ -559,6 +575,7 @@ func (s *Store) claimImportData(ctx context.Context, raw, signature []byte) (com
 			}
 			return command, &parsed, nil
 		case "unknown":
+			*resumed = true
 			return command, nil, tx.Commit()
 		case "reverted":
 			if failed := failedDataEffectOf(row, command.CommandHeader); failed != nil {
@@ -641,6 +658,9 @@ func loadInstallDataByNamespace(ctx context.Context, tx *sql.Tx, installation, n
 	return receipt, nil
 }
 
+// newImportContext bounds the native import; a test replaces it to expire the bound.
+var newImportContext = detachedImportContext
+
 // DispatchImportData claims an import once and runs it. An import left unknown is finished under the same claim.
 func (s *Store) DispatchImportData(ctx context.Context, raw, signature []byte, native ImportDataNative) (ImportDataReceipt, error) {
 	var zero ImportDataReceipt
@@ -652,14 +672,16 @@ func (s *Store) DispatchImportData(ctx context.Context, raw, signature []byte, n
 		return zero, err
 	}
 	defer s.releaseDataExecution()
-	command, replay, err := s.claimImportData(ctx, raw, signature)
+	var resumed bool
+	command, replay, err := s.claimImportDataResuming(ctx, raw, signature, &resumed)
 	if err != nil {
 		return zero, fmt.Errorf("claim import data: %w", err)
 	}
 	if replay != nil {
 		return *replay, nil
 	}
-	ctx, cancel := detachedImportContext(ctx, mustDataInt(command.Payload.ArchiveBytes))
+	parent := ctx
+	ctx, cancel := newImportContext(ctx, mustDataInt(command.Payload.ArchiveBytes))
 	defer cancel()
 	snapshot, err := native(ctx, importDataRequestFor(command))
 	if err != nil {
@@ -667,11 +689,16 @@ func (s *Store) DispatchImportData(ctx context.Context, raw, signature []byte, n
 		// failure code, so the restore that undoes a half-done import is not blocked by an unsettled command of
 		// the installation. It is 'unknown' only if the process dies before this point.
 		code, dirty := classifyImportFailure(err)
+		// A resumed claim cannot tell what the crashed run did: it may already have cleared the namespace.
+		dirty = dirty || resumed
 		failure := &DataEffectFailedError{Header: command.CommandHeader, Code: code, Cause: err}
-		if failErr := s.failDataEffect(ctx, command.CommandHeader, command.Payload.NamespaceID, code, dirty, func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error {
+		// Recorded on a context of its own: the native call may have failed because its deadline expired.
+		recordCtx, recordCancel := failureRecordContext(parent)
+		defer recordCancel()
+		if failErr := s.failDataEffect(recordCtx, command.CommandHeader, command.Payload.NamespaceID, code, dirty, func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error {
 			_, err := control.VerifyImportDataSettlement(raw, signature, a, now)
 			return err
-		}); failErr != nil {
+		}, nil); failErr != nil {
 			return zero, fmt.Errorf("import data: %w", errors.Join(err, failErr))
 		}
 		return zero, fmt.Errorf("import data: %w", failure)

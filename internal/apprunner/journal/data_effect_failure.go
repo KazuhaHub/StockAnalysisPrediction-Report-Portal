@@ -126,7 +126,10 @@ func classifyRaiseFailure(err error) (string, bool) {
 }
 
 // failDataEffect turns the claimed row into the reverted failure record, if the row is still exactly the claim.
-func (s *Store) failDataEffect(ctx context.Context, h control.CommandHeader, namespace, code string, dirty bool, check func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error) error {
+//
+// The caller passes a context that outlives the native call's own bounded one: a native call that failed because its
+// deadline expired must still be able to record that. same is an optional step in the same transaction.
+func (s *Store) failDataEffect(ctx context.Context, h control.CommandHeader, namespace, code string, dirty bool, check func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error, same func(ctx context.Context, tx *sql.Tx, now int64) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -152,7 +155,35 @@ func (s *Store) failDataEffect(ctx context.Context, h control.CommandHeader, nam
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return fmt.Errorf("fail data effect rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
 	}
+	if same != nil {
+		if err := same(ctx, tx, now); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// failureRecordContext is the context a failure is recorded on: detached from the native call's expired or cancelled
+// one, with its own short bound.
+func failureRecordContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+}
+
+// restoreNamespaceReservation puts a namespace's two reservation rows back to the size of the given limits, when a raise
+// that had enlarged them ended definitively failed. Only rows still at the enlarged size are touched.
+func (s *Store) restoreNamespaceReservation(ctx context.Context, tx *sql.Tx, namespace, installation string, oldBytes, oldInodes, newBytes, newInodes, now int64) error {
+	oldPlan, ok := s.namespacePlan(namespace, installation, oldBytes, oldInodes)
+	if !ok {
+		return nil
+	}
+	newPlan, _ := s.namespacePlan(namespace, installation, newBytes, newInodes)
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET disk_bytes=?,updated_ms=? WHERE resource_id=? AND state='held' AND disk_bytes=?`,
+		oldPlan.diskBytes, now, namespace, newPlan.diskBytes); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET disk_bytes=?,updated_ms=? WHERE resource_id=? AND state='held' AND disk_bytes=?`,
+		oldPlan.checkpointBytes, now, checkpointReservationID(namespace), newPlan.checkpointBytes)
+	return err
 }
 
 // failedDataEffectOf answers a reverted row of a data effect with its typed failure, or nil when the row is not one.

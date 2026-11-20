@@ -287,3 +287,95 @@ func TestUpdateStartRefusedOverAFailedImportUntilARestoreApplied(t *testing.T) {
 		t.Fatalf("a clean refusal blocked a start: %v", err)
 	}
 }
+
+// An import that fails because its own bound expired is still recorded: the failure is written on a context of its
+// own, so the row never stays unknown and the rollback restore is not refused.
+func TestImportDataFailureOnAnExpiredBoundIsRecordedAndTheRollbackApplies(t *testing.T) {
+	ctx := context.Background()
+	f, checkpoint, restore, restoreRaw, restoreSig := restoreJournalFixture(t)
+	stoppedFixture(t, f, checkpoint)
+	command, raw, sig := importCommandFor(t, f, checkpoint, 1, mustDataInt(f.data.QuotaBytes), mustDataInt(f.data.QuotaInodes))
+	previous := newImportContext
+	newImportContext = func(parent context.Context, _ int64) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.WithoutCancel(parent), time.Millisecond)
+	}
+	t.Cleanup(func() { newImportContext = previous })
+	expiring := func(ctx context.Context, request data.ImportDataRequest) (data.ImportDataSnapshot, error) {
+		<-ctx.Done()
+		return data.ImportDataSnapshot{}, errors.Join(data.ErrImportIncomplete, ctx.Err())
+	}
+	_, err := f.store.DispatchImportData(ctx, raw, sig, expiring)
+	var failed *DataEffectFailedError
+	if !errors.As(err, &failed) || failed.Code != dataFailureIncomplete {
+		t.Fatalf("an import that expired: %v", err)
+	}
+	state, receipt := commandRow(t, f, command.EffectID)
+	if record, ok := parseDataEffectFailure(receipt); state != "reverted" || !ok || !record.Dirty {
+		t.Fatalf("an expired import is %q %q", state, receipt)
+	}
+	run := func(ctx context.Context, request data.RestoreRequest) (data.RestoreSnapshot, error) {
+		return restoreSnapshotFor(restore), nil
+	}
+	if restored, err := f.store.dispatchRestore(ctx, restoreRaw, restoreSig, run); err != nil || restored.State != "restored" {
+		t.Fatalf("the rollback restore after an expired import: %+v %v", restored, err)
+	}
+}
+
+// A claim that resumes an unknown row cannot know what the crashed run did, so even a pre-clear refusal is dirty.
+func TestImportDataResumedClaimRecordsEveryFailureDirty(t *testing.T) {
+	ctx := context.Background()
+	f, checkpoint := appliedCheckpointFixture(t)
+	stoppedFixture(t, f, checkpoint)
+	command, raw, sig := importCommandFor(t, f, checkpoint, 1, mustDataInt(f.data.QuotaBytes), mustDataInt(f.data.QuotaInodes))
+	if _, _, err := f.store.claimImportData(ctx, raw, sig); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	if _, err := f.store.DispatchImportData(ctx, raw, sig, failingImport(data.ErrImportArchiveMissing, &calls)); !errors.Is(err, data.ErrImportArchiveMissing) {
+		t.Fatalf("resumed import: %v", err)
+	}
+	_, receipt := commandRow(t, f, command.EffectID)
+	if record, ok := parseDataEffectFailure(receipt); !ok || !record.Dirty || record.Code != dataFailureArchiveMissing {
+		t.Fatalf("a resumed refusal is %q", receipt)
+	}
+	if !guardRefuses(t, f, checkpoint.NamespaceID) {
+		t.Fatal("a start was allowed after a resumed, possibly half-done import")
+	}
+}
+
+// A raise that ends definitively failed gives back the larger reservation its claim took.
+func TestSetDataQuotaRefusedRaiseRestoresTheNamespaceReservations(t *testing.T) {
+	ctx := context.Background()
+	f, _ := appliedCheckpointFixture(t)
+	fixtureVolumePresent(t, f)
+	if err := f.store.SetCapacityBudgets(CapacityBudgets{MemoryMiB: 1 << 20, CPUMillis: 1 << 20, DiskBytes: 1 << 50, CheckpointBytes: 1 << 50, ImageStoreBytes: 1 << 40, RunningBackends: 64}); err != nil {
+		t.Fatal(err)
+	}
+	oldBytes, oldInodes := mustDataInt(f.data.QuotaBytes), mustDataInt(f.data.QuotaInodes)
+	namespace := f.command.Payload.NamespaceID
+	oldPlan, _ := f.store.namespacePlan(namespace, f.command.InstallationID, oldBytes, oldInodes)
+	for _, row := range []struct {
+		resource string
+		disk     int64
+	}{{namespace, oldPlan.diskBytes}, {checkpointReservationID(namespace), oldPlan.checkpointBytes}} {
+		mustJournalExec(t, f.store.db, `INSERT INTO runner_reservations(id,resource_id,installation_id,kind,memory_mib,cpu_millis,disk_bytes,image_bytes,state,created_ms,updated_ms)
+			VALUES(?,?,?,'namespace',0,0,?,0,'held',1,1)`, fixtureID(7950+len(row.resource)%7), row.resource, f.command.InstallationID, row.disk)
+	}
+	reserved := func() (int64, int64) {
+		return scalarJournalInt(t, f.store.db, `SELECT disk_bytes FROM runner_reservations WHERE resource_id=?`, namespace),
+			scalarJournalInt(t, f.store.db, `SELECT disk_bytes FROM runner_reservations WHERE resource_id=?`, checkpointReservationID(namespace))
+	}
+	_, raw, sig := quotaRaise(t, f, 1, oldBytes, oldInodes, oldBytes*2, oldInodes*2)
+	enlargedInCall := false
+	refuse := func(ctx context.Context, request data.QuotaRaiseRequest) (data.QuotaRaiseSnapshot, error) {
+		d, c := reserved()
+		enlargedInCall = d > oldPlan.diskBytes || c > oldPlan.checkpointBytes
+		return data.QuotaRaiseSnapshot{}, errors.Join(data.ErrQuotaRaiseUnsafe, errors.New("live limits differ"))
+	}
+	if _, err := f.store.DispatchSetDataQuota(ctx, raw, sig, refuse); !errors.Is(err, data.ErrQuotaRaiseUnsafe) {
+		t.Fatalf("refused raise: %v", err)
+	}
+	if d, c := reserved(); !enlargedInCall || d != oldPlan.diskBytes || c != oldPlan.checkpointBytes {
+		t.Fatalf("reservations after a refused raise: data=%d checkpoints=%d want %d %d (enlarged during the claim: %v)", d, c, oldPlan.diskBytes, oldPlan.checkpointBytes, enlargedInCall)
+	}
+}
