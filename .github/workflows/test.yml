@@ -810,6 +810,20 @@ jobs:
             GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/report-portal
             sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha"
           done
+      # release.yml's build-runner job ships app-runner for linux/amd64 and linux/arm64 only (doc 182 D8); the same
+      # compile and provenance check run here so a break is found before a tag.
+      - name: Build and verify app-runner
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          for arch in amd64 arm64; do
+            out="bin/runner-linux-${arch}/app-runner"
+            GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/app-runner
+            sh scripts/check-release-build.sh "$out" linux "$arch" "$sha" app-runner
+          done
       - name: Trim the build cache to what this run used
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
         run: find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
