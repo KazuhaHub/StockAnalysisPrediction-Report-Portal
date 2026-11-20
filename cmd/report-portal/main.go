@@ -150,6 +150,9 @@ func printRestore(rep *app.RestoreReport, force bool) {
 	fmt.Printf("%s %d rows into %d of the backup's %d tables\n", verb, rep.Total, len(rep.Rows), len(rep.Header.Tables))
 	if force {
 		fmt.Printf("restore complete; %d existing rows were replaced\n", rep.Replaced)
+		if rep.MachineTokensLost > 0 {
+			fmt.Printf("%d machine tokens created after this backup are gone and must be recreated\n", rep.MachineTokensLost)
+		}
 		return
 	}
 	fmt.Printf("DRY RUN — nothing was written. This would DELETE %d existing rows.\n", rep.Replaced)
