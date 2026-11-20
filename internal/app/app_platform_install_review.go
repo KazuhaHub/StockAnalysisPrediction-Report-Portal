@@ -19,20 +19,25 @@ const platformNativeInstallFormat = "portal.install-review/1-dev.1"
 const platformFrontendInstallFormat = "portal.frontend-install-review/1-dev.1"
 
 type platformInstallProjection struct {
-	Format               string                        `json:"format"`
-	AppID                string                        `json:"app_id"`
-	PublisherID          string                        `json:"publisher_id"`
-	ReleaseSHA256        string                        `json:"release_sha256"`
-	TrustRevision        int64                         `json:"trust_revision"`
-	KeyRevision          int64                         `json:"key_revision"`
-	KeyID                string                        `json:"key_id"`
-	ControllerEpoch      string                        `json:"controller_epoch"`
-	ActorAuthority       string                        `json:"actor_authority"`
-	PlatformAPI          string                        `json:"platform_api"`
-	DeclinedCapabilities []string                      `json:"declined_capabilities"`
-	DataQuotaBytes       int64                         `json:"data_quota_bytes"`
-	Audience             []platformInstallAudience     `json:"audience,omitempty"`
-	Runtime              *platformManagedInstallTarget `json:"runtime,omitempty"`
+	Format               string   `json:"format"`
+	AppID                string   `json:"app_id"`
+	PublisherID          string   `json:"publisher_id"`
+	ReleaseSHA256        string   `json:"release_sha256"`
+	TrustRevision        int64    `json:"trust_revision"`
+	KeyRevision          int64    `json:"key_revision"`
+	KeyID                string   `json:"key_id"`
+	ControllerEpoch      string   `json:"controller_epoch"`
+	ActorAuthority       string   `json:"actor_authority"`
+	PlatformAPI          string   `json:"platform_api"`
+	DeclinedCapabilities []string `json:"declined_capabilities"`
+	DataQuotaBytes       int64    `json:"data_quota_bytes"`
+	// The approved inode limit, and what the descriptor asked for (doc 185). A plan written before
+	// these fields existed has none of them and reads as today's fixed 65,536 (see approvedQuota).
+	DataQuotaInodes          int64                         `json:"data_quota_inodes,omitempty"`
+	RequestedDataQuotaBytes  int64                         `json:"requested_data_quota_bytes,omitempty"`
+	RequestedDataQuotaInodes int64                         `json:"requested_data_quota_inodes,omitempty"`
+	Audience                 []platformInstallAudience     `json:"audience,omitempty"`
+	Runtime                  *platformManagedInstallTarget `json:"runtime,omitempty"`
 }
 
 // Only an internal development protocol is assigned here; this is not Portal's
@@ -114,7 +119,7 @@ func platformLoadInstallProjectionForTarget(e migExec, release platformStagedRel
 		return platformInstallProjection{}, err
 	}
 	declined := platformDeclinedCapabilities(selection)
-	return platformInstallProjection{Format: format, Runtime: target, AppID: release.appID, PublisherID: release.publisherID, ReleaseSHA256: release.sha256, TrustRevision: release.trustRevision, KeyRevision: release.keyRevision, KeyID: release.verificationKeyID, ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: declined, DataQuotaBytes: 256 << 20}, nil
+	return platformInstallProjection{Format: format, Runtime: target, AppID: release.appID, PublisherID: release.publisherID, ReleaseSHA256: release.sha256, TrustRevision: release.trustRevision, KeyRevision: release.keyRevision, KeyID: release.verificationKeyID, ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: declined}, nil
 }
 
 // Generic static installation defaults to no application persistence. Native
@@ -166,7 +171,7 @@ func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, ses
 		if err != nil {
 			return err
 		}
-		if err = platformSetInstallProjectionFormat(e, &projection, format); err != nil {
+		if err = platformSetInstallProjectionFormat(e, &projection, format, platformQuotaApprovalFrom(ctx)); err != nil {
 			return err
 		}
 		projection.Audience, err = resolvePlatformInstallAudience(e, targets, control.nowMS)
@@ -334,7 +339,11 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if requiredFormat != "" && storedProjection.Format != requiredFormat {
 			return errAppPlatformPlanChanged
 		}
-		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format); err != nil {
+		approval := platformQuotaApproval{}
+		if platformBackendQuotaFormat(storedProjection.Format) {
+			approval = platformQuotaApproval{storedProjection.DataQuotaBytes, storedProjection.DataQuotaInodes}
+		}
+		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format, approval); err != nil {
 			return err
 		}
 		if err := validatePlatformInstallAudience(e, storedProjection.Audience, control.nowMS); err != nil {

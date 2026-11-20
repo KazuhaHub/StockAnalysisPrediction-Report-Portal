@@ -230,7 +230,7 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 		return zero, errAppPlatformStageEvidence
 	}
 	if origin != expected.installationID || owner != expected.installationID || namespaceState != "active" ||
-		namespaceFormat != activeFormat || quota != 256<<20 || observedBytes < 0 || observedBytes > quota ||
+		namespaceFormat != activeFormat || !platformValidQuotaBytes(quota) || observedBytes < 0 || observedBytes > quota ||
 		(!allowDisabled && writerFence != 1) ||
 		(allowDisabled && writerFence < 1) || retained.Valid || deleted.Valid {
 		return zero, fmt.Errorf("%w: checkpoint namespace origin=%s owner=%s state=%s format=%d active=%d quota=%d bytes=%d writer=%d retained=%v deleted=%v",

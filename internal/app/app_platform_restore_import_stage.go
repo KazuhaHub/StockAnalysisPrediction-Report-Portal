@@ -162,7 +162,7 @@ func platformImportCommand(expected platformOperationLease, runtime platformRunt
 			GrantID: ev.grantID, RecoverySetID: ev.plan.RecoverySetID, CheckpointID: ev.source.checkpointID, NamespaceID: ev.source.namespaceID,
 			ReleaseSHA256: ev.source.release, ManifestSHA256: ev.source.manifest, ArchiveBytes: strconv.FormatInt(ev.source.archiveBytes, 10),
 			DataFormat: strconv.FormatInt(ev.source.dataFormat, 10), WriterFence: strconv.FormatInt(ev.source.writerFence, 10),
-			QuotaBytes: strconv.FormatInt(ev.source.quotaBytes, 10), QuotaInodes: platformImportQuotaInodes,
+			QuotaBytes: strconv.FormatInt(ev.source.quotaBytes, 10), QuotaInodes: strconv.FormatInt(ev.source.quotaInodes, 10),
 			SourceProjectID: cp.ProjectID, SourceNamespaceInode: cp.NamespaceInode, SourceDevice: cp.Device,
 			SourceFilesystemUUID: ev.source.sourceFilesystemUUID, SourceRootInode: ev.source.sourceRootInode,
 		},

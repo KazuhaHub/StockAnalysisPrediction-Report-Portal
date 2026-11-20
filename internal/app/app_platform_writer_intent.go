@@ -86,7 +86,7 @@ func loadPlatformWriterIntentSource(e migExec, lease platformOperationLease, run
 	if err := e.queryRow(`SELECT id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID).Scan(&result.namespaceID, &origin, &owner, &state, &schema, &quota, &used, &writer, &revision, &retained, &deleted, &created, &updated); err != nil {
 		return zero, false, err
 	}
-	if !platformValidUUID(result.namespaceID) || origin != lease.installationID || owner != lease.installationID || state != "active" || schema != int64(parsed.Manifest.Data.Schema) || quota != 256<<20 || used < 0 || used > quota || writer != 1 || (revision != 2 && revision != 3) || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > now {
+	if !platformValidUUID(result.namespaceID) || origin != lease.installationID || owner != lease.installationID || state != "active" || schema != int64(parsed.Manifest.Data.Schema) || !platformValidQuotaBytes(quota) || used < 0 || used > quota || writer != 1 || (revision != 2 && revision != 3) || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > now {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	namespaceUpdated := updated

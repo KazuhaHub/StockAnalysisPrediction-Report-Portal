@@ -55,7 +55,7 @@ func loadPlatformStaticCandidate(e migExec, lease platformOperationLease, runtim
 	if err != nil {
 		return zero, err
 	}
-	if count != 1 || !platformValidUUID(result.namespace) || origin != lease.installationID || !owner.Valid || owner.String != lease.installationID || state != "active" || quota != 256<<20 || writer != 1 || revision != 2 || result.format < 1 || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > now {
+	if count != 1 || !platformValidUUID(result.namespace) || origin != lease.installationID || !owner.Valid || owner.String != lease.installationID || state != "active" || !platformValidQuotaBytes(quota) || writer != 1 || revision != 2 || result.format < 1 || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > now {
 		return zero, errAppPlatformStageEvidence
 	}
 	namespaceUpdated := updated

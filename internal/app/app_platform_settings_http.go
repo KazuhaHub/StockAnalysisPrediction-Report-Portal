@@ -37,6 +37,7 @@ type platformSettingsData struct {
 	State         string `json:"state"`
 	Format        int64  `json:"format"`
 	QuotaBytes    string `json:"quota_bytes"`
+	QuotaInodes   string `json:"quota_inodes"`
 	ObservedBytes string `json:"observed_bytes"`
 	Revision      string `json:"revision"`
 }
@@ -389,18 +390,19 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 		}
 
 		var namespace, state string
-		var format, quota, observed, dataRevision int64
-		err = e.queryRow(`SELECT id,state,data_format,quota_bytes,observed_bytes,revision
+		var format, quota, inodes, observed, dataRevision int64
+		err = e.queryRow(`SELECT id,state,data_format,quota_bytes,quota_inodes,observed_bytes,revision
 			FROM app_platform_data_namespaces
 			WHERE origin_installation_id=? OR owner_installation_id=?
 			ORDER BY updated_ms DESC,id DESC LIMIT 1`,
 			installation, installation).
-			Scan(&namespace, &state, &format, &quota, &observed, &dataRevision)
+			Scan(&namespace, &state, &format, &quota, &inodes, &observed, &dataRevision)
 		switch {
 		case err == nil:
 			result.Data = &platformSettingsData{
 				ID: namespace, State: state, Format: format,
 				QuotaBytes:    strconv.FormatInt(quota, 10),
+				QuotaInodes:   strconv.FormatInt(inodes, 10),
 				ObservedBytes: strconv.FormatInt(observed, 10),
 				Revision:      strconv.FormatInt(dataRevision, 10),
 			}

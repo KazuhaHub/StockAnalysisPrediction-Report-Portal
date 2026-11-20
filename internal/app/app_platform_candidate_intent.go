@@ -69,7 +69,7 @@ func loadPlatformCandidateIntentMode(e migExec, lease platformOperationLease, ru
 	if err != nil {
 		return zero, false, err
 	}
-	if origin != lease.installationID || owner != lease.installationID || state != "active" || format < 1 || quota != 256<<20 || used < 0 || used > quota || writer != 1 || revision != 2 || retained.Valid || deleted.Valid {
+	if origin != lease.installationID || owner != lease.installationID || state != "active" || format < 1 || !platformValidQuotaBytes(quota) || used < 0 || used > quota || writer != 1 || revision != 2 || retained.Valid || deleted.Valid {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	err = e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms FROM app_platform_operation_effects WHERE operation_id=? AND stage='prepare_data' AND effect_number=1`, lease.id).Scan(&dataEffect, &dataKind, &dataDigest, &dataRuntime, &epoch, &admitted, &observed, &state, &receipt, &created, &updated)

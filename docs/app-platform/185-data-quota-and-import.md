@@ -241,3 +241,42 @@ Q8. **Production image sizes.** Decided: keep D11's 8 GiB data and 8 GiB checkpo
 Q9. **Schema change in section 11.** Decided: approved as migration `0024`.
 
 Q10. **Order.** Decided: P1 first; it unblocks market-monitor's quota on its own. Then P3 import, which gives the fast host-side seed. P2 hard links is needed before P3 if market-monitor's seed contains its `snapshots/` links. Alternatively the seed can be packed without `snapshots/`, which the app rebuilds, so P3 can come before P2.
+
+## Implementation notes (P1)
+
+P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and what is left.
+
+**Landed**
+
+- **Descriptor (3.1).** `data.quota {bytes, inodes}` in `descriptor-v2.schema.json`, validated by `appplatform.ValidDataQuota`. The Go and TypeScript products are regenerated.
+- **Migration `0024` (11).** `quota_inodes`, the two actions and the `import` stage, for SQLite and PostgreSQL, with up, restore and rewind tests.
+  - The control schema now has three frozen shapes, because 0015, 0021 and 0024 each widen the same CHECK lists. Each step's verifier accepts its own shape and the current one.
+  - `import_data` and the `import` stage are only representable. Nothing accepts a plan with either action, and `set_data_quota` is not accepted yet either (see below).
+- **Approved quota (3.2).**
+  - An install plan carries the approved bytes and inodes and the requested pair, in the canonical bytes.
+  - `POST /api/admin/app-platform/plans` for `install` takes the optional decimal strings `data_quota_bytes` and `data_quota_inodes`. Each must be within bounds and not above the request.
+  - The prepare-data command, the namespace row and every check that compared with the fixed 256 MiB now use the approved values. A plan written before the fields reads as 256 MiB and 65,536.
+  - Restore import (168) uses the namespace's own `quota_inodes`.
+- **Update review.** A target descriptor that asks for more than the installation's current quota shows the current, requested and raise values. A request for the same or less shows nothing and keeps the approved quota.
+- **Runner admission (3.3).**
+  - A namespace reserves three quotas: the data and two retained checkpoints. The reservation row still stores that total, so rows written before this change read as 256 MiB.
+  - With a separate checkpoint volume, `DeriveBudgets` sets `CheckpointBytes` from that volume. The data volume then counts one quota per namespace and the checkpoint volume two. Otherwise all three count against `disk_bytes`.
+  - A refusal is the typed dimension `data_quota` or `data_quota_checkpoint`, shown as the error code `data_quota_capacity`, with the requested and remaining bytes in the receipt. The error code is translated in en-US, zh-CN and zh-TW.
+- **Checkpoint caps (4).**
+  - A checkpoint's archive cap is its quota plus 64 MiB, and its entry cap is its inode quota. An import uses the quota it carries.
+  - The fixed 512 MiB in command validation is now the platform ceiling of 16 GiB plus 64 MiB.
+- **Console.** The settings page shows the inode quota and the usage as a percentage of the quota.
+
+**Deviations**
+
+- **Update raise not applied.** The update review shows the raise, but the update keeps the approved quota (`raise_applied` is false). Applying it in the update would change the update-start evidence of every update path; it belongs with `set_data_quota`.
+- **Restore walk bound.** Restore has no live quota in the runner journal, so its entry walk is bounded by the platform maximum (1,000,000) and its archive bound is the checkpoint's own verified size. The XFS project quota is the binding limit of a restore.
+- **Frontend object storage** keeps its fixed 256 MiB (`platformObjectNamespaceBytes`). It is not an XFS quota.
+
+**Not done**
+
+- **`set_data_quota`.** There is no reviewed plan, no operation, no runner command or effect, and no `data_quota_lower_refused` check yet. The action is in the schema only.
+  - Doing it properly means a new lifecycle action in the generation history chain: every history loader (install, update, resume, restore) must read the quota from the namespace row rather than the install-time receipt.
+  - The runner also needs a signed command with its own receipt and a journal evidence update fenced together with the namespace row.
+- **Console "Raise quota"** and its review dialog, which need `set_data_quota`. The console install review does not yet offer a smaller approval; the API does.
+- **Hard links** (P2), and **import** (P3), as the phasing says.

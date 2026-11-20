@@ -95,7 +95,7 @@ func (s *Server) loadPlatformWritableBackendHistoryPhased(e migExec, b platformB
 		return nil, errAppPlatformLaunchUnavailable
 	}
 	var plan platformInstallProjection
-	if json.Unmarshal([]byte(rawPlan), &plan) != nil || plan.Format != platformWritableInstallFormat || plan.ControllerEpoch != b.epoch || plan.ReleaseSHA256 != b.release || plan.Runtime == nil || plan.DataQuotaBytes != 256<<20 {
+	if json.Unmarshal([]byte(rawPlan), &plan) != nil || plan.Format != platformWritableInstallFormat || plan.ControllerEpoch != b.epoch || plan.ReleaseSHA256 != b.release || plan.Runtime == nil || !platformValidQuotaBytes(plan.DataQuotaBytes) {
 		return nil, errAppPlatformLaunchUnavailable
 	}
 	// The runtime binding row is the one database read this part of the history needs; the
@@ -113,7 +113,7 @@ func (s *Server) loadPlatformWritableBackendHistoryPhased(e migExec, b platformB
 	if err := e.queryRow(`SELECT origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE id=?`, b.namespace).Scan(&origin, &owner, &state, &format, &quota, &used, &writer, &revision, &retained, &deleted, &w.namespaceCreated, &w.namespaceUpdated); err != nil {
 		return nil, errAppPlatformLaunchUnavailable
 	}
-	if origin != b.installation || !owner.Valid || owner.String != b.installation || state != "active" || format != b.format || quota != 256<<20 || used < 0 || used > quota || writer != 1 || revision != 3 || retained.Valid || deleted.Valid || w.namespaceCreated < 0 || w.namespaceUpdated < w.namespaceCreated || w.namespaceUpdated > completed {
+	if origin != b.installation || !owner.Valid || owner.String != b.installation || state != "active" || format != b.format || quota != plan.DataQuotaBytes || used < 0 || used > quota || writer != 1 || revision != 3 || retained.Valid || deleted.Valid || w.namespaceCreated < 0 || w.namespaceUpdated < w.namespaceCreated || w.namespaceUpdated > completed {
 		return nil, errAppPlatformLaunchUnavailable
 	}
 	w.namespaceRevision = revision

@@ -18,9 +18,6 @@ import (
 // platformImportReceiptFormat is the format the runner stamps on an import receipt.
 const platformImportReceiptFormat = "portal.runner.import-checkpoint-receipt/1-dev.1"
 
-// Inode quota reserved for an imported namespace, the same figure prepare-data reserves.
-const platformImportQuotaInodes = "65536"
-
 func platformDecimal(value string, positive bool) (int64, bool) {
 	n, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || n < 0 || (positive && n == 0) || strconv.FormatInt(n, 10) != value {
