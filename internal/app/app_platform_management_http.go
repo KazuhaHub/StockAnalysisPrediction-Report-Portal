@@ -169,6 +169,10 @@ func platformManagementAudience(raw json.RawMessage) ([]platformAudienceTarget, 
 
 func platformManagementError(w http.ResponseWriter, err error) {
 	status, code := 503, "app_platform_unavailable"
+	if dataStatus, dataCode, ok := platformDataActionError(err); ok {
+		jsonErrorCode(w, dataStatus, dataCode, "application management request could not be completed")
+		return
+	}
 	switch {
 	case errors.Is(err, errPlatformManagementInput):
 		status, code = 400, "app_platform_invalid_request"
@@ -313,7 +317,8 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	}
 	fields, err := platformManagementObject(raw, "action",
 		"release_sha256", "trust_revision", "audience",
-		"installation_id", "data_namespace_id", "recovery_set_id", "recovers_operation_id")
+		"installation_id", "data_namespace_id", "recovery_set_id", "recovers_operation_id",
+		"data_quota_bytes", "data_quota_inodes", "archive_sha256")
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -332,6 +337,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		}
 	} else if action != "disable" && action != "uninstall" && action != "enable" &&
 		action != "repair" && action != "restore" &&
+		action != "set_data_quota" && action != "import_data" &&
 		action != "delete_data" && !platformRecoveryAction(action) {
 		platformManagementError(w, errPlatformManagementInput)
 		return
@@ -609,6 +615,61 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		writeJSON(w, platformRepairManagementResponse(review, projection))
+	case "set_data_quota":
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		bytesText, bytesErr := platformManagementString(fields, "data_quota_bytes")
+		inodesText, inodesErr := platformManagementString(fields, "data_quota_inodes")
+		if len(fields) != 4 || installationErr != nil || bytesErr != nil || inodesErr != nil || !platformValidUUID(installation) ||
+			!platformPositiveCounter(bytesText) || !platformPositiveCounter(inodesText) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		newBytes, bytesParseErr := strconv.ParseInt(bytesText, 10, 64)
+		newInodes, inodesParseErr := strconv.ParseInt(inodesText, 10, 64)
+		if bytesParseErr != nil || inodesParseErr != nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			platformManagementError(w, errAppPlatformRuntimeConflict)
+			return
+		}
+		review, err := s.createPlatformSetDataQuotaReview(r.Context(), actor, installation, newBytes, newInodes, endpoint)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformDataQuotaPlan
+		if json.Unmarshal([]byte(review.JSON), &projection) != nil || projection.Format != platformSetDataQuotaFormat || projection.InstallationID != installation {
+			platformManagementError(w, errAppPlatformPlanChanged)
+			return
+		}
+		writeJSON(w, platformDataQuotaManagementResponse(review, projection))
+	case "import_data":
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		archive, archiveErr := platformManagementString(fields, "archive_sha256")
+		if len(fields) != 3 || installationErr != nil || archiveErr != nil || !platformValidUUID(installation) || !platformValidSHA(archive) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			platformManagementError(w, errAppPlatformRuntimeConflict)
+			return
+		}
+		review, err := s.createPlatformManagedImportDataReview(r.Context(), actor, installation, archive, endpoint)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformManagedUpdatePlan
+		if json.Unmarshal([]byte(review.JSON), &projection) != nil || projection.Format != platformManagedImportDataFormat ||
+			projection.InstallationID != installation || projection.Import == nil {
+			platformManagementError(w, errAppPlatformPlanChanged)
+			return
+		}
+		writeJSON(w, platformImportDataManagementResponse(review, projection))
 	case "restore":
 		if len(fields) != 3 || fields["installation_id"] == nil ||
 			fields["recovery_set_id"] == nil {
@@ -714,6 +775,22 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		}
 		result, err = s.consumePlatformFrontendEnableReviewContext(
 			r.Context(), actor, id, sha, key)
+	case "set_data_quota":
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			err = errAppPlatformRuntimeConflict
+			break
+		}
+		result, err = s.consumePlatformSetDataQuotaReviewContext(
+			r.Context(), actor, id, sha, key, endpoint)
+	case "import_data":
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			err = errAppPlatformRuntimeConflict
+			break
+		}
+		result, err = s.consumePlatformManagedImportDataReviewContext(
+			r.Context(), actor, id, sha, key, endpoint)
 	case "repair":
 		endpoint, ok := s.platformRuntimeEndpoint()
 		if !ok {
@@ -839,4 +916,37 @@ func (s *Server) apiPlatformOperationProgress(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, result)
+}
+
+func platformDataQuotaManagementResponse(review platformRemovalReview, p platformDataQuotaPlan) map[string]any {
+	item := map[string]any{
+		"action": "set_data_quota", "installation_id": p.InstallationID, "app_id": p.AppID, "publisher_id": p.PublisherID,
+		"current_data_quota_bytes":  strconv.FormatInt(p.CurrentQuotaBytes, 10),
+		"current_data_quota_inodes": strconv.FormatInt(p.CurrentQuotaInodes, 10),
+		"data_quota_bytes":          strconv.FormatInt(p.NewQuotaBytes, 10),
+		"data_quota_inodes":         strconv.FormatInt(p.NewQuotaInodes, 10),
+		"observed_bytes":            strconv.FormatInt(p.ObservedBytes, 10),
+		"capacity":                  p.Capacity,
+	}
+	if p.Capacity != "fits" {
+		item["capacity_dimension"] = p.CapacityDimension
+		item["capacity_requested"] = strconv.FormatInt(p.CapacityRequested, 10)
+		item["capacity_remaining"] = strconv.FormatInt(p.CapacityRemaining, 10)
+	}
+	return map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": item}
+}
+
+func platformImportDataManagementResponse(review platformRemovalReview, p platformManagedUpdatePlan) map[string]any {
+	step := p.Import
+	return map[string]any{
+		"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+		"review": map[string]any{
+			"action": "import_data", "installation_id": p.InstallationID, "app_id": p.AppID, "publisher_id": p.PublisherID,
+			"archive_sha256": step.ArchiveSHA256, "archive_bytes": strconv.FormatInt(step.ArchiveBytes, 10),
+			"archive_entries": strconv.FormatInt(step.Entries, 10), "content_bytes": strconv.FormatInt(step.ContentBytes, 10),
+			"archive_data_format": strconv.FormatInt(step.DataFormat, 10), "release_data_format": strconv.FormatInt(p.DataFormat, 10),
+			"data_quota_bytes": strconv.FormatInt(step.QuotaBytes, 10), "data_quota_inodes": strconv.FormatInt(step.QuotaInodes, 10),
+			"replaces_contents": true, "keeps_checkpoint": true, "requires_disabled": true,
+		},
+	}
 }

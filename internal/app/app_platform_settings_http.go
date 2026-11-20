@@ -79,7 +79,11 @@ type platformInstallationSettings struct {
 	Recovery             platformSettingsRecovery     `json:"recovery"`
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
 	RepairEligible       bool                         `json:"repair_eligible"`
-	ControlPaused        bool                         `json:"control_paused"`
+	// QuotaRaiseEligible and ImportEligible offer the reviewed set_data_quota and import_data actions (doc 185).
+	// A raise is online, so a running installation qualifies; an import needs the installation stopped.
+	QuotaRaiseEligible bool `json:"quota_raise_eligible"`
+	ImportEligible     bool `json:"import_eligible"`
+	ControlPaused      bool `json:"control_paused"`
 	// OperationPending is true while an operation of this installation is unfinished or unresolved;
 	// grant changes are refused until it settles.
 	OperationPending bool `json:"operation_pending"`
@@ -518,6 +522,13 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 						result.Phase == "recovery_required" ||
 						result.Phase == "review_required"))) {
 			result.RepairEligible = true
+		}
+		if !result.ControlPaused && pending == 0 && result.Backend.Required && result.Backend.Registered &&
+			platformValidSHA(result.CurrentReleaseSHA256) && result.Data != nil && result.Data.State == "active" {
+			running := result.DesiredState == "enabled" && result.Phase == "ready"
+			stopped := result.DesiredState == "disabled" && result.Phase == "disabled"
+			result.QuotaRaiseEligible = running || stopped
+			result.ImportEligible = stopped && generation >= 2
 		}
 		recovery, err := platformMigrationRecoveryProjection(e, installation)
 		if err != nil {

@@ -52,6 +52,8 @@ type platformManagedUpdatePlan struct {
 	TargetRuntime              *platformManagedInstallTarget `json:"target_runtime,omitempty"`
 	// Migration is the reviewed data migration the update runs between the source removal and the start.
 	Migration *platformMigrationStep `json:"migration,omitempty"`
+	// Import is the reviewed archive an import_data operation replaces the namespace with; nil for every other action.
+	Import *platformImportStep `json:"import,omitempty"`
 	// RecoversOperationID names the failed update this one retries; empty for an ordinary update.
 	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
 }
@@ -84,7 +86,7 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		o.source_generation,o.target_generation,o.action
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=?
-		AND o.action IN ('update','enable','repair') AND o.managed=1
+		AND o.action IN ('update','enable','repair','import_data') AND o.managed=1
 		AND o.stage IN ('migrate','download','stage','quiesce','start','probe','activate','complete','recovery_required')
 		AND (o.stage<>'complete' OR (o.completed_ms IS NOT NULL
 			AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL

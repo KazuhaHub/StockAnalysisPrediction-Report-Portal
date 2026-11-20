@@ -40,7 +40,7 @@ func (s *Server) loadPlatformWritableUpdateBackendHistoryPhased(e migExec, b pla
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
 		WHERE o.installation_id=?
-		AND o.action IN ('update','enable','repair') AND o.managed=1
+		AND o.action IN ('update','enable','repair','import_data') AND o.managed=1
 		AND o.target_generation=? AND o.stage='complete'
 		AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND o.lease_until_ms IS NULL AND o.error_code IS NULL
@@ -86,7 +86,7 @@ func (s *Server) loadPlatformWritableUpdateBackendHistoryPhased(e migExec, b pla
 	revision := uint64(11)
 	if history == appplatform.ActionEnable {
 		revision = 6
-	} else if history == appplatform.ActionRepair {
+	} else if history == appplatform.ActionRepair || history == appplatform.ActionImportData {
 		revision = 8
 	}
 	expected := platformOperationLease{
@@ -324,7 +324,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.managed=1
-		AND o.action IN ('install','update','enable','repair','restore')
+		AND o.action IN ('install','update','enable','repair','import_data','restore')
 		AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL
@@ -354,7 +354,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL
-		AND o.action IN ('install','update','enable','repair','restore')`,
+		AND o.action IN ('install','update','enable','repair','import_data','restore')`,
 		checkpoint.SourceDataEffectID, expected.installationID).
 		Scan(&dataReceipt, &dataAction, &dataGeneration,
 			&dataCompleted); err != nil ||
@@ -368,12 +368,16 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 			dataCompleted, errAppPlatformLaunchUnavailable)
 	}
 	data, err := journal.ParseDataPreparationReceipt([]byte(dataReceipt))
+	// The start recorded the quota of its own time: the install's, or the pair of any raise before it.
+	quotaChain, chainErr := platformNamespaceQuotaChain(e, expected.installationID, running.NamespaceID)
+	if chainErr != nil {
+		return zero, fmt.Errorf("update history quota chain: %w", errAppPlatformLaunchUnavailable)
+	}
 	if err != nil || data.Claim.ResourceID != running.NamespaceID ||
 		data.ProjectID != running.Claim.Preflight.ProjectID ||
 		data.Device != running.Claim.Preflight.Device ||
 		data.NamespaceInode != running.Claim.Preflight.NamespaceInode ||
-		data.QuotaBytes != running.Claim.Preflight.QuotaBytes ||
-		data.QuotaInodes != running.Claim.Preflight.QuotaInodes {
+		!platformQuotaInChain(quotaChain, mustPlatformCheckpointInt(running.Claim.Preflight.QuotaBytes), mustPlatformCheckpointInt(running.Claim.Preflight.QuotaInodes)) {
 		return zero, fmt.Errorf(
 			"update history data receipt resource=%s/%s project=%s/%s device=%s/%s inode=%s/%s: %w",
 			data.Claim.ResourceID, running.NamespaceID, data.ProjectID,
@@ -425,8 +429,8 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		namespaceInode:          data.NamespaceInode,
 		device:                  data.Device,
 		dataFormat:              checkpoint.DataFormat,
-		quotaBytes:              data.QuotaBytes,
-		quotaInodes:             data.QuotaInodes,
+		quotaBytes:              running.Claim.Preflight.QuotaBytes,
+		quotaInodes:             running.Claim.Preflight.QuotaInodes,
 		rootFilesystemUUID:      data.Claim.RootFilesystemUUID,
 		rootInode:               data.Claim.RootInode,
 		writerFence:             strconv.FormatInt(checkpointWriterFence, 10),

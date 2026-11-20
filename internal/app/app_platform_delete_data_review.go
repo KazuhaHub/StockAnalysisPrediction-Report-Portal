@@ -248,7 +248,7 @@ func platformDeleteDataRunnerWriterFence(
 		FROM app_platform_operations o
 		JOIN app_platform_operation_effects f ON f.operation_id=o.id
 		WHERE o.installation_id=? AND o.target_generation=?
-		AND o.action IN ('install','update','enable','repair','restore')
+		AND o.action IN ('install','update','enable','repair','import_data','restore')
 		AND o.managed=1 AND o.stage='complete'
 		AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND o.lease_until_ms IS NULL AND o.error_code IS NULL

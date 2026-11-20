@@ -159,7 +159,7 @@ func TestOnlyStartBearingOperationsAreRefusedWhileALoadIsUnsettled(t *testing.T)
 
 // Fails if an operation kind is in neither list, in both, or the lists drift from the schema's set of actions.
 func TestEveryOperationKindIsClassifiedAsStartBearingOrNot(t *testing.T) {
-	kinds := []string{"install", "update", "disable", "enable", "repair", "uninstall", "delete_data", "restore", "restore_import"}
+	kinds := []string{"install", "update", "disable", "enable", "repair", "uninstall", "delete_data", "restore", "restore_import", "set_data_quota", "import_data"}
 	for _, kind := range kinds {
 		in := 0
 		for _, a := range platformStartBearingActions {

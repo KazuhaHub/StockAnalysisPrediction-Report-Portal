@@ -40,6 +40,10 @@ func platformAttemptTimeout(lease platformOperationLease) time.Duration {
 	if lease.snapshot.Action == appplatform.ActionRestoreImport && lease.snapshot.Stage == appplatform.StageRestoreData {
 		return platformImportAttemptTimeout
 	}
+	// An import of an inbox archive is bulk work like a restore import: the runner keeps working after the attempt.
+	if lease.snapshot.Action == appplatform.ActionImportData && lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageImport {
+		return platformImportAttemptTimeout
+	}
 	// A migration job runs on, detached, for up to its wall clock; the attempt waits like an import's.
 	if lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageMigrate {
 		return platformImportAttemptTimeout
@@ -198,6 +202,12 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				selected, err = w.server.claimNextPlatformManagedEnable(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedSameRelease(ctx, w.worker, appplatform.ActionImportData)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformSetDataQuota(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformDeleteData(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
@@ -309,6 +319,14 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedRepair(
 			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionImportData &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedSameRelease(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionSetDataQuota &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformSetDataQuota(
+			ctx, w.active, w.endpoint)
 	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedEnable(
@@ -387,6 +405,8 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	if (errors.Is(err, errPlatformImageBusy) ||
 		(w.active.snapshot.Action == appplatform.ActionRestoreImport &&
 			errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
+		(w.active.snapshot.Action == appplatform.ActionImportData && w.active.snapshot.Stage == appplatform.StageImport &&
+			errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
 		(w.active.snapshot.Action == appplatform.ActionUpdate && w.active.snapshot.Stage == appplatform.StageMigrate &&
 			(errors.Is(err, errPlatformMigrationBusy) ||
 				(errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)))) &&
@@ -424,6 +444,25 @@ func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode st
 	} else if w.active.snapshot.Action == appplatform.ActionRepair &&
 		w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedRepairForReview
+	} else if w.active.snapshot.Action == appplatform.ActionImportData &&
+		w.active.snapshot.Managed {
+		finish = func(ctx context.Context, lease platformOperationLease) error {
+			// A failure after the import began restores the checkpoint the operation kept; if that cannot be
+			// proven the operation ends recovery_required, which is what the plain finish records.
+			rolledBack, rollbackErr := w.server.rollbackPlatformImportData(ctx, lease, w.endpoint)
+			if rollbackErr != nil {
+				log.Printf("app-platform import rollback: %v", rollbackErr)
+			}
+			if rolledBack {
+				ctx = withPlatformImportRolledBack(ctx)
+			}
+			return w.server.finishPlatformManagedSameReleaseForReview(ctx, lease)
+		}
+	} else if w.active.snapshot.Action == appplatform.ActionSetDataQuota &&
+		w.active.snapshot.Managed {
+		finish = func(ctx context.Context, lease platformOperationLease) error {
+			return w.server.finishPlatformSetDataQuotaForReview(ctx, lease, capacityCode)
+		}
 	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
 		w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedEnableForReview

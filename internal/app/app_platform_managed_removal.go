@@ -335,7 +335,7 @@ func loadPlatformManagedRemovalSource(
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
 		WHERE o.installation_id=? AND o.target_generation=?
-		AND o.action IN ('update','enable','repair','restore') AND o.managed=1
+		AND o.action IN ('update','enable','repair','import_data','restore') AND o.managed=1
 		AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL AND o.controller_epoch=?
@@ -385,6 +385,22 @@ func loadPlatformManagedRemovalSource(
 			plan.TargetRuntime.RuntimeID != runtime.id {
 			return platformManagedRemovalSource{}, fmt.Errorf(
 				"managed removal enable plan: %w",
+				errAppPlatformStageEvidence)
+		}
+		canonical, _ = json.Marshal(plan)
+	case "import_data":
+		var plan platformManagedUpdatePlan
+		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
+			plan.Format != platformManagedImportDataFormat ||
+			plan.InstallationID != expected.installationID ||
+			plan.TargetGeneration != sourceGeneration ||
+			plan.TargetReleaseSHA256 != sourceRelease ||
+			plan.DataNamespaceID != sourceNamespace ||
+			plan.DataFormat != sourceFormat ||
+			plan.TargetRuntime == nil ||
+			plan.TargetRuntime.RuntimeID != runtime.id {
+			return platformManagedRemovalSource{}, fmt.Errorf(
+				"managed removal import plan: %w",
 				errAppPlatformStageEvidence)
 		}
 		canonical, _ = json.Marshal(plan)
@@ -440,8 +456,9 @@ func loadPlatformManagedRemovalSource(
 	}
 	expectedKind := map[string]string{
 		"update": "update-start", "enable": "enable-start",
-		"repair":  "enable-start",
-		"restore": "restore-start",
+		"repair":      "enable-start",
+		"import_data": "enable-start",
+		"restore":     "restore-start",
 	}[action]
 	var effectID, effectKind, effectDigest, receiptRaw string
 	var effectCreated, effectUpdated int64

@@ -38,7 +38,7 @@ func (s *Server) platformHeldStartsToSettle(ctx context.Context) ([]string, erro
 		LEFT JOIN app_platform_review_plans p ON p.id=o.review_plan_id`,
 		`o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND f.state IN ('prepared','unknown')
-		AND ((o.action IN ('enable','repair') AND f.kind='enable-start')
+		AND ((o.action IN ('enable','repair','import_data') AND f.kind='enable-start')
 		  OR (o.action='restore' AND f.kind='restore-start' AND (p.plan_json IS NULL OR p.plan_json NOT LIKE ?)))`,
 		"o.id", []any{platformResumePlanPrefix()}, platformHeldStartWindow,
 		func(rows *sql.Rows) (string, string, bool, error) {

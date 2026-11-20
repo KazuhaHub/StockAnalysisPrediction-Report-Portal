@@ -348,6 +348,9 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		if lease.snapshot.Action == appplatform.ActionRepair {
 			audit = "app_platform.managed_repair_activated"
 		}
+		if lease.snapshot.Action == appplatform.ActionImportData {
+			audit = "app_platform.managed_import_data_activated"
+		}
 	}
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)

@@ -181,7 +181,7 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 			return nil, err
 		}
 		return update.TargetRuntime, nil
-	case platformManagedEnableFormat, platformManagedRepairFormat:
+	case platformManagedEnableFormat, platformManagedRepairFormat, platformManagedImportDataFormat:
 		var enable platformManagedUpdatePlan
 		if json.Unmarshal([]byte(raw), &enable) != nil ||
 			enable.Format != probe.Format ||
@@ -228,7 +228,7 @@ func (s *Server) checkPlatformManagedBackendRoot(ctx context.Context, operation 
 
 func (s *Server) checkPlatformManagedUpdateBackendRoot(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
 	var completed int
-	if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND action IN ('update','enable','repair') AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL`, operation).Scan(&completed); err != nil {
+	if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND action IN ('update','enable','repair','import_data') AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL`, operation).Scan(&completed); err != nil {
 		return err
 	}
 	if completed != 1 {
