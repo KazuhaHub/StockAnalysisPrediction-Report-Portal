@@ -173,7 +173,9 @@ func (t platformTable) checkExpressions(driver string) []string {
 	var checks []string
 	for _, c := range t.columns() {
 		if c.kind == "Q" {
-			// A column added after the table existed: the step that adds it cannot add checks to it.
+			// A column added after the table existed. Its check is last, so the names of the others do not
+			// move: PostgreSQL gets it as the final named constraint, SQLite as part of the column itself
+			// (see ddlNamed), because SQLite cannot add a table constraint to an existing table.
 			continue
 		}
 		if c.kind == "N" || c.kind == "R" || c.kind == "MS" || c.kind == "F" {
@@ -226,7 +228,29 @@ func (t platformTable) checkExpressions(driver string) []string {
 	for _, check := range t.checks {
 		checks = append(checks, strings.ReplaceAll(check, "BYTE_LENGTH(content)", platformByteLength("content", driver)))
 	}
+	if driver == "postgres" {
+		for _, c := range t.columns() {
+			if c.kind == "Q" {
+				checks = append(checks, platformQuotaInodesCheck(c.name))
+			}
+		}
+	}
 	return checks
+}
+
+// platformQuotaInodesCheck bounds quota_inodes to the platform's inode quota range (doc 185 section 3.1).
+func platformQuotaInodesCheck(column string) string {
+	return column + ">=65536 AND " + column + "<=1000000"
+}
+
+// platformQuotaInodesColumnSQL is the column step 0024 adds, as ALTER TABLE ADD COLUMN spells it. The SQLite
+// table text carries the same words, so the verifier compares like with like.
+func platformQuotaInodesColumnSQL(driver string) string {
+	if driver == "postgres" {
+		return "quota_inodes BIGINT NOT NULL DEFAULT " + strconv.Itoa(platformQuotaInodesDefault)
+	}
+	return "quota_inodes INTEGER NOT NULL DEFAULT " + strconv.Itoa(platformQuotaInodesDefault) +
+		" CHECK (" + platformQuotaInodesCheck("quota_inodes") + " AND typeof(quota_inodes)='integer')"
 }
 func (t platformTable) ddl(driver string) string {
 	return t.ddlNamed(driver, platformPrefix+t.name)
@@ -240,7 +264,7 @@ func (t platformTable) ddlNamed(driver, name string) string {
 			part += " NOT NULL"
 		}
 		if c.kind == "Q" {
-			part += " DEFAULT " + strconv.Itoa(platformQuotaInodesDefault)
+			part = platformQuotaInodesColumnSQL(driver)
 		}
 		parts = append(parts, part)
 	}

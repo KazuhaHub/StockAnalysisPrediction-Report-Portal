@@ -60,6 +60,24 @@ func testMigration0024Schema(t *testing.T, pg bool) {
 	if _, err := st.exec(`UPDATE app_platform_data_namespaces SET quota_inodes=NULL`); err == nil {
 		t.Fatal("quota_inodes admitted NULL")
 	}
+	for _, bad := range []string{"65535", "1000001", "0", "-1"} {
+		if _, err := st.exec(`UPDATE app_platform_data_namespaces SET quota_inodes=` + bad); err == nil {
+			t.Fatalf("quota_inodes=%s admitted", bad)
+		}
+	}
+	mustExec(t, st, `UPDATE app_platform_data_namespaces SET quota_inodes=1000000`)
+	mustExec(t, st, `UPDATE app_platform_data_namespaces SET quota_inodes=65536`)
+	if err := migration0024().verify(st.poolExec()); err != nil {
+		t.Fatal(err)
+	}
+	if pg {
+		// A different default is a different contract.
+		mustExec(t, st, `ALTER TABLE app_platform_data_namespaces ALTER COLUMN quota_inodes SET DEFAULT 70000`)
+		if err := migration0024().verify(st.poolExec()); err == nil {
+			t.Fatal("the verifier accepted a changed default")
+		}
+		mustExec(t, st, `ALTER TABLE app_platform_data_namespaces ALTER COLUMN quota_inodes SET DEFAULT 65536`)
+	}
 	// The import stage is allowed by the schema; the executor is a later phase.
 	mustExec(t, st, `UPDATE app_platform_operations SET stage='import',completed_ms=NULL WHERE id='`+platformFixtureID(2010)+`'`)
 	if _, err := st.exec(`UPDATE app_platform_operations SET stage='invented',completed_ms=NULL WHERE id='` + platformFixtureID(2010) + `'`); err == nil {

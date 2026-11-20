@@ -66,12 +66,17 @@ func migration0024() migration {
 	}
 	m.up = func(e migExec) error {
 		if !e.columnExists(platformPrefix+"data_namespaces", "quota_inodes") {
-			sqlType := "INTEGER"
-			if e.s.driver == "postgres" {
-				sqlType = "BIGINT"
-			}
-			if _, err := e.exec("ALTER TABLE " + platformPrefix + "data_namespaces ADD COLUMN quota_inodes " + sqlType + " NOT NULL DEFAULT 65536"); err != nil {
+			if _, err := e.exec("ALTER TABLE " + platformPrefix + "data_namespaces ADD COLUMN " + platformQuotaInodesColumnSQL(e.s.driver)); err != nil {
 				return err
+			}
+			if e.s.driver == "postgres" {
+				name, err := platformCheckName(platformSchemaTables(), "data_namespaces", platformQuotaInodesCheck("quota_inodes"))
+				if err != nil {
+					return err
+				}
+				if _, err := e.exec("ALTER TABLE " + platformPrefix + "data_namespaces ADD CONSTRAINT " + name + " CHECK (" + platformQuotaInodesCheck("quota_inodes") + ")"); err != nil {
+					return err
+				}
 			}
 		}
 		return setPlatformQuotaChecks(e, platformActions0021(), platformActions(), platformLegacyStages(), platformStages())
