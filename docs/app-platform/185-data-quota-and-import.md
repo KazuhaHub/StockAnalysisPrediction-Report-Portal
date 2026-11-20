@@ -1,6 +1,6 @@
 # Proposal: per-installation data quota and administrator data import
 
-Status: Proposed 2026-11-20 for owner decision (section 12). This document changes no code, schema or contract. The schema change it needs is in section 11 and requires the owner's approval before any implementation. It builds on:
+Status: Accepted 2026-11-20; implementation pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
@@ -208,7 +208,7 @@ All of them need en-US, zh-CN and zh-TW translations.
 
 The three phases ship as separate PRs.
 
-## 11. Schema change — needs owner approval
+## 11. Schema change — approved by the owner on 2026-11-20 (migration 0024)
 
 One additive migration after `0023`, numbered `0024`:
 
@@ -218,24 +218,26 @@ One additive migration after `0023`, numbered `0024`:
 
 The runner journal is unchanged: its volume evidence already records the byte and inode limits per namespace. SQLite and PostgreSQL both get the migration, with up and down tests, as 0022 and 0023 did.
 
-## 12. Questions for the owner
+## 12. Owner decisions (2026-11-20)
 
-Q1. **Per-installation quota bounds.** Recommended: 256 MiB to 16 GiB in 64 MiB steps, and 65,536 to 1,000,000 inodes. The descriptor requests and the administrator approves; market-monitor requests 3 GiB and 100,000 inodes (D10).
+The owner accepted the recommended answer to each question below (Q1 to Q10) and approved migration `0024` (Q9).
 
-Q2. **Lowering a quota.** Recommended: not in version 1. Lowering below usage would make the app fail its writes, and needs its own review of the usage. Only raising is supported.
+Q1. **Per-installation quota bounds.** Decided: 256 MiB to 16 GiB in 64 MiB steps, and 65,536 to 1,000,000 inodes. The descriptor requests and the administrator approves; market-monitor requests 3 GiB and 100,000 inodes (D10).
 
-Q3. **Hard links in checkpoints.** Recommended: preserve links that stay inside the namespace (section 4), rather than asking apps to avoid them.
+Q2. **Lowering a quota.** Decided: not in version 1. Lowering below usage would make the app fail its writes, and needs its own review of the usage. Only raising is supported.
 
-Q4. **Checkpoint retention for large namespaces.** Recommended: keep two, as today. One would halve the checkpoint volume needed, but would lose the second rollback point.
+Q3. **Hard links in checkpoints.** Decided: preserve links that stay inside the namespace (section 4), rather than asking apps to avoid them.
 
-Q5. **Import semantics.** Recommended: replace only in version 1; the review states that current contents are replaced and a pre-import checkpoint is kept.
+Q4. **Checkpoint retention for large namespaces.** Decided: keep two, as today. One would halve the checkpoint volume needed, but would lose the second rollback point.
 
-Q6. **Seed through the proxy as well.** Recommended: no platform work. Once P1 lands, an app may still fetch its own seed through the reviewed proxy if its operator prefers; that is app code.
+Q5. **Import semantics.** Decided: replace only in version 1; the review states that current contents are replaced and a pre-import checkpoint is kept.
 
-Q7. **Browser upload of import archives.** Recommended: not in version 1; the runner-host inbox only.
+Q6. **Seed through the proxy as well.** Decided: no platform work. Once P1 lands, an app may still fetch its own seed through the reviewed proxy if its operator prefers; that is app code.
 
-Q8. **Production image sizes.** Recommended: keep D11's 8 GiB data and 8 GiB checkpoint, and grow online at 80% (handbook §4.2). They hold market-monitor's 3 GiB with two checkpoints. Do not start at 20 GiB, because XFS cannot shrink.
+Q7. **Browser upload of import archives.** Decided: not in version 1; the runner-host inbox only.
 
-Q9. **Schema change in section 11.** Approve migration `0024` as described?
+Q8. **Production image sizes.** Decided: keep D11's 8 GiB data and 8 GiB checkpoint, and grow online at 80% (handbook §4.2). They hold market-monitor's 3 GiB with two checkpoints. Do not start at 20 GiB, because XFS cannot shrink.
 
-Q10. **Order.** Recommended: P1 first; it unblocks market-monitor's quota on its own. Then P3 import, which gives the fast host-side seed. P2 hard links is needed before P3 if market-monitor's seed contains its `snapshots/` links. Alternatively the seed can be packed without `snapshots/`, which the app rebuilds, so P3 can come before P2.
+Q9. **Schema change in section 11.** Decided: approved as migration `0024`.
+
+Q10. **Order.** Decided: P1 first; it unblocks market-monitor's quota on its own. Then P3 import, which gives the fast host-side seed. P2 hard links is needed before P3 if market-monitor's seed contains its `snapshots/` links. Alternatively the seed can be packed without `snapshots/`, which the app rebuilds, so P3 can come before P2.
