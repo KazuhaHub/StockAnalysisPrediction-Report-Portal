@@ -369,15 +369,23 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 		in.refuse(conn, host, refusal)
 		return
 	}
-	defer release()
+	var freeOnce sync.Once
+	free := func() { freeOnce.Do(release) }
+	defer free()
+	// A refused tunnel gives its slot back before the application reads the refusal: otherwise an application
+	// that opens its next tunnel as soon as it is told no can find the slots still held and be told busy.
+	refuseFreed := func(refusal proxyforwarder.Refusal) {
+		free()
+		in.refuse(conn, host, refusal)
+	}
 	// Step 2: the host must match, and the port must be 443. A name that is an IP
 	// literal or not a plain lower-case DNS name matches nothing.
 	if !auth.policy.Match(host) {
-		in.refuse(conn, host, proxyforwarder.RefusalHostNotReviewed)
+		refuseFreed(proxyforwarder.RefusalHostNotReviewed)
 		return
 	}
 	if port != appplatform.ProxyPort {
-		in.refuse(conn, host, proxyforwarder.RefusalPortNotPermitted)
+		refuseFreed(proxyforwarder.RefusalPortNotPermitted)
 		return
 	}
 	ctx, cancel := context.WithCancelCause(auth.ctx)
@@ -395,15 +403,15 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	stopResolve()
 	if err != nil || len(addresses) == 0 || len(addresses) > 16 {
 		if ctx.Err() != nil {
-			in.refuse(conn, host, proxyforwarder.RefusalUnavailable)
+			refuseFreed(proxyforwarder.RefusalUnavailable)
 			return
 		}
-		in.refuse(conn, host, proxyforwarder.RefusalResolveFailed)
+		refuseFreed(proxyforwarder.RefusalResolveFailed)
 		return
 	}
 	pinned, ok := in.runner.firstAllowed(addresses)
 	if !ok {
-		in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
+		refuseFreed(proxyforwarder.RefusalAddressDenied)
 		return
 	}
 	// Step 4: one pinned dial.
@@ -411,7 +419,7 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	upstream, err := in.runner.Dial(dialCtx, "tcp", net.JoinHostPort(pinned.String(), strconv.Itoa(appplatform.ProxyPort)))
 	stopDial()
 	if err != nil {
-		in.refuse(conn, host, proxyforwarder.RefusalConnectFailed)
+		refuseFreed(proxyforwarder.RefusalConnectFailed)
 		return
 	}
 	defer upstream.Close()

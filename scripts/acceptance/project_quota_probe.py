@@ -398,7 +398,7 @@ def main(args):
             checkpoint_root = mountpoint / "checkpoint-data"
             checkpoint_root.mkdir(mode=0o700)
             native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_CHECKPOINT_ROOT=str(checkpoint_root), APP_DATA_NATIVE_ABI=args[4])
-            native = subprocess.run([args[2], "-test.run=^TestNativeData(Primitive|WriteAccess|Checkpoint)$", "-test.v", "-test.timeout=45s"], env=native_env, capture_output=True, text=True, timeout=60)
+            native = subprocess.run([args[2], "-test.run=^(TestNativeData(Primitive|WriteAccess|Checkpoint)|TestNativeImportCheckpoint|TestNativeImportCheckpointOntoASecondRoot|TestNativeRaiseQuotaAndImportData)$", "-test.v", "-test.timeout=45s"], env=native_env, capture_output=True, text=True, timeout=60)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-32768:])
             if "NATIVE_DATA_NAMESPACE_DELETED" not in native.stdout:
@@ -415,6 +415,12 @@ def main(args):
             if "NATIVE_DATA_RESTORE_VERIFIED" not in native.stdout:
                 raise RuntimeError("native verified data restore missing")
             report["native_go_data_restore"] = True
+            if "--- PASS: TestNativeImportCheckpoint " not in native.stdout or "NATIVE_DATA_IMPORT_VERIFIED" not in native.stdout:
+                raise RuntimeError("native checkpoint import missing")
+            report["native_go_data_checkpoint_import"] = True
+            if "--- PASS: TestNativeRaiseQuotaAndImportData " not in native.stdout:
+                raise RuntimeError("native quota raise and data import missing")
+            report["native_go_data_quota_raise_and_import"] = True
             if candidate:
                 candidate_root = mountpoint / "candidate-data"
                 candidate_root.mkdir(mode=0o700)

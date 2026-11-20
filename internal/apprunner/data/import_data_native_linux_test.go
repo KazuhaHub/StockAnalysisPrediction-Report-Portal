@@ -44,8 +44,8 @@ func TestNativeRaiseQuotaAndImportData(t *testing.T) {
 	if err != nil || err2 != nil {
 		t.Fatal(errors.Join(err, err2))
 	}
-	const project = 4270
-	name := nativeNamespace(70)
+	const project = 4280
+	name := nativeNamespace(80)
 	prepared, err := root.Prepare(ctx, rootID, Request{name, project, 8 << 20, 128})
 	if err != nil {
 		t.Fatal(err)

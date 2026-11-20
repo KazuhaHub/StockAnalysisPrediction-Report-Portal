@@ -147,6 +147,10 @@ func (r RestoreRequest) entryLimit() int {
 	return int(limit)
 }
 
+// pathLimit bounds how many paths a walk of the namespace may visit: the inode cap for inodes plus the same
+// number for the extra hard-link paths of those inodes. The namespace's own quota counts inodes, never paths.
+func (r RestoreRequest) pathLimit() int { return 2 * r.entryLimit() }
+
 func (r CheckpointRequest) valid() bool {
 	return namespaceID.MatchString(r.CheckpointID) && namespaceID.MatchString(r.NamespaceID) && r.ProjectID > 0 && r.DataFormat > 0 && r.MaxArchiveBytes > 0 && r.ExpectedDevice > 0 && r.ExpectedNamespaceInode > 0 && r.WriterFence > 0 && sha256Value(r.ReleaseSHA256)
 }
@@ -340,6 +344,22 @@ func (r ImportRequest) valid() bool {
 type importFootprint struct {
 	block, bytes, inodes int64
 	overflow             bool
+}
+
+// importFootprintOf is the rounded footprint of an archive's entries on a filesystem with the given block size.
+// A link entry adds no inode and no bytes: it names a file whose first path is already charged.
+func importFootprintOf(entries []restoreEntry, block int64) *importFootprint {
+	footprint := newImportFootprint(block)
+	for _, entry := range entries {
+		switch {
+		case entry.link != "":
+		case entry.directory:
+			footprint.addDirectory()
+		default:
+			footprint.addFile(entry.size)
+		}
+	}
+	return footprint
 }
 
 func newImportFootprint(block int64) *importFootprint {

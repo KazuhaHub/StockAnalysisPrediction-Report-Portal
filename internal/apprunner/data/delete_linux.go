@@ -101,7 +101,7 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	}
 	count := 0
 	if err := deleteNamespaceChildren(
-		ctx, folder, r.device, 0, &count, request.QuotaInodes); err != nil {
+		ctx, folder, r.device, 0, &count, deletePathLimit(request.QuotaInodes)); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -215,8 +215,17 @@ func settleDeleteDataQuota(ctx context.Context, file *os.File, request DeleteReq
 	return nil
 }
 
-// deleteNamespaceChildren removes everything under folder. A namespace holds at most its inode quota of entries,
-// so that quota bounds the walk.
+// deletePathLimit bounds the delete walk. The inode quota bounds directories and files; a file with several hard
+// links adds paths but no inodes, so the walk may visit up to the same number again as extra link paths. The
+// quota is a positive int64 bounded by the platform, and the product is saturated rather than overflowed.
+func deletePathLimit(inodeQuota int64) int64 {
+	if inodeQuota <= 0 || inodeQuota > maxCheckpointEntryCap {
+		inodeQuota = maxCheckpointEntryCap
+	}
+	return 2 * inodeQuota
+}
+
+// deleteNamespaceChildren removes everything under folder, visiting at most maxEntries paths.
 func deleteNamespaceChildren(ctx context.Context, folder *os.File, device uint64, depth int, count *int, maxEntries int64) error {
 	if depth > maxDeleteDepth {
 		return ErrDeleteUnsafe
