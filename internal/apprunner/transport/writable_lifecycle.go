@@ -58,13 +58,17 @@ const (
 	RemoveImageRead
 	DeleteCheckpointExecute
 	DeleteCheckpointRead
+	SetDataQuotaExecute
+	SetDataQuotaRead
+	ImportDataExecute
+	ImportDataRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= DeleteCheckpointRead
+	return a >= WritableWriterExecute && a <= ImportDataRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute || a == RemoveImageExecute || a == DeleteCheckpointExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute || a == RemoveImageExecute || a == DeleteCheckpointExecute || a == SetDataQuotaExecute || a == ImportDataExecute
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -280,6 +284,8 @@ type writableLifecycleReference struct {
 	loadImage               control.LoadImageCommand
 	removeImage             control.RemoveImageCommand
 	deleteCheckpoint        control.DeleteCheckpointCommand
+	setDataQuota            control.SetDataQuotaCommand
+	importData              control.ImportDataCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
@@ -470,6 +476,38 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.deleteCheckpoint = v.Command()
 		r.release = r.deleteCheckpoint.Payload.ReleaseSHA256
+	case action == SetDataQuotaExecute || action == SetDataQuotaRead:
+		var v control.VerifiedSetDataQuotaCommand
+		var err error
+		if action == SetDataQuotaRead {
+			v, err = control.VerifySetDataQuotaRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifySetDataQuotaSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifySetDataQuota(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.setDataQuota = v.Command()
+		r.release = r.setDataQuota.Payload.ReleaseSHA256
+		id := journal.CapacityIdentityOfHeader(r.setDataQuota.CommandHeader)
+		r.capacity = &id
+	case action == ImportDataExecute || action == ImportDataRead:
+		var v control.VerifiedImportDataCommand
+		var err error
+		if action == ImportDataRead {
+			v, err = control.VerifyImportDataRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifyImportDataSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyImportData(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.importData = v.Command()
+		r.release = r.importData.Payload.ReleaseSHA256
 	case action == SettleUpdateStartExecute || action == SettleUpdateStartRead:
 		var v control.VerifiedSettleUpdateStartCommand
 		var err error
@@ -533,7 +571,7 @@ func candidateOrphanAction(action WritableLifecycleAction) bool {
 // whose effect starts a backend, runs a migration job or loads an image.
 func capacityRefusalAction(action WritableLifecycleAction) bool {
 	switch action {
-	case WritableCandidateStart, WritableCandidateRead, UpdateStartExecute, UpdateStartReceipt, MigrateDataExecute, MigrateDataRead, LoadImageExecute, LoadImageRead, ImportCheckpointExecute, ImportCheckpointRead:
+	case SetDataQuotaExecute, SetDataQuotaRead, WritableCandidateStart, WritableCandidateRead, UpdateStartExecute, UpdateStartReceipt, MigrateDataExecute, MigrateDataRead, LoadImageExecute, LoadImageRead, ImportCheckpointExecute, ImportCheckpointRead:
 		return true
 	}
 	return false
@@ -571,6 +609,22 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 	}
 	if action == DeleteCheckpointExecute || action == DeleteCheckpointRead {
 		return validDeleteCheckpointReply(body, r.deleteCheckpoint, received)
+	}
+	if action == SetDataQuotaExecute || action == SetDataQuotaRead {
+		return validDataEffectReply(body, r.setDataQuota.CommandHeader, func() bool {
+			receipt, err := journal.ParseSetDataQuotaReceipt(body)
+			return err == nil && journal.SetDataQuotaReceiptMatchesCommand(receipt, r.setDataQuota) && receiptSettledBy(receipt.SettledMS, received)
+		}, func() bool {
+			refusal, err := journal.ParseCapacityRefusal(body)
+			id := journal.CapacityIdentityOfHeader(r.setDataQuota.CommandHeader)
+			return err == nil && refusal.Matches(id) && receiptSettledBy(refusal.SettledMS, received)
+		}, r.setDataQuota.IssuedMS, received)
+	}
+	if action == ImportDataExecute || action == ImportDataRead {
+		return validDataEffectReply(body, r.importData.CommandHeader, func() bool {
+			receipt, err := journal.ParseImportDataReceipt(body)
+			return err == nil && journal.ImportDataReceiptMatchesCommand(receipt, r.importData) && receiptSettledBy(receipt.SettledMS, received)
+		}, nil, r.importData.IssuedMS, received)
 	}
 	var settled string
 	switch {
@@ -998,6 +1052,59 @@ func validDeleteCheckpointReply(body []byte, c control.DeleteCheckpointCommand, 
 	}
 	settled, settledErr := strconv.ParseInt(receipt.SettledMS, 10, 64)
 	return settledErr == nil && settled <= received.UnixMilli()
+}
+
+func receiptSettledBy(settledMS string, received time.Time) bool {
+	settled, err := strconv.ParseInt(settledMS, 10, 64)
+	return err == nil && settled <= received.UnixMilli()
+}
+
+// validDataEffectReply accepts a typed status, a receipt or a capacity refusal, each bound to the exact signed
+// command. A receipt is terminal and immutable, so a read-back is not held to the command's signing time.
+func validDataEffectReply(body []byte, h control.CommandHeader, receipt, refusal func() bool, issuedMS string, received time.Time) bool {
+	if status, err := journal.ParseMigrateDataStatus(body); err == nil {
+		observed, observedErr := strconv.ParseInt(status.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(issuedMS, 10, 64)
+		return journal.DataEffectStatusMatchesHeader(status, h) && observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
+	}
+	if refusal != nil && refusal() {
+		return true
+	}
+	return receipt()
+}
+
+// dataEffectAbsenceReply reports whether body is the runner's definite "never claimed" answer to a read-back.
+func dataEffectAbsenceReply(action WritableLifecycleAction, body []byte) bool {
+	if action != SetDataQuotaRead && action != ImportDataRead {
+		return false
+	}
+	status, err := journal.ParseMigrateDataStatus(body)
+	return err == nil && status.State == "absent"
+}
+
+// DataEffectStatus returns the typed "pending" or "orphaned" answer to a set-data-quota or import-data execute or
+// read-back. A definite absence is reported as journal.ErrNoSuchEffect.
+func (o WritableLifecycleObservation) DataEffectStatus() (journal.MigrateDataStatus, error) {
+	if o.action != SetDataQuotaExecute && o.action != SetDataQuotaRead && o.action != ImportDataExecute && o.action != ImportDataRead {
+		return journal.MigrateDataStatus{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseMigrateDataStatus([]byte(o.body))
+}
+
+// SetDataQuotaReceipt returns the receipt of a raise execute or read-back.
+func (o WritableLifecycleObservation) SetDataQuotaReceipt() (journal.SetDataQuotaReceipt, error) {
+	if o.action != SetDataQuotaExecute && o.action != SetDataQuotaRead {
+		return journal.SetDataQuotaReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseSetDataQuotaReceipt([]byte(o.body))
+}
+
+// ImportDataReceipt returns the receipt of an import execute or read-back.
+func (o WritableLifecycleObservation) ImportDataReceipt() (journal.ImportDataReceipt, error) {
+	if o.action != ImportDataExecute && o.action != ImportDataRead {
+		return journal.ImportDataReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseImportDataReceipt([]byte(o.body))
 }
 
 // deleteCheckpointAbsenceReply reports whether body is the runner's definite "never claimed" answer. Only a read-back
