@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -113,4 +114,22 @@ func (s *Server) listPlatformPostgresBindingTargets(session platformActorSession
 		return err
 	})
 	return result, err
+}
+
+// checkPlatformCredentialPairing refuses the pairings a PostgreSQL role must never have: a value
+// that is a username and password is bound only as pg_password (never sent as a header, never
+// given to an application by raw_read), and pg_password needs such a value. Every other value is
+// left to its operation's own checks. It opens the credential inside custody and wipes it.
+func (s *Server) checkPlatformCredentialPairing(operation, id string, revision int64, sealed string) error {
+	err := s.checkPlatformPostgresCredentialValue(id, revision, sealed)
+	if operation == "pg_password" {
+		return err
+	}
+	if err == nil {
+		return errPlatformManagementInput
+	}
+	if errors.Is(err, errAppPlatformCredentialUnavailable) {
+		return err
+	}
+	return nil
 }

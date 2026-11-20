@@ -389,16 +389,15 @@ func (s *Server) createPlatformSecretBindingReviewFull(session platformActorSess
 			if err := s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String); err != nil {
 				return err
 			}
-		} else if operation == "pg_password" {
-			// The value must be a username and password before anything is reviewed.
-			if err := s.checkPlatformPostgresCredentialValue(credentialID, valueRevision, sealed.String); err != nil {
-				return err
-			}
 		} else if operation == "http_bearer" || operation == "http_api_key" {
 			// An AccessKey would be sent whole as a header value: refuse that pairing.
 			if s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String) == nil {
 				return errPlatformManagementInput
 			}
+		}
+		// A database role is bound only as pg_password, and pg_password needs one.
+		if err := s.checkPlatformCredentialPairing(operation, credentialID, valueRevision, sealed.String); err != nil {
+			return err
 		}
 		bindingID, err := platformNewUUID()
 		if err != nil {
@@ -575,12 +574,12 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 		if err != nil {
 			return err
 		}
-		if plan.Operation == "pg_password" {
+		{
 			var sealed sql.NullString
 			if err := e.queryRow(`SELECT sealed_value FROM app_platform_credentials WHERE id=?`, plan.CredentialID).Scan(&sealed); err != nil {
 				return errAppPlatformPlanChanged
 			}
-			if err := s.checkPlatformPostgresCredentialValue(plan.CredentialID, plan.CredentialValueRevision, sealed.String); err != nil {
+			if err := s.checkPlatformCredentialPairing(plan.Operation, plan.CredentialID, plan.CredentialValueRevision, sealed.String); err != nil {
 				return errAppPlatformPlanChanged
 			}
 		}
