@@ -70,11 +70,11 @@ func testPlatformSecretBindingLifecycle(t *testing.T, pg bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	use, sealed, err := loadPlatformSecretBindingUse(e, installation, binding.Name, facts)
+	use, sealed, err := loadPlatformSecretBindingUse(e, installation, binding.Name, facts, platformTargetDefaultURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandUse, header, headerValue, err := s.resolvePlatformSecretBindingCommand(e, installation, binding.Name)
+	commandUse, header, headerValue, err := s.resolvePlatformSecretBindingCommand(e, installation, binding.Name, platformTargetDefaultURL)
 	if err != nil || commandUse.id != use.id || header != "Authorization" || string(headerValue) != "Bearer disposable-upstream-value" {
 		t.Fatal("private command credential", commandUse, header, string(headerValue), err)
 	}
@@ -99,14 +99,14 @@ func testPlatformSecretBindingLifecycle(t *testing.T, pg bool) {
 	if scalar[string](t, s.st, `SELECT state FROM app_platform_secret_bindings WHERE id=?`, binding.ID) != "review_required" {
 		t.Fatal("rotation left binding active")
 	}
-	if _, _, err := loadPlatformSecretBindingUse(e, installation, binding.Name, facts); err == nil {
+	if _, _, err := loadPlatformSecretBindingUse(e, installation, binding.Name, facts, platformTargetDefaultURL); err == nil {
 		t.Fatal("old binding authorized the replacement value")
 	}
 	reapproved := platformActivateSecretBindingFixture(t, s, admin, installation, rotated)
 	if reapproved.Revision != 3 {
 		t.Fatal("reapproval revision", reapproved.Revision)
 	}
-	use, sealed, err = loadPlatformSecretBindingUse(e, installation, binding.Name, facts)
+	use, sealed, err = loadPlatformSecretBindingUse(e, installation, binding.Name, facts, platformTargetDefaultURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func testPlatformSecretBindingLifecycle(t *testing.T, pg bool) {
 	if scalar[string](t, s.st, `SELECT state FROM app_platform_secret_bindings WHERE id=?`, binding.ID) != "revoked" {
 		t.Fatal("credential revocation left binding active")
 	}
-	if _, _, err := loadPlatformSecretBindingUse(e, installation, binding.Name, facts); err == nil {
+	if _, _, err := loadPlatformSecretBindingUse(e, installation, binding.Name, facts, platformTargetDefaultURL); err == nil {
 		t.Fatal("revoked credential remained usable")
 	}
 }

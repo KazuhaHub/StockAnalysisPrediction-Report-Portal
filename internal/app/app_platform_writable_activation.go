@@ -55,7 +55,7 @@ func loadPlatformWritableActivationMetadata(e migExec, lease platformOperationLe
 	if err != nil {
 		return zero, err
 	}
-	if err := verifyPlatformSelectedCapabilityRows(e, lease.installationID, selection, false, 1, planID, errAppPlatformStageEvidence); err != nil {
+	if err := verifyPlatformSelectedCapabilityRows(e, lease.installationID, selection, false, 1, planID, nil, errAppPlatformStageEvidence); err != nil {
 		return zero, err
 	}
 	return platformWritableActivationMetadata{frontendSHA: document.SourceSHA256, documentSHA: document.DocumentSHA256, audience: plan.Audience, capabilities: selection, reviewPlanID: planID}, nil
@@ -189,7 +189,7 @@ func (s *Server) commitPlatformWritableActivation(ctx context.Context, lease pla
 	if err := platformVerifyInstallAuthorityAtCommit(e, lease, trust, now); err != nil {
 		return zero, err
 	}
-	if err := verifyPlatformSelectedCapabilityRows(e, lease.installationID, metadata.capabilities, true, 1, metadata.reviewPlanID, errAppPlatformStageEvidence); err != nil {
+	if err := verifyPlatformSelectedCapabilityRows(e, lease.installationID, metadata.capabilities, true, 1, metadata.reviewPlanID, nil, errAppPlatformStageEvidence); err != nil {
 		return zero, err
 	}
 	expectedActive := clonePlatformWritableRegistrationIntent(current)

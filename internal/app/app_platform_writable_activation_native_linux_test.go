@@ -237,7 +237,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if err != nil {
 		t.Fatal("current policy credential facts unavailable", err)
 	}
-	_, _, credentialHeader, err := s.resolvePlatformSecretBindingCommand(s.st.poolExec(), lease.installationID, "upstream-api")
+	_, _, credentialHeader, err := s.resolvePlatformSecretBindingCommand(s.st.poolExec(), lease.installationID, "upstream-api", platformTargetDefaultURL)
 	clear(credentialHeader)
 	if err != nil || facts.policyRevision != 2 {
 		t.Fatal("current policy credential binding unavailable", facts, err)

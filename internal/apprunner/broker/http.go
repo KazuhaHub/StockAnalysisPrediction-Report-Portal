@@ -5,7 +5,9 @@ package broker
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +16,6 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -46,6 +47,25 @@ type HTTPRequest struct {
 	Body        []byte
 	HeaderName  string
 	HeaderValue []byte
+	// SignedHeaders are the headers Portal computed for a provider that signs each request (doc
+	// 177), mutually exclusive with HeaderName. The executor sets exactly these (and Accept,
+	// Accept-Encoding and User-Agent); it checks that they are the closed set for this very
+	// request, so a request it could alter is refused rather than sent.
+	SignedHeaders []appplatform.SignedHeader
+}
+
+// signedRequestOK reports whether the signed headers are exactly what Portal produces for this
+// request: no credential header beside them, a body whose digest is the signed
+// x-acs-content-sha256, and the closed header set of package appplatform.
+func signedRequestOK(input HTTPRequest) bool {
+	if len(input.SignedHeaders) == 0 {
+		return true
+	}
+	if input.HeaderName != "" || len(input.HeaderValue) != 0 {
+		return false
+	}
+	sum := sha256.Sum256(input.Body)
+	return appplatform.CheckACS3SignedHeaders(input.Method, input.URL, input.ContentType, hex.EncodeToString(sum[:]), input.SignedHeaders) == nil
 }
 
 // HTTPResponse deliberately excludes arbitrary upstream headers, cookies and URLs.
@@ -94,29 +114,15 @@ type HTTP struct {
 	policy HTTPPolicy
 	// set is the parsed policy and raw the exact bytes it came from; a signed
 	// command must carry these bytes to use this executor.
-	set       appplatform.HTTPPolicyV2
-	raw       []byte
-	networks  []appplatform.PrivateNetwork
+	set appplatform.HTTPPolicyV2
+	raw []byte
+	addressGuard
 	authorize func(context.Context) error
 	slots     chan struct{}
 	lookup    func(context.Context, string) ([]netip.Addr, error)
 	dial      func(context.Context, string, string) (net.Conn, error)
 	tlsConfig *tls.Config
-	now       func() time.Time
-	// interfaces lists this host's interfaces. A private call reads a snapshot at
-	// most hostAddressTTL old and denies every address assigned to any interface
-	// and every address inside the subnet of a bridge interface (hostnet's
-	// definition, the same as the startup refusal), so a bridge created after the
-	// runner started is covered once the snapshot is refreshed.
-	interfaces func() ([]hostnet.Interface, error)
-	hostMu     sync.Mutex
-	hostAt     time.Time
-	hostIfaces []hostnet.Interface
-	hostValid  bool
 }
-
-// hostAddressTTL bounds how stale the interface snapshot of a private call is.
-const hostAddressTTL = 5 * time.Second
 
 // NewHTTP snapshots a host-selected v1 policy. authorize must check the current
 // installation/generation/epoch, grant revision and actor/resource authority
@@ -160,9 +166,9 @@ func newHTTP(set appplatform.HTTPPolicyV2, raw []byte, networks []appplatform.Pr
 		networks[i].Ports = slices.Clone(networks[i].Ports)
 	}
 	d := &net.Dialer{Timeout: 5 * time.Second}
-	return &HTTP{set: set, raw: raw, networks: networks, authorize: authorize, slots: make(chan struct{}, set.Concurrency), now: time.Now, lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
+	return &HTTP{set: set, raw: raw, addressGuard: addressGuard{networks: networks, now: time.Now, interfaces: hostnet.List}, authorize: authorize, slots: make(chan struct{}, set.Concurrency), lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	}, dial: d.DialContext, interfaces: hostnet.List}, nil
+	}, dial: d.DialContext}, nil
 }
 
 // allowlistMatches reports whether a command's private-network digest is the one
@@ -176,64 +182,9 @@ func (h *HTTP) allowlistMatches(digest string) bool {
 	return err == nil && digest == sum
 }
 
-// hostSnapshot is the interface snapshot, reused for hostAddressTTL.
-func (h *HTTP) hostSnapshot() ([]hostnet.Interface, bool) {
-	h.hostMu.Lock()
-	defer h.hostMu.Unlock()
-	if h.hostValid && h.now().Sub(h.hostAt) < hostAddressTTL {
-		return h.hostIfaces, true
-	}
-	if h.interfaces == nil {
-		return nil, false
-	}
-	list, err := h.interfaces()
-	if err != nil {
-		h.hostValid = false
-		return nil, false
-	}
-	h.hostIfaces, h.hostAt, h.hostValid = list, h.now(), true
-	return list, true
-}
-
-// onHost reports whether ip is an address of this host or inside a bridge subnet.
-func onHost(interfaces []hostnet.Interface, ip netip.Addr) bool {
-	for _, i := range interfaces {
-		bridge := i.IsBridge()
-		for _, a := range i.Addrs {
-			if appplatform.Unmap(a.Addr()) == ip || bridge && a.Masked().Contains(ip) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// addressesAllowed applies the target's class to every address. Public targets
-// keep the public-only rule. Private targets admit only addresses the runner's
-// allowlist admits for the port and scheme, never an always-denied address and
-// never one of this host's own or inside a bridge's subnet (per call, from the
-// snapshot); a public address is in no allowlist, so a
-// mixed answer is denied as a whole.
+// addressesAllowed applies the selected target's class to every address.
 func (h *HTTP) addressesAllowed(target appplatform.EffectiveHTTPTarget, addresses []netip.Addr) bool {
-	if !target.Private {
-		for _, ip := range addresses {
-			if !publicAddress(ip) {
-				return false
-			}
-		}
-		return true
-	}
-	host, ok := h.hostSnapshot()
-	if !ok {
-		return false
-	}
-	for _, ip := range addresses {
-		ip = appplatform.Unmap(ip)
-		if appplatform.AlwaysDenied(ip) || !appplatform.Admit(h.networks, ip, target.Port, target.Scheme) || onHost(host, ip) {
-			return false
-		}
-	}
-	return true
+	return h.addressGuard.addressesAllowed(target.Private, target.Port, target.Scheme, addresses)
 }
 
 func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, error) {
@@ -264,8 +215,9 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if len(input.HeaderValue) == 0 && input.HeaderName != "" {
 		return zero, ErrDenied
 	}
-	// A credential is never sent over plain HTTP.
-	if target.Scheme != "https" && input.HeaderName != "" {
+	// The target was selected above. A signed request must carry exactly the reviewed signed headers, and a
+	// credential or signature is never sent over plain HTTP.
+	if !signedRequestOK(input) || target.Scheme != "https" && (input.HeaderName != "" || len(input.SignedHeaders) > 0) {
 		return zero, ErrDenied
 	}
 	ctx, cancel := context.WithTimeout(parent, target.Deadline)
@@ -346,6 +298,12 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if input.HeaderName != "" {
 		req.Header.Set(input.HeaderName, string(input.HeaderValue))
 	}
+	for _, signed := range input.SignedHeaders {
+		// host is carried by the URL, which the check above tied to the signed value.
+		if signed.Name != "host" {
+			req.Header.Set(signed.Name, string(signed.Value))
+		}
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return zero, ErrUncertain
@@ -360,7 +318,7 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if err != nil || int64(len(body)) > target.ResponseBytes || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
-	echo := newEchoMatcher(input.HeaderName, input.HeaderValue)
+	echo := newRequestEchoMatcher(input)
 	defer echo.Clear()
 	if echo.Match(body) {
 		clear(body)

@@ -335,6 +335,49 @@ matching it against a partial list — or against nothing, before the first fetc
 the dismissal away unmatched and re-interrupt every reader on upgrade day. It refuses an empty list
 for the same reason.
 
+### Variables are templates rendered by the reader
+
+A title or body may carry placeholders — `{{now}}`, `{{time:<RFC3339 instant>}}`, `{{countdown:<instant>}}`,
+`{{site}}` — with optional `|date` / `|time` / `|datetime` and `|<IANA zone>` on the two time forms.
+The stored text is the template; the reader's browser renders it, because only the browser knows the
+reader's clock and zone. The server never renders, it validates: a save whose title or body holds a
+placeholder the reader could not render is refused with 400 `bad_announcement_variable`, so a typo is
+caught by the operator who made it rather than shown raw to everybody. The reader side still leaves an
+unrecognised placeholder exactly as written (a row saved before this existed, or a hand-edited
+database), because a visible `{{tiem:…}}` gets reported and an empty gap does not.
+
+The grammar lives twice — `announcement_vars.go` and `web/src/lib/announcementVars.ts` — with one case
+list mirrored in both test files. That duplication is the price of validating on the server without
+rendering there; the editor runs the same check so an operator sees the exact token before the server
+refuses it.
+
+Four decisions are load-bearing:
+
+- **Every rendered time is tagged with its full IANA zone name**, e.g. `2026-11-20 22:00 (Asia/Shanghai)`,
+  and a zone option must be one. Abbreviations were rejected: `CST` is US Central in the zone database
+  and China Standard Time in common usage, and the database has no abbreviation at all for most of
+  Asia. A maintenance notice off by fourteen hours is worse than one without a zone.
+- **The instant must carry an offset.** A zoneless wall time is exactly the ambiguity the variable
+  exists to remove. The editor's picker takes a moment in the operator's own clock and writes it as
+  UTC.
+- **No variable reads the display window.** `starts_at` / `ends_at` say when the announcement is up,
+  not when the thing it announces happens; a maintenance notice is usually posted days before the
+  maintenance. Exposing the window as `{{starts}}` / `{{ends}}` would invite conflating the two.
+- **The dismissal signature is over the template, not the rendering.** A ticking `{{now}}` or
+  `{{countdown}}` therefore never re-interrupts a reader; only a change to what the operator wrote
+  does, as before. A row whose text moves with the clock re-renders every 15 seconds; one that does
+  not never ticks.
+
+A row saved before this existed that happens to hold a literal `{{...}}` is refused on its next
+full save (PUT) until its text is fixed; the switches (PATCH) and delete still work, and the editor
+names the offending token. That is deliberate: accepting it would let the same text be saved that a
+new row is refused for.
+
+`{{user}}` was considered and left out: an announcement is a broadcast, and personalising it makes
+"everyone saw the same notice" untrue for no practical gain. A "next trading day" variable was also
+left out — it is ambiguous across exchanges and wrong on ad-hoc holiday changes, where an operator
+writing a date is not.
+
 ## Consequences
 
 - **Rollback is clean but not lossless.** The five `meta` keys stay on disk — inert, like

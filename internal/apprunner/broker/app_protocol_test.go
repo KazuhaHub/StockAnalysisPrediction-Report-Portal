@@ -179,3 +179,32 @@ func TestBrokerProtocolSuccessShape(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// A request may ask for a signed call (doc 177): a closed nested object, never beside a plain
+// credential.
+func TestBrokerProtocolSigningIsAClosedOptionalObject(t *testing.T) {
+	const signing = `"signing":{"credential":"qwen-billing","scheme":"acs3","action":"QueryAccountBalance","version":"2017-12-14"}`
+	raw := strings.Replace(validBrokerRequest, `"url":`, signing+`,"url":`, 1)
+	got, err := DecodeAppHTTPRequest([]byte(raw))
+	want := appplatform.SigningRequest{Credential: "qwen-billing", Scheme: "acs3", Action: "QueryAccountBalance", Version: "2017-12-14"}
+	if err != nil || got.Signing != want || got.Credential != "" || got.Method != "POST" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if plain, err := DecodeAppHTTPRequest([]byte(validBrokerRequest)); err != nil || plain.Signing != (appplatform.SigningRequest{}) {
+		t.Fatal("a request without signing carries one", err)
+	}
+	for i, bad := range []string{
+		strings.Replace(validBrokerRequest, `"url":`, signing+`,"credential":"qwen-billing","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, signing+`,`+signing+`,"url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"signing":null,"url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"signing":"acs3","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"signing":{},"url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"Signing":{"credential":"a","scheme":"acs3","action":"A","version":"2017-12-14"},"url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, strings.Replace(signing, `"scheme":"acs3"`, `"scheme":"aws4"`, 1)+`,"url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, strings.Replace(signing, `"version":"2017-12-14"`, `"version":"2017-12-14","key":"x"`, 1)+`,"url":`, 1),
+	} {
+		if got, err := DecodeAppHTTPRequest([]byte(bad)); !errors.Is(err, ErrAppInvalid) || got.Method != "" {
+			t.Fatalf("case %d accepted: %v", i, err)
+		}
+	}
+}

@@ -50,6 +50,9 @@ const (
 	EgressFrameNoticeResult byte = 0x07 // Portal -> runner: its outcome
 	EgressFrameOutcome      byte = 0x08 // runner -> Portal: how the call ended, for audit
 	EgressFrameClose        byte = 0x09 // either: the session ends
+	// EgressFramePostgresAdmit starts a PostgreSQL liveness call (doc 178): runner -> Portal. It is
+	// answered like an admit, by one command frame (the signed probe command) or one refusal.
+	EgressFramePostgresAdmit byte = 0x0A
 )
 
 // Refusal codes (EgressFrameRefusal payload).
@@ -138,11 +141,16 @@ type EgressFrame struct {
 	Payload []byte
 }
 
+// isEgressCallStart says whether a frame type is one a runner starts a call with.
+func isEgressCallStart(t byte) bool {
+	return t == EgressFrameAdmit || t == EgressFrameNotice || t == EgressFramePostgresAdmit
+}
+
 // egressFrameLimit is the payload bound of a frame type; ok is false for an
 // unknown type.
 func egressFrameLimit(t byte) (int, bool) {
 	switch t {
-	case EgressFrameAdmit:
+	case EgressFrameAdmit, EgressFramePostgresAdmit:
 		return egressAdmitMaxBytes, true
 	case EgressFrameCommand:
 		return 4 + control.MaxCommandBytes + 64, true
@@ -227,7 +235,7 @@ func (r EgressRole) receives(t byte) bool {
 		return true
 	case EgressFrameCommand, EgressFrameRefusal, EgressFrameProof, EgressFrameNoticeResult:
 		return r == EgressRunner
-	case EgressFrameAdmit, EgressFrameChallenge, EgressFrameNotice, EgressFrameOutcome:
+	case EgressFrameAdmit, EgressFrameChallenge, EgressFrameNotice, EgressFrameOutcome, EgressFramePostgresAdmit:
 		return r == EgressPortal
 	}
 	return false
@@ -355,13 +363,13 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 	call := m.calls[f.Call]
 	if call == nil {
 		if _, finished := m.finished[f.Call]; finished {
-			if f.Type == EgressFrameAdmit || f.Type == EgressFrameNotice {
+			if isEgressCallStart(f.Type) {
 				return ErrEgressProtocol // a call ID is never reused
 			}
 			// A late answer to a call its owner already abandoned.
 			return nil
 		}
-		if m.role != EgressPortal || (f.Type != EgressFrameAdmit && f.Type != EgressFrameNotice) || len(m.calls) >= egressMaxCalls {
+		if m.role != EgressPortal || !isEgressCallStart(f.Type) || len(m.calls) >= egressMaxCalls {
 			return ErrEgressProtocol
 		}
 		call = &EgressCall{mux: m, id: f.Call, kind: f.Type, in: make(chan EgressFrame, egressCallBuffer)}
@@ -371,7 +379,7 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 			return ErrEgressProtocol
 		}
 		m.calls[f.Call] = call
-	} else if f.Type == EgressFrameAdmit || f.Type == EgressFrameNotice {
+	} else if isEgressCallStart(f.Type) {
 		return ErrEgressProtocol // duplicate start
 	}
 	switch f.Type {
@@ -389,7 +397,7 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 		// Portal answers a call once; a second answer is out of order, not a queue.
 		// A command answers an admit and a result a notice, nothing else.
 		if call.answered || call.kind == 0 ||
-			f.Type == EgressFrameCommand && call.kind != EgressFrameAdmit ||
+			f.Type == EgressFrameCommand && call.kind != EgressFrameAdmit && call.kind != EgressFramePostgresAdmit ||
 			f.Type == EgressFrameNoticeResult && call.kind != EgressFrameNotice {
 			return ErrEgressProtocol
 		}
@@ -508,7 +516,7 @@ func (c *EgressCall) Send(t byte, payload []byte) error {
 	case c.finished:
 		m.mu.Unlock()
 		return ErrEgressClosed
-	case (t == EgressFrameAdmit || t == EgressFrameNotice) && m.role == EgressRunner:
+	case isEgressCallStart(t) && m.role == EgressRunner:
 		if c.kind != 0 {
 			m.mu.Unlock()
 			return ErrEgressProtocol
@@ -590,6 +598,12 @@ type EgressAdmit struct {
 	// Credential names the reviewed binding the call asks Portal to place (doc
 	// 176), or is empty and then absent from the frame.
 	Credential string `json:"credential,omitempty"`
+	// SigningScheme, SigningAction and SigningVersion ask Portal to sign the call (doc 177) with
+	// the binding named by Credential. They are all present or all absent, and present only with a
+	// Credential. They name a reviewed (action, version) pair; Portal computes the signature.
+	SigningScheme  string `json:"signingScheme,omitempty"`
+	SigningAction  string `json:"signingAction,omitempty"`
+	SigningVersion string `json:"signingVersion,omitempty"`
 }
 
 // EncodeEgressAdmit encodes the closed admit JSON.
@@ -632,10 +646,17 @@ func DecodeEgressAdmit(payload []byte) (EgressAdmit, error) {
 
 func validEgressAdmit(a EgressAdmit) bool {
 	digest, err := hex.DecodeString(a.BodySHA256)
-	return (a.Credential == "" || appplatform.ValidCredentialBindingName(a.Credential)) && appplatform.ValidHTTPRequestMethod(a.Method) && len(a.URL) > 0 && len(a.URL) <= appplatform.MaxHTTPTargetBytes &&
+	return (a.Credential == "" || appplatform.ValidCredentialBindingName(a.Credential)) && validEgressAdmitSigning(a) && appplatform.ValidHTTPRequestMethod(a.Method) && len(a.URL) > 0 && len(a.URL) <= appplatform.MaxHTTPTargetBytes &&
 		appplatform.ValidHTTPPolicyHeaderValue(a.Accept) && appplatform.ValidHTTPPolicyHeaderValue(a.ContentType) &&
 		a.BodyBytes >= 0 && a.BodyBytes <= appplatform.MaxHTTPRequestBytes &&
 		err == nil && len(digest) == sha256.Size && hex.EncodeToString(digest) == a.BodySHA256
+}
+
+func validEgressAdmitSigning(a EgressAdmit) bool {
+	if a.SigningScheme == "" {
+		return a.SigningAction == "" && a.SigningVersion == ""
+	}
+	return a.Credential != "" && a.SigningScheme == appplatform.ACS3Scheme && appplatform.ValidACS3Action(a.SigningAction) && appplatform.ValidACS3Version(a.SigningVersion)
 }
 
 // EncodeEgressSigned encodes the command and proof frames: u32 length, the

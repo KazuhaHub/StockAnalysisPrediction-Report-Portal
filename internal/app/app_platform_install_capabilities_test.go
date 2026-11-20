@@ -194,14 +194,14 @@ func testPlatformInstallCapabilityRows(t *testing.T, pg bool) {
 	for _, c := range []platformSelectedCapability{{"network.http", true, p.Runtime.NetworkPolicy}, {"storage.files", false, "{}"}} {
 		mustExec(t, st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,?,?,1,?,1,1)`, platformFixtureID(1), c.capability, boolInt(c.granted), c.policy, platformFixtureID(2))
 	}
-	if err := verifyPlatformInstallCapabilityRows(st.poolExec(), platformFixtureID(1), m, p, true, 1, platformFixtureID(2), errAppPlatformStageEvidence); err != nil {
+	if err := verifyPlatformInstallCapabilityRows(st.poolExec(), platformFixtureID(1), m, p, true, 1, platformFixtureID(2), nil, errAppPlatformStageEvidence); err != nil {
 		t.Fatal("exact selected source rows refused", err)
 	}
 	mustExec(t, st, `UPDATE app_platform_capability_grants SET granted=0 WHERE capability='network.http'`)
-	if err := verifyPlatformInstallCapabilityRows(st.poolExec(), platformFixtureID(1), m, p, false, 1, platformFixtureID(2), errAppPlatformStageEvidence); err != nil {
+	if err := verifyPlatformInstallCapabilityRows(st.poolExec(), platformFixtureID(1), m, p, false, 1, platformFixtureID(2), nil, errAppPlatformStageEvidence); err != nil {
 		t.Fatal("pending reviewed restriction refused", err)
 	}
-	if err := verifyPlatformInstallCapabilityRows(st.poolExec(), platformFixtureID(1), m, p, true, 1, platformFixtureID(2), errAppPlatformStageEvidence); err == nil {
+	if err := verifyPlatformInstallCapabilityRows(st.poolExec(), platformFixtureID(1), m, p, true, 1, platformFixtureID(2), nil, errAppPlatformStageEvidence); err == nil {
 		t.Fatal("pending permission became active")
 	}
 	mustExec(t, st, `UPDATE app_platform_capability_grants SET granted=1 WHERE capability='network.http'`)
@@ -222,7 +222,7 @@ func testPlatformInstallCapabilityRows(t *testing.T, pg bool) {
 			tx.Rollback()
 			t.Fatal(err)
 		}
-		err = verifyPlatformInstallCapabilityRows(migExec{s: st, ex: tx}, platformFixtureID(1), m, p, true, 1, platformFixtureID(2), errAppPlatformStageEvidence)
+		err = verifyPlatformInstallCapabilityRows(migExec{s: st, ex: tx}, platformFixtureID(1), m, p, true, 1, platformFixtureID(2), nil, errAppPlatformStageEvidence)
 		tx.Rollback()
 		if err == nil {
 			t.Fatal("inexact grant row admitted", q)

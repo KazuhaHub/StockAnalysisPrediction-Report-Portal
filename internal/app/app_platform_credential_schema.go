@@ -3,6 +3,17 @@ package app
 // Credential custody extends the control schema through a separate migration;
 // the original control products and their verification remain unchanged.
 func platformCredentialTables() []platformTable {
+	return platformCredentialTablesWithOperations(platformSecretBindingOperations())
+}
+
+// platformLegacyCredentialTables is the credential schema as step 0016 created it: the current tables
+// with the frozen three-value operation list. Step 0016 must keep producing this shape; step 0022
+// widens it afterwards, for fresh and upgraded databases alike.
+func platformLegacyCredentialTables() []platformTable {
+	return platformCredentialTablesWithOperations(platformLegacySecretBindingOperations())
+}
+
+func platformCredentialTablesWithOperations(operations string) []platformTable {
 	return []platformTable{
 		{name: "credentials", fields: "id:ID label:T160 state:T24 sealed_value:T32768? value_revision:R revision:R created_ms:MS updated_ms:MS revoked_ms:MS?", primary: "id", checks: []string{
 			platformEnum("state", "active", "revoked", "review_required"),
@@ -14,7 +25,7 @@ func platformCredentialTables() []platformTable {
 			{"credential_id", platformPrefix + "credentials", "id", "NO ACTION"},
 			{"review_plan_id", platformPrefix + "review_plans", "id", "NO ACTION"},
 		}, checks: []string{
-			platformEnum("operation", "http_bearer", "http_api_key", "raw_read"), platformEnum("state", "active", "revoked", "review_required"),
+			operations, platformEnum("state", "active", "revoked", "review_required"),
 			"((state='revoked') AND (revoked_ms IS NOT NULL)) OR ((state<>'revoked') AND (revoked_ms IS NULL))", "updated_ms>=created_ms",
 		}},
 	}
@@ -28,8 +39,13 @@ func platformCredentialIndexes() []platformIndex {
 	}
 }
 func migration0016() migration {
-	tables, indexes := platformCredentialTables(), platformCredentialIndexes()
-	m := migration{id: "0016", restore: restoreRule{olderDumpOK: true}, verify: func(e migExec) error { return verifyPlatformSchemaProducts(e, tables, indexes) }}
+	tables, indexes := platformLegacyCredentialTables(), platformCredentialIndexes()
+	// A database that has not applied 0022 still carries the frozen operation list, and verification
+	// runs before that step: 0016 accepts either list.
+	verify := func(e migExec) error {
+		return verifyPlatformSchemaProductsWithAlternates(e, platformCredentialTables(), indexes, tables)
+	}
+	m := migration{id: "0016", restore: restoreRule{olderDumpOK: true}, verify: verify}
 	for _, t := range tables {
 		m.tables = append(m.tables, platformPrefix+t.name)
 		for _, c := range t.columns() {

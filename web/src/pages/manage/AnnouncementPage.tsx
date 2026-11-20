@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   App,
@@ -36,7 +36,11 @@ import type {
   AnnouncementLevel,
   AnnouncementScope,
 } from '../../api/types'
-import { AnnouncementRow } from '../../components/SiteAnnouncement'
+import { AnnouncementRow, useAnnouncementVars } from '../../components/SiteAnnouncement'
+import AnnouncementVarInsert from '../../components/AnnouncementVarInsert'
+import { checkAnnouncementVars } from '../../lib/announcementVars'
+import { useOptionalSite } from '../../site'
+import type { TextAreaRef } from 'antd/es/input/TextArea'
 import type { Principal } from '../../api/types'
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
 import { principalName, principalOptions } from '../../components/principals'
@@ -103,6 +107,35 @@ export default function AnnouncementPage() {
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<FormValues>()
   const draft = useFormDraft(form, open, saving, () => setOpen(false))
+  const site = useOptionalSite()
+  // The list shows what readers see, so a row headed by a template reads as its headline.
+  const renderVars = useAnnouncementVars(items.map((a) => a.title + a.content).join('\n'))
+  const contentRef = useRef<TextAreaRef>(null)
+
+  // A variable goes in at the body's cursor (or replaces its selection), and the cursor lands after
+  // it, so inserting two in a row reads in the order they were picked.
+  const insertVar = (text: string) => {
+    const el = contentRef.current?.resizableTextArea?.textArea
+    const cur = String(form.getFieldValue('content') || '')
+    const start = el ? el.selectionStart : cur.length
+    const end = el ? el.selectionEnd : cur.length
+    const next = cur.slice(0, start) + text + cur.slice(end)
+    form.setFieldValue('content', next)
+    void form.validateFields(['content']).catch(() => {})
+    requestAnimationFrame(() => {
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(start + text.length, start + text.length)
+    })
+  }
+
+  // Mirrors the server's check, so an operator sees the exact token before the save is refused.
+  const varRule = {
+    validator: (_: unknown, v?: string) => {
+      const bad = checkAnnouncementVars(v || '')
+      return bad ? Promise.reject(new Error(t('announcementAdmin.badVariable', { token: bad }))) : Promise.resolve()
+    },
+  }
 
   const load = (opts?: LoadOpts) => {
     setLoading(true)
@@ -187,7 +220,12 @@ export default function AnnouncementPage() {
   }
 
   const submit = async () => {
-    const v = await form.validateFields()
+    let v: FormValues
+    try {
+      v = await form.validateFields()
+    } catch {
+      return // antd draws the field errors; a rejected click must not surface as an unhandled rejection
+    }
     const [from, to] = v.window ?? [null, null]
     const payload = {
       enabled: v.enabled === true,
@@ -297,7 +335,7 @@ export default function AnnouncementPage() {
   const row = (a: AdminAnnouncement) => {
     const status = statusOf(a)
     const stale = staleDays(a)
-    const preview = (a.content || '').split('\n')[0]
+    const preview = renderVars((a.content || '').split('\n')[0])
     return (
       <div
         style={{
@@ -324,7 +362,7 @@ export default function AnnouncementPage() {
           }}
         />
         <Typography.Text strong={!!a.title} type={a.title ? undefined : 'secondary'}>
-          {a.title || t('announcementAdmin.untitled')}
+          {a.title ? renderVars(a.title) : t('announcementAdmin.untitled')}
         </Typography.Text>
         <Typography.Text type="secondary" ellipsis style={{ flex: 1, minWidth: 80, fontSize: 12 }}>
           {preview}
@@ -613,16 +651,23 @@ export default function AnnouncementPage() {
           <Form.Item
             name="title"
             label={t('settings.announcementTitle')}
-            rules={[{ max: 160, message: t('settings.announcementTitleTooLong') }]}
+            rules={[{ max: 160, message: t('settings.announcementTitleTooLong') }, varRule]}
           >
             <Input maxLength={160} showCount placeholder={t('settings.announcementTitlePlaceholder')} />
           </Form.Item>
           <Form.Item
             name="content"
             label={t('settings.announcementContent')}
-            rules={[{ max: 2000, message: t('settings.announcementContentTooLong') }]}
+            extra={
+              <Space size={8} wrap>
+                <AnnouncementVarInsert onInsert={insertVar} site={site?.title || t('brand')} />
+                <span>{t('announcementVars.hint', { example: '{{time:2026-11-20T14:00Z}}' })}</span>
+              </Space>
+            }
+            rules={[{ max: 2000, message: t('settings.announcementContentTooLong') }, varRule]}
           >
             <Input.TextArea
+              ref={contentRef}
               maxLength={2000}
               showCount
               autoSize={{ minRows: 5, maxRows: 14 }}

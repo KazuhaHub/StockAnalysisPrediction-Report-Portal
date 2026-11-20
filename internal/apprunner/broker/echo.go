@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/url"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 // Transformed forms of a credential are looked for only for values between these
@@ -47,13 +49,53 @@ func asciiLower(b []byte) []byte {
 }
 
 func newEchoMatcher(header string, value []byte) *echoMatcher {
-	m := &echoMatcher{}
 	if len(value) == 0 {
-		return m
+		return &echoMatcher{}
 	}
 	secrets := [][]byte{value}
 	if header == "Authorization" && bytes.HasPrefix(value, []byte("Bearer ")) && len(value) > len("Bearer ") {
 		secrets = append(secrets, value[len("Bearer "):])
+	}
+	return newEchoMatcherFor(secrets)
+}
+
+// newRequestEchoMatcher matches what a request carried that a response must not give back: its
+// credential header value, or, for a signed request, the Authorization value, the signature in it
+// and the security token (the AccessKey secret itself never reaches the runner).
+func newRequestEchoMatcher(input HTTPRequest) *echoMatcher {
+	return newEchoMatcherFor(echoSecretsOf(input.HeaderName, input.HeaderValue, input.SignedHeaders))
+}
+
+func echoSecretsOf(header string, value []byte, signed []appplatform.SignedHeader) [][]byte {
+	if len(signed) == 0 {
+		if len(value) == 0 {
+			return nil
+		}
+		secrets := [][]byte{value}
+		if header == "Authorization" && bytes.HasPrefix(value, []byte("Bearer ")) && len(value) > len("Bearer ") {
+			secrets = append(secrets, value[len("Bearer "):])
+		}
+		return secrets
+	}
+	var secrets [][]byte
+	for _, h := range signed {
+		if !appplatform.ACS3SecretHeader(h.Name) || len(h.Value) == 0 {
+			continue
+		}
+		secrets = append(secrets, h.Value)
+		if h.Name == "authorization" {
+			if i := bytes.LastIndex(h.Value, []byte("Signature=")); i >= 0 {
+				secrets = append(secrets, h.Value[i+len("Signature="):])
+			}
+		}
+	}
+	return secrets
+}
+
+func newEchoMatcherFor(secrets [][]byte) *echoMatcher {
+	m := &echoMatcher{}
+	if len(secrets) == 0 {
+		return m
 	}
 	seenExact, seenFolded := map[string]bool{}, map[string]bool{}
 	addExact := func(f []byte) {
