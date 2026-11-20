@@ -382,7 +382,7 @@ jobs:
           sudo -n chmod 0755 "$bin_dir"
           sudo -n install -m 0555 -o root -g root "$build" "$bin_dir/transport.test"
           cd internal/apprunner/transport
-          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_EGRESS_ACCEPTANCE=1 "$bin_dir/transport.test" -test.v -test.timeout=90s -test.run='^TestServiceEgressEndpointAcceptance$'
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_EGRESS_ACCEPTANCE=1 "$bin_dir/transport.test" -test.v -test.timeout=90s -test.run='^(TestServiceEgressEndpointAcceptance|TestProxyEndpointAcceptance)$'
 
       - name: Verify Portal confirmation through the root endpoint
         shell: bash

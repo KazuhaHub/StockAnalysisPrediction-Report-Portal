@@ -6,11 +6,13 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -278,6 +280,67 @@ func TestProxyReportsReachPortal(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no refusal report reached Portal")
+	}
+}
+
+// The Portal-side reference forwarder against the runner's real broker: an HTTPS client that only knows
+// HTTPS_PROXY reaches a reviewed host through CONNECT, the broker's tunnel and a TLS server, and a host that
+// was not reviewed is a 403 with the refusal code.
+func TestProxyForwarderEndToEndAgainstTheBroker(t *testing.T) {
+	f := newEgrFixture(t)
+	server := f.proxySeams()
+	f.open(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- proxyforwarder.Serve(ctx, listener, func(context.Context) (net.Conn, error) { return f.listener("1").dial() })
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	proxyURL, _ := url.Parse("http://" + listener.Addr().String())
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+		// The test server certificate does not name the host; the point here is the path. The SNI the client sends is the CONNECT host.
+		TLSClientConfig: &tls.Config{RootCAs: roots, InsecureSkipVerify: true, MinVersion: tls.VersionTLS12},
+	}}
+	for i := 0; i < 3; i++ {
+		resp, err := client.Get("https://qt.gtimg.cn/q=sh000001")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || !strings.Contains(string(body), "hello from upstream") {
+			t.Fatalf("request %d: %d %q", i, resp.StatusCode, body)
+		}
+	}
+	// An unreviewed host is refused by the broker and the forwarder says why.
+	raw, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	_ = raw.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = io.WriteString(raw, "CONNECT evil.example.com:443 HTTP/1.1\r\nHost: evil.example.com:443\r\n\r\n")
+	reply, _ := io.ReadAll(raw)
+	if !strings.HasPrefix(string(reply), "HTTP/1.1 403") || !strings.Contains(string(reply), "X-Portal-Proxy-Refusal: host_not_reviewed") {
+		t.Fatalf("refusal: %q", reply)
+	}
+	// Plain HTTP is not proxied at all: the forwarder only speaks CONNECT.
+	plain := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	if resp, err := plain.Get("http://qt.gtimg.cn/q=sh000001"); err == nil {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("plain HTTP through the proxy: %d", resp.StatusCode)
+		}
 	}
 }
 
