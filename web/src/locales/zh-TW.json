@@ -4238,6 +4238,8 @@
   "appPlatform.settings.raiseQuotaShort": "運行器的 {{dimension}} 不足：需要 {{requested}}，剩餘 {{remaining}}。",
   "appPlatform.settings.importData": "匯入資料",
   "appPlatform.settings.importTitle": "匯入應用程式資料",
+  "appPlatform.settings.importConfirmTitle": "取代此應用程式的資料？",
+  "appPlatform.settings.importConfirmBody": "目前的應用程式資料將被封存內容取代。系統會保留取代前的檢查點，匯入失敗時會從該檢查點還原。",
   "appPlatform.settings.importAction": "以封存取代資料",
   "appPlatform.settings.importHint": "請輸入已放入運行器匯入區域的封存的 SHA-256 摘要（64 位小寫十六進位字元）。",
   "appPlatform.settings.importDigest": "封存 SHA-256",

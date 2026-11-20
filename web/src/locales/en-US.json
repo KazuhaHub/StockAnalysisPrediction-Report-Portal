@@ -4238,6 +4238,8 @@
   "appPlatform.settings.raiseQuotaShort": "The runner is short on {{dimension}}: {{requested}} requested, {{remaining}} remaining.",
   "appPlatform.settings.importData": "Import data",
   "appPlatform.settings.importTitle": "Import application data",
+  "appPlatform.settings.importConfirmTitle": "Replace the data of this application?",
+  "appPlatform.settings.importConfirmBody": "The current application data will be replaced by the archive. A checkpoint of it is kept, and the installation is restored from it if the import fails.",
   "appPlatform.settings.importAction": "Replace data with archive",
   "appPlatform.settings.importHint": "Enter the SHA-256 digest (64 lowercase hex characters) of an archive already placed in the runner's import area.",
   "appPlatform.settings.importDigest": "Archive SHA-256",

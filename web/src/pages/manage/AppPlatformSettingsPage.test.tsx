@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { App } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
 
@@ -45,14 +46,14 @@ const settings = {
 
 function mount(path = `/manage/apps/installations/${installation}`) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <App><MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/manage/apps/installations/:installation" element={<AppPlatformSettingsPage />} />
         <Route path="/manage/apps" element={<div>apps</div>} />
         <Route path="/apps/v2/:installation" element={<div>application</div>} />
         <Route path="/manage/apps/:key/credentials" element={<div>credentials</div>} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter></App>,
   )
 }
 
@@ -668,6 +669,11 @@ describe('data quota raise and data import', () => {
     expect(dialog.textContent).toContain('appPlatform.settings.importDisabled')
     expect(dialog.textContent).toContain('f'.repeat(64))
     await user.click(await screen.findByRole('button', { name: /appPlatform\.settings\.importAction$/ }))
+    // The destructive commit asks once more, with the shared confirmation rules.
+    expect(apiMock.post).not.toHaveBeenCalledWith(`${root}/operations`, expect.anything())
+    expect((await screen.findAllByText('appPlatform.settings.importConfirmTitle')).length).toBeGreaterThan(0)
+    const buttons = screen.getAllByRole('button', { name: /appPlatform\.settings\.importAction$/ })
+    await user.click(buttons[buttons.length - 1])
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
       plan_id: plan,
       plan_sha256: 'e'.repeat(64),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
+import { Alert, App, Button, Card, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
 import { AppstoreOutlined, ArrowLeftOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,7 @@ import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
+import { confirmAction } from '../../components/Confirm'
 import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
 import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
@@ -181,6 +182,7 @@ function phaseTone(settings: Settings): StatusTone {
 
 export default function AppPlatformSettingsPage() {
   const { t } = useTranslation()
+  const { modal } = App.useApp()
   const { lang } = usePrefs()
   const { token } = theme.useToken()
   const navigate = useNavigate()
@@ -500,7 +502,17 @@ export default function AppPlatformSettingsPage() {
       setImporting(false)
     }
   }
-  const confirmImport = async () => {
+  // The import replaces the namespace's contents, so the review's confirmation asks once more, with the shared rules.
+  const confirmImport = () => {
+    if (!importPlan || importing) return
+    confirmAction(modal, {
+      title: t('appPlatform.settings.importConfirmTitle'),
+      description: t('appPlatform.settings.importConfirmBody'),
+      okText: t('appPlatform.settings.importAction'),
+      onOk: () => commitImport(),
+    }, t)
+  }
+  const commitImport = async () => {
     if (!importPlan || importing) return
     setImporting(true); setImportError('')
     try {

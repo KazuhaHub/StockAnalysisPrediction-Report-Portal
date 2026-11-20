@@ -4238,6 +4238,8 @@
   "appPlatform.settings.raiseQuotaShort": "运行器的 {{dimension}} 不足：需要 {{requested}}，剩余 {{remaining}}。",
   "appPlatform.settings.importData": "导入数据",
   "appPlatform.settings.importTitle": "导入应用数据",
+  "appPlatform.settings.importConfirmTitle": "替换此应用的数据？",
+  "appPlatform.settings.importConfirmBody": "当前应用数据将被归档内容替换。系统会保留替换前的检查点，导入失败时从该检查点恢复。",
   "appPlatform.settings.importAction": "用归档替换数据",
   "appPlatform.settings.importHint": "请输入已放入运行器导入区域的归档的 SHA-256 摘要（64 位小写十六进制字符）。",
   "appPlatform.settings.importDigest": "归档 SHA-256",

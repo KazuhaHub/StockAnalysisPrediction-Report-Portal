@@ -1,6 +1,6 @@
 # Proposal: per-installation data quota and administrator data import
 
-Status: Accepted 2026-11-20. Phase P1 (quota) is implemented; see the implementation notes at the end. P2 and P3 are pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20. Phases P1 (quota) and P3 (reviewed `set_data_quota` and `import_data`, `pack-import`) are implemented; see the implementation notes at the end. P2 (hard links) is pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
@@ -218,6 +218,10 @@ One additive migration after `0023`, numbered `0024`:
 
 The runner journal is unchanged: its volume evidence already records the byte and inode limits per namespace. SQLite and PostgreSQL both get the migration, with up and down tests, as 0022 and 0023 did.
 
+### Runner journal schema v5 — approved by the owner on 2026-11-20
+
+The paragraph above says the runner journal is unchanged. That holds for the quota evidence the P1 work records, but not for the two new signed commands: each needs a durable `runner_commands` row, and that table's `kind` list is a closed CHECK. The owner approved **journal schema v5**: the `kind` CHECK gains `set-data-quota` and `import-data`, and `runner_commands` is rebuilt on upgrade the way v3 did it, from v1, v2, v3 and v4, keeping every row in admission order. No table or column is added, the stage list is unchanged (the commands use the existing stages `prepare_data` and `restore_data`), and the Portal schema stays at `0024`. An older binary refuses a v5 journal as a newer file.
+
 ## 12. Owner decisions (2026-11-20)
 
 The owner accepted the recommended answer to each question below (Q1 to Q10) and approved migration `0024` (Q9).
@@ -290,29 +294,42 @@ P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and 
 
 ## Implementation notes (set_data_quota, P3)
 
-This pass delivers the host-side and native parts of P3. The reviewed `set_data_quota` and `import_data` actions are **not implemented**: they are blocked on a schema decision.
+P3 and the reviewed `set_data_quota` action are implemented, apart from the item listed under "Not done".
 
-**Landed**
+**Runner**
 
-- **`app-runner pack-import`** (`cmd/app-runner/pack_import.go`, `internal/apprunner/packimport`).
-  - Validates with the checkpoint walker's rules: regular files and directories only; no setuid, setgid or sticky bits; the reserved manifest name; names up to 255 bytes; at most 64 levels. Hard links are refused with an error naming phase P2.
-  - It also refuses a tree whose walk order the restore reader would reject (a directory `a` beside a sibling such as `a.txt`, which sorts before `a/`). The checkpoint walker has the same latent limit; the packer fails early instead of at import.
-  - Writes a canonical tar into `<checkpoint_root>/.portal-imports/` (root-owned, 0700, created if missing), owners `65532:65532`, directories 0750, files 0640, mtime zero. It writes a partial file, links it into place (never overwrites) and syncs.
-  - The first entry is a one-block manifest (`portal.app/data-import/1`: entries, bytes, `body_sha256`, packer). The printed SHA-256 is the digest of everything after the manifest block, so the runner finds an archive by reading its first 1 KiB and verifies the body when it uses it.
-- **Runner natives** (`internal/apprunner/data`).
-  - `RaiseQuota`: raises the XFS project limits online with the quota call. Lowering is refused (`ErrQuotaLower`); the live limits must equal the recorded old limits; it is convergent (an applied raise reports `AlreadyApplied`).
-  - `InspectImportInbox` and `InspectImportArchive`: exactly one archive by digest, full validation, manifest counts and the `.portal-data-schema` marker.
-  - `ImportData`: clears and extracts into the same namespace inode with `restoreExtract`, `importFits` (now `importFitsQuota`) and the restore read-back; refuses a data format mismatch and an archive over the quota before clearing anything; returns the bytes and inodes observed from the project quota. `RemoveImportArchive` deletes the archive and is for the completion step only.
-- **Handbook** section "Importing data", with the corrected market-monitor sizing.
-- **Doc corrections.** market-monitor's quota is 6 GiB (supersedes D10); two retained checkpoints need about 12.4 GiB, so the checkpoint image must be at least 16 GiB (sections 3.3 and Q8).
+- **Journal schema v5** (section 11): the two kinds, the upgrade from v1 to v4, and tests for every starting version.
+- **Commands.** `set-data-quota` (stage `prepare_data`) and `import-data` (stage `restore_data`) are signed like the other data commands, with their own execute, read and settlement purposes. The runner claims each in one transaction before the native call (row `unknown`), and settles it to `applied` with its receipt afterwards; an effect left unknown is finished under the same claim, never claimed again. A read-back answers with the receipt or a typed status (`pending`, `orphaned`, `absent`).
+  - Raise: checks the volume resource, the install's prepare-data receipt, that the old limits equal the journal's current quota, and capacity admission (raising both reservation rows, the checkpoint row included). A refusal is the typed `data_quota` dimension and the shortfall. The native raise (`Root.RaiseQuota`) is online, refuses lowering and refuses a hand-edited live limit.
+  - Import: requires no running container, the operation's own applied pre-import checkpoint (verified and kept), and the namespace's current quota. The native import replaces the contents in the same namespace inode (`restoreExtract`, `importFits`, restore read-back) and returns the bytes and inodes the project quota reports.
+- **Quota chain.** The install's prepare-data receipt stays immutable, because later checkpoints rebuild its digest. The current quota is its limits followed by every applied `set-data-quota` row of the namespace, each starting where the last ended. Checkpoint sources (archive and entry caps), the update-start evidence, restore bounds, delete-data and managed removal read the last link; the stop and remove-code checks accept any link for the quota a start recorded at its own time.
+- **Data query** (`data-query`, no journal row): the questions a review asks, signed by Portal. Does exactly one inbox archive carry a digest (and its size, entries, content bytes and data schema marker), would a larger quota fit the runner's capacity (a rolled-back dry run of admission), and the deletion of an inbox archive after a completed import.
+- **`pack-import` and the natives** are as in the first pass of these notes: validation with the checkpoint walker's rules (hard links refused until P2), normalised owners and modes, a canonical archive in `<checkpoint_root>/.portal-imports/` that is never overwritten. The printed digest is that of everything after the manifest block.
 
-**Tests.** Unit tests (no database involved) cover refusals, normalisation, canonical manifest and digest, never-overwrite, inbox and name checks, archive inspection with tampering and the entry cap, malformed raise and import requests. `TestNativeRaiseQuotaAndImportData` (raise, lowering, hand-edited limit, convergence, import, format mismatch, replace, archive removal) is written and gated like the other native tests. It was **not run**: it needs the disposable XFS fixture.
+**Portal**
 
-**Not done, and why**
+- **`set_data_quota`.** Stages `queued -> validate -> prepare_data -> complete`; no generation changes and the installation keeps running. The review shows current and new bytes and inodes, usage and the runner's capacity answer; lowering is `data_quota_lower_refused`, an unchanged or out-of-bounds request `data_quota_invalid`, and a raise the runner cannot hold is reviewed with its shortfall named and cannot be confirmed (`data_quota_capacity`). The commit that records the receipt updates the namespace row (`quota_bytes`, `quota_inodes`, `observed_bytes`, revision) and completes the operation in one fenced transaction.
+- **History loaders.** The namespace row is compared with the last link of the Portal's chain (the install review's approval, then each completed raise), not with the install plan: the approved-quota check every source loader shares, the install-time backend history (row revision and update time allow the raises), the update history (a start's recorded quota may be any link; its rebuilt command uses the recorded one), and the live sources that feed new commands (current quota). Fresh-host import reads the namespace row, which is current. Tests cover the install-time history, the update history, a start after a raise (which carries the raised quota) and the failure and refusal paths, on SQLite and PostgreSQL.
+- **`import_data`.** A same-release lifecycle with one more stage: `validate -> quiesce -> snapshot -> import -> start -> probe -> activate -> complete`. The review requires the runner's confirmation of exactly one archive with the reviewed digest, a data schema marker equal to the release's data format (`data_format_mismatch`), and a size and entry count inside the quota (`data_import_too_large`); errors are `data_import_archive_missing` and `data_import_archive_invalid`. `validate` asks the runner again. The `import` effect records `observed_bytes` from the receipt. On `complete` Portal asks the runner to delete the archive; a failed import keeps it.
+- **Failure after the import** restores the pre-import checkpoint (a runner restore under the second effect number of the stage) and leaves the installation disabled and unchanged (`managed_import_data_rolled_back`). If that restore cannot be proven the operation ends `recovery_required` and the existing repair path applies. A failure before the import changes nothing (`managed_import_data_unavailable`).
+- **Audit.** Review, intent, every stage, the import (digest, entries, observed bytes), the rollback and the archive deletion each write an `audit_log` row; the same for the raise.
+- **Console.** The settings page offers "Raise quota" and "Import data" with review dialogs in en-US, zh-CN and zh-TW. The import commit asks once more through `confirmAction`. The settings projection reports `quota_raise_eligible` and `import_eligible`.
+- **Handbook** section "Importing data" now covers the whole procedure, including raising the quota first.
 
-- **`set_data_quota`**, **`import_data`**, their Portal plans, operations, stages, history loaders, audit, HTTP routes and console dialogs, the update-raises-quota deferral, and the `data_quota_lower_refused`, `data_import_*` and `data_format_mismatch` error codes and translations.
-- **Blocker: the runner journal schema.** Each new signed runner command needs a durable `runner_commands` row, and that table's `kind` list is a closed CHECK (`journal/schema.go`; v3 widened it for remove-image and delete-checkpoint). Doc 185 section 11 says the journal is unchanged, which does not hold for a new command kind. Reusing `prepare-data` or `import-checkpoint` is not safe: `requireDataRootHistory` and the import-checkpoint scan decode every row of those kinds with their own receipt formats.
-- **Needed from the owner:** approval for journal schema v5, widening the `kind` CHECK with `set-data-quota` and `import-data`, with the v3-style rebuild on upgrade. No Portal migration is needed beyond 0024.
-- **Design once approved.**
-  - `set_data_quota`: stages `queued -> validate -> prepare_data -> complete`, one fenced effect; the namespace row (`quota_bytes`, `quota_inodes`) and a journal evidence row are updated together. Every history loader reads the current quota from the namespace row or the latest raise instead of the install-time receipt.
-  - `import_data`: a same-release lifecycle for a disabled installation (stage `import` between `snapshot` and `start`), with the pre-import checkpoint restored on a failure after `import`. Quiesce is the verified stopped state: the installation must be disabled first.
+**Deviations**
+
+- **Import requires a disabled installation.** The proposal's quiesce stops the backend; here the installation is disabled first, and `quiesce` is the verified stopped state. The review and the console say so, and an enabled installation is refused with `data_import_requires_disabled`.
+- **Review capacity is the runner's admission answer** (fits, or the dimension and shortfall), not a free-bytes figure.
+- **The review checks size with the manifest's numbers** (content bytes against the byte quota, entries plus the namespace root against the inode quota); the exact block-rounded footprint is checked by the runner at the import.
+- **Journal kinds and stages.** The two commands share the stages `prepare_data` and `restore_data` with other effects (no stage was added); the Portal records the import under its own effect stage `import`.
+- **An unknown raise** ends `recovery_required` after its attempts. The runner finishes an effect left unknown when the same signed command arrives, but Portal does not yet reconcile one automatically; a limit above the journal evidence refuses a start until the raise is reviewed again.
+
+**Tests**
+
+- Run: journal v1 to v4 upgrades, the two commands (claim, settle, replay, unknown, capacity, refusals), the quota chain, the data query, transport actions and read purposes, control commands, the data natives that need no XFS, `pack-import`, the operation models, the Portal flows on SQLite and PostgreSQL (`postgres:16-alpine`, removed afterwards), the web tests and the typecheck.
+- Written, **not run**: `TestNativeRaiseQuotaAndImportData`. It needs the disposable XFS fixture.
+
+**Not done**
+
+- **Update raises quota.** An approved update that asks for more still keeps the approved quota (`raise_applied` stays false); raising is the separate reviewed action. Folding it into the update changes the update's start evidence on every update path. The design that fits: run the same `set-data-quota` effect between the checkpoint and the start, derive the Portal's quota chain from applied `set-data-quota` effect receipts (which also covers an update's own raise, in flight), and count the extra effect in the registration's base. It needs its own review.
+- **Hard links** (P2).
