@@ -1,6 +1,6 @@
 # Proposal: backend apps on Linux (ext4 and others), macOS and Windows — runtime and data quota options
 
-Status: proposal 2026-11-19; awaiting owner decisions (section 9). No code,
+Status: Accepted 2026-11-20; implementation pending. No code,
 schema or contract change is made by this document. Related: docs
 [28](28-project-quota-acceptance.md), [46](46-native-xfs-data-primitive.md),
 [49](49-data-root-identity.md), [66](66-candidate-container-policy.md),
@@ -538,18 +538,29 @@ access).
 8. M3 refusal stays: preflight against a Docker Desktop engine socket reports
    the daemon peer refusal.
 
-## 9. Decisions for the owner (recommended answers)
+## 9. Owner decisions (2026-11-20)
 
-| # | Question | Recommended answer |
-| --- | --- | --- |
-| D1 | Linux primary for ext4 hosts | XFS data and checkpoint roots on two preallocated loop-mounted images (or a real XFS partition or LV where one exists); no data-layer code change |
-| D2 | Build the native ext4 project-quota adapter | Yes as the fallback, phase P4, not blocking market-monitor; build it only when a host cannot use D1 |
-| D3 | Offer a soft (scanning) quota mode, even with an acknowledgement | No |
-| D4 | Model for backend apps on macOS and Windows | M1: Linux Portal + runner inside an administrator-managed Linux VM, "supported with acknowledged risk"; native darwin/windows Portal stays static-only |
-| D5 | Build a host-to-VM transport (M2) now | No; only as part of a future remote-runner design |
-| D6 | Accept Docker Desktop, OrbStack, Colima's engine socket, Podman or Rancher Desktop as the runner's engine | No |
-| D7 | Windows reference hypervisor | Hyper-V (or another full VM); WSL2 only for evaluation, after its kernel passes preflight and doc 28 |
-| D8 | Ship runner binaries and a VM image | Release `app-runner` for `linux/amd64` and `linux/arm64`; ship a documented provisioning recipe, not a prebuilt VM image |
-| D9 | Require native arm64 evidence before supporting Apple Silicon hosts | Yes |
-| D10 | Initial market-monitor quota | 3 GiB bytes and 100,000 inodes, reviewed after one year of growth (about 300 MB per year, `pipeline/README.md:57`) |
-| D11 | Preallocated image sizes for production | 8 GiB data, 8 GiB checkpoint (doc 167's reference budget), grown online when capacity reporting shows 80% |
+The owner decided every question below on 2026-11-20 and accepted the recommended answer for each (D1 to D11).
+
+
+D1. Linux primary for ext4 hosts. Decided: XFS data and checkpoint roots on two preallocated loop-mounted images (or a real XFS partition or LV where one exists); no data-layer code change.
+
+D2. Build the native ext4 project-quota adapter. Decided: yes as the fallback, phase P4, not blocking market-monitor; build it only when a host cannot use D1.
+
+D3. Offer a soft (scanning) quota mode, even with an acknowledgement. Decided: no.
+
+D4. Model for backend apps on macOS and Windows. Decided: M1, Linux Portal + runner inside an administrator-managed Linux VM, "supported with acknowledged risk"; native darwin/windows Portal stays static-only.
+
+D5. Build a host-to-VM transport (M2) now. Decided: no; only as part of a future remote-runner design.
+
+D6. Accept Docker Desktop, OrbStack, Colima's engine socket, Podman or Rancher Desktop as the runner's engine. Decided: no.
+
+D7. Windows reference hypervisor. Decided: Hyper-V (or another full VM); WSL2 only for evaluation, after its kernel passes preflight and doc 28.
+
+D8. Ship runner binaries and a VM image. Decided: release `app-runner` for `linux/amd64` and `linux/arm64`; ship a documented provisioning recipe, not a prebuilt VM image.
+
+D9. Require native arm64 evidence before supporting Apple Silicon hosts. Decided: yes.
+
+D10. Initial market-monitor quota. Decided: 3 GiB bytes and 100,000 inodes, reviewed after one year of growth (about 300 MB per year, `pipeline/README.md:57`).
+
+D11. Preallocated image sizes for production. Decided: 8 GiB data, 8 GiB checkpoint (doc 167's reference budget), grown online when capacity reporting shows 80%.

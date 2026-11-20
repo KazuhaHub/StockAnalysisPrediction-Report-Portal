@@ -1,8 +1,8 @@
 # Proposal: authenticated machine read API for apps (e.g. Dify)
 
-Status: proposal 2026-11-19; awaiting owner decisions (section 11) and approval
-of the schema change (section 10). No code, schema or contract change is made by
-this document. Builds on [179](179-public-projection.md) (route list, limits,
+Status: Accepted 2026-11-20; implementation pending. Owner decisions are in
+section 11; the schema change (section 10) is approved as migration 0023. No
+code, schema or contract change is made by this document. Builds on [179](179-public-projection.md) (route list, limits,
 consent, `pub.` assertion) and [180](180-authenticated-ingress.md) (Portal-side
 verification of an external caller). Related: [175](175-reviewed-multi-origin-and-private-network.md),
 [182](182-cross-platform-backend-runtime.md).
@@ -391,7 +391,7 @@ summary says how many.
 12. SQLite and PostgreSQL; native run with a fixture app that verifies
     `X-Portal-Machine-Assertion`.
 
-## 10. Schema change — NEEDS OWNER APPROVAL
+## 10. Schema change — Approved by the owner on 2026-11-20 (migration 0023)
 
 ### 10.1 Why not reuse an existing table
 
@@ -569,21 +569,35 @@ Contract changes needing sign-off besides the schema: the capability
 `portal.machine-read-policy/1-dev.1`, the `mch.` assertion and its header, the
 runner's path-space rule, and the `/machine/apps/` URL space.
 
-## 11. Decisions for the owner (recommended answers)
+## 11. Owner decisions (2026-11-20)
 
-| # | Question | Recommended answer |
-| --- | --- | --- |
-| Q1 | New table or reuse `api_tokens` | New table `app_platform_machine_tokens` (section 10.1) |
-| Q2 | Token format and hashing | `pmr_<handle>_<secret>`, 256-bit secret, SHA-256 digest, shown once |
-| Q3 | GET only, or also POST for queries (needed by Dify's API-based extension) | GET only in version 1; revisit if a real workflow needs a JSON body |
-| Q4 | Portal response cache for machine routes | None in version 1 (`no-store`); the app can cache internally |
-| Q5 | Optional source CIDR list per token | Yes, optional, default empty |
-| Q6 | Expiry | Required; default 90 days, maximum 365; rotation with up to 7 days of grace |
-| Q7 | Who creates and revokes tokens | Portal administrators who may manage the installation (as doc 175 decision 1); never an app role |
-| Q8 | Does the app learn the token's identity | Yes: handle and label in the assertion; never the secret |
-| Q9 | Record source addresses | Once per token per day in audit only; no per-request IP storage |
-| Q10 | Relay MCP for market-monitor's FastMCP server | No; the app exposes JSON GET routes under `/v1/machine/` through its planned Go wrapper |
-| Q11 | Make `/v1/machine/` and `/v1/public/` exclusive (runner refuses viewer assertions there) | Yes |
-| Q12 | Serve a generated OpenAPI document | Yes, authenticated with the same token, no backend call |
-| Q13 | Default limits | 60/min per token (max 600), 5/s and 4 concurrent per installation (max 50 and 16) |
-| Q14 | Approve the schema in section 10 | Approve as one additive migration after `0022` |
+The owner decided every question below on 2026-11-20 and accepted the recommended answer for each (Q1 to Q14). Q14: the table `app_platform_machine_tokens` of section 10 is approved as one additive migration after `0022`, numbered `0023`.
+
+
+Q1. New table or reuse `api_tokens`. Decided: new table `app_platform_machine_tokens` (section 10.1).
+
+Q2. Token format and hashing. Decided: `pmr_<handle>_<secret>`, 256-bit secret, SHA-256 digest, shown once.
+
+Q3. GET only, or also POST for queries (needed by Dify's API-based extension). Decided: GET only in version 1; revisit if a real workflow needs a JSON body.
+
+Q4. Portal response cache for machine routes. Decided: none in version 1 (`no-store`); the app can cache internally.
+
+Q5. Optional source CIDR list per token. Decided: yes, optional, default empty.
+
+Q6. Expiry. Decided: required; default 90 days, maximum 365; rotation with up to 7 days of grace.
+
+Q7. Who creates and revokes tokens. Decided: Portal administrators who may manage the installation (as doc 175 decision 1); never an app role.
+
+Q8. Does the app learn the token's identity. Decided: yes; handle and label in the assertion; never the secret.
+
+Q9. Record source addresses. Decided: once per token per day in audit only; no per-request IP storage.
+
+Q10. Relay MCP for market-monitor's FastMCP server. Decided: no; the app exposes JSON GET routes under `/v1/machine/` through its planned Go wrapper.
+
+Q11. Make `/v1/machine/` and `/v1/public/` exclusive (runner refuses viewer assertions there). Decided: yes.
+
+Q12. Serve a generated OpenAPI document. Decided: yes, authenticated with the same token, no backend call.
+
+Q13. Default limits. Decided: 60/min per token (max 600), 5/s and 4 concurrent per installation (max 50 and 16).
+
+Q14. Approve the schema in section 10. Decided: approve as one additive migration after `0022`.
