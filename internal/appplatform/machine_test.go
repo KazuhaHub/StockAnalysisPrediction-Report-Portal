@@ -1,6 +1,7 @@
 package appplatform
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,16 @@ func TestMachineAssertionBindsRequestAndIsSeparateFromOtherKinds(t *testing.T) {
 		if _, err := SignMachineAssertion(signer, c.gen, c.route, c.path, "", c.id, c.name, now); err == nil {
 			t.Fatalf("signed %+v", c)
 		}
+	}
+}
+
+// An older runner has only the two-part pattern ("viewer" or "pub." plus two parts): a machine token
+// has three parts after its prefix, so the upgrade fails closed (doc 183 section 4.7).
+func TestOlderRunnerPatternRefusesMachineTokens(t *testing.T) {
+	older := regexp.MustCompile(`^(pub\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
+	token, err := SignMachineAssertion(testPublicSigner(), 1, "bars", "/v1/machine/bars", "", "abcdefghijkl", "Dify", time.Unix(1_800_000_000, 0))
+	if err != nil || older.MatchString(token) || !backendRequestAssertion.MatchString(token) {
+		t.Fatal(err)
 	}
 }
 

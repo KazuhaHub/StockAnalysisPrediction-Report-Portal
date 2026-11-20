@@ -105,6 +105,9 @@ func validateBackendRequestData(boot, method, path, bodyDigest, assertionDigest 
 	if appplatform.IsPublicAssertion(assertion) {
 		return validatePublicAssertionData(boot, method, path, bodyDigest, assertionDigest, body, assertion)
 	}
+	if appplatform.IsMachineAssertion(assertion) {
+		return validateMachineAssertionData(boot, method, path, bodyDigest, assertionDigest, body, assertion)
+	}
 	encoded, _, ok := strings.Cut(assertion, ".")
 	if !ok {
 		return ErrInvalidCommand

@@ -69,8 +69,12 @@ func forwardBackendRequest(ctx context.Context, socket string, uid, gid uint32, 
 	// and a viewer token only the viewer header. ValidBackendRequestData already refused a public
 	// token on anything but a bodiless GET of /v1/public/.
 	header := protocol.Header
-	if appplatform.IsPublicAssertion(assertion) {
+	switch {
+	case appplatform.IsPublicAssertion(assertion):
 		header = appplatform.PublicAssertionHeader
+	case appplatform.IsMachineAssertion(assertion):
+		// A machine token (doc 183) likewise reaches only its own header.
+		header = appplatform.MachineAssertionHeader
 	}
 	request.Header.Set(header, assertion)
 	response, err := client.Do(request)
