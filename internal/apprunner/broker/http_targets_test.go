@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/hostnet"
 )
 
 type targetFixture struct {
@@ -26,6 +27,7 @@ type targetFixture struct {
 	answers  []string
 	dialed   string
 	hostIPs  []netip.Addr
+	bridges  []hostnet.Interface
 	hostErr  error
 	hostRead atomic.Int32
 	clock    atomic.Int64
@@ -101,11 +103,18 @@ func newTargetFixture(t *testing.T, p appplatform.HTTPPolicyV2, networks []apppl
 		f.mu.Unlock()
 		return (&net.Dialer{}).DialContext(ctx, network, s.Listener.Addr().String())
 	}
-	h.interfaceAddrs = func() ([]netip.Addr, error) {
+	h.interfaces = func() ([]hostnet.Interface, error) {
 		f.hostRead.Add(1)
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.hostIPs, f.hostErr
+		if f.hostErr != nil {
+			return nil, f.hostErr
+		}
+		eth := hostnet.Interface{Name: "eth0"}
+		for _, a := range f.hostIPs {
+			eth.Addrs = append(eth.Addrs, netip.PrefixFrom(a, a.BitLen()))
+		}
+		return append([]hostnet.Interface{eth}, f.bridges...), nil
 	}
 	f.h = h
 	return f
@@ -260,7 +269,7 @@ func TestPlainHTTPNeedsAllowlistAndNeverCarriesACredential(t *testing.T) {
 	if !errors.Is(err, ErrDenied) || f.dials.Load() != dials || authorized.Load() != 0 {
 		t.Fatalf("credential over http: err=%v dials=%d authorized=%d", err, f.dials.Load()-dials, authorized.Load())
 	}
-	_, err = f.h.Do(context.Background(), HTTPRequest{Method: "GET", URL: "http://10.20.0.5:8080/v1", HeaderName: "X-API-Key", HeaderValue: []byte("k")})
+	_, err = f.h.Do(context.Background(), HTTPRequest{Method: "GET", URL: "http://10.20.0.5:8080/v1", HeaderName: "X-API-Key", HeaderValue: []byte("key-1234567")})
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("api key over http: %v", err)
 	}

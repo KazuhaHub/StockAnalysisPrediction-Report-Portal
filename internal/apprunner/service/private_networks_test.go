@@ -85,6 +85,11 @@ func TestCheckPrivateNetworksAgainstHost(t *testing.T) {
 		"cni":                             {iface("cni0", "10.20.0.1/24")},
 		"cni with suffix":                 {iface("cni-podman0", "10.20.0.1/24")},
 		"podman":                          {iface("podman0", "10.20.0.1/24")},
+		"lxc":                             {iface("lxcbr0", "10.20.0.1/24")},
+		"lxd":                             {iface("lxdbr0", "10.20.0.1/24")},
+		"incus":                           {iface("incusbr0", "10.20.0.1/24")},
+		"proxmox":                         {iface("vmbr0", "10.20.0.1/24")},
+		"bridge by kernel kind":           {HostInterface{Name: "mynet0", Bridge: true, Addrs: []netip.Prefix{netip.MustParsePrefix("10.20.0.1/24")}}},
 		"second interface is the culprit": {iface("lo", "127.0.0.1/8"), iface("eth0", "10.20.0.200/24")},
 	}
 	for name, hosts := range refused {

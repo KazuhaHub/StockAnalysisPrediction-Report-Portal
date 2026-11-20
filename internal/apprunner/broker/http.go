@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/hostnet"
 )
 
 var (
@@ -102,13 +103,16 @@ type HTTP struct {
 	dial      func(context.Context, string, string) (net.Conn, error)
 	tlsConfig *tls.Config
 	now       func() time.Time
-	// interfaceAddrs lists the addresses assigned to this host's interfaces. A
-	// private target may never reach one, even inside an allowlisted prefix.
-	interfaceAddrs func() ([]netip.Addr, error)
-	hostMu         sync.Mutex
-	hostAt         time.Time
-	hostAddrs      []netip.Addr
-	hostValid      bool
+	// interfaces lists this host's interfaces. A private call reads a snapshot at
+	// most hostAddressTTL old and denies every address assigned to any interface
+	// and every address inside the subnet of a bridge interface (hostnet's
+	// definition, the same as the startup refusal), so a bridge created after the
+	// runner started is covered once the snapshot is refreshed.
+	interfaces func() ([]hostnet.Interface, error)
+	hostMu     sync.Mutex
+	hostAt     time.Time
+	hostIfaces []hostnet.Interface
+	hostValid  bool
 }
 
 // hostAddressTTL bounds how stale the interface snapshot of a private call is.
@@ -158,7 +162,7 @@ func newHTTP(set appplatform.HTTPPolicyV2, raw []byte, networks []appplatform.Pr
 	d := &net.Dialer{Timeout: 5 * time.Second}
 	return &HTTP{set: set, raw: raw, networks: networks, authorize: authorize, slots: make(chan struct{}, set.Concurrency), now: time.Now, lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	}, dial: d.DialContext, interfaceAddrs: systemInterfaceAddrs}, nil
+	}, dial: d.DialContext, interfaces: hostnet.List}, nil
 }
 
 // allowlistMatches reports whether a command's private-network digest is the one
@@ -172,43 +176,43 @@ func (h *HTTP) allowlistMatches(digest string) bool {
 	return err == nil && digest == sum
 }
 
-func systemInterfaceAddrs() ([]netip.Addr, error) {
-	all, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]netip.Addr, 0, len(all))
-	for _, a := range all {
-		if p, err := netip.ParsePrefix(a.String()); err == nil {
-			out = append(out, appplatform.Unmap(p.Addr()))
-		}
-	}
-	return out, nil
-}
-
-// hostAddresses is the interface snapshot, reused for hostAddressTTL.
-func (h *HTTP) hostAddresses() ([]netip.Addr, bool) {
+// hostSnapshot is the interface snapshot, reused for hostAddressTTL.
+func (h *HTTP) hostSnapshot() ([]hostnet.Interface, bool) {
 	h.hostMu.Lock()
 	defer h.hostMu.Unlock()
 	if h.hostValid && h.now().Sub(h.hostAt) < hostAddressTTL {
-		return h.hostAddrs, true
+		return h.hostIfaces, true
 	}
-	if h.interfaceAddrs == nil {
+	if h.interfaces == nil {
 		return nil, false
 	}
-	addrs, err := h.interfaceAddrs()
+	list, err := h.interfaces()
 	if err != nil {
 		h.hostValid = false
 		return nil, false
 	}
-	h.hostAddrs, h.hostAt, h.hostValid = addrs, h.now(), true
-	return addrs, true
+	h.hostIfaces, h.hostAt, h.hostValid = list, h.now(), true
+	return list, true
+}
+
+// onHost reports whether ip is an address of this host or inside a bridge subnet.
+func onHost(interfaces []hostnet.Interface, ip netip.Addr) bool {
+	for _, i := range interfaces {
+		bridge := i.IsBridge()
+		for _, a := range i.Addrs {
+			if appplatform.Unmap(a.Addr()) == ip || bridge && a.Masked().Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // addressesAllowed applies the target's class to every address. Public targets
 // keep the public-only rule. Private targets admit only addresses the runner's
 // allowlist admits for the port and scheme, never an always-denied address and
-// never one of this host's own; a public address is in no allowlist, so a
+// never one of this host's own or inside a bridge's subnet (per call, from the
+// snapshot); a public address is in no allowlist, so a
 // mixed answer is denied as a whole.
 func (h *HTTP) addressesAllowed(target appplatform.EffectiveHTTPTarget, addresses []netip.Addr) bool {
 	if !target.Private {
@@ -219,13 +223,13 @@ func (h *HTTP) addressesAllowed(target appplatform.EffectiveHTTPTarget, addresse
 		}
 		return true
 	}
-	host, ok := h.hostAddresses()
+	host, ok := h.hostSnapshot()
 	if !ok {
 		return false
 	}
 	for _, ip := range addresses {
 		ip = appplatform.Unmap(ip)
-		if appplatform.AlwaysDenied(ip) || !appplatform.Admit(h.networks, ip, target.Port, target.Scheme) || slices.Contains(host, ip) {
+		if appplatform.AlwaysDenied(ip) || !appplatform.Admit(h.networks, ip, target.Port, target.Scheme) || onHost(host, ip) {
 			return false
 		}
 	}
@@ -318,6 +322,9 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 		config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: target.Host}
 		if h.tlsConfig != nil {
 			config = h.tlsConfig.Clone()
+			if config.ServerName == "" {
+				config.ServerName = target.Host
+			}
 		}
 		transport.TLSClientConfig = config
 		transport.TLSHandshakeTimeout = 5 * time.Second
