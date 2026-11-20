@@ -152,15 +152,11 @@ func (s *Server) ingressRequest(w http.ResponseWriter, r *http.Request) {
 		s.recordPlatformIngress("", "", "static")
 		return
 	}
-	// 2. The ceilings that apply before anything is looked up.
+	// 2. The ceiling that applies before anything is looked up: per source. The per-installation budget is
+	// charged after the signature has been verified (below).
 	if !s.platformIngress.clients.allow(platformPublicClientKey(clientIP(r, s.trustedNets)), platformIngressClientPerMinute, time.Minute, now) {
 		platformIngressReply(w, 429, `{"ok":false,"code":"rate_limited"}`, 60)
 		s.recordPlatformIngress("", "", "rate_client")
-		return
-	}
-	if !s.platformIngress.installations.allow("installation:"+installation, platformIngressInstallationPerMinute, time.Minute, now) {
-		platformIngressReply(w, 429, `{"ok":false,"code":"rate_limited"}`, 60)
-		s.recordPlatformIngress("", "", "rate_installation")
 		return
 	}
 	// 3. Authority without a session.
@@ -215,6 +211,14 @@ func (s *Server) ingressRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.platformIngress.claimNonce(installation, endpoint, appplatform.IngressDigest([]byte(nonce)), now) {
 		s.recordPlatformIngress(installation, endpoint, "replay")
 		platformIngressRefuse(w)
+		return
+	}
+	// The installation's budget is spent by authenticated requests only. Charged before authentication it
+	// would be keyed on an identifier anyone can put in a URL, and a few sources sending junk signatures
+	// could starve every real sender; what bounds the cost of junk is the per-client ceiling of step 2.
+	if !s.platformIngress.installations.allow("installation:"+installation, platformIngressInstallationPerMinute, time.Minute, now) {
+		platformIngressReply(w, 429, `{"ok":false,"code":"rate_limited"}`, 60)
+		s.recordPlatformIngress(installation, endpoint, "rate_installation")
 		return
 	}
 	// 6. The endpoint's own ceiling, from the descriptor.

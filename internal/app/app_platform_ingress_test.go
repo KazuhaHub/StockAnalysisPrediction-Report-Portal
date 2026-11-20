@@ -622,15 +622,14 @@ func TestIngressClientAndInstallationCeilings(t *testing.T) {
 		if w := e.send(t, withEndpoint("hook-three"), func(m *ingressSend) { m.route, m.remote = "webhook", "10.201.0.1:1" }); w.Code != 202 {
 			t.Fatal("another source", w.Code)
 		}
-		// The installation ceiling holds across sources: exhaust it as 600 requests would, then the next
-		// one is refused before anything is looked up.
+		// The installation ceiling holds across sources for verified requests: exhaust it as 600 would, then
+		// the next verified one is refused and never reaches the backend.
 		for i := 0; i < platformIngressInstallationPerMinute; i++ {
 			e.s.platformIngress.installations.allow("installation:"+e.id, platformIngressInstallationPerMinute, time.Minute, time.Now())
 		}
-		opens = platformCredentialOpenCount.Load()
 		forwards := e.forwarded()
 		w := e.send(t, withEndpoint("hook-three"), func(m *ingressSend) { m.route, m.remote = "webhook", "10.202.0.1:1" })
-		if w.Code != 429 || w.Header().Get("Retry-After") == "" || platformCredentialOpenCount.Load() != opens || e.forwarded() != forwards {
+		if w.Code != 429 || w.Header().Get("Retry-After") == "" || e.forwarded() != forwards {
 			t.Fatal("per-installation ceiling", w.Code)
 		}
 	})

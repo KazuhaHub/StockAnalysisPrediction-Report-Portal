@@ -167,14 +167,6 @@ func (p *platformIngressState) storeDeclaration(release string, d platformIngres
 	p.descriptors[release] = d
 }
 
-// forget drops what is held for an installation: a disabled capability, an uninstall.
-func (p *platformIngressState) forget(installation string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.initLocked()
-	delete(p.nonces, installation)
-}
-
 // record counts one outcome. class is "request", "accepted", "forwarded", "backend_failure" or a
 // refusal class; endpoint is empty until the binding is known to be real. A window that has run
 // its course moves to the finished list for the timer to write, never to a request.

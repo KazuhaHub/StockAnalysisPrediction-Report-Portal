@@ -247,8 +247,5 @@ func (s *Server) setPlatformIngressGrant(ctx context.Context, session platformAc
 		_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,'app_platform_installation',?,?,'')`, time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339), actor.username, actor.ouID, action, installation, string(detail))
 		return err
 	})
-	if err == nil {
-		s.platformIngress.forget(installation)
-	}
 	return err
 }
