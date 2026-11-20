@@ -289,8 +289,9 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// principals.read is optional only (doc 181 section 3.1): an administrator enables it
 		// after reading the disclosure, so a descriptor cannot make it a condition of install.
 		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
-		// administrator's decision, never a condition of install.
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" {
+		// administrator's decision, never a condition of install. network.postgres (doc 178) is
+		// optional only for the same reason: a database probe is granted by its own review.
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -301,7 +302,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres"} {
 		if seen[value] && !hasBackend {
 			return false
 		}

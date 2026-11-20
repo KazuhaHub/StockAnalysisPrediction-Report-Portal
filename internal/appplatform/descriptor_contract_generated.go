@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "11aecc401573053b720b6fce70cdc61335e0517c39b6a32ec49625e7af836030"
+const descriptorContractSHA256 = "b70743dbe76d1500c9dc72e8faa1b687ebacbc5c3aa30d1b9dd41df5468d98e0"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -160,7 +160,7 @@ var publicRouteIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 var publicPathPattern = regexp.MustCompile(`^/v1/public/[A-Za-z0-9._/-]+$`)
 var publicQueryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 var publicDocumentPattern = regexp.MustCompile(`^public/[A-Za-z0-9._/-]+$`)
-var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true}
+var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "network.postgres": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
 var descriptorDisplayIcons = map[string]bool{"appstore": true, "file-text": true, "dashboard": true, "calendar": true, "bar-chart": true, "cloud": true, "tool": true, "experiment": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}

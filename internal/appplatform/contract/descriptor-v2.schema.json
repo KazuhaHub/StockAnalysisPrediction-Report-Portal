@@ -448,10 +448,11 @@
                   "background.run",
                   "files.export",
                   "principals.read",
-                  "public.projection"
+                  "public.projection",
+                  "network.postgres"
                 ]
               },
-              "maxItems": 13,
+              "maxItems": 14,
               "uniqueItems": true
             },
             {

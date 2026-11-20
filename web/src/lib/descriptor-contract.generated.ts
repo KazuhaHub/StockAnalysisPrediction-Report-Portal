@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "11aecc401573053b720b6fce70cdc61335e0517c39b6a32ec49625e7af836030";
+export const DESCRIPTOR_SCHEMA_SHA256 = "b70743dbe76d1500c9dc72e8faa1b687ebacbc5c3aa30d1b9dd41df5468d98e0";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -60,7 +60,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "network.postgres")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -172,7 +172,8 @@ export const DESCRIPTOR_CAPABILITIES = [
   "background.run",
   "files.export",
   "principals.read",
-  "public.projection"
+  "public.projection",
+  "network.postgres"
 ] as const;
 export const DESCRIPTOR_LOCALES = [
   "en-US",

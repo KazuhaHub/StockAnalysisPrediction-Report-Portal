@@ -34,9 +34,10 @@ const (
 )
 
 // ServiceEgressResources are the only resources a session may carry.
-// secrets.use (doc 176) is only meaningful beside network.http: it lets a call
-// name a reviewed credential binding, which Portal places into that call.
-var ServiceEgressResources = []string{"network.http", "notifications.publish", "secrets.use"}
+// secrets.use (doc 176) is only meaningful beside network.http or network.postgres
+// (doc 178): it lets a call name a reviewed credential binding, which Portal places
+// into that call.
+var ServiceEgressResources = []string{"network.http", "network.postgres", "notifications.publish", "secrets.use"}
 
 // ServiceEgressSessionCommand binds one egress session to the installation
 // tuple the runner already trusts. Like ServiceBackendTaskCommand it carries the
@@ -188,7 +189,7 @@ func validateServiceEgressSession(c ServiceEgressSessionCommand, a Authority, no
 		}
 		previous = resource
 	}
-	if slices.Contains(c.Resources, "secrets.use") && !slices.Contains(c.Resources, "network.http") {
+	if slices.Contains(c.Resources, "secrets.use") && !slices.Contains(c.Resources, "network.http") && !slices.Contains(c.Resources, "network.postgres") {
 		return ErrInvalidCommand
 	}
 	if concurrency, ok := counter(c.Concurrency, true); !ok || concurrency > 4 {
