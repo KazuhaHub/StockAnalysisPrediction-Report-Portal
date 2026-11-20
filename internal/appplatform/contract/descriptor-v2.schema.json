@@ -75,6 +75,19 @@
           "x-go-omitempty": true,
           "description": "Optional reviewed anonymous read-only projection (doc 179). Requires a backend and the optional public.projection capability."
         },
+        "machine": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Machine"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Optional reviewed authenticated machine read routes (doc 183). Requires a backend and the optional machine.read capability."
+        },
         "data": {
           "$ref": "#/$defs/DataCompatibility"
         }
@@ -448,10 +461,11 @@
                   "background.run",
                   "files.export",
                   "principals.read",
-                  "public.projection"
+                  "public.projection",
+                  "machine.read"
                 ]
               },
-              "maxItems": 13,
+              "maxItems": 14,
               "uniqueItems": true
             },
             {
@@ -904,6 +918,90 @@
         "path",
         "cache_seconds",
         "response_bytes"
+      ]
+    },
+    "Machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MachineRoute"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "description": "Sorted by id; ids unique; paths unique."
+        }
+      },
+      "required": [
+        "routes"
+      ]
+    },
+    "MachineRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 13,
+          "maxLength": 257,
+          "pattern": "^/v1/machine/[A-Za-z0-9._/-]+$",
+          "description": "Fixed backend path under /v1/machine/, valid for the backend relay."
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,31}$"
+              },
+              "maxItems": 16,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-omitempty": true,
+          "description": "Declared query names, sorted; absent or empty means none."
+        },
+        "response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000,
+          "x-go-name": "TimeoutMS"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-omitempty": true,
+          "description": "Optional text for the generated OpenAPI document."
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "response_bytes",
+        "timeout_ms"
       ]
     }
   }

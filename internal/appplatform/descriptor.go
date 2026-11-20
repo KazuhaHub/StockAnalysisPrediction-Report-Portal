@@ -135,6 +135,13 @@ func validManifest(m Manifest) bool {
 	if declaresPublic != (m.Public != nil) || (m.Public != nil && (m.Backend == nil || !validPublic(*m.Public))) {
 		return false
 	}
+	declaresMachine := false
+	for _, value := range m.Capabilities.Optional {
+		declaresMachine = declaresMachine || value == "machine.read"
+	}
+	if declaresMachine != (m.Machine != nil) || (m.Machine != nil && (m.Backend == nil || !validMachine(*m.Machine))) {
+		return false
+	}
 	if m.Data.Schema < minDescriptorDataSchema || m.Data.Schema > maxDescriptorDataSchema || m.Data.WritesOnStartup || len(m.Data.ReadableSchemas) == 0 || len(m.Data.ReadableSchemas) > maxDescriptorReadableSchemas {
 		return false
 	}
@@ -290,7 +297,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// after reading the disclosure, so a descriptor cannot make it a condition of install.
 		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
 		// administrator's decision, never a condition of install.
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" {
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "machine.read" {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -301,7 +308,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "machine.read"} {
 		if seen[value] && !hasBackend {
 			return false
 		}

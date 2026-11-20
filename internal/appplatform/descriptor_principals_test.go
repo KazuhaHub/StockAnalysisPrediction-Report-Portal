@@ -53,8 +53,8 @@ func TestDescriptorSchemaListsPrincipalsReadAsOptionalOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Only the optional list names it (doc 181 section 3.1); required keeps eleven entries and
-	// optional has thirteen (public.projection, doc 179).
-	if strings.Count(string(raw), `"principals.read"`) != 1 || strings.Count(string(raw), `"maxItems": 13`) < 1 || strings.Count(string(raw), `"maxItems": 11`) < 1 {
+	// optional has fourteen (public.projection, doc 179, and machine.read, doc 183).
+	if strings.Count(string(raw), `"principals.read"`) != 1 || strings.Count(string(raw), `"maxItems": 14`) < 1 || strings.Count(string(raw), `"maxItems": 11`) < 1 {
 		t.Fatal("principals.read must be in the optional list only")
 	}
 }

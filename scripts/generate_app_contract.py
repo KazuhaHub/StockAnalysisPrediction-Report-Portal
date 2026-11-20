@@ -163,6 +163,12 @@ def render(raw):
         "minPublicCacheSeconds": p("PublicRoute", "cache_seconds")["minimum"],
         "maxPublicCacheSeconds": p("PublicRoute", "cache_seconds")["maximum"],
         "maxPublicResponseBytes": p("PublicRoute", "response_bytes")["maximum"],
+        "maxMachineRoutes": p("Machine", "routes")["maxItems"],
+        "maxMachineQueryNames": without_null(p("MachineRoute", "query"))["maxItems"],
+        "maxMachineResponseBytes": p("MachineRoute", "response_bytes")["maximum"],
+        "minMachineTimeoutMS": p("MachineRoute", "timeout_ms")["minimum"],
+        "maxMachineTimeoutMS": p("MachineRoute", "timeout_ms")["maximum"],
+        "maxMachineDescription": without_null(p("MachineRoute", "description"))["maxLength"],
     }
     for key in ("memory_mib", "cpu_millis", "pids"):
         field = p("Resources", key)
@@ -196,6 +202,9 @@ def render(raw):
         "publicPath": p("PublicRoute", "path")["pattern"],
         "publicQueryName": without_null(p("PublicRoute", "query"))["items"]["pattern"],
         "publicDocument": without_null(p("Public", "document"))["pattern"],
+        "machineRouteID": p("MachineRoute", "id")["pattern"],
+        "machinePath": p("MachineRoute", "path")["pattern"],
+        "machineQueryName": without_null(p("MachineRoute", "query"))["items"]["pattern"],
     }
     for key, value in patterns.items():
         if any(char in value for char in "`\r\n"):
