@@ -37,7 +37,7 @@ func ListenManagedController(ctx context.Context, path string, controllerUID, co
 // bounded network pool on the same checked root, journal and protected endpoint.
 // The caller owns all providers until Serve stops; enrollment is never created
 // here. Existing constructors retain their original narrower capability sets.
-func ListenNetworkManagedController(ctx context.Context, path string, uid, gid uint32, store *journal.Store, root *data.Root, pin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity, native *driver.CandidateRuntime, images *imagestore.Store, active, entries int) (*Server, error) {
+func ListenNetworkManagedController(ctx context.Context, path string, uid, gid uint32, store *journal.Store, root *data.Root, pin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity, native *driver.CandidateRuntime, images *imagestore.Store, active, entries int, options ...ManagedControllerOption) (*Server, error) {
 	if ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || store == nil || root == nil || checkpointRoot == nil || native == nil || images == nil {
 		return nil, ErrUnsafeEndpoint
 	}
@@ -48,7 +48,7 @@ func ListenNetworkManagedController(ctx context.Context, path string, uid, gid u
 	if err != nil || checkpointIdentity != checkpointPin || checkpointIdentity == pin {
 		return nil, ErrUnsafeEndpoint
 	}
-	network, err := newNetworkProvider(store, active, entries)
+	network, err := newNetworkProvider(store, active, entries, options...)
 	if err != nil {
 		return nil, ErrUnsafeEndpoint
 	}

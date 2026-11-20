@@ -135,9 +135,9 @@ type privateNetworksWire struct {
 	Entries []PrivateNetwork `json:"entries"`
 }
 
-// CanonicalPrivateNetworks returns the digest input: entries sorted by prefix.
-// The empty allowlist encodes with an empty entries array.
-func CanonicalPrivateNetworks(networks []PrivateNetwork) ([]byte, error) {
+// SortPrivateNetworks returns a validated deep copy ordered by prefix, the order
+// the canonical encoding uses. The empty allowlist is a non-nil empty slice.
+func SortPrivateNetworks(networks []PrivateNetwork) ([]PrivateNetwork, error) {
 	if ValidatePrivateNetworks(networks) != nil {
 		return nil, ErrInvalidPrivateNetworks
 	}
@@ -153,6 +153,16 @@ func CanonicalPrivateNetworks(networks []PrivateNetwork) ([]byte, error) {
 		}
 		return pa.Bits() - pb.Bits()
 	})
+	return entries, nil
+}
+
+// CanonicalPrivateNetworks returns the digest input: entries sorted by prefix.
+// The empty allowlist encodes with an empty entries array.
+func CanonicalPrivateNetworks(networks []PrivateNetwork) ([]byte, error) {
+	entries, err := SortPrivateNetworks(networks)
+	if err != nil {
+		return nil, err
+	}
 	raw, err := json.Marshal(privateNetworksWire{Format: PrivateNetworksFormat, Entries: entries})
 	if err != nil {
 		return nil, ErrInvalidPrivateNetworks

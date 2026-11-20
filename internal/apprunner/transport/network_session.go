@@ -51,6 +51,24 @@ type networkProvider struct {
 	sessions       map[string]networkChecker
 	streamSessions map[string]networkChecker
 	egressChecks   int
+	// targets is what the runner advertises to the network targets query: the
+	// policy formats it serves and the operator's private-network allowlist.
+	targets NetworkTargets
+}
+
+// ManagedControllerOption configures trusted runner state of the managed
+// controller; it is never a request or package field.
+type ManagedControllerOption func(*managedControllerOptions)
+
+type managedControllerOptions struct {
+	privateNetworks []appplatform.PrivateNetwork
+}
+
+// WithPrivateNetworks gives the runner's private-network allowlist (doc 175) to
+// the network pool and to the network targets query. Without it, no private
+// target is served and the query advertises an empty list.
+func WithPrivateNetworks(networks []appplatform.PrivateNetwork) ManagedControllerOption {
+	return func(o *managedControllerOptions) { o.privateNetworks = networks }
 }
 
 type networkBackgroundExecutor interface {
@@ -80,8 +98,19 @@ type networkControlSession struct {
 	mu         sync.Mutex
 }
 
-func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*networkProvider, error) {
+func newNetworkProvider(store networkEnrollmentStore, active, entries int, options ...ManagedControllerOption) (*networkProvider, error) {
 	if store == nil {
+		return nil, broker.ErrDenied
+	}
+	var settings managedControllerOptions
+	for _, option := range options {
+		if option == nil {
+			return nil, broker.ErrDenied
+		}
+		option(&settings)
+	}
+	targets, err := NewNetworkTargets(settings.privateNetworks)
+	if err != nil {
 		return nil, broker.ErrDenied
 	}
 	p := &networkProvider{
@@ -90,13 +119,14 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*net
 		streamSessions: make(map[string]networkChecker),
 		activeLimit:    active,
 		cacheLimit:     entries,
+		targets:        targets,
 	}
 	current, err := broker.NewConfirmedNetworkAuthority(p.enrollment, p.confirm)
 	if err != nil {
 		return nil, err
 	}
 	p.current = current
-	pool, err := broker.NewNetworkPool(active, entries, current)
+	pool, err := broker.NewNetworkPool(active, entries, current, broker.WithPrivateNetworks(targets.PrivateNetworks))
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +253,7 @@ func (p *networkProvider) serve(parent context.Context, conn net.Conn, magicCons
 	if err != nil {
 		return
 	}
-	policy, err := appplatform.ParseHTTPPolicy(verified.Command().PolicyRaw)
+	responseBound, err := networkResponseBound(verified.Command())
 	if err != nil {
 		return
 	}
@@ -280,7 +310,7 @@ func (p *networkProvider) serve(parent context.Context, conn net.Conn, magicCons
 			code = 4
 		}
 	}
-	if code == 1 && (session.sequence != 4 || response.Status < 200 || response.Status >= 300 && response.Status < 400 || response.Status > 599 || !appplatform.ValidHTTPPolicyHeaderValue(response.ContentType) || int64(len(response.Body)) > policy.Policy.ResponseBytes) {
+	if code == 1 && (session.sequence != 4 || response.Status < 200 || response.Status >= 300 && response.Status < 400 || response.Status > 599 || !appplatform.ValidHTTPPolicyHeaderValue(response.ContentType) || int64(len(response.Body)) > responseBound) {
 		return
 	}
 	result := make([]byte, 49)
@@ -313,7 +343,7 @@ func exchangeNetworkSession(parent context.Context, conn net.Conn, raw, signatur
 	if err != nil || control.ValidateNetworkHTTPBody(verified, body) != nil {
 		return zero, broker.ErrDenied
 	}
-	policy, err := appplatform.ParseHTTPPolicy(verified.Command().PolicyRaw)
+	responseBound, err := networkResponseBound(verified.Command())
 	if err != nil {
 		return zero, broker.ErrDenied
 	}
@@ -385,7 +415,7 @@ func exchangeNetworkSession(parent context.Context, conn net.Conn, raw, signatur
 			status := binary.BigEndian.Uint16(header[33:35])
 			kindSize := binary.BigEndian.Uint16(header[35:37])
 			bodySize := binary.BigEndian.Uint32(header[37:41])
-			if code < 1 || code > 4 || kindSize > 256 || int64(bodySize) > policy.Policy.ResponseBytes {
+			if code < 1 || code > 4 || kindSize > 256 || int64(bodySize) > responseBound {
 				return zero, broker.ErrUncertain
 			}
 			if code != 1 {
@@ -432,4 +462,18 @@ func networkStreamEOF(r io.Reader) error {
 		return broker.ErrUncertain
 	}
 	return nil
+}
+
+// networkResponseBound is the response size limit of the target the command's
+// URL selects: the shared bound, or the target's own narrower one.
+func networkResponseBound(c control.NetworkHTTPRequestCommand) (int64, error) {
+	parsed, err := appplatform.ParseHTTPPolicyAny(c.PolicyRaw)
+	if err != nil {
+		return 0, broker.ErrDenied
+	}
+	target, err := parsed.Policy.Select(c.Method, c.URL)
+	if err != nil {
+		return 0, broker.ErrDenied
+	}
+	return target.ResponseBytes, nil
 }
