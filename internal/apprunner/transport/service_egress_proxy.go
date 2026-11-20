@@ -179,33 +179,54 @@ func (r *egressRegistry) flushProxyReports() {
 	r.mu.Unlock()
 	now := r.now()
 	for _, t := range targets {
-		in := t.in
-		// What is due joins the installation's queue; a few reports go out per tick. Portal holds a report's
-		// call until it has written its audit row, and a session has a bounded number of calls open, so a
-		// burst of reports must never be sent at once.
-		in.reportMu.Lock()
+		r.sendProxyReports(t.in, t.session, now, false)
+	}
+}
+
+// sendProxyReports moves what is due to Portal over session. What is due joins the installation's queue and a few
+// reports go out per call (a tick, or the last chance when final is set and everything not yet reported is taken
+// from the proxy, at most what Portal will hold at once). Portal holds a report's call until it has written its
+// audit row, and a session has a bounded number of calls open, so a burst of reports is never sent at once.
+func (r *egressRegistry) sendProxyReports(in *egressInstall, session *egressSession, now time.Time, final bool) {
+	limit := egressProxyReportsPerTick
+	in.reportMu.Lock()
+	if final {
+		in.reportQueue = append(in.reportQueue, in.proxy.Drain(now)...)
+		limit = egressMaxReportCalls
+	} else {
 		in.reportQueue = append(in.reportQueue, in.proxy.Reports(now)...)
-		if over := len(in.reportQueue) - egressProxyReportQueue; over > 0 {
-			in.reportQueue = in.reportQueue[over:]
+	}
+	if over := len(in.reportQueue) - egressProxyReportQueue; over > 0 {
+		in.reportQueue = in.reportQueue[over:]
+	}
+	batch := in.reportQueue[:min(len(in.reportQueue), limit)]
+	in.reportQueue = in.reportQueue[len(batch):]
+	in.reportMu.Unlock()
+	for i, report := range batch {
+		payload, err := EncodeEgressProxyReport(report)
+		if err != nil {
+			continue
 		}
-		batch := in.reportQueue[:min(len(in.reportQueue), egressProxyReportsPerTick)]
-		in.reportQueue = in.reportQueue[len(batch):]
-		in.reportMu.Unlock()
-		for i, report := range batch {
-			payload, err := EncodeEgressProxyReport(report)
-			if err != nil {
-				continue
-			}
-			call, err := t.session.mux.NewCall()
-			if err != nil {
-				// The session is busy or ending: keep what has not gone out for the next tick.
-				in.reportMu.Lock()
-				in.reportQueue = append(append([]broker.ProxyReport(nil), batch[i:]...), in.reportQueue...)
-				in.reportMu.Unlock()
-				break
-			}
-			_ = call.Send(EgressFrameProxyReport, payload)
-			call.Finish()
+		call, err := session.mux.NewCall()
+		if err != nil {
+			// The session is busy or ending: keep what has not gone out for the next tick.
+			in.reportMu.Lock()
+			in.reportQueue = append(append([]broker.ProxyReport(nil), batch[i:]...), in.reportQueue...)
+			in.reportMu.Unlock()
+			return
 		}
+		_ = call.Send(EgressFrameProxyReport, payload)
+		call.Finish()
+	}
+}
+
+// finalProxyReports is the best-effort last report of an installation that is about to be dropped.
+func (r *egressRegistry) finalProxyReports(in *egressInstall) {
+	in.mu.Lock()
+	s := in.current
+	usable := !in.closed && s != nil && s.allows(egressProxyResource)
+	in.mu.Unlock()
+	if usable {
+		r.sendProxyReports(in, s, r.now(), true)
 	}
 }

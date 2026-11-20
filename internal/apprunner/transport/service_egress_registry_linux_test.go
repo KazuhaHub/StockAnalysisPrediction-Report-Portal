@@ -260,8 +260,10 @@ type portalSide struct {
 	noticeR func(broker.AppNotice) (byte, EgressNoticeResult)
 	gate    chan struct{}
 	admits  chan EgressAdmit
-	// reports collects the proxy reports (doc 184 section 7) the runner sends.
-	reports chan broker.ProxyReport
+	// reports collects the proxy reports (doc 184 section 7) the runner sends. While holdReports is set
+	// the Portal side holds each report's call open, as a slow audit write would.
+	reports     chan broker.ProxyReport
+	holdReports chan struct{}
 }
 
 // open sends a signed session over a fresh connection and returns the Portal
@@ -350,6 +352,12 @@ func (p *portalSide) handle(call *EgressCall) {
 		if err != nil {
 			p.t.Errorf("proxy report frame: %v", err)
 			return
+		}
+		p.mu.Lock()
+		hold := p.holdReports
+		p.mu.Unlock()
+		if hold != nil {
+			<-hold
 		}
 		p.reports <- report
 	case EgressFrameNotice:

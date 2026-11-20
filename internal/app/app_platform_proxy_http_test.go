@@ -223,6 +223,21 @@ func testPlatformProxyHTTP(t *testing.T, pg bool) {
 func TestPlatformProxyHTTP(t *testing.T)         { testPlatformProxyHTTP(t, false) }
 func TestPlatformProxyHTTPPostgres(t *testing.T) { testPlatformProxyHTTP(t, true) }
 
+// The console shows a grant only when the session loader would treat it as one: a row that no consumed review
+// backs is shown as not granted.
+func TestPlatformProxyViewGrantedMatchesTheSessionLoader(t *testing.T) {
+	p := platformProxyHTTPEnv(t, false)
+	platformProxySeedGrant(t, p.s, p.installation, []string{"qt.gtimg.cn"}, appplatform.ProxyDailyBytesMax)
+	if v := p.view(t); !v.Granted || v.Policy == nil {
+		t.Fatalf("a reviewed grant: %+v", v)
+	}
+	other, _ := appplatform.CanonicalProxyPolicy(appplatform.ProxyPolicy{Hosts: []string{"other.example.com"}, DailyBytes: appplatform.ProxyDailyBytesMax})
+	mustExec(t, p.s.st, `UPDATE app_platform_capability_grants SET policy_json=? WHERE installation_id=? AND capability='network.proxy'`, string(other), p.installation)
+	if v := p.view(t); v.Granted || v.Policy != nil {
+		t.Fatalf("a row no review backs is shown as granted: %+v", v)
+	}
+}
+
 func TestPlatformProxyOldRunnerIs409OverHTTP(t *testing.T) {
 	p := platformProxyHTTPEnv(t, false)
 	proxyRunnerOf(p.s).fail(transport.ErrProxyUnsupported)

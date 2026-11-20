@@ -69,13 +69,13 @@ func (s *Server) apiPlatformProxyView(w http.ResponseWriter, r *http.Request, us
 	}
 	out := platformProxyView{DeclaredHosts: []string{}, Rollups: []platformProxyRollupView{}, MaxDailyBytes: appplatform.ProxyDailyBytesMax}
 	err = s.withAppPlatformActorRead(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
-		var desired, phase string
+		var desired, phase, release, epoch string
 		var revision int64
 		var descriptor []byte
-		if err := e.queryRow(`SELECT i.desired_state,i.phase,i.policy_revision,r.descriptor
+		if err := e.queryRow(`SELECT i.desired_state,i.phase,i.policy_revision,i.controller_epoch,a.release_sha256,r.descriptor
 			FROM app_platform_installations i
 			JOIN app_platform_activations a ON a.installation_id=i.id AND a.state='active'
-			JOIN app_platform_releases r ON r.sha256=a.release_sha256 WHERE i.id=?`, installation).Scan(&desired, &phase, &revision, &descriptor); err != nil {
+			JOIN app_platform_releases r ON r.sha256=a.release_sha256 WHERE i.id=?`, installation).Scan(&desired, &phase, &revision, &epoch, &release, &descriptor); err != nil {
 			return errPlatformInstallationMissing
 		}
 		parsed, err := appplatform.ParseDescriptor(descriptor)
@@ -91,24 +91,23 @@ func (s *Server) apiPlatformProxyView(w http.ResponseWriter, r *http.Request, us
 		if err != nil {
 			return err
 		}
-		var background, granted int
+		var background int
 		var stored string
 		if err := e.queryRow(`SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run' AND policy_revision=?`, installation, revision).Scan(&background); err != nil {
 			background = 0
 		}
-		if err := e.queryRow(`SELECT granted,policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.proxy' AND policy_revision=?`, installation, revision).Scan(&granted, &stored); err != nil {
+		if err := e.queryRow(`SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.proxy' AND policy_revision=?`, installation, revision).Scan(&stored); err != nil {
 			return errPlatformInstallationMissing
 		}
 		out.PolicyRevision = strconv.FormatInt(revision, 10)
 		out.PreviousPolicySHA256 = platformDigest([]byte(stored))
 		out.Ready = desired == "enabled" && phase == "ready" && operations+effects == 0 && background == 1
 		budget := appplatform.ProxyDailyBytesMax
-		if granted == 1 {
-			if policy, err := appplatform.ParseProxyPolicy([]byte(stored)); err == nil {
-				out.Granted = true
-				out.Policy = &platformProxyPolicyView{Hosts: slices.Clone(policy.Policy.Hosts), DailyBytes: policy.Policy.DailyBytes}
-				budget = policy.Policy.DailyBytes
-			}
+		// Granted is what the session loader treats as granted: a row a consumed review backs.
+		if policy, err := loadPlatformProxyGrant(e, installation, revision, release, epoch); err == nil {
+			out.Granted = true
+			out.Policy = &platformProxyPolicyView{Hosts: slices.Clone(policy.Policy.Hosts), DailyBytes: policy.Policy.DailyBytes}
+			budget = policy.Policy.DailyBytes
 		}
 		now := time.Now().UTC()
 		today := now.Format("2006-01-02")

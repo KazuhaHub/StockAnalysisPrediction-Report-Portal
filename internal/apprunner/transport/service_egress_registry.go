@@ -158,6 +158,16 @@ func newEgressRegistry(parent context.Context, provider *networkProvider, bind E
 // close ends every session and every broker socket, and waits for their
 // goroutines. It is the runner-shutdown path.
 func (r *egressRegistry) close() {
+	// Sessions run under r.ctx, so what the proxy has not reported is sent before it is cancelled.
+	r.mu.Lock()
+	live := make([]*egressInstall, 0, len(r.installs))
+	for _, in := range r.installs {
+		live = append(live, in)
+	}
+	r.mu.Unlock()
+	for _, in := range live {
+		r.finalProxyReports(in)
+	}
 	r.cancel()
 	r.mu.Lock()
 	r.closed = true
@@ -370,6 +380,8 @@ func (r *egressRegistry) detach(s *egressSession) {
 
 // closeInstall ends an installation's sessions and its broker socket.
 func (r *egressRegistry) closeInstall(in *egressInstall, reason byte) {
+	// What the proxy counted and has not reported is sent first, while the session can still carry it.
+	r.finalProxyReports(in)
 	r.mu.Lock()
 	in.mu.Lock()
 	if in.closed {

@@ -100,7 +100,7 @@ func newProxyEnv(t *testing.T, tune func(*ProxyLimits)) *proxyEnv {
 		e.lookups.Add(1)
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		if a, ok := e.answers[host]; ok {
+		if a, ok := e.answers[strings.TrimSuffix(host, ".")]; ok {
 			return a, nil
 		}
 		return publicAnswer, nil
@@ -580,7 +580,7 @@ func TestProxyIdleAndLifetimeTimersCloseTheTunnel(t *testing.T) {
 						case <-stop:
 							return
 						case <-time.After(50 * time.Millisecond):
-							_, _ = conn.Write([]byte("x"))
+							_, _ = conn.Write(appData(1))
 						}
 					}
 				}()
@@ -614,7 +614,7 @@ func TestProxyBudgetClosesMidStreamAndRefusesUntilTheUTCDayChanges(t *testing.T)
 	if _, err := conn.Write(buildHello(helloOptions{sni: "qt.gtimg.cn"})); err != nil {
 		t.Fatal(err)
 	}
-	chunk := make([]byte, 64*1024)
+	chunk := appData(64 * 1024)
 	go func() {
 		for i := 0; i < 64; i++ {
 			if _, err := conn.Write(chunk); err != nil {
@@ -705,7 +705,7 @@ func TestProxyThroughputCap(t *testing.T) {
 	if _, err := conn.Write(buildHello(helloOptions{sni: "qt.gtimg.cn"})); err != nil {
 		t.Fatal(err)
 	}
-	payload := make([]byte, 1536*1024) // above the 200 KB burst: the rest is paced at 1 MB/s
+	payload := appData(1536 * 1024) // above the 200 KB burst: the rest is paced at 1 MB/s
 	start := time.Now()
 	if _, err := conn.Write(payload); err != nil {
 		t.Fatal(err)
@@ -921,6 +921,216 @@ func TestProxyInstallInheritsTheBucket(t *testing.T) {
 	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
 	if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalBusy {
 		t.Fatalf("a new generation got a fresh burst: %q", got)
+	}
+}
+
+// The reviewed name is resolved fully qualified, so a search domain in the resolver configuration can never
+// turn it into another name.
+func TestProxyResolvesTheNameFullyQualified(t *testing.T) {
+	e := newProxyEnv(t, nil)
+	e.apply(appplatform.ProxyDailyBytesMax, "api.example.com")
+	var asked []string
+	e.runner.Lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+		asked = append(asked, host)
+		return publicAnswer, nil
+	}
+	if got := e.refusalOf("api.example.com", 443); got != proxyforwarder.RefusalNone {
+		t.Fatalf("%q", got)
+	}
+	if len(asked) != 1 || asked[0] != "api.example.com." {
+		t.Fatalf("the resolver was asked for %q", asked)
+	}
+}
+
+// failingBudget is a budget whose count cannot be read while fail is set.
+type failingBudget struct {
+	ProxyBudget
+	fail atomic.Bool
+}
+
+func (b *failingBudget) Used(installation string, day int64) (int64, error) {
+	if b.fail.Load() {
+		return 0, errors.New("journal unreadable")
+	}
+	return b.ProxyBudget.Used(installation, day)
+}
+
+// A budget that cannot be read admits nothing, and admits again once it can.
+func TestProxyFailsClosedWhenTheBudgetCannotBeRead(t *testing.T) {
+	e := newProxyEnv(t, nil)
+	budget := &failingBudget{ProxyBudget: e.budget}
+	e.runner.SetBudget(budget)
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	budget.fail.Store(true)
+	if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalUnavailable {
+		t.Fatalf("an unreadable budget: %q", got)
+	}
+	if len(e.dialedAddresses()) != 0 || e.in.Open() != 0 || e.runner.Open() != 0 {
+		t.Fatal("a tunnel was admitted, or a slot leaked, on an unreadable budget")
+	}
+	budget.fail.Store(false)
+	if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalNone {
+		t.Fatalf("after the budget can be read: %q", got)
+	}
+}
+
+// appData is n bytes of well-formed application data records, which is all a TLS client sends after its hello.
+func appData(n int) []byte {
+	var out []byte
+	for n > 0 {
+		size := min(n, 16000)
+		out = append(out, 0x17, 3, 3, byte(size>>8), byte(size))
+		out = append(out, make([]byte, size)...)
+		n -= size
+	}
+	return out
+}
+
+// hrrRecord is a handshake record carrying a ServerHello; with retry it is a HelloRetryRequest.
+func hrrRecord(retry bool) []byte {
+	random := make([]byte, 32)
+	if retry {
+		copy(random, helloRetryRequestRandom)
+	}
+	body := append([]byte{3, 3}, random...)
+	body = append(body, 0, 0x13, 0x01, 0, 0, 0)
+	handshake := append([]byte{2, 0, byte(len(body) >> 8), byte(len(body))}, body...)
+	return append([]byte{0x16, 3, 3, byte(len(handshake) >> 8), byte(len(handshake))}, handshake...)
+}
+
+// hrrScenario runs a tunnel to an upstream that answers the first ClientHello with a HelloRetryRequest (or a
+// plain ServerHello), lets follow write what the client sends next, and returns the bytes the upstream
+// received after the first hello and whether the broker closed the tunnel.
+func hrrScenario(t *testing.T, retry bool, follow func(conn net.Conn)) (afterFirst int64, closed bool) {
+	t.Helper()
+	e := newProxyEnv(t, nil)
+	e.clock.live = true
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	first := buildHello(helloOptions{sni: "qt.gtimg.cn"})
+	received := make(chan int64, 1)
+	go func() {
+		c, err := listener.Accept()
+		if err != nil {
+			received <- -1
+			return
+		}
+		defer c.Close()
+		if _, err := io.ReadFull(c, make([]byte, len(first))); err != nil {
+			received <- -1
+			return
+		}
+		_, _ = c.Write(hrrRecord(retry))
+		n, _ := io.Copy(io.Discard, c)
+		received <- n
+	}()
+	e.runner.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "tcp", listener.Addr().String())
+	}
+	conn, refusal, done := e.open("qt.gtimg.cn", 443)
+	if refusal != proxyforwarder.RefusalNone {
+		t.Fatalf("refused: %s", refusal)
+	}
+	if _, err := conn.Write(first); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(conn, make([]byte, len(hrrRecord(retry)))); err != nil {
+		t.Fatalf("the server's record did not come back: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	follow(conn)
+	_ = conn.(*net.TCPConn).CloseWrite()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tunnel did not end")
+	}
+	e.in.mu.Lock()
+	for _, hosts := range e.in.stats {
+		for _, s := range hosts {
+			closed = closed || s.closes[ProxyCloseSNIMismatch] > 0
+		}
+	}
+	e.in.mu.Unlock()
+	return <-received, closed
+}
+
+// After a HelloRetryRequest the client's second ClientHello is judged like the first.
+func TestProxySecondClientHelloAfterRetryIsJudged(t *testing.T) {
+	good := buildHello(helloOptions{sni: "qt.gtimg.cn", extras: [][]byte{greaseECH()}})
+	ccs := []byte{0x14, 3, 3, 0, 1, 1}
+	for name, tc := range map[string]struct {
+		retry   bool
+		send    [][]byte
+		want    int64
+		refused bool
+	}{
+		"retry then a hello for the host":               {true, [][]byte{good}, int64(len(good)), false},
+		"retry then a change cipher spec and the hello": {true, [][]byte{ccs, good}, int64(len(ccs) + len(good)), false},
+		"retry then a hello for another name":           {true, [][]byte{buildHello(helloOptions{sni: "evil.example.net"})}, 0, true},
+		"retry then a hello without a name":             {true, [][]byte{buildHello(helloOptions{})}, 0, true},
+		"retry then application data first":             {true, [][]byte{{0x17, 3, 3, 0, 1, 9}}, 0, true},
+		"retry then bytes that are not a record":        {true, [][]byte{[]byte("GET / HTTP/1.1\r\n\r\n")}, 0, true},
+		"retry then a good hello and traffic after it":  {true, [][]byte{good, {0x17, 3, 3, 0, 3, 1, 2, 3}}, int64(len(good) + 8), false},
+		"no retry: later records are not judged":        {false, [][]byte{{0x17, 3, 3, 0, 3, 1, 2, 3}, buildHello(helloOptions{sni: "evil.example.net"})}, 8 + int64(len(buildHello(helloOptions{sni: "evil.example.net"}))), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, closed := hrrScenario(t, tc.retry, func(conn net.Conn) {
+				for _, p := range tc.send {
+					_, _ = conn.Write(p)
+				}
+			})
+			if got != tc.want || closed != tc.refused {
+				t.Fatalf("upstream got %d bytes after the first hello (want %d), mismatch=%v (want %v)", got, tc.want, closed, tc.refused)
+			}
+		})
+	}
+}
+
+// An installation about to be dropped hands over everything it has not reported: the hour still open, refusals
+// inside their interval and the day's usage; a second drain has nothing.
+func TestProxyDrainGivesEverythingUnreported(t *testing.T) {
+	e := newProxyEnv(t, nil)
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	conn, refusal, done := e.open("qt.gtimg.cn", 443)
+	if refusal != proxyforwarder.RefusalNone {
+		t.Fatalf("refused: %s", refusal)
+	}
+	if body := e.get(conn, "qt.gtimg.cn"); !strings.Contains(body, "hello") {
+		t.Fatalf("%q", body)
+	}
+	<-done
+	_ = e.refusalOf("evil.example.com", 443)
+	// The first regular pass reports the refusal and the usage, never the open hour.
+	var kinds []string
+	for _, r := range e.in.Reports(e.clock.Now()) {
+		kinds = append(kinds, r.Kind)
+	}
+	if strings.Join(kinds, ",") != "refusal,usage" {
+		t.Fatalf("regular reports: %v", kinds)
+	}
+	_ = e.refusalOf("evil.example.com", 443) // inside the one-minute interval: held back
+	e.budget.Add(e.in.id, e.in.day(), 10)    // and the day's usage moved
+	kinds = nil
+	var rollup *ProxyReport
+	for _, r := range e.in.Drain(e.clock.Now().Add(time.Second)) {
+		kinds = append(kinds, r.Kind)
+		if r.Kind == ProxyReportRollup {
+			r := r
+			rollup = &r
+		}
+	}
+	if strings.Join(kinds, ",") != "rollup,refusal,usage" || rollup == nil || rollup.Hosts[0].Host != "qt.gtimg.cn" || rollup.Hosts[0].Tunnels != 1 {
+		t.Fatalf("drained reports: %v %+v", kinds, rollup)
+	}
+	if again := e.in.Drain(e.clock.Now().Add(2 * time.Second)); len(again) != 0 {
+		t.Fatalf("a second drain gave %+v", again)
 	}
 }
 

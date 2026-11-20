@@ -59,37 +59,47 @@ func NewDurableProxyBudget(store ProxyBudgetStore, now func() time.Time, interva
 	return b
 }
 
-// load makes the key's counted value known. mu is held.
-func (b *DurableProxyBudget) load(k budgetKey) {
-	if _, ok := b.used[k]; ok {
-		return
+// counted is the key's counted value, read from the store the first time. The store is read without the lock
+// held, and a failed read is returned and cached as nothing, so the next call reads again.
+func (b *DurableProxyBudget) counted(k budgetKey) (int64, error) {
+	b.mu.Lock()
+	if v, ok := b.used[k]; ok {
+		b.mu.Unlock()
+		return v, nil
 	}
+	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	stored, err := b.store.ProxyBudgetUsed(ctx, k.installation, k.day)
 	if err != nil {
-		stored = 0
+		return 0, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if v, ok := b.used[k]; ok {
+		return v, nil // another caller read it meanwhile
 	}
 	b.used[k] = stored + b.pending[k]
+	return b.used[k], nil
 }
 
-// Used is the bytes counted for the installation on the day.
-func (b *DurableProxyBudget) Used(installation string, day int64) int64 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	k := budgetKey{installation, day}
-	b.load(k)
-	return b.used[k]
+// Used is the bytes counted for the installation on the day, or an error when the store cannot be read.
+func (b *DurableProxyBudget) Used(installation string, day int64) (int64, error) {
+	return b.counted(budgetKey{installation, day})
 }
 
-// Add counts n more bytes and returns the new total.
+// Add counts n more bytes and returns the new total. When the store cannot be read the bytes are still counted
+// and will be added to the stored value once it can be, and the total returned is only what is pending.
 func (b *DurableProxyBudget) Add(installation string, day int64, n int64) int64 {
+	k := budgetKey{installation, day}
+	_, err := b.counted(k)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	k := budgetKey{installation, day}
-	b.load(k)
-	b.used[k] += n
 	b.pending[k] += n
+	if err != nil {
+		return b.pending[k]
+	}
+	b.used[k] += n
 	return b.used[k]
 }
 

@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -35,6 +36,8 @@ const (
 	proxyUsageInterval   = 10 * time.Minute
 	proxyMaxRefusalKeys  = 64
 )
+
+var errNoBudget = errors.New("no budget to read")
 
 // ProxyHostRollup is one host's activity in one hour. BytesIn is upstream to the
 // application, BytesOut the other way.
@@ -141,14 +144,30 @@ func toLower(s string) string {
 // completed hour, each refusal key at most once a minute with its count, and the
 // day's usage at most every ten minutes while it changes. It returns nothing
 // for an installation that has done nothing.
-func (in *ProxyInstall) Reports(now time.Time) []ProxyReport {
+func (in *ProxyInstall) Reports(now time.Time) []ProxyReport { return in.reports(now, false) }
+
+// Drain returns everything the installation has not reported, whatever the intervals: the hour still open, every
+// refusal with a count and the day's usage. It is for an installation that is about to be dropped (its session
+// ended, a new generation replaced it, the runner is shutting down), so that what it counted is not lost.
+func (in *ProxyInstall) Drain(now time.Time) []ProxyReport { return in.reports(now, true) }
+
+func (in *ProxyInstall) reports(now time.Time, final bool) []ProxyReport {
+	// The day's count may be read from the journal, so it is read before the lock is taken.
+	in.mu.Lock()
+	budgeted := in.auth != nil
+	in.mu.Unlock()
+	var used int64
+	usedErr := errNoBudget
+	if budgeted {
+		used, usedErr = in.runner.budget.Used(in.id, now.UTC().Unix()/86400)
+	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	var out []ProxyReport
 	current := now.UTC().Unix() / 3600
 	var hours []int64
 	for hour := range in.stats {
-		if hour < current {
+		if hour < current || final {
 			hours = append(hours, hour)
 		}
 	}
@@ -185,17 +204,16 @@ func (in *ProxyInstall) Reports(now time.Time) []ProxyReport {
 	})
 	for _, key := range keys {
 		c := in.refusals[key]
-		if c.count > 0 && (c.last.IsZero() || now.Sub(c.last) >= proxyRefusalInterval) {
+		if c.count > 0 && (final || c.last.IsZero() || now.Sub(c.last) >= proxyRefusalInterval) {
 			out = append(out, ProxyReport{Kind: ProxyReportRefusal, Host: key.host, Code: string(key.code), Count: c.count})
 			c.count, c.last = 0, now
 		} else if c.count == 0 && now.Sub(c.last) >= 10*proxyRefusalInterval {
 			delete(in.refusals, key)
 		}
 	}
-	if in.auth != nil {
+	if in.auth != nil && usedErr == nil {
 		day := now.UTC().Unix() / 86400
-		used := in.runner.budget.Used(in.id, day)
-		if used > 0 && (day != in.usageDay || used != in.usageSet) && (in.usageAt.IsZero() || day != in.usageDay || now.Sub(in.usageAt) >= proxyUsageInterval) {
+		if used > 0 && (final && used != in.usageSet || (day != in.usageDay || used != in.usageSet) && (in.usageAt.IsZero() || day != in.usageDay || now.Sub(in.usageAt) >= proxyUsageInterval)) {
 			out = append(out, ProxyReport{Kind: ProxyReportUsage, Day: time.Unix(day*86400, 0).UTC().Format("2006-01-02"), Bytes: used, Budget: in.auth.policy.DailyBytes})
 			in.usageDay, in.usageSet, in.usageAt = day, used, now
 		}

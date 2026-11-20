@@ -22,7 +22,7 @@ const (
 	DefaultListen = "127.0.0.1:3128"
 
 	maxHeaderBytes = 8 << 10
-	replyDeadline  = 20 * time.Second
+	replyDeadline  = 40 * time.Second // the broker may spend 5 s on the open, 10 s resolving and 10 s dialling
 	writeDeadline  = 5 * time.Second
 )
 

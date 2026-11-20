@@ -257,8 +257,13 @@ func TestProxyTunnelsCloseWhenTheSessionExpires(t *testing.T) {
 	if _, err := conn.Write(helloFor(t, "qt.gtimg.cn")); err != nil {
 		t.Fatal(err)
 	}
-	start := f.registry.now()
-	f.registry.now = func() time.Time { return start.Add(10 * time.Minute) }
+	// The session reaches its expiry: its recorded end moves into the past, under the installation lock.
+	f.registry.mu.Lock()
+	in := f.registry.installs[f.installation]
+	f.registry.mu.Unlock()
+	in.mu.Lock()
+	in.current.expires = time.Now().Add(-time.Second)
+	in.mu.Unlock()
 	if !tunnelClosed(conn, 5*time.Second) {
 		t.Fatal("the tunnel outlived its session's expiry")
 	}
@@ -422,6 +427,79 @@ func TestProxyBudgetSurvivesARunnerRestart(t *testing.T) {
 	c.Close()
 	if refusal != proxyforwarder.RefusalBudgetSpent {
 		t.Fatalf("after a restart the day's budget was given back: %q", refusal)
+	}
+}
+
+// A Portal that is slow to write its audit rows holds report calls open. Reports beyond what Portal will hold are
+// dropped and the session lives: no number of reports can make Portal end it, and admits keep their calls.
+func TestProxyReportsWithASlowPortalNeverEndTheSession(t *testing.T) {
+	f := newEgrFixture(t)
+	f.proxySeams()
+	p := f.open(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+	hold := make(chan struct{})
+	p.mu.Lock()
+	p.holdReports = hold
+	p.mu.Unlock()
+	for i := 0; i < 60; i++ {
+		c, _ := f.tunnel("1", fmt.Sprintf("h%d.example.com", i), 443)
+		c.Close()
+	}
+	// Several sweeps pass while every report is held.
+	select {
+	case <-p.mux.Done():
+		t.Fatal("the session ended while Portal held reports open")
+	case <-time.After(9 * time.Second):
+	}
+	// A real call still gets its slot.
+	if r, err := f.request("1", "GET", "/v1/status", "", ""); err != nil || r.status != 200 {
+		t.Fatalf("status during the hold: %+v %v", r, err)
+	}
+	close(hold)
+	select {
+	case <-p.reports:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no report arrived after Portal caught up")
+	}
+	select {
+	case <-p.mux.Done():
+		t.Fatal("the session ended")
+	default:
+	}
+}
+
+// What the proxy counted and had not yet reported is sent before an installation is dropped, whether the runner
+// shuts down or a new generation replaces it.
+func TestProxyUnreportedStatsAreSentBeforeTheInstallationIsDropped(t *testing.T) {
+	for name, drop := range map[string]func(f *egrFixture){
+		"shutdown": func(f *egrFixture) { f.registry.close() },
+		// A new generation replaces an installation through closeInstall with the renewed reason.
+		"closed as replaced": func(f *egrFixture) {
+			f.registry.mu.Lock()
+			in := f.registry.installs[f.installation]
+			f.registry.mu.Unlock()
+			f.registry.closeInstall(in, EgressCloseRenewed)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newEgrFixture(t)
+			f.proxySeams()
+			p := f.open(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+			c, refusal := f.tunnel("1", "evil.example.com", 443)
+			c.Close()
+			if refusal != proxyforwarder.RefusalHostNotReviewed {
+				t.Fatalf("%q", refusal)
+			}
+			// Nothing has been swept yet: the refusal is still only in the proxy's counters.
+			drop(f)
+			select {
+			case report := <-p.reports:
+				if report.Kind != "refusal" || report.Host != "evil.example.com" {
+					t.Fatalf("report: %+v", report)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("what the proxy counted was lost with the installation")
+			}
+		})
 	}
 }
 

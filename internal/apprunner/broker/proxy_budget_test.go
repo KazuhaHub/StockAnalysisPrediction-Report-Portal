@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -68,7 +69,7 @@ func TestDurableBudgetCountsAndWritesInBatches(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		b.Add("a", day, 10)
 	}
-	if got := b.Used("a", day); got != 10000 {
+	if got, _ := b.Used("a", day); got != 10000 {
 		t.Fatalf("used %d", got)
 	}
 	if store.stored("a", day) != 0 {
@@ -95,13 +96,13 @@ func TestDurableBudgetSurvivesARestart(t *testing.T) {
 	first.Close() // a clean shutdown flushes
 	second := NewDurableProxyBudget(store, time.Now, time.Hour)
 	defer second.Close()
-	if got := second.Used("a", day); got != 1234 {
+	if got, _ := second.Used("a", day); got != 1234 {
 		t.Fatalf("after a restart the budget is %d", got)
 	}
 	if got := second.Add("a", day, 6); got != 1240 {
 		t.Fatalf("counting continues from the stored value: %d", got)
 	}
-	if got := second.Used("a", day+1); got != 0 {
+	if got, _ := second.Used("a", day+1); got != 0 {
 		t.Fatalf("the next day starts empty: %d", got)
 	}
 }
@@ -116,7 +117,7 @@ func TestDurableBudgetRetriesAFailedWrite(t *testing.T) {
 	store.fail = true
 	store.mu.Unlock()
 	b.Flush()
-	if b.Used("a", day) != 100 {
+	if got, _ := b.Used("a", day); got != 100 {
 		t.Fatal("a failed write lost the count")
 	}
 	store.mu.Lock()
@@ -160,6 +161,62 @@ func TestDurableBudgetPrunesOldDays(t *testing.T) {
 	if len(store.pruned) != 2 || store.pruned[1] != today {
 		t.Fatalf("pruned %v after the day changed", store.pruned)
 	}
+}
+
+// A read that fails is an error, not zero, and is not remembered: the next read tries the store again. The store
+// is not called with the budget's lock held, so a slow journal read does not stall counting for other tunnels.
+func TestDurableBudgetReadFailureIsAnErrorAndIsRetried(t *testing.T) {
+	store := &unreadableStore{memoryBudgetStore: newMemoryBudgetStore()}
+	day := time.Now().UTC().Unix() / 86400
+	store.rows["a"] = map[int64]int64{day: 700}
+	b := NewDurableProxyBudget(store, time.Now, time.Hour)
+	defer b.Close()
+	store.fail.Store(true)
+	if _, err := b.Used("a", day); err == nil {
+		t.Fatal("an unreadable store counted as zero")
+	}
+	// Bytes counted while it is unreadable are kept and added to the stored value once it can be read.
+	b.Add("a", day, 5)
+	store.fail.Store(false)
+	if got, err := b.Used("a", day); err != nil || got != 705 {
+		t.Fatalf("after the store can be read: %d %v", got, err)
+	}
+	// Another key can be read while the first read of one blocks.
+	release := make(chan struct{})
+	store.block = release
+	started := make(chan struct{}, 1)
+	store.started = started
+	go b.Used("slow", day)
+	<-started
+	done := make(chan struct{})
+	go func() {
+		b.Add("a", day, 1)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a journal read held the budget's lock")
+	}
+	close(release)
+}
+
+type unreadableStore struct {
+	*memoryBudgetStore
+	fail    atomic.Bool
+	block   chan struct{}
+	started chan struct{}
+}
+
+func (s *unreadableStore) ProxyBudgetUsed(ctx context.Context, id string, day int64) (int64, error) {
+	if s.fail.Load() {
+		return 0, errors.New("journal unreadable")
+	}
+	if id == "slow" && s.block != nil {
+		s.started <- struct{}{}
+		<-s.block
+	}
+	return s.memoryBudgetStore.ProxyBudgetUsed(ctx, id, day)
 }
 
 func TestDurableBudgetFlushesOnItsOwn(t *testing.T) {

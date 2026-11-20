@@ -66,8 +66,9 @@ func DefaultProxyLimits() ProxyLimits {
 // ProxyBudget counts the bytes an installation moved in a UTC day. The runner
 // keeps it where it survives a restart; the in-memory one below does not.
 type ProxyBudget interface {
-	// Used is the bytes counted for the installation on day (days since the epoch).
-	Used(installation string, day int64) int64
+	// Used is the bytes counted for the installation on day (days since the epoch). An error means the count
+	// could not be read, and admission then fails closed rather than counting zero.
+	Used(installation string, day int64) (int64, error)
 	// Add counts n more bytes and returns the new total.
 	Add(installation string, day int64, n int64) int64
 }
@@ -80,10 +81,10 @@ type memoryBudget struct {
 // NewMemoryProxyBudget is a budget held in memory only.
 func NewMemoryProxyBudget() ProxyBudget { return &memoryBudget{used: map[string]map[int64]int64{}} }
 
-func (b *memoryBudget) Used(installation string, day int64) int64 {
+func (b *memoryBudget) Used(installation string, day int64) (int64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.used[installation][day]
+	return b.used[installation][day], nil
 }
 
 func (b *memoryBudget) Add(installation string, day int64, n int64) int64 {
@@ -302,7 +303,12 @@ func (in *ProxyInstall) admit(usable func() bool) (*proxyAuth, func(), proxyforw
 	if !in.bucket.Allow() {
 		return nil, nil, proxyforwarder.RefusalBusy
 	}
-	if in.spent(auth) {
+	spent, err := in.spent(auth)
+	if err != nil {
+		// The day's count cannot be read: nothing is admitted on a guess.
+		return nil, nil, proxyforwarder.RefusalUnavailable
+	}
+	if spent {
 		return nil, nil, proxyforwarder.RefusalBudgetSpent
 	}
 	if !in.runner.take() {
@@ -332,8 +338,9 @@ func (in *ProxyInstall) admit(usable func() bool) (*proxyAuth, func(), proxyforw
 
 func (in *ProxyInstall) day() int64 { return in.runner.Now().UTC().Unix() / 86400 }
 
-func (in *ProxyInstall) spent(auth *proxyAuth) bool {
-	return in.runner.budget.Used(in.id, in.day()) >= auth.policy.DailyBytes
+func (in *ProxyInstall) spent(auth *proxyAuth) (bool, error) {
+	used, err := in.runner.budget.Used(in.id, in.day())
+	return used >= auth.policy.DailyBytes, err
 }
 
 // Serve handles one proxy stream whose first bytes are still unread on r. usable
@@ -382,7 +389,9 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 	// Step 3: resolve, and judge every answer. Only an allowed address may be dialled.
 	resolveCtx, stopResolve := context.WithTimeout(ctx, in.limits.Connect)
-	addresses, err := in.runner.Lookup(resolveCtx, host)
+	// The name is resolved fully qualified: a search domain or ndots in the runner's resolver configuration can
+	// never turn a reviewed name into another one.
+	addresses, err := in.runner.Lookup(resolveCtx, host+".")
 	stopResolve()
 	if err != nil || len(addresses) == 0 || len(addresses) > 16 {
 		if ctx.Err() != nil {
@@ -442,11 +451,12 @@ func (r *ProxyRunner) firstAllowed(addresses []netip.Addr) (netip.Addr, bool) {
 
 // refuse answers a refusal, counts it and, for the rollup, notes it.
 func (in *ProxyInstall) refuse(conn net.Conn, host string, refusal proxyforwarder.Refusal) {
+	// Counted before the answer goes out, so what the application has seen is always what is counted.
+	in.noteRefusal(host, refusal)
 	if reply, err := proxyforwarder.EncodeReply(refusal); err == nil {
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		_, _ = conn.Write(reply)
 	}
-	in.noteRefusal(host, refusal)
 }
 
 type proxyTunnel struct {
@@ -462,6 +472,7 @@ type proxyTunnel struct {
 	bytesIn  atomic.Int64 // upstream to application
 	bytesOut atomic.Int64 // application to upstream
 	reason   atomic.Value // the first close reason
+	gate     hrrGate      // what each direction tells the other about a HelloRetryRequest
 }
 
 func (t *proxyTunnel) fail(reason string) {
@@ -552,42 +563,73 @@ func (t *proxyTunnel) splice(app io.Reader) string {
 	in := t.in
 	now := in.runner.Now
 	var wg sync.WaitGroup
-	copyDir := func(dst net.Conn, src io.Reader, out bool) {
-		defer wg.Done()
+	// pass writes one chunk to dst, counting it against the budget and the throughput cap.
+	pass := func(dst net.Conn, out bool) func([]byte) bool {
+		return func(p []byte) bool {
+			t.last.Store(now().UnixNano())
+			if !t.charge(len(p), out) || !in.rate.wait(t.ctx, len(p)) {
+				return false
+			}
+			_ = dst.SetWriteDeadline(time.Now().Add(in.limits.Idle))
+			if _, err := dst.Write(p); err != nil {
+				t.fail(ProxyCloseError)
+				return false
+			}
+			_ = dst.SetWriteDeadline(time.Time{})
+			t.last.Store(now().UnixNano())
+			return true
+		}
+	}
+	// endOfSide is what the end of one direction means: a clean end is a half-close, as the other side may
+	// still answer, anything else cuts the tunnel.
+	endOfSide := func(dst net.Conn, err error) {
+		if !errors.Is(err, io.EOF) && t.ctx.Err() == nil {
+			t.fail(ProxyCloseError)
+			return
+		}
+		if closer, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = closer.CloseWrite()
+		} else {
+			t.fail(ProxyCloseEOF)
+		}
+	}
+	copyRaw := func(dst net.Conn, src io.Reader, out bool) {
+		send := pass(dst, out)
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := src.Read(buf)
-			if n > 0 {
-				t.last.Store(now().UnixNano())
-				if !t.charge(n, out) || !in.rate.wait(t.ctx, n) {
-					return
-				}
-				_ = dst.SetWriteDeadline(time.Now().Add(in.limits.Idle))
-				if _, werr := dst.Write(buf[:n]); werr != nil {
-					t.fail(ProxyCloseError)
-					return
-				}
-				_ = dst.SetWriteDeadline(time.Time{})
-				t.last.Store(now().UnixNano())
+			if n > 0 && !send(buf[:n]) {
+				return
 			}
 			if err != nil {
-				if !errors.Is(err, io.EOF) && t.ctx.Err() == nil {
-					t.fail(ProxyCloseError)
-					return
-				}
-				// A clean end of one side is a half-close: the other side may still answer.
-				if closer, ok := dst.(interface{ CloseWrite() error }); ok {
-					_ = closer.CloseWrite()
-				} else {
-					t.fail(ProxyCloseEOF)
-				}
+				endOfSide(dst, err)
 				return
 			}
 		}
 	}
 	wg.Add(2)
-	go copyDir(t.upstream, app, true)
-	go copyDir(t.conn, t.upstream, false)
+	go func() {
+		defer wg.Done()
+		// Client records are judged whole until no second ClientHello can follow.
+		if cont, err := t.clientRecords(app, pass(t.upstream, true)); !cont {
+			return
+		} else if err != nil {
+			endOfSide(t.upstream, err)
+			return
+		}
+		copyRaw(t.upstream, app, true)
+	}()
+	go func() {
+		defer wg.Done()
+		if err := t.serverFirstRecord(t.upstream, pass(t.conn, false)); err != nil {
+			endOfSide(t.conn, err)
+			return
+		}
+		if t.ctx.Err() != nil {
+			return
+		}
+		copyRaw(t.conn, t.upstream, false)
+	}()
 	// The watchdog ends an idle tunnel; ending any tunnel closes both connections,
 	// which is what unblocks the copies.
 	stop := make(chan struct{})
