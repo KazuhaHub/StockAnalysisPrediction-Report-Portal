@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,6 +112,9 @@ type ProxyRunner struct {
 	open   int
 	max    int
 	budget ProxyBudget
+	// pins is the operator's allowlist of pinned destinations (doc 186), loaded from the root-owned
+	// configuration at start. A pinned tunnel is dialled only when its entry equals one of these.
+	pins []appplatform.ProxyPin
 
 	Now        func() time.Time
 	Lookup     func(ctx context.Context, host string) ([]netip.Addr, error)
@@ -138,6 +142,22 @@ func (r *ProxyRunner) SetBudget(b ProxyBudget) {
 	r.mu.Lock()
 	r.budget = b
 	r.mu.Unlock()
+}
+
+// SetPins sets the operator's allowlist of pinned destinations. It is called once, before the runner serves a
+// stream; a change needs a runner restart. The list is copied.
+func (r *ProxyRunner) SetPins(pins []appplatform.ProxyPin) {
+	r.mu.Lock()
+	r.pins = slices.Clone(pins)
+	r.mu.Unlock()
+}
+
+// pinPermitted is the check made at every dial of a pinned tunnel: the entry equals one of the operator's and
+// its address is outside the fixed denied set.
+func (r *ProxyRunner) pinPermitted(pin appplatform.ProxyPin) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return appplatform.ProxyPinPermitted(r.pins, pin)
 }
 
 func (r *ProxyRunner) take() bool {
@@ -370,9 +390,10 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 		return
 	}
 	defer release()
-	// Step 2: the host must match, and the port must be 443. A name that is an IP
-	// literal or not a plain lower-case DNS name matches nothing.
-	if !auth.policy.Match(host) {
+	// Step 2: a pinned name (doc 186) or a reviewed host must match, and the port must be 443. A name that is
+	// an IP literal or not a plain lower-case DNS name matches nothing. A pin wins for its exact name.
+	pin, pinned := auth.policy.Pin(host)
+	if !pinned && !auth.policy.Match(host) {
 		in.refuse(conn, host, proxyforwarder.RefusalHostNotReviewed)
 		return
 	}
@@ -387,28 +408,40 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	defer lifetime.Stop()
 	// A cut authority closes the application's connection, whatever Serve is waiting on.
 	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
-	// Step 3: resolve, and judge every answer. Only an allowed address may be dialled.
-	resolveCtx, stopResolve := context.WithTimeout(ctx, in.limits.Connect)
-	// The name is resolved fully qualified: a search domain or ndots in the runner's resolver configuration can
-	// never turn a reviewed name into another one.
-	addresses, err := in.runner.Lookup(resolveCtx, host+".")
-	stopResolve()
-	if err != nil || len(addresses) == 0 || len(addresses) > 16 {
-		if ctx.Err() != nil {
-			in.refuse(conn, host, proxyforwarder.RefusalUnavailable)
+	// Step 3: a pinned tunnel resolves nothing: its entry must equal one of the operator's and lie outside the
+	// denied set, and the address guard of an ordinary host is not applied. Any other name is resolved and
+	// every answer is judged; only an allowed address may be dialled.
+	var target string
+	if pinned {
+		if !in.runner.pinPermitted(pin) {
+			in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
 			return
 		}
-		in.refuse(conn, host, proxyforwarder.RefusalResolveFailed)
-		return
-	}
-	pinned, ok := in.runner.firstAllowed(addresses)
-	if !ok {
-		in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
-		return
+		target = pin.Endpoint()
+	} else {
+		resolveCtx, stopResolve := context.WithTimeout(ctx, in.limits.Connect)
+		// The name is resolved fully qualified: a search domain or ndots in the runner's resolver configuration can
+		// never turn a reviewed name into another one.
+		addresses, err := in.runner.Lookup(resolveCtx, host+".")
+		stopResolve()
+		if err != nil || len(addresses) == 0 || len(addresses) > 16 {
+			if ctx.Err() != nil {
+				in.refuse(conn, host, proxyforwarder.RefusalUnavailable)
+				return
+			}
+			in.refuse(conn, host, proxyforwarder.RefusalResolveFailed)
+			return
+		}
+		allowed, ok := in.runner.firstAllowed(addresses)
+		if !ok {
+			in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
+			return
+		}
+		target = net.JoinHostPort(allowed.String(), strconv.Itoa(appplatform.ProxyPort))
 	}
 	// Step 4: one pinned dial.
 	dialCtx, stopDial := context.WithTimeout(ctx, in.limits.Connect)
-	upstream, err := in.runner.Dial(dialCtx, "tcp", net.JoinHostPort(pinned.String(), strconv.Itoa(appplatform.ProxyPort)))
+	upstream, err := in.runner.Dial(dialCtx, "tcp", target)
 	stopDial()
 	if err != nil {
 		in.refuse(conn, host, proxyforwarder.RefusalConnectFailed)
