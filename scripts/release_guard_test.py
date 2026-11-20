@@ -5,7 +5,7 @@ import re
 import unittest
 from unittest.mock import patch
 import subprocess
-from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci
+from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci, recorded_images, image_for
 
 # CI runs `python3 -B -m unittest discover -s scripts` from the repository root, so every file
 # these tests read is found relative to this one rather than to the working directory.
@@ -354,6 +354,241 @@ class LicenceGateTests(unittest.TestCase):
     def test_no_licence_run_for_the_commit_blocks_the_release(self):
         with self.assertRaisesRegex(RuntimeError, 'licence.yml'):
             self.wait(licence_runs=False)
+
+
+PORTAL = 'ghcr.io/owner/repo'
+RUNNER = PORTAL + '-app-runner'
+SHA = 'c' * 40
+
+
+def metadata(portal_digest='sha256:' + 'a' * 64, runner_digest='sha256:' + 'b' * 64, images=True):
+    """release-metadata.json as record-metadata writes it, or as a release before the runner image has it."""
+    meta = {'tag': 'v2026.47.1', 'image': PORTAL, 'commit': SHA, 'digest': portal_digest, 'recorded_at': '2026-11-20T00:00:00Z'}
+    if images:
+        meta['images'] = {'portal': {'image': PORTAL, 'digest': portal_digest},
+                          'app-runner': {'image': RUNNER, 'digest': runner_digest}}
+    return meta
+
+
+class RunnerImageMetadataTests(unittest.TestCase):
+    """Doc 187 section 12: per-image digests, with older releases still validating."""
+
+    def test_the_new_format_validates_and_returns_the_portal_digest(self):
+        self.assertEqual(validate_metadata(metadata(), 'v2026.47.1', PORTAL, SHA), 'sha256:' + 'a' * 64)
+        self.assertEqual(recorded_images(metadata(), PORTAL), {'portal': (PORTAL, 'sha256:' + 'a' * 64), 'app-runner': (RUNNER, 'sha256:' + 'b' * 64)})
+
+    def test_a_release_from_before_the_runner_image_still_validates_for_portal_only(self):
+        legacy = metadata(images=False)
+        self.assertEqual(validate_metadata(legacy, 'v2026.47.1', PORTAL, SHA), 'sha256:' + 'a' * 64)
+        self.assertEqual(recorded_images(legacy, PORTAL), {'portal': (PORTAL, 'sha256:' + 'a' * 64)})
+
+    def test_image_names_follow_the_portal_image(self):
+        self.assertEqual(image_for('portal', PORTAL), PORTAL)
+        self.assertEqual(image_for('app-runner', PORTAL), RUNNER)
+        with self.assertRaises(ValueError):
+            image_for('docs', PORTAL)
+
+    def test_a_declared_images_map_must_be_whole_and_valid(self):
+        # Each of these is a release that says it has a runner image and does not prove it. All refuse.
+        def broken(mutate):
+            meta = metadata()
+            mutate(meta)
+            return meta
+        cases = {
+            'no runner entry': lambda m: m['images'].pop('app-runner'),
+            'no portal entry': lambda m: m['images'].pop('portal'),
+            'an extra image': lambda m: m['images'].update({'docs': {'image': PORTAL + '-docs', 'digest': 'sha256:' + 'd' * 64}}),
+            'a short runner digest': lambda m: m['images']['app-runner'].update(digest='sha256:abc'),
+            'an uppercase runner digest': lambda m: m['images']['app-runner'].update(digest='sha256:' + 'B' * 64),
+            'a runner digest that is not text': lambda m: m['images']['app-runner'].update(digest=7),
+            'no runner digest': lambda m: m['images']['app-runner'].pop('digest'),
+            'a runner path that is not the portal image with -app-runner': lambda m: m['images']['app-runner'].update(image=PORTAL),
+            'a runner path in another repository': lambda m: m['images']['app-runner'].update(image='ghcr.io/other/repo-app-runner'),
+            'an extra field in an entry': lambda m: m['images']['app-runner'].update(note='x'),
+            'a portal entry that differs from the legacy keys': lambda m: m['images']['portal'].update(digest='sha256:' + 'e' * 64),
+            'an images value that is a list': lambda m: m.update(images=[]),
+            'an images value that is null': lambda m: m.update(images=None),
+            'an entry that is not an object': lambda m: m['images'].update({'app-runner': 'sha256:' + 'b' * 64}),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ValueError):
+                    validate_metadata(broken(mutate), 'v2026.47.1', PORTAL, SHA)
+
+    def test_the_legacy_keys_are_still_held_to_tag_repository_and_commit(self):
+        for key, value in (('tag', 'v2026.1.1'), ('image', 'ghcr.io/other/repo'), ('commit', 'd' * 40), ('digest', 'sha256:nope')):
+            with self.subTest(key):
+                meta = metadata()
+                meta[key] = value
+                with self.assertRaises(ValueError):
+                    validate_metadata(meta, 'v2026.47.1', PORTAL, SHA)
+
+
+class VerifyTargetTests(unittest.TestCase):
+    """verify-target verifies every recorded image's fixed tag against its recorded digest."""
+
+    def verify(self, meta, registry, key='portal'):
+        asked = []
+
+        def digest(ref):
+            asked.append(ref)
+            return registry[ref]
+
+        with patch('release_guard.image_digest', side_effect=digest), \
+                patch('release_guard.subprocess.check_output', return_value=json.dumps(meta)), \
+                patch('release_guard.gh_json') as gh:
+            gh.side_effect = [
+                {'draft': False, 'assets': [{'name': name, 'id': 1} for name in expected_assets('v2026.47.1')]},
+                {'object': {'type': 'tag', 'sha': 't'}},
+                {'object': {'type': 'commit', 'sha': SHA}},
+            ]
+            return verify_target('owner/repo', 'v2026.47.1', PORTAL, key), asked
+
+    def registry(self, portal='sha256:' + 'a' * 64, runner='sha256:' + 'b' * 64):
+        return {f'{PORTAL}:v2026.47.1': portal, f'{RUNNER}:v2026.47.1': runner}
+
+    def test_both_images_are_verified_whichever_key_is_asked(self):
+        for key, want in (('portal', 'sha256:' + 'a' * 64), ('app-runner', 'sha256:' + 'b' * 64)):
+            with self.subTest(key):
+                digest, asked = self.verify(metadata(), self.registry(), key)
+                self.assertEqual(digest, want)
+                self.assertEqual(set(asked), {f'{PORTAL}:v2026.47.1', f'{RUNNER}:v2026.47.1'})
+                self.assertEqual(len(asked), 2)
+        digest, _ = self.verify(metadata(), self.registry(), 'all')
+        self.assertEqual(digest.splitlines(), ['portal sha256:' + 'a' * 64, 'app-runner sha256:' + 'b' * 64])
+
+    def test_a_moved_runner_tag_refuses_the_release_even_when_portal_is_asked(self):
+        # Neither channel tag may move to half a release.
+        with self.assertRaisesRegex(RuntimeError, 'app-runner image tag no longer matches recorded digest'):
+            self.verify(metadata(), self.registry(runner='sha256:' + 'f' * 64), 'portal')
+
+    def test_a_moved_portal_tag_refuses_the_release_when_the_runner_is_asked(self):
+        with self.assertRaisesRegex(RuntimeError, 'portal image tag no longer matches recorded digest'):
+            self.verify(metadata(), self.registry(portal='sha256:' + 'f' * 64), 'app-runner')
+
+    def test_a_missing_runner_tag_refuses(self):
+        # image_digest returns None for an absent manifest, which is never the recorded digest.
+        with self.assertRaisesRegex(RuntimeError, 'app-runner image tag'):
+            self.verify(metadata(), {f'{PORTAL}:v2026.47.1': 'sha256:' + 'a' * 64, f'{RUNNER}:v2026.47.1': None})
+
+    def test_a_declared_runner_image_with_no_valid_digest_refuses_before_the_registry_is_asked(self):
+        meta = metadata()
+        meta['images']['app-runner']['digest'] = 'sha256:short'
+        asked = []
+        with self.assertRaises(ValueError):
+            with patch('release_guard.image_digest', side_effect=lambda ref: asked.append(ref)):
+                self.verify(meta, {})
+        self.assertEqual(asked, [])
+
+    def test_an_older_release_is_verified_for_portal_only(self):
+        digest, asked = self.verify(metadata(images=False), self.registry(), 'portal')
+        self.assertEqual((digest, asked), ('sha256:' + 'a' * 64, [f'{PORTAL}:v2026.47.1']))
+        # Promotion moves only the Portal tag for it: the runner key yields nothing to point at.
+        digest, asked = self.verify(metadata(images=False), self.registry(), 'app-runner')
+        self.assertEqual((digest, asked), ('', [f'{PORTAL}:v2026.47.1']))
+        digest, _ = self.verify(metadata(images=False), self.registry(), 'all')
+        self.assertEqual(digest, 'portal sha256:' + 'a' * 64)
+
+    def test_an_unknown_key_is_refused(self):
+        with self.assertRaises(ValueError):
+            verify_target('owner/repo', 'v2026.47.1', PORTAL, 'docs')
+
+
+class RunnerImageWorkflowTests(unittest.TestCase):
+    """The runner image rides the same CI-gated chain as the Portal image (doc 187 section 12)."""
+
+    def needs(self, workflow, job):
+        return [n.strip() for n in re.search(r'^    needs: \[([^\]]*)\]', job_block(workflow, job), re.M)[1].split(',')]
+
+    def setUp(self):
+        self.release = read_workflow('release.yml')
+
+    def test_the_runner_image_needs_the_same_chain_as_the_portal_image(self):
+        # `docker` needs release (which needs tag, which needs ci, build, build-runner and smoke-arm64).
+        self.assertEqual(self.needs(self.release, 'docker-runner'), ['setup', 'build-runner', 'release', 'smoke-arm64'])
+        for need in ('release', 'smoke-arm64'):
+            self.assertIn(need, self.needs(self.release, 'docker'))
+        self.assertIn('tag', self.needs(self.release, 'release'))
+        tag = self.needs(self.release, 'tag')
+        for need in ('ci', 'build', 'build-runner', 'smoke-arm64'):
+            self.assertIn(need, tag)
+
+    def test_the_runner_job_rechecks_the_tag_and_refuses_to_replace_a_fixed_tag(self):
+        block = job_block(self.release, 'docker-runner')
+        self.assertIn('name: Recheck the immutable tag before image publication', block)
+        self.assertIn('test "$actual" = "$EXPECTED_SHA"', block)
+        self.assertLess(block.index('Recheck the immutable tag'), block.index('docker/build-push-action'))
+        self.assertRegex(block, r'release_guard\.py guard "\$\{IMAGE\}:\$\{VERSION\}"')
+        self.assertIn('-app-runner\n          VERSION', block)
+        self.assertLess(block.index('release_guard.py guard'), block.index('docker/build-push-action'))
+
+    def test_the_runner_job_pushes_only_the_fixed_tag_with_its_own_cache(self):
+        block = job_block(self.release, 'docker-runner')
+        self.assertIn('file: Dockerfile.app-runner', block)
+        self.assertIn('platforms: linux/amd64,linux/arm64', block)
+        self.assertIn('-app-runner:${{ needs.setup.outputs.tag }}', block)
+        self.assertIn('-app-runner:buildcache', block)
+        self.assertNotIn(':latest', block)
+        self.assertNotIn(':beta', block)
+        self.assertRegex(block, r'outputs:\n      digest: \$\{\{ steps\.push\.outputs\.digest \}\}')
+        self.assertIn('org.opencontainers.image.revision=${{ needs.setup.outputs.sha }}', block)
+        self.assertIn('org.opencontainers.image.version=${{ needs.setup.outputs.tag }}', block)
+        # Every third-party action is pinned to a commit, like the other jobs that hold packages: write.
+        for use in re.findall(r'uses: (docker/[^\s]+)', block):
+            self.assertRegex(use, r'@[0-9a-f]{40}$', use)
+
+    def test_each_architecture_of_the_image_is_run_by_digest_before_anything_is_recorded(self):
+        block = job_block(self.release, 'docker-runner')
+        self.assertIn('${{ steps.push.outputs.digest }}', block)
+        self.assertIn('scripts/probe-runner-image.sh "$IMAGE" linux/amd64', block)
+        arm = job_block(self.release, 'smoke-runner-image-arm64')
+        self.assertIn('    runs-on: ubuntu-24.04-arm\n', arm)
+        self.assertIn('needs.docker-runner.outputs.digest', arm)
+        self.assertIn('scripts/probe-runner-image.sh "$IMAGE" linux/arm64', arm)
+        self.assertEqual(self.needs(self.release, 'smoke-runner-image-arm64'), ['setup', 'docker-runner'])
+
+    def test_metadata_is_recorded_by_its_own_job_after_both_images(self):
+        self.assertEqual(self.needs(self.release, 'record-metadata'), ['setup', 'docker', 'docker-runner', 'smoke-runner-image-arm64'])
+        # The step moved out of docker: the Portal job no longer writes the file.
+        self.assertNotIn('release-metadata.json', job_block(self.release, 'docker'))
+        record = job_block(self.release, 'record-metadata')
+        self.assertIn('images: {portal: {image: $image, digest: $digest}', record)
+        self.assertIn('"app-runner": {image: ($image + "-app-runner"), digest: $runner_digest}', record)
+        # The legacy keys keep Portal's values, so older readers and older releases still validate.
+        self.assertIn('{tag: $tag, commit: $commit, image: $image, digest: $digest, recorded_at: $recorded,', record)
+        self.assertIn('gh release upload "$VERSION" release-metadata.json --repo "$REPO" --clobber', record)
+
+    def test_publish_cannot_run_without_the_runner_image(self):
+        needs = self.needs(self.release, 'publish')
+        for need in ('docker', 'docker-runner', 'smoke-runner-image-arm64', 'record-metadata'):
+            self.assertIn(need, needs)
+
+    def test_the_release_job_refuses_to_replace_draft_assets_when_either_image_exists(self):
+        block = job_block(self.release, 'release')
+        self.assertIn('release_guard.py guard "$IMAGE"', block)
+        self.assertIn('release_guard.py guard "$RUNNER_IMAGE"', block)
+
+    def test_the_runner_binary_carries_the_release_identity(self):
+        block = job_block(self.release, 'build-runner')
+        for var in ('Version=${VERSION}', 'Commit=${SHORT_SHA}', 'BuildDate=${BUILD_DATE}'):
+            self.assertIn('internal/version.' + var, block)
+        self.assertIn('out/app-runner version', block)
+
+    def test_channels_verify_both_images_before_either_tag_moves(self):
+        channels = job_block(read_workflow('release-channels.yml'), 'reconcile')
+        verify, apply = channels.index('Verify every target exists'), channels.index('Apply the channels')
+        self.assertLess(verify, apply)
+        self.assertIn('--image-key all', channels[verify:apply])
+        # Both tags are pointed by digest in the one apply step, the runner's only when the release recorded it.
+        step = channels[apply:]
+        self.assertIn('docker buildx imagetools create -t "${IMAGE}:$1" "${IMAGE}@${digest}"', step)
+        self.assertIn('docker buildx imagetools create -t "${IMAGE}-app-runner:$1" "${IMAGE}-app-runner@${runner_digest}"', step)
+        self.assertEqual(step.count('imagetools create'), 2)
+
+    def test_workflow_lint_covers_the_entry_and_its_tests(self):
+        test = read_workflow('test.yml')
+        self.assertIn('deploy/app-runner/portal-app-runner-entry', test)
+        self.assertIn('sh scripts/app_runner_entry_test.sh', test)
 
 
 if __name__ == '__main__':

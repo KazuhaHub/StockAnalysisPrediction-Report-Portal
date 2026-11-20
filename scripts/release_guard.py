@@ -26,11 +26,58 @@ def image_digest(image):
     return match[1]
 
 
+DIGEST = re.compile(r'sha256:[a-f0-9]{64}')
+
+# The app-runner image sits beside the Portal image and takes its name from it (doc 187 section 3): the same
+# repository path with this suffix, and exactly the Portal image's tags.
+RUNNER_IMAGE_SUFFIX = '-app-runner'
+IMAGE_KEYS = ('portal', 'app-runner')
+
+
+def image_for(key, portal_image):
+    """The registry path of one image of a release, from the Portal image's."""
+    if key == 'portal':
+        return portal_image
+    if key == 'app-runner':
+        return portal_image + RUNNER_IMAGE_SUFFIX
+    raise ValueError(f'Unknown image key {key!r}')
+
+
+def recorded_images(meta, image):
+    """The images a release recorded, as {key: (path, digest)}, each entry checked.
+
+    A release from before the runner image has only the legacy top-level image and digest, and is a Portal-only
+    release. A release that declares an `images` map is a release with a runner image, and the map must then
+    carry both entries, each with the path its key implies and a valid digest, and its Portal entry must be the
+    legacy one, because that is what older readers verify.
+    """
+    if 'images' not in meta:
+        return {'portal': (image, meta['digest'])}
+    images = meta['images']
+    if not isinstance(images, dict) or set(images) != set(IMAGE_KEYS):
+        raise ValueError('Release metadata images must name exactly the portal and app-runner images')
+    found = {}
+    for key in IMAGE_KEYS:
+        entry = images[key]
+        if not isinstance(entry, dict) or set(entry) != {'image', 'digest'}:
+            raise ValueError(f'Release metadata has a malformed {key} image entry')
+        if entry['image'] != image_for(key, image):
+            raise ValueError(f'Release metadata {key} image does not match the repository')
+        if not isinstance(entry['digest'], str) or not DIGEST.fullmatch(entry['digest']):
+            raise ValueError(f'Release metadata has no valid {key} image digest')
+        found[key] = (entry['image'], entry['digest'])
+    if found['portal'] != (image, meta['digest']):
+        raise ValueError('Release metadata Portal entry differs from its legacy image and digest')
+    return found
+
+
 def validate_metadata(meta, tag, image, commit):
+    """Check a release's metadata and return the Portal digest, as every reader before the runner image did."""
     if any(meta.get(k) != v for k, v in [('tag', tag), ('image', image), ('commit', commit)]):
         raise ValueError('Release metadata does not match tag, repository and commit')
-    if not re.fullmatch(r'sha256:[a-f0-9]{64}', meta.get('digest', '')):
+    if not isinstance(meta.get('digest'), str) or not DIGEST.fullmatch(meta['digest']):
         raise ValueError('Release metadata has no valid image digest')
+    recorded_images(meta, image)
     return meta['digest']
 
 
@@ -107,7 +154,16 @@ def guard_draft(repo, tag):
         raise RuntimeError('Release is already published; cut a new version')
 
 
-def verify_target(repo, tag, image):
+def verify_target(repo, tag, image, key='portal'):
+    """Verify a release is promotable and return the digest recorded for `key`.
+
+    Every image the release recorded is checked, whichever key is asked for: a fixed tag that no longer matches
+    its recorded digest refuses the whole release, so neither channel tag can move to half a release. `key` is
+    'portal', 'app-runner' or 'all'. For one key the result is its digest, or '' when a Portal-only release
+    recorded none; for 'all' it is one `<key> <digest>` line per recorded image.
+    """
+    if key not in IMAGE_KEYS + ('all',):
+        raise ValueError(f'Unknown image key {key!r}')
     release = gh_json(f'repos/{repo}/releases/tags/{tag}')
     if release['draft']:
         raise RuntimeError('Cannot promote a draft release')
@@ -122,10 +178,15 @@ def verify_target(repo, tag, image):
     asset = next(a for a in release['assets'] if a['name'] == 'release-metadata.json')
     raw = subprocess.check_output(['gh', 'api', '-H', 'Accept: application/octet-stream',
                                    f'repos/{repo}/releases/assets/{asset["id"]}'])
-    digest = validate_metadata(json.loads(raw), tag, image, commit['sha'])
-    if image_digest(f'{image}:{tag}') != digest:
-        raise RuntimeError('Fixed image tag no longer matches recorded digest')
-    return digest
+    meta = json.loads(raw)
+    validate_metadata(meta, tag, image, commit['sha'])
+    images = recorded_images(meta, image)
+    for name, (path, digest) in images.items():
+        if image_digest(f'{path}:{tag}') != digest:
+            raise RuntimeError(f'Fixed {name} image tag no longer matches recorded digest')
+    if key == 'all':
+        return '\n'.join(f'{name} {images[name][1]}' for name in IMAGE_KEYS if name in images)
+    return images[key][1] if key in images else ''
 
 
 def main():
@@ -134,6 +195,8 @@ def main():
     parser.add_argument('value', nargs='?')
     parser.add_argument('--repo', default=os.environ.get('GITHUB_REPOSITORY'))
     parser.add_argument('--image')
+    parser.add_argument('--image-key', choices=IMAGE_KEYS + ('all',), default='portal',
+                        help='verify-target: which recorded digest to print (every recorded image is verified)')
     args = parser.parse_args()
     if args.command != 'state' and not args.value:
         parser.error('value is required for this command')
@@ -148,7 +211,7 @@ def main():
     elif args.command == 'wait-ci':
         wait_ci(args.repo, args.value)
     else:
-        print(verify_target(args.repo, args.value, args.image))
+        print(verify_target(args.repo, args.value, args.image, args.image_key))
 
 
 if __name__ == '__main__':

@@ -202,10 +202,18 @@ jobs:
           if [ -n "$SKIPPED" ]; then
             echo "::warning::releases with incomplete assets were ignored: $SKIPPED"
           fi
+          # Every image of the release is verified against the digest recorded on it, for each target, before
+          # any channel tag moves (doc 187 section 12): the Portal image and, for a release that recorded one,
+          # the app-runner image, whose path is the Portal image's with -app-runner. A release from before the
+          # runner image recorded only Portal's, and promotion moves only that tag for it. One line per image:
+          # "<tag> <key> <digest>".
           for tag in $LATEST_TARGET $BETA_TARGET; do
-            digest=$(python3 scripts/release_guard.py verify-target "$tag" --repo "$REPO" --image "$IMAGE")
-            printf '%s %s\n' "$tag" "$digest" >> verified-targets.txt
-            echo "verified ${IMAGE}:${tag}@${digest}"
+            python3 scripts/release_guard.py verify-target "$tag" --repo "$REPO" --image "$IMAGE" --image-key all > "target-$tag.txt"
+            test -s "target-$tag.txt"
+            while read -r key digest; do
+              printf '%s %s %s\n' "$tag" "$key" "$digest" >> verified-targets.txt
+              echo "verified ${key} image of ${tag}@${digest}"
+            done < "target-$tag.txt"
           done
 
       - name: Apply the channels
@@ -232,11 +240,19 @@ jobs:
           fi
 
           point() { # channel tag
-            # Use only the digest verified against release metadata, never re-resolve a tag.
-            digest=$(awk -v tag="$2" '$1 == tag {print $2; exit}' verified-targets.txt)
+            # Use only the digests verified against release metadata, never re-resolve a tag. Both images of a
+            # release are pointed in this one step, after the verification above has passed for all of them.
+            digest=$(awk -v tag="$2" '$1 == tag && $2 == "portal" {print $3; exit}' verified-targets.txt)
             test -n "$digest"
             docker buildx imagetools create -t "${IMAGE}:$1" "${IMAGE}@${digest}"
             echo "moved ${IMAGE}:$1 -> $2"
+            runner_digest=$(awk -v tag="$2" '$1 == tag && $2 == "app-runner" {print $3; exit}' verified-targets.txt)
+            if [ -n "$runner_digest" ]; then
+              docker buildx imagetools create -t "${IMAGE}-app-runner:$1" "${IMAGE}-app-runner@${runner_digest}"
+              echo "moved ${IMAGE}-app-runner:$1 -> $2"
+            else
+              echo "release $2 has no app-runner image: only the Portal tag moves"
+            fi
           }
 
           if [ "$LATEST_ACTION" = "set" ]; then

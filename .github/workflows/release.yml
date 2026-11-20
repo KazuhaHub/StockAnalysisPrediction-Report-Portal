@@ -12,8 +12,10 @@ name: Release
 #   build-runner → cross-compiles app-runner for linux/amd64 and linux/arm64 only (doc 182 decision D8)
 #   smoke-arm64 → start the linux/arm64 binary on an arm64 runner before the tag, draft or image
 #   release → tar/zip + SHA256SUMS, then create or update the DRAFT GitHub Release
-#   docker  → reuse the linux amd64/arm64 binaries to push the FIXED multi-arch image tag, then
-#             attach the durable identity (commit + image digest) to the draft
+#   docker  → reuse the linux amd64/arm64 binaries to push the FIXED multi-arch image tag
+#   docker-runner → the same for the app-runner image (doc 187), then run it by digest before anything is
+#             recorded; smoke-runner-image-arm64 runs the arm64 image natively
+#   record-metadata → attach the durable identity (commit + each image's digest) to the draft
 #   publish → publish that draft as Beta or Stable, or leave it unpublished for review
 #
 # **A tag publishes a Beta.** The Actions form can cut the next tag from the latest fully-tested main
@@ -427,12 +429,35 @@ jobs:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
+          VERSION: ${{ needs.setup.outputs.tag }}
           COMMIT: ${{ needs.setup.outputs.sha }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
           mkdir -p out
-          go build -trimpath -ldflags="-s -w" -o out/app-runner ./cmd/app-runner
+          # `app-runner version` and the ready line print this identity (doc 187 section 12); the image smoke and
+          # the operator's post-deploy check compare it with the release tag.
+          mod=$(go list -m)
+          ldflags="-s -w"
+          ldflags+=" -X ${mod}/internal/version.Version=${VERSION}"
+          ldflags+=" -X ${mod}/internal/version.Commit=${SHORT_SHA}"
+          ldflags+=" -X ${mod}/internal/version.BuildDate=${BUILD_DATE}"
+          go build -trimpath -ldflags="${ldflags}" -o out/app-runner ./cmd/app-runner
           sh scripts/check-release-build.sh out/app-runner "$GOOS" "$GOARCH" "$COMMIT" app-runner
+      - name: Check the stamped identity (amd64 runs here; arm64 runs in smoke-arm64)
+        if: matrix.goarch == 'amd64'
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          got=$(out/app-runner version)
+          want="${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
+          echo "$got"
+          test "$got" = "$want" || { echo "::error::app-runner version printed '${got}', want '${want}'"; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
           name: app-runner-linux-${{ matrix.goarch }}
@@ -466,12 +491,21 @@ jobs:
         with: { name: app-runner-linux-arm64, path: runner-bin }
       - name: Run the arm64 app-runner command surface
         shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
           runner="$PWD/runner-bin/app-runner"
           chmod +x "$runner"
           "$runner" provision-xfs-images --help | grep -q -- '--mount-checkpoint'
+          "$runner" host-setup --help | grep -q -- '--apply'
           if "$runner" >/dev/null; then echo "::error::app-runner without a command must exit non-zero"; exit 1; fi
+          got=$("$runner" version)
+          want="${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
+          echo "$got"
+          test "$got" = "$want" || { echo "::error::app-runner version printed '${got}', want '${want}'"; exit 1; }
       - name: Run version and probe /healthz
         shell: bash
         env:
@@ -550,7 +584,10 @@ jobs:
       - name: Recheck fixed image before replacing draft assets
         env:
           IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}:${{ needs.setup.outputs.tag }}
-        run: python3 scripts/release_guard.py guard "$IMAGE"
+          RUNNER_IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:${{ needs.setup.outputs.tag }}
+        run: |
+          python3 scripts/release_guard.py guard "$IMAGE"
+          python3 scripts/release_guard.py guard "$RUNNER_IMAGE"
       - name: Package archives
         shell: bash
         env:
@@ -627,6 +664,13 @@ jobs:
           published release; \`:latest\` follows the newest full release, so a release published as a
           pre-release does not move it.
 
+          The application runner has its own image, under the same tags. One \`PORTAL_VERSION\` selects both in
+          the compose project; always update them together:
+
+          \`\`\`shell
+          docker pull ghcr.io/${OWNER_LC}/${REPO_LC}-app-runner:${VERSION}
+          \`\`\`
+
           ### Verify
 
           \`\`\`shell
@@ -693,6 +737,8 @@ jobs:
     # Dockerfile.release) on both arches — test.yml's docker-image job gates amd64 pre-merge, so by
     # tag time this is re-verification except on arm64, which is first checked here.
     needs: [setup, build, release, smoke-arm64]
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -753,6 +799,137 @@ jobs:
           # only rebuild the COPY layers.
           cache-from: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}:buildcache,mode=max
+
+  # THE APP-RUNNER IMAGE (doc 187). It is published from the same CI-gated chain as the Portal image: it needs the
+  # same jobs as `docker`, so the tag job (which needs `ci`, `build`, `build-runner` and `smoke-arm64`) and the draft
+  # Release come first, and the tag is rechecked right before the push. The fixed tag is never replaced. After
+  # the push each architecture's image is run BY DIGEST before anything is recorded, so a runner image whose entry
+  # cannot reach the runner in the host mount namespace is a failed release and `publish` never runs.
+  docker-runner:
+    name: Publish the fixed app-runner image tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    needs: [setup, build-runner, release, smoke-arm64]
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
+      - uses: actions/download-artifact@v8
+        with: { name: app-runner-linux-amd64, path: bin/linux-amd64 }
+      - uses: actions/download-artifact@v8
+        with: { name: app-runner-linux-arm64, path: bin/linux-arm64 }
+      - run: chmod +x bin/linux-amd64/app-runner bin/linux-arm64/app-runner
+      - name: Recheck the immutable tag before image publication
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.setup.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin "refs/tags/${VERSION}:refs/tags/${VERSION}"
+          actual=$(git rev-parse --verify "refs/tags/${VERSION}^{commit}")
+          test "$actual" = "$EXPECTED_SHA" || {
+            echo "::error::tag ${VERSION} moved during the build; refusing publication"
+            exit 1
+          }
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse to replace an already-published fixed tag
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner
+          VERSION: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_guard.py guard "${IMAGE}:${VERSION}"
+      - name: Build and push the fixed multi-arch image
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.app-runner
+          # No QEMU: Dockerfile.app-runner only COPYs the prebuilt per-arch binary.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Only the fixed tag: the rolling channels are moved by release-channels.yml, by digest, after the
+          # release is published.
+          tags: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:${{ needs.setup.outputs.tag }}
+          labels: |
+            org.opencontainers.image.title=app-runner
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.setup.outputs.sha }}
+            org.opencontainers.image.version=${{ needs.setup.outputs.tag }}
+          provenance: false
+          cache-from: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:buildcache,mode=max
+      - name: Run the linux/amd64 image by digest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner@${{ steps.push.outputs.digest }}
+          VERSION: ${{ needs.setup.outputs.tag }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          sh scripts/probe-runner-image.sh "$IMAGE" linux/amd64 "${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
+
+  # The arm64 half of the image check. A step cannot change runner, so it is a job; record-metadata and publish
+  # need it, so a runner image that cannot start on arm64 never gets published or promoted.
+  smoke-runner-image-arm64:
+    name: Run the linux/arm64 app-runner image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    needs: [setup, docker-runner]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run the image by digest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner@${{ needs.docker-runner.outputs.digest }}
+          VERSION: ${{ needs.setup.outputs.tag }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64 || { echo "::error::runner is $(uname -m), not aarch64"; exit 1; }
+          sh scripts/probe-runner-image.sh "$IMAGE" linux/arm64 "${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
+
+  # The durable release identity, written once both images exist and both have been run. Durable, because a
+  # one-day Actions artifact cannot carry an artifact identity to a promotion that happens days later, and
+  # reconciliation needs the digests without pulling the images back. `recorded_at` is when this identity was
+  # written; the artifact's own build date is baked into the binary by the -ldflags above and is the
+  # authoritative one.
+  #
+  # The format: the legacy top-level `image` and `digest` keep Portal's values, so older readers and older
+  # releases still validate, and `images` adds one {image, digest} entry per image. A release from before the
+  # runner image has no `images` map and is verified for Portal only (scripts/release_guard.py).
+  record-metadata:
+    name: Record the durable release identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Nothing: the steps speak to GitHub as RELEASE_PAT, and there is no checkout.
+    permissions: {}
+    needs: [setup, docker, docker-runner, smoke-runner-image-arm64]
+    steps:
       - name: Record the durable release identity on the draft
         shell: bash
         env:
@@ -760,21 +937,23 @@ jobs:
           REPO: ${{ github.repository }}
           VERSION: ${{ needs.setup.outputs.tag }}
           COMMIT: ${{ needs.setup.outputs.sha }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+          RUNNER_DIGEST: ${{ needs.docker-runner.outputs.digest }}
           IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}
         run: |
           set -euo pipefail
-          # Durable, because a one-day Actions artifact cannot carry an artifact identity to a
-          # promotion that happens days later, and reconciliation needs the digest without pulling
-          # the image back. `recorded_at` is when this identity was written; the artifact's own build
-          # date is baked into the binary by the -ldflags above and is the authoritative one.
+          for d in "$DIGEST" "$RUNNER_DIGEST"; do
+            printf '%s' "$d" | grep -Eq '^sha256:[a-f0-9]{64}$' || { echo "::error::an image digest is missing or malformed"; exit 1; }
+          done
           jq -n --arg tag "$VERSION" --arg commit "$COMMIT" --arg image "$IMAGE" \
-                --arg digest "$DIGEST" --arg recorded "$(date -u +%FT%TZ)" \
-            '{tag: $tag, commit: $commit, image: $image, digest: $digest, recorded_at: $recorded}' \
+                --arg digest "$DIGEST" --arg runner_digest "$RUNNER_DIGEST" --arg recorded "$(date -u +%FT%TZ)" \
+            '{tag: $tag, commit: $commit, image: $image, digest: $digest, recorded_at: $recorded,
+              images: {portal: {image: $image, digest: $digest},
+                       "app-runner": {image: ($image + "-app-runner"), digest: $runner_digest}}}' \
             > release-metadata.json
           cat release-metadata.json
           # --clobber so a retry of this step converges instead of failing on the file it wrote.
-          gh release upload "$VERSION" release-metadata.json --clobber
+          gh release upload "$VERSION" release-metadata.json --repo "$REPO" --clobber
 
   publish:
     name: Publish the Release
@@ -783,9 +962,11 @@ jobs:
     # Nothing: the one step speaks to GitHub as RELEASE_PAT, and there is no checkout.
     permissions: {}
     # Last, and the order is load-bearing. Publishing is what a reader sees and what
-    # release-channels reacts to, and reconciliation reads the image digest the docker job records
+    # release-channels reacts to, and reconciliation reads the image digests record-metadata writes
     # on this release — so publishing any earlier could point :beta at an image that is not pushed.
-    needs: [setup, docker]
+    # It needs the runner image's jobs too: a release is never published, and so never promoted, without
+    # its runner image (doc 187 section 12).
+    needs: [setup, docker, docker-runner, smoke-runner-image-arm64, record-metadata]
     steps:
       - name: Publish the prepared draft
         shell: bash
