@@ -25,6 +25,10 @@ type platformActorSession struct {
 	// anonymousPublic marks the sessionless identity of a public projection read (doc 179). Only
 	// the public handlers set it; it admits no account, audience or viewer.
 	anonymousPublic bool
+	// anonymousMachine is the identifier of the machine token an authenticated machine read is made
+	// with (doc 183). Only the machine handlers set it; like anonymousPublic it admits no account,
+	// audience or viewer, and it must show the machine.read grant and the still active token instead.
+	anonymousMachine string
 }
 
 type platformActorFacts struct {

@@ -38,6 +38,10 @@ const (
 	// authSessionOrBearer is either one (canQuery) — a session IS accepted, so it is gated when a
 	// session is what the caller used.
 	authSessionOrBearer
+	// authMachine is the authenticated machine read surface (doc 183): the one credential it accepts is
+	// a machine token in an Authorization header. It never reads a cookie, so it is not a session
+	// route, and it is not authBearer, whose read handlers also admit a cookie.
+	authMachine
 )
 
 // routeRow is one registration.
@@ -68,6 +72,12 @@ func (s *Server) sessionGated(mux *http.ServeMux, gate, pattern string, h handle
 
 func (s *Server) public(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
 	s.route(mux, pattern, authPublic, "", h)
+}
+
+// machine registers a route of the machine read surface (doc 183). The handler authenticates its own
+// token before it does anything else.
+func (s *Server) machine(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
+	s.route(mux, pattern, authMachine, "", h)
 }
 
 // session is the JSON session class: 401 rather than a redirect, because the caller is the SPA.
@@ -492,6 +502,12 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/principals-read", s.apiPlatformPrincipalsGrant)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicPreview)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicGrant)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/machine-read", s.apiPlatformMachinePreview)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-read", s.apiPlatformMachineGrant)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/machine-tokens", s.apiPlatformMachineTokens)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-tokens", s.apiPlatformMachineTokenCreate)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-tokens/{handle}/revoke", s.apiPlatformMachineTokenRevoke)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-tokens/{handle}/rotate", s.apiPlatformMachineTokenRotate)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/capability-policy/plan", s.apiPlatformCapabilityPolicyPlan)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/capability-policy-reviews/{id}", s.apiPlatformCapabilityPolicyConsume)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/catalogue", s.apiPlatformMarketCatalogue)
@@ -541,6 +557,12 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// The anonymous reviewed public projection (doc 179). GET only; no cookie, session or POST.
 	s.public(mux, "GET /public/apps/{installation}/data/{route}", s.publicAppData)
 	s.public(mux, "GET /public/apps/{installation}/{asset...}", s.publicAppDocument)
+	// The authenticated machine read API (doc 183). GET only; one bearer token, never a cookie. The
+	// catch-all keeps every other GET path under /machine/ off the application's single page; the mux
+	// itself answers every other method with a 405.
+	s.machine(mux, "GET /machine/apps/{installation}/data/{route}", s.machineAppData)
+	s.machine(mux, "GET /machine/apps/{installation}/openapi.json", s.machineOpenAPI)
+	s.machine(mux, "GET /machine/{rest...}", s.machineOther)
 
 	// ---- Outbound event webhooks (extension point; see docs/adr/0002-extension-architecture.md) ----
 	s.admin(mux, "GET /api/admin/webhooks", s.apiWebhooks)

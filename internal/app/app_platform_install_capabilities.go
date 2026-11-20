@@ -44,7 +44,7 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 	if stored == boolInt(reviewed) {
 		return true
 	}
-	return (capability == "principals.read" || capability == "public.projection") && !reviewed && stored == 1
+	return (capability == "principals.read" || capability == "public.projection" || capability == "machine.read") && !reviewed && stored == 1
 }
 
 // platformPolicyMatches compares a stored policy with the reviewed one. public.projection is the
@@ -52,7 +52,9 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 // granted row may carry a validated public policy in place of the install-time "{}". An ungranted
 // row is always exactly the reviewed policy, so withdrawing resets it.
 func platformPolicyMatches(capability string, granted int, stored, reviewed string) bool {
-	return stored == reviewed || (capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored))
+	return stored == reviewed ||
+		(capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored)) ||
+		(capability == "machine.read" && granted == 1 && reviewed == "{}" && appplatform.ValidMachinePolicyShape(stored))
 }
 
 // platformNetworkRowAccepted is the row test of one capability: the reviewed selection, or, for a

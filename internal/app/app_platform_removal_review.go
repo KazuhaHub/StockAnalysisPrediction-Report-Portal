@@ -482,6 +482,10 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 			if err != nil {
 				return err
 			}
+			// Machine tokens go with the installation, in the same transaction (doc 183 section 4.3).
+			if _, err = revokePlatformMachineTokens(e, actor, control.nowMS, p.InstallationID, "uninstall"); err != nil {
+				return err
+			}
 		}
 		if _, err := e.exec(`UPDATE app_platform_activations SET state='retired',updated_ms=? WHERE installation_id=? AND state='active'`, control.nowMS, p.InstallationID); err != nil {
 			return err
