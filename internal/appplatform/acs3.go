@@ -1,16 +1,20 @@
 package appplatform
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/url"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Alibaba Cloud ACS3-HMAC-SHA256 request signing (doc 177).
@@ -397,4 +401,61 @@ func CheckACS3SignedHeaders(method, target, contentType, bodySHA256 string, head
 		return ErrInvalidACS3
 	}
 	return nil
+}
+
+// SigningRequest is the application's request to have a call signed (doc 177 section 3.3):
+// the reviewed binding, the scheme and the API action and version. It selects nothing Portal does
+// not then check: the binding's reviewed policy must list exactly this action and version.
+type SigningRequest struct {
+	Credential, Scheme, Action, Version string
+}
+
+// DecodeSigningRequest reads the closed `signing` object: exactly credential, scheme, action and
+// version, each a JSON string, with no duplicate, unknown, differently-cased or null member and no
+// trailing data. On error nothing partial is returned.
+func DecodeSigningRequest(raw []byte) (SigningRequest, error) {
+	var zero SigningRequest
+	if len(raw) == 0 || len(raw) > 512 || !utf8.Valid(raw) {
+		return zero, ErrInvalidACS3
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return zero, ErrInvalidACS3
+	}
+	fields := map[string]string{}
+	for d.More() {
+		token, err := d.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return zero, ErrInvalidACS3
+		}
+		if _, duplicate := fields[key]; duplicate || (key != "credential" && key != "scheme" && key != "action" && key != "version") {
+			return zero, ErrInvalidACS3
+		}
+		var value json.RawMessage
+		if d.Decode(&value) != nil || len(value) == 0 || value[0] != '"' {
+			return zero, ErrInvalidACS3
+		}
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			return zero, ErrInvalidACS3
+		}
+		fields[key] = text
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		return zero, ErrInvalidACS3
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return zero, ErrInvalidACS3
+	}
+	out := SigningRequest{Credential: fields["credential"], Scheme: fields["scheme"], Action: fields["action"], Version: fields["version"]}
+	if len(fields) != 4 || !out.Valid() {
+		return zero, ErrInvalidACS3
+	}
+	return out, nil
+}
+
+// Valid reports whether every member is well formed.
+func (r SigningRequest) Valid() bool {
+	return ValidCredentialBindingName(r.Credential) && r.Scheme == ACS3Scheme && ValidACS3Action(r.Action) && ValidACS3Version(r.Version)
 }

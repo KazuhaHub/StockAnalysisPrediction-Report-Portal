@@ -590,6 +590,12 @@ type EgressAdmit struct {
 	// Credential names the reviewed binding the call asks Portal to place (doc
 	// 176), or is empty and then absent from the frame.
 	Credential string `json:"credential,omitempty"`
+	// SigningScheme, SigningAction and SigningVersion ask Portal to sign the call (doc 177) with
+	// the binding named by Credential. They are all present or all absent, and present only with a
+	// Credential. They name a reviewed (action, version) pair; Portal computes the signature.
+	SigningScheme  string `json:"signingScheme,omitempty"`
+	SigningAction  string `json:"signingAction,omitempty"`
+	SigningVersion string `json:"signingVersion,omitempty"`
 }
 
 // EncodeEgressAdmit encodes the closed admit JSON.
@@ -632,10 +638,17 @@ func DecodeEgressAdmit(payload []byte) (EgressAdmit, error) {
 
 func validEgressAdmit(a EgressAdmit) bool {
 	digest, err := hex.DecodeString(a.BodySHA256)
-	return (a.Credential == "" || appplatform.ValidCredentialBindingName(a.Credential)) && appplatform.ValidHTTPRequestMethod(a.Method) && len(a.URL) > 0 && len(a.URL) <= appplatform.MaxHTTPTargetBytes &&
+	return (a.Credential == "" || appplatform.ValidCredentialBindingName(a.Credential)) && validEgressAdmitSigning(a) && appplatform.ValidHTTPRequestMethod(a.Method) && len(a.URL) > 0 && len(a.URL) <= appplatform.MaxHTTPTargetBytes &&
 		appplatform.ValidHTTPPolicyHeaderValue(a.Accept) && appplatform.ValidHTTPPolicyHeaderValue(a.ContentType) &&
 		a.BodyBytes >= 0 && a.BodyBytes <= appplatform.MaxHTTPRequestBytes &&
 		err == nil && len(digest) == sha256.Size && hex.EncodeToString(digest) == a.BodySHA256
+}
+
+func validEgressAdmitSigning(a EgressAdmit) bool {
+	if a.SigningScheme == "" {
+		return a.SigningAction == "" && a.SigningVersion == ""
+	}
+	return a.Credential != "" && a.SigningScheme == appplatform.ACS3Scheme && appplatform.ValidACS3Action(a.SigningAction) && appplatform.ValidACS3Version(a.SigningVersion)
 }
 
 // EncodeEgressSigned encodes the command and proof frames: u32 length, the
