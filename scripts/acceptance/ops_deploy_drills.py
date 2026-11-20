@@ -50,7 +50,10 @@ ACCEPTED_EVENTS = ("workflow_dispatch",)
 
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 CALVER_RE = re.compile(r"^v(\d{4})\.(\d{1,2})(?:\.(\d+))?$")
-IMAGE_LINE_RE = re.compile(r"^(\s*image:\s*)(ghcr\.io/\S+)\s*$")
+# The report-portal image line only. The compose file also names the app-runner image (doc 187), on the same
+# repository path with -app-runner, and that image is another service behind a profile: the drills never pin or
+# start it.
+IMAGE_LINE_RE = re.compile(r"^(\s*image:\s*)(ghcr\.io/(?!\S*-app-runner[:@\s])\S+)\s*$")
 
 
 # ------------------------------------------------------------------ release selection
@@ -748,6 +751,9 @@ class DockerHost:
         text = render_pinned_compose(template, ref)
         with open(self.compose_file, "w", encoding="utf-8") as f:
             f.write(text)
+        # The compose file binds this directory read-only into the portal and Docker never creates it (doc 187
+        # section 6): a static install makes it beside the compose file, as its header says.
+        os.makedirs(os.path.join(os.path.dirname(self.compose_file), "app-runner-control"), exist_ok=True)
         with open(self.reference_file, "w", encoding="utf-8") as f:  # verbatim, beside the deployed file so paths resolve alike
             f.write(template)
         return text, changed_line_numbers(template, text), image_line_number(template)

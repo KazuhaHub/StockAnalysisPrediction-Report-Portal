@@ -527,7 +527,7 @@ jobs:
       # a developer's shell fails, and the tests above exercise only the paths they call. -x with
       # SCRIPTDIR follows each `. lib/...` the way the script resolves it. About a second.
       - name: Shell scripts
-        run: git ls-files -z '*.sh' | xargs -0 shellcheck -x -P SCRIPTDIR
+        run: git ls-files -z '*.sh' deploy/app-runner/portal-app-runner-entry | xargs -0 shellcheck -x -P SCRIPTDIR
       - name: Release script tests
         # The CalVer rules and the rolling-channel decision are pure shell, and they are tested as
         # shell: YAML parsing cannot check whether a year carries an ISO week 53, whether v2026.9.2
@@ -538,6 +538,7 @@ jobs:
           sh scripts/tag_release_test.sh
           sh scripts/release_derive_test.sh
           sh scripts/proxy_pin_probe_test.sh
+          sh scripts/app_runner_entry_test.sh
       - name: E2E harness tests
         run: python3 -B -m unittest discover -s scripts -p '*_test.py'
 

@@ -65,6 +65,19 @@ class ComposeTests(unittest.TestCase):
         once = drills.render_pinned_compose(self.template, ref)
         self.assertEqual(drills.render_pinned_compose(once, ref), once)
 
+    def test_the_runner_image_line_is_not_a_portal_image_line(self):
+        # The compose file names the app-runner image too. It is another service behind a profile, so the drill
+        # rewrites the portal's line and leaves the runner's alone.
+        self.assertIn("-app-runner:", self.template)
+        runner = [line for line in self.template.splitlines() if "-app-runner:" in line and line.strip().startswith("image:")]
+        self.assertEqual(len(runner), 1, runner)
+        self.assertIsNone(drills.IMAGE_LINE_RE.match(runner[0]))
+        out = drills.render_pinned_compose(self.template, f"{drills.IMAGE}:v2026.46.1")
+        self.assertIn(runner[0], out.splitlines())
+        self.assertEqual(len(drills.changed_line_numbers(self.template, out)), 1)
+        self.assertTrue(drills.IMAGE_LINE_RE.match("    image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal:latest"))
+        self.assertIsNone(drills.IMAGE_LINE_RE.match("    image: ghcr.io/o/r-app-runner@sha256:" + "a" * 64))
+
     def test_zero_or_two_portal_images_are_refused(self):
         with self.assertRaises(ValueError):
             drills.render_pinned_compose("services:\n  db:\n    image: postgres:16\n", "x")
