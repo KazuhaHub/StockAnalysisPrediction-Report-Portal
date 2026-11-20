@@ -118,7 +118,11 @@ func platformDataCommandFromRows(rows platformDataCommandRows, source platformMa
 	if err != nil {
 		return control.Command{}, errAppPlatformStageEvidence
 	}
-	c := control.Command{Format: control.Format, DeploymentID: runtime.deploymentID, ControllerEpoch: source.epoch, ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: source.installationID, OperationID: source.operationID, TargetGeneration: strconv.FormatUint(source.generation, 10), Stage: "prepare_data", EffectNumber: "1", EffectID: effect, Kind: "prepare-data", InstallationFence: strconv.FormatInt(source.fence, 10), Payload: control.PrepareDataPayload{DataNamespaceID: namespace, ReleaseSHA256: target, DataFormat: strconv.Itoa(parsed.Manifest.Data.Schema), QuotaBytes: "268435456", QuotaInodes: "65536", WriterFence: "1"}}
+	quotaBytes, quotaInodes, err := platformPlanQuota(rows.plan)
+	if err != nil {
+		return control.Command{}, err
+	}
+	c := control.Command{Format: control.Format, DeploymentID: runtime.deploymentID, ControllerEpoch: source.epoch, ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: source.installationID, OperationID: source.operationID, TargetGeneration: strconv.FormatUint(source.generation, 10), Stage: "prepare_data", EffectNumber: "1", EffectID: effect, Kind: "prepare-data", InstallationFence: strconv.FormatInt(source.fence, 10), Payload: control.PrepareDataPayload{DataNamespaceID: namespace, ReleaseSHA256: target, DataFormat: strconv.Itoa(parsed.Manifest.Data.Schema), QuotaBytes: strconv.FormatInt(quotaBytes, 10), QuotaInodes: strconv.FormatInt(quotaInodes, 10), WriterFence: "1"}}
 	c.PayloadSHA256, err = control.LogicalDigest(c)
 	return c, err
 }
@@ -129,6 +133,8 @@ func platformDataCommandFromRows(rows platformDataCommandRows, source platformMa
 func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64, create bool) (platformDataIntent, bool, error) {
 	var zero, result platformDataIntent
 	var forbidden, effects int
+	var planRaw string
+	var err error
 	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID, lease.installationID).Scan(&forbidden); err != nil {
 		return zero, false, err
 	}
@@ -142,18 +148,25 @@ func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime pla
 	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
 	}
-	rows, err := e.query(`SELECT id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=? ORDER BY id LIMIT 2`+lock, lease.installationID, lease.installationID)
+	var planQuota, planInodes int64
+	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, lease.id).Scan(&planRaw); err != nil {
+		return zero, false, err
+	}
+	if planQuota, planInodes, err = platformPlanQuota(planRaw); err != nil {
+		return zero, false, err
+	}
+	rows, err := e.query(`SELECT id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,quota_inodes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=? ORDER BY id LIMIT 2`+lock, lease.installationID, lease.installationID)
 	if err != nil {
 		return zero, false, err
 	}
 	var count int
 	var origin, state string
 	var owner sql.NullString
-	var format, quota, observed, writer, revision, created, updated int64
+	var format, quota, inodes, observed, writer, revision, created, updated int64
 	var retained, deleted sql.NullInt64
 	for rows.Next() {
 		count++
-		err = rows.Scan(&result.namespaceID, &origin, &owner, &state, &format, &quota, &observed, &writer, &revision, &retained, &deleted, &created, &updated)
+		err = rows.Scan(&result.namespaceID, &origin, &owner, &state, &format, &quota, &inodes, &observed, &writer, &revision, &retained, &deleted, &created, &updated)
 		if err != nil {
 			rows.Close()
 			return zero, false, err
@@ -178,7 +191,7 @@ func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime pla
 			return zero, false, err
 		}
 	} else {
-		if count != 1 || effects != 1 || !platformValidUUID(result.namespaceID) || origin != lease.installationID || !owner.Valid || owner.String != lease.installationID || state != "review_required" || format != 0 || quota != 256<<20 || observed != 0 || writer != 0 || revision != 1 || retained.Valid || deleted.Valid || created < 0 || created > now || created != updated {
+		if count != 1 || effects != 1 || !platformValidUUID(result.namespaceID) || origin != lease.installationID || !owner.Valid || owner.String != lease.installationID || state != "review_required" || format != 0 || quota != planQuota || inodes != planInodes || observed != 0 || writer != 0 || revision != 1 || retained.Valid || deleted.Valid || created < 0 || created > now || created != updated {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		var kind, digest, runtimeID, epoch, effectState, receipt string
@@ -203,7 +216,7 @@ func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime pla
 		if err != nil {
 			return zero, false, err
 		}
-		if _, err := e.exec(`INSERT INTO app_platform_data_namespaces(id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms) VALUES(?,?,?,'review_required',0,268435456,0,0,1,NULL,NULL,?,?)`, result.namespaceID, lease.installationID, lease.installationID, now, now); err != nil {
+		if _, err := e.exec(`INSERT INTO app_platform_data_namespaces(id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms,quota_inodes) VALUES(?,?,?,'review_required',0,?,0,0,1,NULL,NULL,?,?,?)`, result.namespaceID, lease.installationID, lease.installationID, planQuota, now, now, planInodes); err != nil {
 			return zero, false, err
 		}
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms) VALUES(?,'prepare_data',1,?,'prepare-data',?,?,?, ?,0,'prepared','{}',?,?)`, lease.id, result.effectID, result.command.PayloadSHA256, runtime.id, lease.controllerEpoch, lease.fence, now, now); err != nil {

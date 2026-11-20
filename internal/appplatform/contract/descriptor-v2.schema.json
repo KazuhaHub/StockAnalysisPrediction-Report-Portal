@@ -541,11 +541,45 @@
           "maxItems": 8,
           "x-go-omitempty": true,
           "description": "Single-hop data migration steps. The strict parser also requires a backend, to equal data.schema, from below to, and unique from values."
+        },
+        "quota": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DataQuota"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Requested per-installation data quota (doc 185). Requires a backend. Absent means 256 MiB and 65,536 inodes. The administrator approves it or a smaller value."
         }
       },
       "required": [
         "schema",
         "readable_schemas"
+      ]
+    },
+    "DataQuota": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 268435456,
+          "maximum": 17179869184,
+          "description": "The strict parser also requires a multiple of 64 MiB."
+        },
+        "inodes": {
+          "type": "integer",
+          "minimum": 65536,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "bytes",
+        "inodes"
       ]
     },
     "DataMigration": {

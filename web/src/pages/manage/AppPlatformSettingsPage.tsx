@@ -46,7 +46,7 @@ type Settings = {
   // The reviewed network.http destinations, present while that grant is on.
   networkPolicy?: NetworkPolicyView
   backend: { required: boolean; registered: boolean; enabled: boolean }
-  data?: { id: string; state: string; format: number; quota_bytes: string; observed_bytes: string; revision: string }
+  data?: { id: string; state: string; format: number; quota_bytes: string; quota_inodes: string; observed_bytes: string; revision: string }
   recovery: { count: number; state?: string; pending: boolean; points: RecoveryPoint[] }
   configuration_gaps: string[]
   repair_eligible: boolean
@@ -229,6 +229,10 @@ export default function AppPlatformSettingsPage() {
     return t(`appPlatform.settings.gap.${gap}`, { defaultValue: t('appPlatform.settings.gap.unknown') })
   }
   const setupRequired = settings.configuration_gaps.some((gap) => gap === 'setup_required' || gap.startsWith('secret_binding:'))
+  const usagePercent = settings?.data && BigInt(settings.data.quota_bytes) > 0n
+    ? Number((BigInt(settings.data.observed_bytes) * 100n) / BigInt(settings.data.quota_bytes))
+    : 0
+  const usageTone = (percent: number): StatusTone => (percent >= 90 ? 'error' : percent >= 70 ? 'warning' : 'success')
   const bytes = (value: string) => t('appPlatform.settings.bytes', {
     value: new Intl.NumberFormat(lang).format(BigInt(value)),
   })
@@ -509,7 +513,9 @@ export default function AppPlatformSettingsPage() {
         { key: 'state', label: t('appPlatform.settings.dataState'), children: settings.data.state },
         { key: 'format', label: t('appPlatform.settings.dataFormat'), children: settings.data.format },
         { key: 'quota', label: t('appPlatform.settings.dataQuota'), children: bytes(settings.data.quota_bytes) },
+        { key: 'inodes', label: t('appPlatform.settings.dataQuotaInodes'), children: new Intl.NumberFormat(lang).format(BigInt(settings.data.quota_inodes)) },
         { key: 'observed', label: t('appPlatform.settings.dataObserved'), children: bytes(settings.data.observed_bytes) },
+        { key: 'usage', label: t('appPlatform.settings.dataUsage'), children: <StatusTag tone={usageTone(usagePercent)}>{t('appPlatform.settings.dataUsagePercent', { percent: usagePercent })}</StatusTag> },
       ]} /> : <Typography.Text type="secondary">{t('appPlatform.settings.noData')}</Typography.Text>}
     </Card>
 

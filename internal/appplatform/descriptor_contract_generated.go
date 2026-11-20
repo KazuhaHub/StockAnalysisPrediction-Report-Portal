@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "526bc46afe0a5b20f0f4100dee86ead14a699323c43499336bbc1133e0bddd86"
+const descriptorContractSHA256 = "7d0b5fcc91778b3a3ff456c6f368b5e21de0487a138e0b331d07c77920f6eb5e"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -75,6 +75,11 @@ type DataCompatibility struct {
 	ReadableSchemas []int           `json:"readable_schemas"`
 	WritesOnStartup bool            `json:"writes_on_startup"`
 	Migrations      []DataMigration `json:"migrations,omitempty"`
+	Quota           *DataQuota      `json:"quota,omitempty"`
+}
+type DataQuota struct {
+	Bytes  int `json:"bytes"`
+	Inodes int `json:"inodes"`
 }
 type DataMigration struct {
 	From             int      `json:"from"`

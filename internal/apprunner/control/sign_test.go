@@ -15,7 +15,7 @@ func TestSignRequiresExactValidAuthorityAndEnvelope(t *testing.T) {
 	digest := sha256.Sum256(public)
 	id := "00000000-0000-4000-8000-000000000001"
 	authority := Authority{DeploymentID: id, ControllerEpoch: id, ControlRevision: 1, PublicKey: public, Fingerprint: hex.EncodeToString(digest[:])}
-	c := Command{Format: Format, DeploymentID: id, ControllerEpoch: id, ControlRevision: "1", InstallationID: id, OperationID: id, TargetGeneration: "1", Stage: "prepare_data", EffectNumber: "1", EffectID: id, Kind: "prepare-data", InstallationFence: "1", IssuedMS: "1000", ExpiresMS: "2000", Payload: PrepareDataPayload{DataNamespaceID: id, ReleaseSHA256: hex.EncodeToString(make([]byte, 32)), DataFormat: "1", QuotaBytes: "512", QuotaInodes: "1", WriterFence: "1"}}
+	c := Command{Format: Format, DeploymentID: id, ControllerEpoch: id, ControlRevision: "1", InstallationID: id, OperationID: id, TargetGeneration: "1", Stage: "prepare_data", EffectNumber: "1", EffectID: id, Kind: "prepare-data", InstallationFence: "1", IssuedMS: "1000", ExpiresMS: "2000", Payload: PrepareDataPayload{DataNamespaceID: id, ReleaseSHA256: hex.EncodeToString(make([]byte, 32)), DataFormat: "1", QuotaBytes: "268435456", QuotaInodes: "65536", WriterFence: "1"}}
 	var err error
 	c.PayloadSHA256, err = LogicalDigest(c)
 	if err != nil {

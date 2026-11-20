@@ -10,6 +10,8 @@ import (
 	"math"
 	"strconv"
 	"unicode/utf8"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 const DeleteDataFormat = "portal.runner.delete-data-command/1-dev.1"
@@ -80,6 +82,7 @@ func validDeleteDataLogical(c DeleteDataCommand) bool {
 		formatErr == nil && format > 0 &&
 		quotaErr == nil && quota > 0 && quota%512 == 0 &&
 		inodesErr == nil && inodes > 0 &&
+		appplatform.WithinRunnerDataQuota(quota, inodes) &&
 		deviceErr == nil && device > 0 &&
 		inodeErr == nil && inode > 0 &&
 		writerErr == nil && writer > 0 &&

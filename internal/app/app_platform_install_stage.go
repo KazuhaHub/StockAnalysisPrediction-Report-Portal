@@ -129,12 +129,12 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if err := installRequirementsForTarget(parsed.Manifest, p.Format, p.Runtime); err != nil {
 		return err
 	}
-	expected := platformInstallProjection{Format: p.Format, Runtime: p.Runtime, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: p.DeclinedCapabilities, DataQuotaBytes: 256 << 20}
-	quota, err := platformInstallProfileQuota(p.Format, parsed.Manifest)
-	if err != nil || p.DataQuotaBytes != quota {
+	expected := platformInstallProjection{Format: p.Format, Runtime: p.Runtime, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: p.DeclinedCapabilities}
+	if _, err := platformInstallProfileQuota(p.Format, parsed.Manifest); err != nil || platformCheckInstallQuota(p, p.Format, parsed.Manifest) != nil {
 		return errAppPlatformStageEvidence
 	}
-	expected.DataQuotaBytes = quota
+	expected.DataQuotaBytes, expected.DataQuotaInodes = p.DataQuotaBytes, p.DataQuotaInodes
+	expected.RequestedDataQuotaBytes, expected.RequestedDataQuotaInodes = p.RequestedDataQuotaBytes, p.RequestedDataQuotaInodes
 	if err := validatePlatformInstallAudience(e, p.Audience, now); err != nil {
 		return err
 	}

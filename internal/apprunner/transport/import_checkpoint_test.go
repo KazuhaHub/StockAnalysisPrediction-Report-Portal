@@ -30,7 +30,7 @@ func importTransportFixture(t *testing.T) (control.Authority, control.ImportChec
 			CheckpointID:  checkpoint.Payload.CheckpointID, NamespaceID: checkpoint.Payload.NamespaceID,
 			ReleaseSHA256: checkpoint.Payload.ReleaseSHA256, ManifestSHA256: strings.Repeat("c", 64),
 			ArchiveBytes: "1024", DataFormat: checkpoint.Payload.DataFormat,
-			WriterFence: checkpoint.Payload.WriterFence, QuotaBytes: "1048576", QuotaInodes: "1024",
+			WriterFence: checkpoint.Payload.WriterFence, QuotaBytes: "268435456", QuotaInodes: "65536",
 			SourceProjectID: checkpoint.Payload.ProjectID, SourceNamespaceInode: checkpoint.Payload.NamespaceInode,
 			SourceDevice:         checkpoint.Payload.Device,
 			SourceFilesystemUUID: "11111111-1111-4111-8111-111111119a54", SourceRootInode: "64",

@@ -7,7 +7,9 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// The profile is confirmed as part of canonical review bytes. No-data means no
+// The profile is confirmed as part of canonical review bytes. For a backend the requested quota is the
+// descriptor's data.quota block (doc 185), or 256 MiB when it has none; the approved quota is what the
+// administrator confirmed, see platformApplyInstallQuota. No-data means no
 // application persistence provider, not a fictitious successful quota/receipt.
 func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (int64, error) {
 	switch format {
@@ -15,16 +17,18 @@ func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (
 		if manifest.Backend == nil || !platformSupportedRequiredCapabilities(manifest) {
 			return 0, errAppPlatformInstallUnavailable
 		}
-		return 256 << 20, nil
+		bytes, _ := manifest.Data.QuotaOrDefault()
+		return bytes, nil
 	case platformNativeInstallFormat:
-		return 256 << 20, nil
+		bytes, _ := manifest.Data.QuotaOrDefault()
+		return bytes, nil
 	case platformFrontendInstallFormat:
 		if manifest.Backend != nil || !platformFrontendRequiredCapabilities(manifest) || manifest.Data.WritesOnStartup {
 			return 0, errAppPlatformInstallUnavailable
 		}
 		for _, capability := range manifest.Capabilities.Required {
 			if capability == "storage.files" {
-				return 256 << 20, nil
+				return platformObjectNamespaceBytes, nil
 			}
 		}
 		return 0, nil
@@ -32,7 +36,7 @@ func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (
 		return 0, errAppPlatformPlanChanged
 	}
 }
-func platformSetInstallProjectionFormat(e migExec, p *platformInstallProjection, format string) error {
+func platformSetInstallProjectionFormat(e migExec, p *platformInstallProjection, format string, approval platformQuotaApproval) error {
 	var raw []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, p.ReleaseSHA256).Scan(&raw); err != nil {
 		return err
@@ -41,12 +45,8 @@ func platformSetInstallProjectionFormat(e migExec, p *platformInstallProjection,
 	if err != nil {
 		return errAppPlatformPlanChanged
 	}
-	quota, err := platformInstallProfileQuota(format, parsed.Manifest)
-	if err != nil {
-		return err
-	}
-	p.Format, p.DataQuotaBytes = format, quota
-	return nil
+	p.Format = format
+	return platformApplyInstallQuota(p, format, parsed.Manifest, approval)
 }
 func platformParseInstallProfile(raw string) (string, error) {
 	var p platformInstallProjection

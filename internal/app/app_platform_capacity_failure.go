@@ -13,11 +13,14 @@ import (
 // the dimension (doc 171). The Portal keeps the typed outcome as the operation's failure: a closed error code per
 // dimension, which the management and status views pass through and the UI turns into one message each.
 var platformCapacityErrorCodes = map[string]string{
-	journal.CapacityMemory:          "capacity_exhausted_memory",
-	journal.CapacityCPU:             "capacity_exhausted_cpu",
-	journal.CapacityDisk:            "capacity_exhausted_disk",
-	journal.CapacityImageStore:      "capacity_exhausted_image_store",
-	journal.CapacityRunningBackends: "capacity_exhausted_running_backends",
+	journal.CapacityMemory: "capacity_exhausted_memory",
+	journal.CapacityCPU:    "capacity_exhausted_cpu",
+	journal.CapacityDisk:   "capacity_exhausted_disk",
+	// A namespace's quota, with its retained checkpoints, that the runner cannot reserve (doc 185).
+	journal.CapacityDataQuota:           "data_quota_capacity",
+	journal.CapacityDataQuotaCheckpoint: "data_quota_capacity",
+	journal.CapacityImageStore:          "capacity_exhausted_image_store",
+	journal.CapacityRunningBackends:     "capacity_exhausted_running_backends",
 }
 
 func platformCapacityErrorCode(dimension string) (string, bool) {

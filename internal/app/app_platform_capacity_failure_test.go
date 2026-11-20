@@ -25,6 +25,7 @@ func TestPlatformCapacityErrorCodeIsOnePerDimension(t *testing.T) {
 	want := map[string]string{
 		"memory": "capacity_exhausted_memory", "cpu": "capacity_exhausted_cpu", "disk": "capacity_exhausted_disk",
 		"image_store": "capacity_exhausted_image_store", "running_backends": "capacity_exhausted_running_backends",
+		"data_quota": "data_quota_capacity", "data_quota_checkpoint": "data_quota_capacity",
 	}
 	for dimension, code := range want {
 		got, ok := platformCapacityErrorCode(dimension)

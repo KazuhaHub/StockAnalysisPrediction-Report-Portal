@@ -15,9 +15,12 @@ import (
 // CapacityBudgets are the absolute ceilings the runner admits reservations
 // against (doc 171). The service derives them from host facts at startup.
 type CapacityBudgets struct {
-	MemoryMiB       int64
-	CPUMillis       int64
-	DiskBytes       int64
+	MemoryMiB int64
+	CPUMillis int64
+	DiskBytes int64
+	// CheckpointBytes is the budget of the checkpoint volume when it is another filesystem than the data
+	// volume. Zero means they share one, and a namespace's data and checkpoints all count against DiskBytes.
+	CheckpointBytes int64
 	ImageStoreBytes int64
 	RunningBackends int64
 	// ReservedCPUs and AppCPUs are the CPU lists app containers may not and may run on, in the kernel's list
@@ -32,11 +35,15 @@ func (b CapacityBudgets) valid() bool {
 
 // The dimensions a capacity refusal names.
 const (
-	CapacityMemory          = "memory"
-	CapacityCPU             = "cpu"
-	CapacityDisk            = "disk"
-	CapacityImageStore      = "image_store"
-	CapacityRunningBackends = "running_backends"
+	CapacityMemory = "memory"
+	CapacityCPU    = "cpu"
+	CapacityDisk   = "disk"
+	// CapacityDataQuota is a namespace whose quota, with its retained checkpoints, does not fit the disk
+	// budget; CapacityDataQuotaCheckpoint is the same when only the separate checkpoint volume is short.
+	CapacityDataQuota           = "data_quota"
+	CapacityDataQuotaCheckpoint = "data_quota_checkpoint"
+	CapacityImageStore          = "image_store"
+	CapacityRunningBackends     = "running_backends"
 )
 
 // CapacityExhaustedOutcome is the typed outcome of a refusal.
@@ -74,6 +81,9 @@ func (s *Store) CapacityBudgets() (CapacityBudgets, bool) {
 type capacityPlan struct {
 	kind, resourceID, installationID            string
 	memoryMiB, cpuMillis, diskBytes, imageBytes int64
+	// quotaBytes is the namespace quota a namespace plan reserves for. diskBytes is then the data share, and
+	// checkpointBytes the share of the two retained checkpoints, held as a second row.
+	quotaBytes, checkpointBytes int64
 	// transferFrom names the stopped source backend an enable or repair start replaces. The native start removes
 	// that container before it creates the target, so admission does not count the source next to the target. The
 	// source's row stays held until the settlement that proves its absence releases it.
@@ -118,6 +128,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 			  OR EXISTS (SELECT 1 FROM runner_commands n WHERE n.installation_id=res.installation_id AND n.kind NOT IN (`+installationNeutralCommandKinds+`) AND n.admitted_fence>res.control_fence)))`, now); err != nil {
 		return nil, err
 	}
+	ownCheckpoints := checkpointReservationID(plan.resourceID)
 	var held struct{ state string }
 	var mem, cpu, disk, image int64
 	err := tx.QueryRowContext(ctx, `SELECT state,memory_mib,cpu_millis,disk_bytes,image_bytes FROM runner_reservations WHERE resource_id=?`, plan.resourceID).Scan(&held.state, &mem, &cpu, &disk, &image)
@@ -125,7 +136,16 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if existing && held.state == reservationHeld && mem == plan.memoryMiB && cpu == plan.cpuMillis && disk == plan.diskBytes && image == plan.imageBytes {
+	checkpointsHeld := plan.checkpointBytes == 0
+	if plan.checkpointBytes > 0 {
+		var held int64
+		err := tx.QueryRowContext(ctx, `SELECT disk_bytes FROM runner_reservations WHERE resource_id=? AND state='held'`, ownCheckpoints).Scan(&held)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		checkpointsHeld = err == nil && held == plan.checkpointBytes
+	}
+	if existing && held.state == reservationHeld && mem == plan.memoryMiB && cpu == plan.cpuMillis && disk == plan.diskBytes && image == plan.imageBytes && checkpointsHeld {
 		// Already counted at exactly this size: a replay, or an image another installation loaded first.
 		return nil, nil
 	}
@@ -135,7 +155,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	}
 	var usedMem, usedCPU, usedDisk, usedImage, usedBackends int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(memory_mib),0),COALESCE(SUM(cpu_millis),0),COALESCE(SUM(disk_bytes),0),COALESCE(SUM(image_bytes),0),COALESCE(SUM(CASE WHEN kind='backend' THEN 1 ELSE 0 END),0)
-		FROM runner_reservations WHERE state='held' AND resource_id<>?`, plan.resourceID).Scan(&usedMem, &usedCPU, &usedDisk, &usedImage, &usedBackends); err != nil {
+		FROM runner_reservations WHERE state='held' AND resource_id<>? AND resource_id<>?`, plan.resourceID, ownCheckpoints).Scan(&usedMem, &usedCPU, &usedDisk, &usedImage, &usedBackends); err != nil {
 		return nil, err
 	}
 	if plan.transferFrom != "" && plan.transferFrom != plan.resourceID {
@@ -156,16 +176,43 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	if plan.kind == reservationBackend {
 		backends = 1
 	}
-	for _, d := range []struct {
+	type dimension struct {
 		dimension               string
 		requested, used, budget int64
-	}{
+	}
+	diskDims := []dimension{{CapacityDisk, plan.diskBytes, usedDisk, budgets.DiskBytes}}
+	if plan.quotaBytes > 0 {
+		legacy, err := countLegacyNamespaces(ctx, tx, plan.resourceID, ownCheckpoints)
+		if err != nil {
+			return nil, err
+		}
+		// A namespace reserves its quota on the data volume and its two retained checkpoints, at the archive cap
+		// each, on the checkpoint volume, or all of it on the data volume when they share a filesystem.
+		if budgets.CheckpointBytes > 0 {
+			var usedData, usedCheckpoint int64
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN resource_id LIKE 'checkpoints/%' THEN 0 ELSE disk_bytes END),0),COALESCE(SUM(CASE WHEN resource_id LIKE 'checkpoints/%' THEN disk_bytes ELSE 0 END),0) FROM runner_reservations WHERE state='held' AND resource_id<>? AND resource_id<>?`, plan.resourceID, ownCheckpoints).Scan(&usedData, &usedCheckpoint); err != nil {
+				return nil, err
+			}
+			// A legacy row holds its data and, unrecorded, its two retained checkpoints.
+			usedData += legacy * (legacyNamespaceDataBytes - NamespaceReservationBytes)
+			usedCheckpoint += legacy * legacyNamespaceCheckpointBytes
+			diskDims = []dimension{
+				{CapacityDataQuota, plan.diskBytes, usedData, budgets.DiskBytes},
+				{CapacityDataQuotaCheckpoint, plan.checkpointBytes, usedCheckpoint, budgets.CheckpointBytes},
+			}
+		} else {
+			usedDisk += legacy * (legacyNamespaceDataBytes + legacyNamespaceCheckpointBytes - NamespaceReservationBytes)
+			diskDims = []dimension{{CapacityDataQuota, plan.diskBytes + plan.checkpointBytes, usedDisk, budgets.DiskBytes}}
+		}
+	}
+	dimensions := []dimension{
 		{CapacityMemory, plan.memoryMiB, usedMem, budgets.MemoryMiB},
 		{CapacityCPU, plan.cpuMillis, usedCPU, budgets.CPUMillis},
-		{CapacityDisk, plan.diskBytes, usedDisk, budgets.DiskBytes},
-		{CapacityImageStore, plan.imageBytes, usedImage, budgets.ImageStoreBytes},
-		{CapacityRunningBackends, backends, usedBackends, budgets.RunningBackends},
-	} {
+	}
+	dimensions = append(dimensions, diskDims...)
+	dimensions = append(dimensions, dimension{CapacityImageStore, plan.imageBytes, usedImage, budgets.ImageStoreBytes},
+		dimension{CapacityRunningBackends, backends, usedBackends, budgets.RunningBackends})
+	for _, d := range dimensions {
 		if d.requested > 0 && d.used+d.requested > d.budget {
 			return &capacityRefusal{dimension: d.dimension, requested: d.requested, remaining: max(d.budget-d.used, 0)}, nil
 		}
@@ -182,6 +229,18 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 		image_bytes=CASE WHEN excluded.kind='image' AND runner_reservations.state='held' THEN max(runner_reservations.image_bytes,excluded.image_bytes) ELSE excluded.image_bytes END,
 		state='held',updated_ms=excluded.updated_ms`,
 		id, plan.resourceID, plan.installationID, plan.kind, plan.memoryMiB, plan.cpuMillis, plan.diskBytes, plan.imageBytes, now, now)
+	if err != nil || plan.checkpointBytes == 0 {
+		return nil, err
+	}
+	// The retained checkpoints are a second row of the same namespace, so the volumes can be counted apart.
+	id, err = dataClaimID()
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO runner_reservations(id,resource_id,installation_id,kind,memory_mib,cpu_millis,disk_bytes,image_bytes,state,created_ms,updated_ms)
+		VALUES(?,?,?,?,0,0,?,0,'held',?,?)
+		ON CONFLICT(resource_id) DO UPDATE SET installation_id=excluded.installation_id,kind=excluded.kind,disk_bytes=excluded.disk_bytes,state='held',updated_ms=excluded.updated_ms`,
+		id, ownCheckpoints, plan.installationID, plan.kind, plan.checkpointBytes, now, now)
 	return nil, err
 }
 
@@ -189,7 +248,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 // the resource's proven absence; a stop request is never a release. An unknown or already released resource is
 // not an error.
 func releaseReservation(ctx context.Context, tx *sql.Tx, resourceID string, now int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=? WHERE resource_id=? AND state='held'`, now, resourceID)
+	_, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=? WHERE resource_id IN (?,?) AND state='held'`, now, resourceID, checkpointReservationID(resourceID))
 	return err
 }
 
@@ -219,12 +278,26 @@ func (s *Store) backendPlan(ctx context.Context, kind, resourceID, installationI
 	return capacityPlan{kind: kind, resourceID: resourceID, installationID: installationID, memoryMiB: int64(r.MemoryMiB), cpuMillis: int64(r.CPUMillis)}, true, nil
 }
 
-// namespacePlan builds the reservation of one managed data namespace.
-func (s *Store) namespacePlan(resourceID, installationID string) (capacityPlan, bool) {
+// namespacePlan builds the reservation of one managed data namespace of the given quotas. A quota the command
+// does not carry reserves the default every namespace had before the quota became per installation; one outside
+// the platform bounds reserves nothing and is refused where the command is validated.
+func (s *Store) namespacePlan(resourceID, installationID string, quotaBytes, inodeQuota int64) (capacityPlan, bool) {
 	if _, ok := s.CapacityBudgets(); !ok {
 		return capacityPlan{}, false
 	}
-	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: NamespaceReservationBytes}, true
+	if quotaBytes <= 0 {
+		quotaBytes = NamespaceQuotaBytes
+	}
+	if inodeQuota <= 0 {
+		inodeQuota = appplatform.DataQuotaDefaultInode
+	}
+	dataBytes, checkpointBytes, ok := NamespaceReservation(quotaBytes, inodeQuota)
+	if !ok {
+		// Unreachable for a validated command; hold the largest reservation rather than none.
+		dataBytes, checkpointBytes, _ = NamespaceReservation(appplatform.DataQuotaMaxBytes, appplatform.DataQuotaMaxInodes)
+		quotaBytes = dataBytes
+	}
+	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: dataBytes, checkpointBytes: checkpointBytes, quotaBytes: quotaBytes}, true
 }
 
 // lookupCapacityRefusal finds the refusal a capacity refusal stored for this command, or nil.
@@ -371,4 +444,24 @@ func enableStartSourceResource(f updateStartFacts) string {
 		return source.writable.Claim.ResourceID
 	}
 	return source.source.Claim.ResourceID
+}
+
+// A namespace reserved before the quota was per installation is one held row of three default quotas
+// (NamespaceReservationBytes) with no row for its retained checkpoints. It is read, never rewritten, as the
+// 256 MiB / 65,536 namespace it was: the data, and two checkpoints at that namespace's archive cap. A row of
+// any other size, or one with a checkpoint row, is not legacy.
+const (
+	legacyNamespaceDataBytes       = NamespaceQuotaBytes
+	legacyNamespaceCheckpointBytes = RetainedCheckpoints * 512 << 20
+)
+
+// countLegacyNamespaces counts held legacy namespace rows other than the plan's own.
+func countLegacyNamespaces(ctx context.Context, tx *sql.Tx, ownResource, ownCheckpoints string) (int64, error) {
+	var n int64
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_reservations r
+		WHERE r.state='held' AND r.kind='namespace' AND r.resource_id NOT LIKE 'checkpoints/%' AND r.disk_bytes=?
+		AND r.resource_id<>? AND r.resource_id<>?
+		AND NOT EXISTS (SELECT 1 FROM runner_reservations c WHERE c.state='held' AND c.resource_id='checkpoints/'||r.resource_id)`,
+		NamespaceReservationBytes, ownResource, ownCheckpoints).Scan(&n)
+	return n, err
 }

@@ -171,7 +171,7 @@ func TestDataReservationRejectsChangedRecordOrCommand(t *testing.T) {
 			case "state":
 				statement = `UPDATE runner_commands SET state='applied'`
 			case "payload":
-				c.Payload.QuotaBytes = "134217728"
+				c.Payload.QuotaBytes = "536870912"
 			case "renewed_fence":
 				c.InstallationFence = "2"
 			case "receipt":
@@ -324,13 +324,10 @@ func TestDataReservationConcurrentInstallations(t *testing.T) {
 }
 
 func TestDataReservationEnvelopeAndCancellationRefusal(t *testing.T) {
-	for _, kind := range []string{"unaligned", "signature", "cancel", "revision", "epoch"} {
+	for _, kind := range []string{"signature", "cancel", "revision", "epoch"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _ := enrolledCommandStore(t)
 			c := runnerCommandFixture(t)
-			if kind == "unaligned" {
-				c.Payload.QuotaBytes = "513"
-			}
 			raw, sig := signRunnerCommand(t, c)
 			if _, err := s.AdmitControlCommand(context.Background(), raw, sig); err != nil {
 				t.Fatal(err)

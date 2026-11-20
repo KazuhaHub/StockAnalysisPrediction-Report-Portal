@@ -121,7 +121,7 @@ func (r ImportRequest) restoreRequest() RestoreRequest {
 		CheckpointID: r.CheckpointID, NamespaceID: r.NamespaceID,
 		ReleaseSHA256: r.ReleaseSHA256, ManifestSHA256: r.ManifestSHA256,
 		ProjectID: r.ProjectID, DataFormat: r.DataFormat, ArchiveBytes: r.ArchiveBytes,
-		MaxArchiveBytes: r.MaxArchiveBytes, ExpectedDevice: r.Provenance.Device,
+		MaxArchiveBytes: r.MaxArchiveBytes, MaxEntries: r.QuotaInodes, ExpectedDevice: r.Provenance.Device,
 		ExpectedNamespaceInode: r.Provenance.NamespaceInode, WriterFence: r.WriterFence,
 	}
 }

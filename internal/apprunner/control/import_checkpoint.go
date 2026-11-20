@@ -10,6 +10,8 @@ import (
 	"math"
 	"strconv"
 	"unicode/utf8"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 const ImportCheckpointFormat = "portal.runner.data-import-command/1-dev.1"
@@ -100,9 +102,10 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 	sourceProject, _ := strconv.ParseUint(p.SourceProjectID, 10, 64)
 	archive, _ := strconv.ParseInt(p.ArchiveBytes, 10, 64)
 	quota, _ := strconv.ParseInt(p.QuotaBytes, 10, 64)
+	inodes, _ := strconv.ParseInt(p.QuotaInodes, 10, 64)
 	slot, _ := counter(c.EffectNumber, true)
 	return sourceProject <= math.MaxUint32 &&
-		archive <= maxRestoreArchiveBytes && quota%512 == 0 && slot <= 32
+		archive <= maxRestoreArchiveBytes && appplatform.WithinRunnerDataQuota(quota, inodes) && slot <= 32
 }
 
 func ImportCheckpointLogicalDigest(c ImportCheckpointCommand) (string, error) {

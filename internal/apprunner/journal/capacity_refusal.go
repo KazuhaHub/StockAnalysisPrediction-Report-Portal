@@ -69,7 +69,7 @@ func newCapacityRefusal(id CapacityIdentity, r capacityRefusal, now int64) Capac
 
 func validCapacityDimension(d string) bool {
 	switch d {
-	case CapacityMemory, CapacityCPU, CapacityDisk, CapacityImageStore, CapacityRunningBackends:
+	case CapacityMemory, CapacityCPU, CapacityDisk, CapacityDataQuota, CapacityDataQuotaCheckpoint, CapacityImageStore, CapacityRunningBackends:
 		return true
 	}
 	return false

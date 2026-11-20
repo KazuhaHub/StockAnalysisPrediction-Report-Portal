@@ -36,7 +36,7 @@ const settings = {
     { capability: 'network.http', granted: false, required: true },
   ],
   backend: { required: true, registered: true, enabled: true },
-  data: { id: '22222222-2222-4222-8222-222222222222', state: 'active', format: 2, quota_bytes: '268435456', observed_bytes: '128', revision: '4' },
+  data: { id: '22222222-2222-4222-8222-222222222222', state: 'active', format: 2, quota_bytes: '268435456', quota_inodes: '65536', observed_bytes: '128', revision: '4' },
   recovery: { count: 1, state: 'verified', pending: false, points: [] },
   configuration_gaps: ['capability:network.http'],
   repair_eligible: false,

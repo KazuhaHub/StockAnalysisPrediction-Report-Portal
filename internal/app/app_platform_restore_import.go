@@ -42,7 +42,7 @@ type platformRestoreImportPlan struct {
 // it and the old host's recorded provenance. Everything an import must prove is read from here.
 type platformImportSource struct {
 	recoverySetID, installationID, namespaceID, operationID, release, checkpointID, manifest, epoch, state string
-	dataFormat, archiveBytes, writerFence, quotaBytes                                                      int64
+	dataFormat, archiveBytes, writerFence, quotaBytes, quotaInodes                                         int64
 	checkpoint                                                                                             journal.CheckpointReceipt
 	sourceFilesystemUUID, sourceRootInode                                                                  string
 }
@@ -99,8 +99,8 @@ func loadPlatformImportSource(e migExec, s *Server, installation, recoverySetID 
 		return r, errAppPlatformStageEvidence
 	}
 	r.sourceFilesystemUUID, r.sourceRootInode = data.Claim.RootFilesystemUUID, data.Claim.RootInode
-	if err := e.queryRow(`SELECT quota_bytes FROM app_platform_data_namespaces WHERE id=? AND origin_installation_id=?`, r.namespaceID, installation).Scan(&r.quotaBytes); err != nil ||
-		r.quotaBytes <= 0 || r.quotaBytes%512 != 0 {
+	if err := e.queryRow(`SELECT quota_bytes,quota_inodes FROM app_platform_data_namespaces WHERE id=? AND origin_installation_id=?`, r.namespaceID, installation).Scan(&r.quotaBytes, &r.quotaInodes); err != nil ||
+		r.quotaBytes <= 0 || r.quotaBytes%512 != 0 || r.quotaInodes <= 0 {
 		return r, errAppPlatformStageEvidence
 	}
 	return r, nil

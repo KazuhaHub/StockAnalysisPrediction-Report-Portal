@@ -18,7 +18,7 @@ import (
 var ErrCheckpointUnavailable = errors.New("runner data checkpoint is unavailable")
 
 const checkpointReceiptFormat = "portal.runner.data-checkpoint-receipt/1-dev.1"
-const maxCheckpointArchiveBytes int64 = 512 << 20
+const maxCheckpointArchiveBytes = control.MaxCheckpointArchiveBytes
 
 type CheckpointReceipt struct {
 	Format                  string `json:"format"`
@@ -752,7 +752,10 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 	request := data.CheckpointRequest{
 		CheckpointID: source.command.Payload.CheckpointID, NamespaceID: source.command.Payload.NamespaceID,
 		ReleaseSHA256: source.command.Payload.ReleaseSHA256, ProjectID: projectID,
-		DataFormat: mustDataInt(source.command.Payload.DataFormat), MaxArchiveBytes: maxCheckpointArchiveBytes,
+		DataFormat: mustDataInt(source.command.Payload.DataFormat),
+		// The archive may hold the quota, the tar overhead of every entry it may hold and a fixed allowance, and no
+		// more entries than the inode quota.
+		MaxArchiveBytes: data.ArchiveCapFor(mustDataInt(source.data.QuotaBytes), mustDataInt(source.data.QuotaInodes)), MaxEntries: mustDataInt(source.data.QuotaInodes),
 		ExpectedDevice: mustDataUint(source.command.Payload.Device), ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
 		WriterFence: mustDataInt(source.command.Payload.WriterFence),
 	}

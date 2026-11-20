@@ -197,8 +197,13 @@ func DeriveBudgets(c ResolvedCapacity, h HostFacts) (journal.CapacityBudgets, er
 	if cpuMillis < appplatform.MinBackendCPUMillis {
 		return zero, &NotReadyError{NotReadyCPUBudget}
 	}
-	return journal.CapacityBudgets{MemoryMiB: memoryMiB, CPUMillis: cpuMillis, DiskBytes: c.DiskBytes, ImageStoreBytes: c.ImageStoreBytes, RunningBackends: int64(c.RunningBackends),
-		ReservedCPUs: cpuset.Format(reserved), AppCPUs: cpuset.Format(app)}, nil
+	budgets := journal.CapacityBudgets{MemoryMiB: memoryMiB, CPUMillis: cpuMillis, DiskBytes: c.DiskBytes, ImageStoreBytes: c.ImageStoreBytes, RunningBackends: int64(c.RunningBackends),
+		ReservedCPUs: cpuset.Format(reserved), AppCPUs: cpuset.Format(app)}
+	if h.CheckpointSeparate {
+		// A namespace's retained checkpoints are counted against their own volume (doc 185 section 3.3).
+		budgets.CheckpointBytes = h.CheckpointVolumeBytes
+	}
+	return budgets, nil
 }
 
 // splitCPUs places the reservation: the lowest-numbered online CPUs are reserved and the rest are the app set.

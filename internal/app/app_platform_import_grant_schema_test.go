@@ -22,7 +22,10 @@ func platformRewindToPre0021(t *testing.T, st *Store) {
 	if _, err := e.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0021")); err != nil {
 		t.Fatal(err)
 	}
-	if err := setPlatformActionChecks(e, platformActions(), platformLegacyActions()); err != nil {
+	if err := rewindPlatformQuotaStep(e); err != nil {
+		t.Fatal(err)
+	}
+	if err := setPlatformActionChecks(e, platformActions0021(), platformLegacyActions()); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -241,14 +244,14 @@ func TestSchemaUpgradeCLIAcceptsPre0021Database(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[0021]") || !strings.Contains(out, "nothing was changed") {
-		t.Fatalf("inspection did not report 0021 as the only pending step: %q", out)
+	if !strings.Contains(out, "[0021, 0024]") || !strings.Contains(out, "nothing was changed") {
+		t.Fatalf("inspection did not report 0021 and 0024 as the pending steps: %q", out)
 	}
 	if describeFile(t, path) != before {
 		t.Fatal("inspection changed the database")
 	}
 	out, err = SchemaUpgradeCommand(cfg, []string{"--apply"})
-	if err != nil || !strings.Contains(out, "[0021]") {
+	if err != nil || !strings.Contains(out, "[0021, 0024]") {
 		t.Fatalf("--apply: %q %v", out, err)
 	}
 	upgraded, err := OpenStore("sqlite", path)

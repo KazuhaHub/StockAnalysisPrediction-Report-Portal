@@ -473,7 +473,7 @@ func (s *Server) loadPlatformManagedBackendHistory(e migExec, installation, acti
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	var plan platformInstallProjection
-	if json.Unmarshal([]byte(planRaw), &plan) != nil || plan.Format != platformManagedInstallFormat || plan.ControllerEpoch != epoch || plan.ReleaseSHA256 != release || plan.Runtime == nil || plan.DataQuotaBytes != 256<<20 {
+	if json.Unmarshal([]byte(planRaw), &plan) != nil || plan.Format != platformManagedInstallFormat || plan.ControllerEpoch != epoch || plan.ReleaseSHA256 != release || plan.Runtime == nil || !platformValidQuotaBytes(plan.DataQuotaBytes) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	canonical, _ := json.Marshal(plan)
@@ -488,7 +488,7 @@ func (s *Server) loadPlatformManagedBackendHistory(e migExec, installation, acti
 	if err := e.queryRow(`SELECT origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE id=?`, namespace).Scan(&origin, &owner, &state, &storedFormat, &quota, &used, &writer, &revision, &retained, &deleted, &created, &updated); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if origin != installation || !owner.Valid || owner.String != installation || state != "active" || storedFormat != format || quota != 256<<20 || used < 0 || used > quota || writer != 1 || revision != 2 || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > completed {
+	if origin != installation || !owner.Valid || owner.String != installation || state != "active" || storedFormat != format || quota != plan.DataQuotaBytes || used < 0 || used > quota || writer != 1 || revision != 2 || retained.Valid || deleted.Valid || created < 0 || updated < created || updated > completed {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?`, installation, installation).Scan(&count); err != nil || count != 1 {

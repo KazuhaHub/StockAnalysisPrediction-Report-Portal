@@ -26,7 +26,7 @@ func deleteDataCommandFixture(t *testing.T) control.DeleteDataCommand {
 			NamespaceID:   fixtureID(925),
 			ReleaseSHA256: strings.Repeat("a", 64),
 			ProjectID:     "4204", DataFormat: "1",
-			QuotaBytes: "8388608", QuotaInodes: "128",
+			QuotaBytes: "268435456", QuotaInodes: "65536",
 			ExpectedDevice: "7", ExpectedNamespaceInode: "11",
 			WriterFence: "2",
 		},

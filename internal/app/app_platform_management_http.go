@@ -364,10 +364,14 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		}
 		s.apiPlatformRecoveryPlan(w, r, actor, action, map[string]string{"installation_id": installation, "recovery_set_id": recoverySetID})
 	case "install":
-		if len(fields) != 4 || fields["audience"] == nil || fields["installation_id"] != nil {
+		// The administrator may approve a smaller data quota than the app requested (doc 185); both
+		// fields are optional and decimal strings like every other count on this surface.
+		approvedBytes, approvedInodes, optional, quotaErr := platformManagementQuotaApproval(fields)
+		if quotaErr != nil || len(fields) != 4+optional || fields["audience"] == nil || fields["installation_id"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
+		reviewCtx := platformWithQuotaApproval(r.Context(), approvedBytes, approvedInodes)
 		targets, audienceErr := platformManagementAudience(fields["audience"])
 		if audienceErr != nil {
 			platformManagementError(w, errPlatformManagementInput)
@@ -387,10 +391,10 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 				return
 			}
 			review, err = s.createPlatformManagedInstallReview(
-				r.Context(), actor, release, n, targets, endpoint)
+				reviewCtx, actor, release, n, targets, endpoint)
 		} else {
 			review, err = s.createPlatformInstallReviewForFormatContext(
-				r.Context(), actor, release, n, targets,
+				reviewCtx, actor, release, n, targets,
 				platformFrontendInstallFormat)
 		}
 		if err != nil {
@@ -412,7 +416,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			}
 			audience = append(audience, item)
 		}
-		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": strconv.FormatInt(projection.DataQuotaBytes, 10), "audience": audience}})
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": strconv.FormatInt(projection.DataQuotaBytes, 10), "data_quota_inodes": strconv.FormatInt(projection.DataQuotaInodes, 10), "requested_data_quota_bytes": strconv.FormatInt(projection.RequestedDataQuotaBytes, 10), "requested_data_quota_inodes": strconv.FormatInt(projection.RequestedDataQuotaInodes, 10), "audience": audience}})
 	case "update":
 		recovers := ""
 		want := 4

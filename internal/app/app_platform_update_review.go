@@ -34,6 +34,9 @@ type platformUpdateProjection struct {
 	Migration *platformMigrationStep `json:"migration,omitempty"`
 	// RecoversOperationID names the failed update this one retries, empty for an ordinary update.
 	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
+	// DataQuota is present only when the target descriptor asks for more data quota than the installation
+	// has approved (doc 185 section 3.2). A descriptor asking for the same or less leaves the approved quota.
+	DataQuota *platformUpdateQuotaReview `json:"data_quota,omitempty"`
 }
 
 func platformCurrentCapabilities(e migExec, installation string) ([]string, error) {
@@ -117,7 +120,7 @@ func platformBuildUpdateProjection(e migExec, installation string, sourceRelease
 	}
 	for _, capability := range parsed.Manifest.Capabilities.Required {
 		if capability == "storage.files" {
-			target.DataQuotaBytes = 256 << 20
+			target.DataQuotaBytes = platformObjectNamespaceBytes
 		}
 	}
 	return platformUpdateProjection{

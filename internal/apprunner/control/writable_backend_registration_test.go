@@ -37,7 +37,7 @@ func TestWritableRegistrationDomainAndExactBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.PayloadSHA256 != "310f8af108a4c51907b1d30a319069ca8d6d75be95c4be2d5d9cbc40bee41aa8" {
+	if c.PayloadSHA256 != "f19cac868d8b475b84158342be9965cdb6c49f34f11cb2ae4255bb4963dbc72a" {
 		t.Fatal("independent registration vector changed", c.PayloadSHA256)
 	}
 	if v.Candidate().Index().Format != WritableCandidateFormat || !bytes.Equal(v.Command().CandidateRaw, c.CandidateRaw) {

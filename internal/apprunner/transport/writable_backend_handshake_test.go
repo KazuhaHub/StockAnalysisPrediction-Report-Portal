@@ -26,7 +26,7 @@ func writableHandshakeRequestFixture(t *testing.T) (control.Authority, control.W
 	c.Payload.ReleaseSHA256 = hex.EncodeToString(digest[:])
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
 	now := time.Now().UnixMilli()
-	prep := control.Command{Format: control.Format, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, ControlRevision: c.ControlRevision, InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: "1", Stage: "prepare_data", EffectNumber: "1", EffectID: c.EffectID, Kind: "prepare-data", InstallationFence: c.InstallationFence, IssuedMS: c.IssuedMS, ExpiresMS: c.ExpiresMS, Payload: control.PrepareDataPayload{DataNamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, DataFormat: c.Payload.DataFormat, QuotaBytes: "8388608", QuotaInodes: "128", WriterFence: "1"}}
+	prep := control.Command{Format: control.Format, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, ControlRevision: c.ControlRevision, InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: "1", Stage: "prepare_data", EffectNumber: "1", EffectID: c.EffectID, Kind: "prepare-data", InstallationFence: c.InstallationFence, IssuedMS: c.IssuedMS, ExpiresMS: c.ExpiresMS, Payload: control.PrepareDataPayload{DataNamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, DataFormat: c.Payload.DataFormat, QuotaBytes: "268435456", QuotaInodes: "65536", WriterFence: "1"}}
 	prep.PayloadSHA256, err = control.LogicalDigest(prep)
 	if err != nil {
 		t.Fatal(err)

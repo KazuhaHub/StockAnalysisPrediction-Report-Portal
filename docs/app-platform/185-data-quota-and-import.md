@@ -1,6 +1,6 @@
 # Proposal: per-installation data quota and administrator data import
 
-Status: Accepted 2026-11-20; implementation pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20. Phase P1 (quota) is implemented; see the implementation notes at the end. P2 and P3 are pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
@@ -241,3 +241,49 @@ Q8. **Production image sizes.** Decided: keep D11's 8 GiB data and 8 GiB checkpo
 Q9. **Schema change in section 11.** Decided: approved as migration `0024`.
 
 Q10. **Order.** Decided: P1 first; it unblocks market-monitor's quota on its own. Then P3 import, which gives the fast host-side seed. P2 hard links is needed before P3 if market-monitor's seed contains its `snapshots/` links. Alternatively the seed can be packed without `snapshots/`, which the app rebuilds, so P3 can come before P2.
+
+## Implementation notes (P1)
+
+P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and what is left.
+
+**Landed**
+
+- **Descriptor (3.1).** `data.quota {bytes, inodes}` in `descriptor-v2.schema.json`, validated by `appplatform.ValidDataQuota`. The Go and TypeScript products are regenerated.
+- **Migration `0024` (11).** `quota_inodes`, the two actions and the `import` stage, for SQLite and PostgreSQL, with up, restore and rewind tests.
+  - The control schema now has three frozen shapes, because 0015, 0021 and 0024 each widen the same CHECK lists. Each step's verifier accepts its own shape and the current one.
+  - `import_data` and the `import` stage are only representable. Nothing accepts a plan with either action, and `set_data_quota` is not accepted yet either (see below).
+- **Approved quota (3.2).**
+  - An install plan carries the approved bytes and inodes and the requested pair, in the canonical bytes.
+  - `POST /api/admin/app-platform/plans` for `install` takes the optional decimal strings `data_quota_bytes` and `data_quota_inodes`. Each must be within bounds and not above the request.
+  - The prepare-data command, the namespace row and every check that compared with the fixed 256 MiB now use the approved values. A plan written before the fields reads as 256 MiB and 65,536.
+  - Restore import (168) uses the namespace's own `quota_inodes`.
+- **Update review.** A target descriptor that asks for more than the installation's current quota shows the current, requested and raise values. A request for the same or less shows nothing and keeps the approved quota.
+- **Runner admission (3.3).**
+  - A namespace reserves its quota for the data and two retained checkpoints at the full archive cap each, so a fully reserved volume can always hold both. The data share is one reservation row and the checkpoints are a second row (`checkpoints/<namespace>`), so the two volumes can be counted apart. Rows written before this change (one row of 768 MiB, no checkpoint row) are read, never rewritten, as the 256 MiB / 65,536 namespace they were: 256 MiB of data and two checkpoints at the 512 MiB floor of the cap. Once the namespace is admitted again it holds its own two rows and is counted once.
+  - With a separate checkpoint volume, `DeriveBudgets` sets `CheckpointBytes` from that volume. The data volume then counts the quota and the checkpoint volume the two caps. Otherwise all of it counts against `disk_bytes`.
+  - The runner holds every prepare-data and import command to the platform bounds (256 MiB to 16 GiB in 64 MiB steps, 65,536 to 1,000,000 inodes), whatever the controller signed.
+  - A refusal is the typed dimension `data_quota` or `data_quota_checkpoint`, shown as the error code `data_quota_capacity`, with the requested and remaining bytes in the receipt. The error code is translated in en-US, zh-CN and zh-TW.
+- **Checkpoint caps (4).**
+  - A checkpoint's archive cap is `max(512 MiB, quota + inode quota x 1.5 KiB + 64 MiB)`, and its entry cap is its inode quota. An import uses the quota it carries. The restore re-verify and the delete walk use the same entry cap (the delete walk is bounded by the namespace's inode quota).
+  - **Correction to section 4.** "Quota plus 64 MiB" ignores tar's per-entry overhead, which is not bounded by bytes of data: each entry costs a 512-byte header, plus a PAX header and padding for a long or non-ASCII name, 1.5 KiB in all. 700,000 empty files under a 256 MiB quota already exceed quota plus 64 MiB. The 512 MiB floor keeps every checkpoint that was valid under the old fixed cap valid, so restore and import of old checkpoints still work. The arithmetic refuses quotas outside the platform bounds, so it cannot overflow.
+  - **1.5 KiB per entry is a sizing rule, not a bound.** It is realistic for reservations, but a path of about 4,000 bytes needs roughly 5.5 KiB of PAX header. A tree of pathologically deep paths can therefore exceed the cap. Its lifecycle checkpoint is then refused whole (`ErrCheckpointTooLarge`, "raise the quota"), the partial archive is removed, and nothing is lost: the installation fails closed at that lifecycle step. Raising the quota raises the cap.
+  - The ceiling in command validation is the cap of the largest namespace: 16 GiB, 1,000,000 entries of 1.5 KiB and 64 MiB.
+- **Console.** The settings page shows the inode quota and the usage as a percentage of the quota.
+
+**Deviations**
+
+- **Update raise not applied.** The update review shows the raise, but the update keeps the approved quota (`raise_applied` is false). Applying it in the update would change the update-start evidence of every update path; it belongs with `set_data_quota`.
+- **Restore walk bound.** A restore's entry walk (re-verify and clear) is bounded by the namespace's own inode quota, read from its prepare-data receipt in the runner journal. The platform maximum (1,000,000) stands in only when the journal does not know the quota. Its archive bound is the checkpoint's own verified size, and the XFS project quota is the binding limit either way. The walk holds its entries in memory, at most the inode quota of them.
+- **Hard links** are still refused by the walker (P2).
+- **Migration shape.** `quota_inodes` carries a CHECK of 65,536 to 1,000,000 (a table constraint on PostgreSQL, part of the column on SQLite, which cannot add a table constraint to an existing table) and the PostgreSQL verifier checks its default is 65,536. A database at 0023 verifies under the 0015 and 0021 verifiers through the 0021-era shape.
+- **Plans written before the upgrade** carry no inode or request fields. They read as 256 MiB and 65,536, still stage and consume, and the rebuilt plan is compared in that form. The install, activation, writer, candidate and checkpoint checks now bind the namespace to the quota the install review approved, bytes and inodes.
+- A frontend-only descriptor with `data.quota` is refused at parse.
+- **Frontend object storage** keeps its fixed 256 MiB (`platformObjectNamespaceBytes`). It is not an XFS quota.
+
+**Not done**
+
+- **`set_data_quota`.** There is no reviewed plan, no operation, no runner command or effect, and no `data_quota_lower_refused` check yet. The action is in the schema only.
+  - Doing it properly means a new lifecycle action in the generation history chain: every history loader (install, update, resume, restore) must read the quota from the namespace row rather than the install-time receipt.
+  - The runner also needs a signed command with its own receipt and a journal evidence update fenced together with the namespace row.
+- **Console "Raise quota"** and its review dialog, which need `set_data_quota`. The console install review does not yet offer a smaller approval; the API does.
+- **Hard links** (P2), and **import** (P3), as the phasing says.

@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "526bc46afe0a5b20f0f4100dee86ead14a699323c43499336bbc1133e0bddd86";
+export const DESCRIPTOR_SCHEMA_SHA256 = "7d0b5fcc91778b3a3ff456c6f368b5e21de0487a138e0b331d07c77920f6eb5e";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -70,6 +70,11 @@ export interface DataCompatibility {
  readable_schemas: (number)[];
  writes_on_startup?: false | null;
  migrations?: (DataMigration)[];
+ quota?: DataQuota | null;
+}
+export interface DataQuota {
+ bytes: number;
+ inodes: number;
 }
 export interface DataMigration {
  from: number;
@@ -312,7 +317,12 @@ export const DESCRIPTOR_FIELDS = {
     "schema",
     "readable_schemas",
     "writes_on_startup",
-    "migrations"
+    "migrations",
+    "quota"
+  ],
+  "DataQuota": [
+    "bytes",
+    "inodes"
   ],
   "DataMigration": [
     "from",

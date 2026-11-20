@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -10,10 +11,11 @@ import (
 // Verification is read-only. Catalog definitions, not the migration ledger or
 // constraint names alone, must still establish the approved storage contract.
 //
-// Step 0015 accepts either action list on the two tables 0021 widens: a database that has not yet
-// applied 0021 still carries the frozen legacy list, and verification runs before that step.
+// Step 0015 accepts every shape a later step leaves in the control tables (the legacy lists of 0015, the
+// 0021 shape, and the current one): a database not yet at 0024 still carries an older shape, and
+// verification of recorded steps runs before the pending ones.
 func verifyAppPlatformSchema(e migExec) error {
-	return verifyPlatformSchemaProductsWithAlternates(e, platformSchemaTables(), platformSchemaIndexes(), platformLegacySchemaTables())
+	return verifyPlatformSchemaProductsWithAlternates(e, platformSchemaTables(), platformSchemaIndexes(), append(platformLegacySchemaTables(), platformSchemaTables0021()...))
 }
 
 func verifyPlatformSchemaProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex) error {
@@ -83,14 +85,20 @@ func platformTableFilter(tables []platformTable) string {
 
 func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex, alternates []platformTable) error {
 	type columnShape struct {
-		typ      string
-		nullable bool
+		typ        string
+		nullable   bool
+		hasDefault bool
+		// defaultExpr is the default's value as PostgreSQL prints it, for a column whose default is part of the contract.
+		defaultExpr string
+		// optional columns belong to some accepted shape of the table but not to all of them: one added by
+		// a later step may be present or absent.
+		optional bool
 	}
 	columns := map[string]columnShape{}
 	constraints := map[string]string{}
 	constraintKinds := map[string]string{}
 	constraintTargets := map[string]string{}
-	alternateChecks := map[string]string{}
+	alternateChecks := map[string][]string{}
 	listed := map[string]bool{}
 	for _, t := range tables {
 		listed[t.name] = true
@@ -100,13 +108,47 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 			continue
 		}
 		for n, check := range t.checkExpressions("postgres") {
-			alternateChecks[fmt.Sprintf("%s_ck_%d", platformPrefix+t.name, n+1)] = check
+			key := fmt.Sprintf("%s_ck_%d", platformPrefix+t.name, n+1)
+			alternateChecks[key] = append(alternateChecks[key], check)
+		}
+	}
+	// A check the current shape has and an accepted alternate lacks (the one step 0024 adds) may be absent.
+	optionalChecks := map[string]bool{}
+	for _, t := range alternates {
+		if !listed[t.name] {
+			continue
+		}
+		have := len(t.checkExpressions("postgres"))
+		for _, p := range tables {
+			if p.name != t.name {
+				continue
+			}
+			for n := have; n < len(p.checkExpressions("postgres")); n++ {
+				optionalChecks[fmt.Sprintf("%s_ck_%d", platformPrefix+p.name, n+1)] = true
+			}
+		}
+	}
+	alternateColumns := map[string]columnShape{}
+	for _, t := range alternates {
+		if !listed[t.name] {
+			continue
+		}
+		for _, c := range t.columns() {
+			alternateColumns[platformPrefix+t.name+"."+c.name] = columnShape{strings.ToLower(c.sqlType("postgres")), c.nullable, c.kind == "Q", platformQuotaDefaultExpr(c), true}
 		}
 	}
 	for _, t := range tables {
 		name := platformPrefix + t.name
 		for _, c := range t.columns() {
-			columns[name+"."+c.name] = columnShape{strings.ToLower(c.sqlType("postgres")), c.nullable}
+			columns[name+"."+c.name] = columnShape{strings.ToLower(c.sqlType("postgres")), c.nullable, c.kind == "Q", platformQuotaDefaultExpr(c), false}
+		}
+		for _, c := range t.columns() {
+			// A column that an accepted alternate shape of the table lacks may be present or absent.
+			if listedAlternate(alternates, t.name) && !alternateHas(alternates, t.name, c.name) {
+				shape := columns[name+"."+c.name]
+				shape.optional = true
+				columns[name+"."+c.name] = shape
+			}
 		}
 		constraints[name+"_pk"] = "PRIMARY KEY (" + t.primary + ")"
 		constraintKinds[name+"_pk"] = "p"
@@ -122,22 +164,26 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 			constraintKinds[key] = "c"
 		}
 	}
-	rows, err := e.query(`SELECT c.relname,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.atthasdef,c.relkind,c.relispartition
+	rows, err := e.query(`SELECT c.relname,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.atthasdef,COALESCE((SELECT pg_get_expr(d.adbin,d.adrelid) FROM pg_attrdef d WHERE d.adrelid=a.attrelid AND d.adnum=a.attnum),''),c.relkind,c.relispartition
         FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relname IN ` + platformTableFilter(tables) + ` AND a.attnum>0 AND NOT a.attisdropped`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var table, name, typ, kind string
+		var table, name, typ, kind, defaultExpr string
 		var required, hasDefault, partition bool
-		if err := rows.Scan(&table, &name, &typ, &required, &hasDefault, &kind, &partition); err != nil {
+		if err := rows.Scan(&table, &name, &typ, &required, &hasDefault, &defaultExpr, &kind, &partition); err != nil {
 			rows.Close()
 			return err
 		}
 		key := table + "." + name
 		want, ok := columns[key]
-		if !ok || want.typ != typ || want.nullable == required || hasDefault || kind != "r" || partition {
+		if !ok {
+			// A column only an alternate shape declares is allowed, and checked as that shape declares it.
+			want, ok = alternateColumns[key]
+		}
+		if !ok || want.typ != typ || want.nullable == required || hasDefault != want.hasDefault || defaultExpr != want.defaultExpr || kind != "r" || partition {
 			rows.Close()
 			return fmt.Errorf("application control column %s has an incompatible definition", key)
 		}
@@ -147,6 +193,11 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 	rows.Close()
 	if err != nil {
 		return err
+	}
+	for key, shape := range columns {
+		if shape.optional {
+			delete(columns, key)
+		}
 	}
 	if len(columns) != 0 {
 		return fmt.Errorf("application control columns are missing")
@@ -176,8 +227,8 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 		if kind == "c" {
 			got := canonicalPlatformBoolean(strings.TrimSpace(strings.TrimPrefix(definition, "CHECK")))
 			same = got == canonicalPlatformBoolean(want)
-			if alternate, ok := alternateChecks[name]; ok && !same {
-				same = got == canonicalPlatformBoolean(alternate)
+			for _, alternate := range alternateChecks[name] {
+				same = same || got == canonicalPlatformBoolean(alternate)
 			}
 		}
 		if !same {
@@ -190,6 +241,9 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 	rows.Close()
 	if err != nil {
 		return err
+	}
+	for name := range optionalChecks {
+		delete(constraints, name)
 	}
 	if len(constraints) != 0 {
 		return fmt.Errorf("application control constraints are missing")
@@ -385,4 +439,35 @@ func compactPlatformForeignKey(definition, target string) string {
 		normalized = strings.TrimSuffix(normalized, suffix) + "deferrableinitiallydeferred"
 	}
 	return normalized
+}
+
+func listedAlternate(alternates []platformTable, table string) bool {
+	for _, t := range alternates {
+		if t.name == table {
+			return true
+		}
+	}
+	return false
+}
+
+func alternateHas(alternates []platformTable, table, column string) bool {
+	for _, t := range alternates {
+		if t.name != table {
+			continue
+		}
+		for _, c := range t.columns() {
+			if c.name == column {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// platformQuotaDefaultExpr is the default PostgreSQL stores for a step-0024 column, empty for the others.
+func platformQuotaDefaultExpr(c platformColumn) string {
+	if c.kind == "Q" {
+		return strconv.Itoa(platformQuotaInodesDefault)
+	}
+	return ""
 }

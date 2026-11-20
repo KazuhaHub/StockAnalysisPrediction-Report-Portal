@@ -582,7 +582,7 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 	quota := int64(0)
 	for _, capability := range parsed.Manifest.Capabilities.Required {
 		if capability == "storage.files" {
-			quota = 256 << 20
+			quota = platformObjectNamespaceBytes
 		}
 	}
 	targetProjection := platformInstallProjection{
@@ -595,8 +595,13 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 		DeclinedCapabilities: platformDeclinedCapabilities(selection),
 		DataQuotaBytes:       quota, Runtime: target,
 	}
+	var currentBytes, currentInodes int64
+	if err := e.queryRow(`SELECT quota_bytes,quota_inodes FROM app_platform_data_namespaces WHERE owner_installation_id=? AND state='active'`, installation).Scan(&currentBytes, &currentInodes); err != nil {
+		return platformUpdateProjection{}, errAppPlatformPlanChanged
+	}
 	return platformUpdateProjection{
-		Format: platformUpdateReviewFormat, InstallationID: installation,
+		DataQuota: platformUpdateQuotaDifference(currentBytes, currentInodes, parsed.Manifest),
+		Format:    platformUpdateReviewFormat, InstallationID: installation,
 		AppID: release.appID, PublisherID: release.publisherID,
 		SourceReleaseSHA256: source.release, SourceGeneration: source.generation,
 		TargetGeneration:     source.generation + 1,

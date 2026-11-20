@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
@@ -32,13 +34,28 @@ const (
 	backfillImageBytes       = int64(4) << 30
 )
 
-// Disk a managed namespace reserves: its 256 MiB quota plus two retained recovery
-// checkpoints of at most 256 MiB each (doc 167 section 4).
+// Disk a managed namespace reserves: its quota plus two retained recovery checkpoints of at most the quota
+// each (doc 167 section 4, doc 185 section 3.3). NamespaceQuotaBytes is the default quota every namespace had
+// before the quota became per installation, and NamespaceReservationBytes what it reserves.
 const (
 	NamespaceQuotaBytes       = int64(256) << 20
 	RetainedCheckpoints       = 2
 	NamespaceReservationBytes = NamespaceQuotaBytes * (1 + RetainedCheckpoints)
 )
+
+// NamespaceReservation is the disk one namespace reserves: its quota on the data volume, and two retained
+// checkpoints on the checkpoint volume, each the size of the archive cap, because the cap is what a checkpoint
+// may take and a fully reserved volume must still hold both. It reports false for a quota outside the platform
+// bounds, so no arithmetic here can overflow.
+func NamespaceReservation(quotaBytes, inodeQuota int64) (dataBytes, checkpointBytes int64, ok bool) {
+	if !appplatform.WithinRunnerDataQuota(quotaBytes, inodeQuota) {
+		return 0, 0, false
+	}
+	return quotaBytes, RetainedCheckpoints * data.ArchiveCapFor(quotaBytes, inodeQuota), true
+}
+
+// checkpointReservationID is the second reservation row of a namespace: its retained checkpoints.
+func checkpointReservationID(namespaceID string) string { return "checkpoints/" + namespaceID }
 
 // imageResourceID is the reservation identity of a loaded image: one per config digest, however many
 // installations use it.

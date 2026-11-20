@@ -17,12 +17,16 @@ var (
 	ErrIncomplete           = errors.New("data preparation requires reconciliation")
 	ErrCheckpointUnsafe     = errors.New("data checkpoint contains unsafe or changed content")
 	ErrCheckpointIncomplete = errors.New("data checkpoint requires reconciliation")
-	ErrRestoreUnsafe        = errors.New("data restore binding is unsafe")
-	ErrRestoreIncomplete    = errors.New("data restore requires reconciliation")
-	ErrDeleteUnsafe         = errors.New("data deletion binding is unsafe")
-	ErrDeleteIncomplete     = errors.New("data deletion requires reconciliation")
-	ErrImportUnsafe         = errors.New("data checkpoint import binding is unsafe")
-	ErrImportIncomplete     = errors.New("data checkpoint import requires reconciliation")
+	// ErrCheckpointTooLarge is a namespace whose checkpoint would outgrow the archive cap. The cap sizes tar
+	// overhead at 1.5 KiB per entry, which a tree of very long paths can exceed. The refusal is definite and the
+	// partial archive is removed; nothing is lost, and raising the quota raises the cap.
+	ErrCheckpointTooLarge = errors.New("data checkpoint exceeds the archive cap of the namespace quota; raise the quota")
+	ErrRestoreUnsafe      = errors.New("data restore binding is unsafe")
+	ErrRestoreIncomplete  = errors.New("data restore requires reconciliation")
+	ErrDeleteUnsafe       = errors.New("data deletion binding is unsafe")
+	ErrDeleteIncomplete   = errors.New("data deletion requires reconciliation")
+	ErrImportUnsafe       = errors.New("data checkpoint import binding is unsafe")
+	ErrImportIncomplete   = errors.New("data checkpoint import requires reconciliation")
 	// ErrArchiveMismatch is a retained checkpoint archive that is not the file a deletion claimed: not a regular file,
 	// linked more than once, or of another size. Nothing is removed.
 	ErrArchiveMismatch = errors.New("checkpoint archive does not match the claimed file")
@@ -85,8 +89,62 @@ type CheckpointRequest struct {
 	ProjectID                                uint32
 	DataFormat                               int64
 	MaxArchiveBytes                          int64
-	ExpectedDevice, ExpectedNamespaceInode   uint64
-	WriterFence                              int64
+	// MaxEntries is the most entries a checkpoint may hold: the namespace's inode quota (doc 185 section 4).
+	// Zero keeps legacyMaxCheckpointEntries.
+	MaxEntries                             int64
+	ExpectedDevice, ExpectedNamespaceInode uint64
+	WriterFence                            int64
+}
+
+// legacyMaxCheckpointEntries is the entry cap every checkpoint had before the inode quota was per installation.
+const legacyMaxCheckpointEntries = 100000
+
+// maxCheckpointEntryCap is the platform's largest inode quota (appplatform.DataQuotaMaxInodes); no
+// entry cap may exceed it, whatever a request carries.
+const maxCheckpointEntryCap = 1000000
+
+// checkpointArchiveOverheadBytes is what a checkpoint archive may hold beyond the data and its entries: the
+// manifest, the end-of-archive blocks and padding.
+const checkpointArchiveOverheadBytes = 64 << 20
+
+// checkpointArchiveFloorBytes is the cap every checkpoint had before the quota was per installation. It stays
+// the least cap, so a checkpoint that was valid then is valid now.
+const checkpointArchiveFloorBytes = 512 << 20
+
+// checkpointEntryOverheadBytes is what one entry may cost in tar beyond its data: a 512-byte header, plus a PAX
+// header and its padding for a long or non-ASCII name (1.5 KiB in all). It is unbounded by bytes of data, so
+// the cap follows the number of entries the namespace may hold.
+const checkpointEntryOverheadBytes = 1536
+
+// ArchiveCapFor is the largest archive a namespace may checkpoint:
+// max(512 MiB, quota + inode quota x 1.5 KiB + 64 MiB). It returns zero, meaning no cap and so a refused
+// request, for a quota that is not positive or is too large to compute safely.
+func ArchiveCapFor(quotaBytes, inodeQuota int64) int64 {
+	const maxQuotaBytes, maxInodes = int64(1) << 50, int64(1) << 40
+	if quotaBytes <= 0 || inodeQuota <= 0 || quotaBytes > maxQuotaBytes || inodeQuota > maxInodes {
+		return 0
+	}
+	return max(checkpointArchiveFloorBytes, quotaBytes+inodeQuota*checkpointEntryOverheadBytes+checkpointArchiveOverheadBytes)
+}
+
+func entryCapOf(configured int64) int64 {
+	if configured > 0 {
+		return min(configured, maxCheckpointEntryCap)
+	}
+	return legacyMaxCheckpointEntries
+}
+
+func (r CheckpointRequest) entryCap() int64 { return entryCapOf(r.MaxEntries) }
+func (r RestoreRequest) entryCap() int64    { return entryCapOf(r.MaxEntries) }
+
+// entryLimit is entryCap as an int for the walks. The explicit bound keeps the conversion safe on
+// every platform; entryCapOf never exceeds it.
+func (r RestoreRequest) entryLimit() int {
+	limit := r.entryCap()
+	if limit < 1 || limit > maxCheckpointEntryCap {
+		return legacyMaxCheckpointEntries
+	}
+	return int(limit)
 }
 
 func (r CheckpointRequest) valid() bool {
@@ -129,6 +187,7 @@ type RestoreRequest struct {
 	CheckpointID, NamespaceID, ReleaseSHA256, ManifestSHA256 string
 	ProjectID                                                uint32
 	DataFormat, ArchiveBytes, MaxArchiveBytes                int64
+	MaxEntries                                               int64
 	ExpectedDevice, ExpectedNamespaceInode                   uint64
 	WriterFence                                              int64
 }
@@ -357,4 +416,15 @@ func (o ImportObservation) Snapshot() (ImportSnapshot, error) {
 type QuarantineReport struct {
 	Files int
 	Bytes int64
+}
+
+// checkpointRequest is the request that re-verifies the checkpoint a restore reads, with the same caps.
+func (r RestoreRequest) checkpointRequest() CheckpointRequest {
+	return CheckpointRequest{
+		CheckpointID: r.CheckpointID, NamespaceID: r.NamespaceID,
+		ReleaseSHA256: r.ReleaseSHA256, ProjectID: r.ProjectID,
+		DataFormat: r.DataFormat, MaxArchiveBytes: r.MaxArchiveBytes, MaxEntries: r.MaxEntries,
+		ExpectedDevice: r.ExpectedDevice, ExpectedNamespaceInode: r.ExpectedNamespaceInode,
+		WriterFence: r.WriterFence,
+	}
 }

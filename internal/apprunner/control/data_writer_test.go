@@ -11,7 +11,7 @@ import (
 func dataWriterFixture(t *testing.T) (DataWriterCommand, ed25519.PrivateKey, Authority, int64) {
 	t.Helper()
 	base, key, a, now := candidateFixture(t)
-	ref := Command{Format: Format, DeploymentID: base.DeploymentID, ControllerEpoch: base.ControllerEpoch, ControlRevision: base.ControlRevision, InstallationID: base.InstallationID, OperationID: base.OperationID, TargetGeneration: "1", Stage: "prepare_data", EffectNumber: "1", EffectID: base.EffectID, Kind: "prepare-data", InstallationFence: base.InstallationFence, IssuedMS: base.IssuedMS, ExpiresMS: base.ExpiresMS, Payload: PrepareDataPayload{DataNamespaceID: base.Payload.DataNamespaceID, ReleaseSHA256: base.Payload.ReleaseSHA256, DataFormat: "1", QuotaBytes: "8388608", QuotaInodes: "128", WriterFence: "1"}}
+	ref := Command{Format: Format, DeploymentID: base.DeploymentID, ControllerEpoch: base.ControllerEpoch, ControlRevision: base.ControlRevision, InstallationID: base.InstallationID, OperationID: base.OperationID, TargetGeneration: "1", Stage: "prepare_data", EffectNumber: "1", EffectID: base.EffectID, Kind: "prepare-data", InstallationFence: base.InstallationFence, IssuedMS: base.IssuedMS, ExpiresMS: base.ExpiresMS, Payload: PrepareDataPayload{DataNamespaceID: base.Payload.DataNamespaceID, ReleaseSHA256: base.Payload.ReleaseSHA256, DataFormat: "1", QuotaBytes: "268435456", QuotaInodes: "65536", WriterFence: "1"}}
 	ref.PayloadSHA256, _ = LogicalDigest(ref)
 	raw, sig, err := Sign(ref, key, a, now)
 	if err != nil {
@@ -27,8 +27,8 @@ func dataWriterFixture(t *testing.T) (DataWriterCommand, ed25519.PrivateKey, Aut
 
 func TestDataWriterCommandDomainAndBinding(t *testing.T) {
 	c, key, a, now := dataWriterFixture(t)
-	if c.PayloadSHA256 != "9317625db31c65f21081e4287512d0c66bf82c6ffc78e8306986c859b95bd308" {
-		t.Fatal("independent initial writer logical vector changed")
+	if c.PayloadSHA256 != "826b5dfa9557f336b442bd9312b227385640073f60c47a52db527662b3289165" {
+		t.Fatal("independent initial writer logical vector changed", c.PayloadSHA256)
 	}
 	raw, sig, err := SignDataWriter(c, key, a, now)
 	if err != nil {

@@ -16,23 +16,15 @@ import (
 var platformActionCheckedTables = []string{"review_plans", "operations"}
 
 // platformLegacySchemaTables is the control schema as step 0015 created it: the current tables with
-// the frozen action list on the two checked tables. Step 0015 must keep producing this shape; step
-// 0021 widens it afterwards, for fresh and upgraded databases alike.
+// the frozen action and stage lists and without quota_inodes. Step 0015 must keep producing this shape;
+// steps 0021 and 0024 widen it afterwards, for fresh and upgraded databases alike.
 func platformLegacySchemaTables() []platformTable {
-	tables := platformSchemaTables()
-	for i, t := range tables {
-		if !slices.Contains(platformActionCheckedTables, t.name) {
-			continue
-		}
-		checks := slices.Clone(t.checks)
-		for j, check := range checks {
-			if check == platformActions() {
-				checks[j] = platformLegacyActions()
-			}
-		}
-		tables[i].checks = checks
-	}
-	return tables
+	return platformSchemaTablesAt(platformLegacyActions(), platformLegacyStages(), false)
+}
+
+// platformSchemaTables0021 is the shape step 0021 leaves: the 0021 action list, still the legacy stages.
+func platformSchemaTables0021() []platformTable {
+	return platformSchemaTablesAt(platformActions0021(), platformLegacyStages(), false)
 }
 
 func platformImportGrantSchemaTables() []platformTable {
@@ -98,7 +90,7 @@ type platformCheckTarget struct{ table, constraint string }
 // reparse, and the rewritten tables are checked before the transaction may commit. The call is
 // idempotent: a table that already carries `to` is left as it is, and one that carries neither is an
 // error, never a guess.
-func setPlatformActionChecks(e migExec, from, to string) error {
+func setPlatformActionChecks(e migExec, from, to string, later ...string) error {
 	var targets []platformCheckTarget
 	for _, table := range platformActionCheckedTables {
 		name, err := platformActionCheckName(table)
@@ -107,11 +99,13 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 		}
 		targets = append(targets, platformCheckTarget{table, name})
 	}
-	return rewritePlatformChecks(e, targets, from, to)
+	return rewritePlatformChecks(e, targets, from, to, later...)
 }
 
-// rewritePlatformChecks is setPlatformActionChecks for any list of targets.
-func rewritePlatformChecks(e migExec, targets []platformCheckTarget, from, to string) error {
+// rewritePlatformChecks is setPlatformActionChecks for any list of targets. later are lists a newer step
+// widened `to` into: a table that already carries one of them is left as it is, because a database
+// whose ledger was cleared (a baseline fixture) still has the newest shape.
+func rewritePlatformChecks(e migExec, targets []platformCheckTarget, from, to string, later ...string) error {
 	if e.s.driver == "postgres" {
 		for _, target := range targets {
 			name := target.constraint
@@ -158,8 +152,12 @@ func rewritePlatformChecks(e migExec, targets []platformCheckTarget, from, to st
 		}
 		if changed == 0 {
 			var present int
-			if err := e.queryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=? AND instr(sql,?)>0`, full, newText).Scan(&present); err != nil {
-				return err
+			for _, accepted := range append([]string{to}, later...) {
+				var n int
+				if err := e.queryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=? AND instr(sql,?)>0`, full, "CHECK ("+accepted+")").Scan(&n); err != nil {
+					return err
+				}
+				present += n
 			}
 			if present != 1 {
 				return fmt.Errorf("application control table %s carries an unexpected check", full)
@@ -200,13 +198,17 @@ func rewritePlatformChecks(e migExec, targets []platformCheckTarget, from, to st
 }
 
 func verifyPlatformImportGrantSchema(e migExec) error {
-	var tables []platformTable
-	for _, t := range platformSchemaTables() {
-		if slices.Contains(platformActionCheckedTables, t.name) {
-			tables = append(tables, t)
+	only := func(tables []platformTable) []platformTable {
+		var result []platformTable
+		for _, t := range tables {
+			if slices.Contains(platformActionCheckedTables, t.name) {
+				result = append(result, t)
+			}
 		}
+		return result
 	}
-	tables = append(tables, platformImportGrantSchemaTables()...)
+	// Step 0024 widens the two checked tables again, so a later start sees either shape.
+	tables := append(only(platformSchemaTables()), platformImportGrantSchemaTables()...)
 	var indexes []platformIndex
 	for _, i := range platformSchemaIndexes() {
 		if slices.Contains(platformActionCheckedTables, i.table) {
@@ -214,7 +216,7 @@ func verifyPlatformImportGrantSchema(e migExec) error {
 		}
 	}
 	indexes = append(indexes, platformImportGrantSchemaIndexes()...)
-	return verifyPlatformSchemaProducts(e, tables, indexes)
+	return verifyPlatformSchemaProductsWithAlternates(e, tables, indexes, only(platformSchemaTables0021()))
 }
 
 func migration0021() migration {
@@ -244,7 +246,7 @@ func migration0021() migration {
 				return err
 			}
 		}
-		return setPlatformActionChecks(e, platformLegacyActions(), platformActions())
+		return setPlatformActionChecks(e, platformLegacyActions(), platformActions0021(), platformActions())
 	}
 	return m
 }

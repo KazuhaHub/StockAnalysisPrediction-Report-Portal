@@ -115,7 +115,7 @@ func TestDeleteCheckpointRefusesMalformedHeaderAndPayload(t *testing.T) {
 		"short release":           func(c *DeleteCheckpointCommand) { c.Payload.ReleaseSHA256 = "abc" },
 		"upper manifest":          func(c *DeleteCheckpointCommand) { c.Payload.ManifestSHA256 = strings.Repeat("A", 64) },
 		"zero bytes":              func(c *DeleteCheckpointCommand) { c.Payload.ArchiveBytes = "0" },
-		"bytes over the limit":    func(c *DeleteCheckpointCommand) { c.Payload.ArchiveBytes = "536870913" },
+		"bytes over the limit":    func(c *DeleteCheckpointCommand) { c.Payload.ArchiveBytes = "18782978049" },
 		"leading zero bytes":      func(c *DeleteCheckpointCommand) { c.Payload.ArchiveBytes = "04096" },
 		"zero format":             func(c *DeleteCheckpointCommand) { c.Payload.DataFormat = "0" },
 		"zero fence":              func(c *DeleteCheckpointCommand) { c.Payload.WriterFence = "0" },
@@ -137,7 +137,7 @@ func TestDeleteCheckpointRefusesMalformedHeaderAndPayload(t *testing.T) {
 		}
 	}
 	command, _, _, _ := deleteCheckpointFixture(t)
-	command.Payload.ArchiveBytes = "536870912"
+	command.Payload.ArchiveBytes = "18782978048"
 	if _, err := DeleteCheckpointLogicalDigest(command); err != nil {
 		t.Fatal("the largest checkpoint archive was refused:", err)
 	}
