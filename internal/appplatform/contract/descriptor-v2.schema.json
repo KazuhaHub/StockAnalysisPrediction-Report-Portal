@@ -101,6 +101,19 @@
           "x-go-omitempty": true,
           "description": "Optional reviewed authenticated machine read routes (doc 183). Requires a backend and the optional machine.read capability."
         },
+        "network_proxy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkProxy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Optional suggested hosts for the reviewed forward proxy (doc 184). Requires a backend, background.run and the optional network.proxy capability. Suggestions only: authority comes from the administrator's review."
+        },
         "data": {
           "$ref": "#/$defs/DataCompatibility"
         }
@@ -477,10 +490,11 @@
                   "public.projection",
                   "network.postgres",
                   "ingress.webhook",
-                  "machine.read"
+                  "machine.read",
+                  "network.proxy"
                 ]
               },
-              "maxItems": 16,
+              "maxItems": 17,
               "uniqueItems": true
             },
             {
@@ -850,6 +864,26 @@
         }
       ],
       "description": "Discriminated query rule. Integer min <= max; reserved names constructor/prototype are forbidden. No query field is required in a URL."
+    },
+    "NetworkProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 255
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "description": "Sorted, unique host entries: an exact host or a one-label wildcard whose base is a registrable domain or deeper. Port 443 only."
+        }
+      },
+      "required": [
+        "hosts"
+      ]
     },
     "Public": {
       "type": "object",

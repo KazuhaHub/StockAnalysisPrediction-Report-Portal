@@ -74,6 +74,11 @@ type egressRegistry struct {
 	wg       sync.WaitGroup
 	// maxSessions is the bound on live sessions that a new installation meets.
 	maxSessions int
+	// proxy is what every installation's proxy tunnels share (doc 184): the runner-wide tunnel
+	// cap, the daily budget store and the network seams.
+	proxy *broker.ProxyRunner
+	// budget, when the runner has a journal, is the durable daily budget; close flushes it.
+	budget *broker.DurableProxyBudget
 
 	// openMu serialises opens, which are rare and may touch the journal.
 	openMu sync.Mutex
@@ -94,6 +99,11 @@ type egressInstall struct {
 	peerOK     func(net.Conn) bool
 	intact     func() error
 	server     *egressServer
+	// proxy is the installation's tunnels. Its authority follows the current session.
+	proxy *broker.ProxyInstall
+	// reportQueue holds the proxy reports not yet sent to Portal (doc 184 section 7).
+	reportMu    sync.Mutex
+	reportQueue []broker.ProxyReport
 
 	mu       sync.Mutex
 	bucket   *broker.TokenBucket
@@ -112,6 +122,8 @@ type egressSession struct {
 	resources   []string
 	expires     time.Time
 	mux         *EgressMux
+	// proxy is the reviewed proxy policy the session carries, if any.
+	proxy *appplatform.ParsedProxyPolicy
 
 	// Guarded by install.mu.
 	draining bool
@@ -123,7 +135,8 @@ type egressSession struct {
 
 func newEgressRegistry(parent context.Context, provider *networkProvider, bind EgressBinder) *egressRegistry {
 	ctx, cancel := context.WithCancel(parent)
-	r := &egressRegistry{provider: provider, bind: bind, now: time.Now, maxSessions: maxEgressSessions, ctx: ctx, cancel: cancel, installs: make(map[string]*egressInstall)}
+	r := &egressRegistry{provider: provider, bind: bind, now: time.Now, maxSessions: maxEgressSessions, ctx: ctx, cancel: cancel, installs: make(map[string]*egressInstall),
+		proxy: broker.NewProxyRunner(appplatform.ProxyTunnelsPerRunner, nil)}
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -133,6 +146,7 @@ func newEgressRegistry(parent context.Context, provider *networkProvider, bind E
 			select {
 			case <-ticker.C:
 				r.sweep()
+				r.flushProxyReports()
 			case <-ctx.Done():
 				return
 			}
@@ -144,6 +158,16 @@ func newEgressRegistry(parent context.Context, provider *networkProvider, bind E
 // close ends every session and every broker socket, and waits for their
 // goroutines. It is the runner-shutdown path.
 func (r *egressRegistry) close() {
+	// Sessions run under r.ctx, so what the proxy has not reported is sent before it is cancelled.
+	r.mu.Lock()
+	live := make([]*egressInstall, 0, len(r.installs))
+	for _, in := range r.installs {
+		live = append(live, in)
+	}
+	r.mu.Unlock()
+	for _, in := range live {
+		r.finalProxyReports(in)
+	}
 	r.cancel()
 	r.mu.Lock()
 	r.closed = true
@@ -156,7 +180,20 @@ func (r *egressRegistry) close() {
 		r.closeInstall(in, EgressCloseShutdown)
 	}
 	r.wg.Wait()
+	if r.budget != nil {
+		r.budget.Close()
+	}
 }
+
+// useProxyBudget makes the daily budget of the proxy durable in store (doc 184 section 6), so a runner
+// restart does not reset it. It is called once, before the registry serves.
+func (r *egressRegistry) useProxyBudget(store broker.ProxyBudgetStore) {
+	r.budget = broker.NewDurableProxyBudget(store, r.now, proxyBudgetFlushInterval)
+	r.proxy.SetBudget(r.budget)
+}
+
+// proxyBudgetFlushInterval is how often counted bytes are written to the journal.
+const proxyBudgetFlushInterval = 5 * time.Second
 
 // open verifies, binds, acknowledges and installs one session. The connection
 // belongs to the registry from the call on: it is closed on refusal, and
@@ -237,6 +274,9 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		return refuse(err)
 	}
 	session := &egressSession{command: command, revision: revision, concurrency: concurrency, resources: slices.Clone(command.Resources), expires: time.UnixMilli(expires), mux: NewEgressMux(conn, EgressRunner), seen: make(map[string]struct{})}
+	if policy, ok := proxyPolicyOf(command); ok {
+		session.proxy = &policy
+	}
 	// The last checks and the acknowledgement happen under the registry lock, so
 	// an installation closed meanwhile (a disabled close, shutdown) is refused
 	// here instead of being acknowledged as open and dropped. The write is one
@@ -271,7 +311,12 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 			install.mu.Unlock()
 			replaced = install
 		}
-		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{})}
+		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{}),
+			proxy: broker.NewProxyInstall(command.InstallationID, r.proxy, broker.DefaultProxyLimits())}
+		if replaced != nil {
+			// The admission bucket and the throughput cap belong to the installation, not the generation.
+			install.proxy.Inherit(replaced.proxy)
+		}
 		r.installs[command.InstallationID] = install
 	}
 	session.install = install
@@ -283,6 +328,9 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		previous.draining = true
 	}
 	drainNow := previous != nil && previous.inflight == 0
+	// The session that is now current decides the proxy authority: its policy, or none. It is set under the
+	// installation's lock, so a session that ends meanwhile cannot revoke what this one just set.
+	install.applyProxy(session)
 	install.mu.Unlock()
 	r.live++
 	if listen {
@@ -318,6 +366,10 @@ func (r *egressRegistry) detach(s *egressSession) {
 	}
 	if in.current == s {
 		in.current = nil
+		// No session is current any more: Portal no longer vouches for the proxy, so every
+		// tunnel is cut. A session replaced by a newer one is not this case. It is done under
+		// the installation's lock, as the open of a replacement sets its authority.
+		in.proxy.Revoke()
 	}
 	in.mu.Unlock()
 	r.mu.Unlock()
@@ -328,6 +380,8 @@ func (r *egressRegistry) detach(s *egressSession) {
 
 // closeInstall ends an installation's sessions and its broker socket.
 func (r *egressRegistry) closeInstall(in *egressInstall, reason byte) {
+	// What the proxy counted and has not reported is sent first, while the session can still carry it.
+	r.finalProxyReports(in)
 	r.mu.Lock()
 	in.mu.Lock()
 	if in.closed {
@@ -345,6 +399,7 @@ func (r *egressRegistry) closeInstall(in *egressInstall, reason byte) {
 	}
 	in.mu.Unlock()
 	r.mu.Unlock()
+	in.proxy.Revoke()
 	if in.server != nil {
 		in.server.close()
 	}

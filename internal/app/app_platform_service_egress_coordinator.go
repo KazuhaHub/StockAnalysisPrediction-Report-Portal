@@ -46,6 +46,8 @@ const (
 // substitute one.
 type platformServiceEgressTransport interface {
 	Query(ctx context.Context, e platformRuntimeEndpoint) (transport.ServiceEgressProfile, error)
+	// QueryProxy is the PRPX0001 query (doc 184): whether the runner serves the reviewed forward proxy.
+	QueryProxy(ctx context.Context, e platformRuntimeEndpoint) (transport.ProxyProfile, error)
 	Open(ctx context.Context, e platformRuntimeEndpoint, raw, signature []byte, a control.Authority, descriptor []byte) (*transport.EgressMux, error)
 }
 
@@ -77,6 +79,8 @@ type platformServiceEgressCoordinator struct {
 	endpoint  func() (platformRuntimeEndpoint, bool)
 	now       func() time.Time
 	audit     *platformServiceEgressAggregator
+	// refusals limits the proxy refusal rows (doc 184 section 7).
+	refusals platformProxyRefusalLimiter
 	// loadSession reads the authority a session is still bound to; reloadTimeout
 	// bounds each such reload of the drift loop. Both are seams for tests.
 	loadSession   func(context.Context, platformServiceEgressSessionState) (platformServiceEgressAuthority, error)
@@ -261,7 +265,7 @@ func (s *Server) listPlatformServiceEgressInstallations(ctx context.Context) ([]
 	rows, err := s.st.queryContext(ctx, `SELECT i.id FROM app_platform_installations i
 		WHERE i.desired_state='enabled' AND i.phase='ready' AND i.runtime_id IS NOT NULL
 		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability='background.run' AND g.granted=1)
-		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability IN ('network.http','network.postgres','notifications.publish') AND g.granted=1)
+		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability IN ('network.http','network.postgres','network.proxy','notifications.publish') AND g.granted=1)
 		ORDER BY i.id LIMIT ?`, platformServiceEgressMaxInstallations)
 	if err != nil {
 		return nil, false
@@ -324,6 +328,20 @@ func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint pl
 	}
 	resources := slices.Clone(plan.resources)
 	plan.Close()
+	// The proxy rides the session only when the runner says it serves it (doc 184): a runner that predates
+	// the proxy, or enforces other limits, gets a session without it, and the grant stays reviewed but unused.
+	if slices.Contains(resources, platformServiceEgressProxy) {
+		serves, err := c.runnerServesProxy(ctx, endpoint)
+		if err != nil {
+			return err
+		}
+		if !serves {
+			resources = slices.DeleteFunc(resources, func(r string) bool { return r == platformServiceEgressProxy })
+			if len(resources) == 0 {
+				return errPlatformServiceEgressUnavailable
+			}
+		}
+	}
 	profile, err := c.transport.Query(ctx, endpoint)
 	if err != nil {
 		if errors.Is(err, transport.ErrServiceEgressUnsupported) {
@@ -495,6 +513,8 @@ func (c *platformServiceEgressCoordinator) serveCall(ctx context.Context, l *pla
 		return
 	}
 	switch first.Type {
+	case transport.EgressFrameProxyReport:
+		c.serveProxyReport(l, first.Payload)
 	case transport.EgressFrameAdmit:
 		c.serveAdmit(ctx, l, call, first.Payload)
 	case transport.EgressFrameNotice:

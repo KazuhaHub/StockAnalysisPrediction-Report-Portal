@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "1cd3cc72759a4829e3b4f2db5b60894ad01537811201af76a694167f0786562c"
+const descriptorContractSHA256 = "526bc46afe0a5b20f0f4100dee86ead14a699323c43499336bbc1133e0bddd86"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -18,6 +18,7 @@ type Manifest struct {
 	Public        *Public           `json:"public,omitempty"`
 	Ingress       *Ingress          `json:"ingress,omitempty"`
 	Machine       *Machine          `json:"machine,omitempty"`
+	NetworkProxy  *NetworkProxy     `json:"network_proxy,omitempty"`
 	Data          DataCompatibility `json:"data"`
 }
 type Compatibility struct {
@@ -98,6 +99,9 @@ type RouteQuery struct {
 	Max      *int     `json:"max,omitempty"`
 	Values   []string `json:"values,omitempty"`
 }
+type NetworkProxy struct {
+	Hosts []string `json:"hosts"`
+}
 type Public struct {
 	Routes   []PublicRoute `json:"routes"`
 	Document string        `json:"document,omitempty"`
@@ -154,6 +158,7 @@ const maxImageLayers = 32
 const maxImageLayerUncompressedBytes = 1073741824
 const maxDescriptorVersionBytes = 128
 const maxPublicRoutes = 8
+const maxNetworkProxyHosts = 64
 const maxPublicQueryNames = 8
 const minPublicCacheSeconds = 1
 const maxPublicCacheSeconds = 300
@@ -196,7 +201,7 @@ var ingressPathPattern = regexp.MustCompile(`^/v1/ingress/[A-Za-z0-9._/-]+$`)
 var machineRouteIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 var machinePathPattern = regexp.MustCompile(`^/v1/machine/[A-Za-z0-9._/-]+$`)
 var machineQueryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
-var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "network.postgres": true, "ingress.webhook": true, "machine.read": true}
+var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "network.postgres": true, "ingress.webhook": true, "machine.read": true, "network.proxy": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
 var descriptorDisplayIcons = map[string]bool{"appstore": true, "file-text": true, "dashboard": true, "calendar": true, "bar-chart": true, "cloud": true, "tool": true, "experiment": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}

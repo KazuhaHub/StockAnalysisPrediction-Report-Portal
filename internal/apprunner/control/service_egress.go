@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 // ServiceEgressSessionFormat is the signed command that opens a background
@@ -19,6 +22,66 @@ import (
 // call inside the session still needs its own signed NetworkHTTPRequestCommand.
 const ServiceEgressSessionFormat = "portal.service-egress-session/1-dev.1"
 const serviceEgressSessionPurpose = "portal.app/runner-service-egress-session/v1"
+
+// ServiceEgressSessionProxyFormat is the session command that also carries the
+// reviewed forward proxy (doc 184): the policy, its digest and the fixed limits.
+// A session without a proxy keeps ServiceEgressSessionFormat and its exact
+// encoding, so a runner that predates the proxy opens it unchanged; a session
+// with one uses this format and no other, and a runner that does not know it
+// refuses the command, which Portal avoids by asking the PRPX0001 query first.
+const ServiceEgressSessionProxyFormat = "portal.service-egress-session/1-dev.2"
+
+// ServiceEgressProxy is the proxy block of a session command. Every limit is a
+// platform-fixed value, in the signed bytes so a runner never invents them and
+// compared exactly so a change is a format revision. The policy travels as its
+// canonical text with its digest; the runner checks one against the other.
+type ServiceEgressProxy struct {
+	PolicySHA256       string `json:"policy_sha256"`
+	Policy             string `json:"policy"`
+	DailyBytes         string `json:"daily_bytes"`
+	Tunnels            string `json:"tunnels"`
+	NewPerMinute       string `json:"new_per_minute"`
+	Burst              string `json:"burst"`
+	IdleSeconds        string `json:"idle_seconds"`
+	LifetimeSeconds    string `json:"lifetime_seconds"`
+	RunnerTunnels      string `json:"runner_tunnels"`
+	ConnectSeconds     string `json:"connect_seconds"`
+	FirstRecordSeconds string `json:"first_record_seconds"`
+	Mbit               string `json:"mbit"`
+}
+
+// NewServiceEgressProxy is the proxy block for a canonical proxy policy: the
+// digest, the reviewed daily budget and the platform's fixed limits.
+func NewServiceEgressProxy(policy []byte) ServiceEgressProxy {
+	sum := sha256.Sum256(policy)
+	p := ServiceEgressProxy{
+		PolicySHA256: hex.EncodeToString(sum[:]), Policy: string(policy),
+		Tunnels: strconv.Itoa(appplatform.ProxyTunnelsPerInstallation), NewPerMinute: strconv.Itoa(appplatform.ProxyNewPerMinute),
+		Burst: strconv.Itoa(appplatform.ProxyNewBurst), IdleSeconds: strconv.Itoa(appplatform.ProxyIdleSeconds),
+		LifetimeSeconds: strconv.Itoa(appplatform.ProxyLifetimeSeconds), RunnerTunnels: strconv.Itoa(appplatform.ProxyTunnelsPerRunner),
+		ConnectSeconds: strconv.Itoa(appplatform.ProxyConnectTimeoutSeconds), FirstRecordSeconds: strconv.Itoa(appplatform.ProxyFirstRecordSeconds),
+		Mbit: strconv.Itoa(appplatform.ProxyMbitPerSecond),
+	}
+	if parsed, err := appplatform.ParseProxyPolicy(policy); err == nil {
+		p.DailyBytes = strconv.FormatInt(parsed.Policy.DailyBytes, 10)
+	}
+	return p
+}
+
+// validateServiceEgressProxy checks the block: the digest is that of the carried
+// canonical policy, the budget is the policy's own, and every other limit is the
+// platform's.
+func validateServiceEgressProxy(p ServiceEgressProxy) error {
+	parsed, err := appplatform.ParseProxyPolicy([]byte(p.Policy))
+	if err != nil || parsed.SHA256 != p.PolicySHA256 {
+		return ErrInvalidCommand
+	}
+	want := NewServiceEgressProxy([]byte(p.Policy))
+	if p != want {
+		return ErrInvalidCommand
+	}
+	return nil
+}
 
 // Platform-fixed budgets. They are in the signed command so a runner never
 // invents them, and they are compared exactly so a future change is a format
@@ -37,31 +100,32 @@ const (
 // secrets.use (doc 176) is only meaningful beside network.http or network.postgres
 // (doc 178): it lets a call name a reviewed credential binding, which Portal places
 // into that call.
-var ServiceEgressResources = []string{"network.http", "network.postgres", "notifications.publish", "secrets.use"}
+var ServiceEgressResources = []string{"network.http", "network.postgres", "network.proxy", "notifications.publish", "secrets.use"}
 
 // ServiceEgressSessionCommand binds one egress session to the installation
 // tuple the runner already trusts. Like ServiceBackendTaskCommand it carries the
 // registration proof of the generation it is for, so the runner compares the
 // tuple against a controller-signed document rather than against Portal's word.
 type ServiceEgressSessionCommand struct {
-	Format                string   `json:"format"`
-	DeploymentID          string   `json:"deployment_id"`
-	ControllerEpoch       string   `json:"controller_epoch"`
-	ControlRevision       string   `json:"control_revision"`
-	SessionID             string   `json:"session_id"`
-	InstallationID        string   `json:"installation_id"`
-	Generation            string   `json:"generation"`
-	PolicyRevision        string   `json:"policy_revision"`
-	ReleaseSHA256         string   `json:"release_sha256"`
-	ServiceIdentitySHA256 string   `json:"service_identity_sha256"`
-	Resources             []string `json:"resources"`
-	Concurrency           string   `json:"concurrency"`
-	RatePerMinute         string   `json:"rate_per_minute"`
-	Burst                 string   `json:"burst"`
-	RegistrationRaw       []byte   `json:"registration_raw"`
-	RegistrationSignature []byte   `json:"registration_signature"`
-	IssuedMS              string   `json:"issued_ms"`
-	ExpiresMS             string   `json:"expires_ms"`
+	Format                string              `json:"format"`
+	DeploymentID          string              `json:"deployment_id"`
+	ControllerEpoch       string              `json:"controller_epoch"`
+	ControlRevision       string              `json:"control_revision"`
+	SessionID             string              `json:"session_id"`
+	InstallationID        string              `json:"installation_id"`
+	Generation            string              `json:"generation"`
+	PolicyRevision        string              `json:"policy_revision"`
+	ReleaseSHA256         string              `json:"release_sha256"`
+	ServiceIdentitySHA256 string              `json:"service_identity_sha256"`
+	Resources             []string            `json:"resources"`
+	Concurrency           string              `json:"concurrency"`
+	RatePerMinute         string              `json:"rate_per_minute"`
+	Burst                 string              `json:"burst"`
+	Proxy                 *ServiceEgressProxy `json:"proxy,omitempty"`
+	RegistrationRaw       []byte              `json:"registration_raw"`
+	RegistrationSignature []byte              `json:"registration_signature"`
+	IssuedMS              string              `json:"issued_ms"`
+	ExpiresMS             string              `json:"expires_ms"`
 }
 
 // VerifiedServiceEgressSession is a command that passed every check below. It
@@ -77,6 +141,10 @@ func (v VerifiedServiceEgressSession) Command() ServiceEgressSessionCommand {
 	c.Resources = slices.Clone(c.Resources)
 	c.RegistrationRaw = bytes.Clone(c.RegistrationRaw)
 	c.RegistrationSignature = bytes.Clone(c.RegistrationSignature)
+	if c.Proxy != nil {
+		proxy := *c.Proxy
+		c.Proxy = &proxy
+	}
 	return c
 }
 
@@ -157,7 +225,13 @@ func VerifyServiceEgressSession(raw, signature []byte, a Authority, nowMS int64)
 }
 
 func validateServiceEgressSession(c ServiceEgressSessionCommand, a Authority, nowMS int64) error {
-	if c.Format != ServiceEgressSessionFormat {
+	// The proxy block, the proxy resource and the second format stand or fall together.
+	hasProxy := slices.Contains(c.Resources, "network.proxy")
+	if c.Format != ServiceEgressSessionFormat && c.Format != ServiceEgressSessionProxyFormat ||
+		(c.Format == ServiceEgressSessionProxyFormat) != (c.Proxy != nil) || hasProxy != (c.Proxy != nil) {
+		return ErrInvalidCommand
+	}
+	if c.Proxy != nil && validateServiceEgressProxy(*c.Proxy) != nil {
 		return ErrInvalidCommand
 	}
 	for _, id := range []string{c.DeploymentID, c.ControllerEpoch, c.SessionID, c.InstallationID} {

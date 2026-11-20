@@ -73,8 +73,8 @@ func TestOpenUpgradesPopulatedV1Journal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 3 {
-		t.Fatal("journal not upgraded to v3")
+	if scalar(t, store.db, `PRAGMA user_version`) != schemaVersion {
+		t.Fatal("journal not upgraded")
 	}
 	if scalar(t, store.db, `SELECT COUNT(*) FROM runner_commands`) != 3 || scalar(t, store.db, `SELECT COUNT(*) FROM runner_checkpoints`) != 1 || scalar(t, store.db, `SELECT COUNT(*) FROM runner_deployment`) != 1 {
 		t.Fatal("upgrade lost or invented rows")
@@ -84,7 +84,7 @@ func TestOpenUpgradesPopulatedV1Journal(t *testing.T) {
 			t.Fatalf("row %s changed by upgrade", kind)
 		}
 	}
-	if scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`) != 5 || scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL`) != 6 {
+	if scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`) != 6 || scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL`) != 6 {
 		t.Fatal("upgrade left extra or missing schema objects")
 	}
 	if scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE '%_v1'`) != 0 {
@@ -148,12 +148,12 @@ func TestCurrentJournalRefusedByOlderInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, older := range []int{1, 2} {
+	for _, older := range []int{1, 2, 3} {
 		if _, err := inspectAt(context.Background(), store.db, older); !errors.Is(err, ErrNewerVersion) {
-			t.Fatalf("v%d inspector accepted a v3 journal: %v", older, err)
+			t.Fatalf("v%d inspector accepted a v4 journal: %v", older, err)
 		}
 	}
-	if _, err := inspectAt(context.Background(), store.db, 3); err != nil {
+	if _, err := inspectAt(context.Background(), store.db, 4); err != nil {
 		t.Fatal(err)
 	}
 }

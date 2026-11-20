@@ -89,8 +89,8 @@ func TestFreshJournalIsV3WithReservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 3 {
-		t.Fatal("fresh journal is not v3")
+	if scalar(t, store.db, `PRAGMA user_version`) != schemaVersion {
+		t.Fatal("fresh journal is not current")
 	}
 	if scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='runner_reservations'`) != 1 {
 		t.Fatal("fresh v3 journal has no reservation table")
@@ -121,7 +121,7 @@ func TestNewerThanV3Refused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`PRAGMA user_version=4`); err != nil {
+	if _, err := store.db.Exec(`PRAGMA user_version=5`); err != nil {
 		t.Fatal(err)
 	}
 	store.Close()
@@ -129,7 +129,7 @@ func TestNewerThanV3Refused(t *testing.T) {
 		if reopened != nil {
 			reopened.Close()
 		}
-		t.Fatalf("v4 journal opened: %v", err)
+		t.Fatalf("v5 journal opened: %v", err)
 	}
 }
 
@@ -162,8 +162,8 @@ func TestOpenUpgradesV2ToV3AndBacksFillAtTheMaxima(t *testing.T) {
 		t.Fatalf("v2 journal did not upgrade: %v", err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 3 {
-		t.Fatal("not upgraded to v3")
+	if scalar(t, store.db, `PRAGMA user_version`) != schemaVersion {
+		t.Fatal("not upgraded")
 	}
 	got := reservationsByResource(t, store.db)
 	want := map[string]reservationRow{
@@ -195,8 +195,8 @@ func TestOpenUpgradesV1StraightToV3(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 3 || scalar(t, store.db, `SELECT COUNT(*) FROM runner_commands`) != 3 {
-		t.Fatal("v1 journal not carried to v3")
+	if scalar(t, store.db, `PRAGMA user_version`) != schemaVersion || scalar(t, store.db, `SELECT COUNT(*) FROM runner_commands`) != 3 {
+		t.Fatal("v1 journal not carried to the current version")
 	}
 	if scalar(t, store.db, `SELECT COUNT(*) FROM runner_reservations`) != 0 {
 		t.Fatal("a v1 journal with no live resource backfilled a reservation")

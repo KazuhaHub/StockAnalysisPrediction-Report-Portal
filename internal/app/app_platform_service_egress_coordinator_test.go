@@ -23,10 +23,14 @@ type fakeEgressRunner struct {
 	mu       sync.Mutex
 	profile  transport.ServiceEgressProfile
 	queryErr error
-	queries  int
-	opens    int
-	openErr  error
-	sessions chan *fakeEgressSession
+	// proxyProfile and proxyErr are the PRPX0001 answer; proxyAsked counts the questions.
+	proxyProfile transport.ProxyProfile
+	proxyErr     error
+	proxyAsked   int
+	queries      int
+	opens        int
+	openErr      error
+	sessions     chan *fakeEgressSession
 	// postgres is whether the runner answers the PostgreSQL probe query (doc 178); queriedPostgres
 	// counts the questions.
 	postgres        bool
@@ -50,7 +54,27 @@ type fakeEgressSession struct {
 }
 
 func newFakeEgressRunner() *fakeEgressRunner {
-	return &fakeEgressRunner{profile: transport.NewServiceEgressProfile(4), sessions: make(chan *fakeEgressSession, 8)}
+	return &fakeEgressRunner{profile: transport.NewServiceEgressProfile(4), proxyProfile: transport.NewProxyProfile(), sessions: make(chan *fakeEgressSession, 8)}
+}
+
+// QueryProxy answers the PRPX0001 query (doc 184).
+func (f *fakeEgressRunner) QueryProxy(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.proxyAsked++
+	return f.proxyProfile, f.proxyErr
+}
+
+func (f *fakeEgressRunner) setProxy(p transport.ProxyProfile, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.proxyProfile, f.proxyErr = p, err
+}
+
+func (f *fakeEgressRunner) proxyQueries() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.proxyAsked
 }
 
 func (f *fakeEgressRunner) Query(context.Context, platformRuntimeEndpoint) (transport.ServiceEgressProfile, error) {

@@ -159,6 +159,7 @@ def render(raw):
         "maxImageLayerUncompressedBytes": p("ImageLayer", "uncompressed_bytes")["maximum"],
         "maxDescriptorVersionBytes": p("Manifest", "version")["maxLength"],
         "maxPublicRoutes": p("Public", "routes")["maxItems"],
+        "maxNetworkProxyHosts": p("NetworkProxy", "hosts")["maxItems"],
         "maxPublicQueryNames": without_null(p("PublicRoute", "query"))["maxItems"],
         "minPublicCacheSeconds": p("PublicRoute", "cache_seconds")["minimum"],
         "maxPublicCacheSeconds": p("PublicRoute", "cache_seconds")["maximum"],

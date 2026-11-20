@@ -149,6 +149,15 @@ func validManifest(m Manifest) bool {
 	if declaresMachine != (m.Machine != nil) || (m.Machine != nil && (m.Backend == nil || !validMachine(*m.Machine))) {
 		return false
 	}
+	// Likewise the suggested proxy hosts (doc 184): the block and the capability stand or fall together,
+	// and both need a backend. The block grants nothing; it pre-fills the administrator's review.
+	declaresProxy := false
+	for _, value := range m.Capabilities.Optional {
+		declaresProxy = declaresProxy || value == ProxyCapability
+	}
+	if declaresProxy != (m.NetworkProxy != nil) || (m.NetworkProxy != nil && (m.Backend == nil || len(m.NetworkProxy.Hosts) < 1 || !ValidProxyHosts(m.NetworkProxy.Hosts))) {
+		return false
+	}
 	if m.Data.Schema < minDescriptorDataSchema || m.Data.Schema > maxDescriptorDataSchema || m.Data.WritesOnStartup || len(m.Data.ReadableSchemas) == 0 || len(m.Data.ReadableSchemas) > maxDescriptorReadableSchemas {
 		return false
 	}
@@ -305,8 +314,9 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
 		// administrator's decision, never a condition of install. network.postgres (doc 178) is
 		// optional only for the same reason: a database probe is granted by its own review, and so is
-		// ingress.webhook (doc 180).
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" || value == "ingress.webhook" || value == "machine.read" {
+		// ingress.webhook (doc 180), machine.read (doc 183) and network.proxy (doc 184) are optional
+		// only too: each is an administrator's decision, never a condition of install.
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" || value == "ingress.webhook" || value == "machine.read" || value == ProxyCapability {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -317,10 +327,14 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres", "ingress.webhook", "machine.read"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres", "ingress.webhook", "machine.read", ProxyCapability} {
 		if seen[value] && !hasBackend {
 			return false
 		}
+	}
+	// The proxy rides the egress session, which exists only with background.run (doc 184 Q2).
+	if seen[ProxyCapability] && !seen["background.run"] {
+		return false
 	}
 	for _, value := range []string{"tasks.schedule", "events.subscribe"} {
 		if seen[value] && !seen["background.run"] {

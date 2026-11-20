@@ -17,6 +17,10 @@ func (platformServiceEgressRunner) Query(context.Context, platformRuntimeEndpoin
 	return transport.ServiceEgressProfile{}, transport.ErrServiceEgressUnsupported
 }
 
+func (platformServiceEgressRunner) QueryProxy(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error) {
+	return transport.ProxyProfile{}, transport.ErrProxyUnsupported
+}
+
 func (platformServiceEgressRunner) Open(context.Context, platformRuntimeEndpoint, []byte, []byte, control.Authority, []byte) (*transport.EgressMux, error) {
 	return nil, transport.ErrServiceEgressUnsupported
 }

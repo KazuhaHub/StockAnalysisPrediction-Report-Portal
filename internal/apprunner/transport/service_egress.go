@@ -53,6 +53,9 @@ const (
 	// EgressFramePostgresAdmit starts a PostgreSQL liveness call (doc 178): runner -> Portal. It is
 	// answered like an admit, by one command frame (the signed probe command) or one refusal.
 	EgressFramePostgresAdmit byte = 0x0A
+	// EgressFrameProxyReport (doc 184 section 7) is a one-way call from the runner: a rollup, a
+	// refusal row or the day's usage of the installation's proxy tunnels. Portal answers nothing.
+	EgressFrameProxyReport byte = 0x0B // runner -> Portal
 )
 
 // Refusal codes (EgressFrameRefusal payload).
@@ -108,6 +111,12 @@ const (
 	egressAdmitMaxBytes  = 8192
 	egressNoticeMaxBytes = broker.MaxAppNoticeBytes
 	egressResultMaxBytes = 256
+	// egressMaxReportCalls bounds the proxy report calls Portal holds open at once. A report is one-way and
+	// Portal holds its call until it has written the audit row, so a slow audit write must not let reports
+	// fill the session's calls: a report over the bound is dropped, never a protocol violation.
+	egressMaxReportCalls = 8
+	// egressProxyReportMaxBytes bounds a report: 64 hosts of up to 253 bytes with their close counts.
+	egressProxyReportMaxBytes = 32768
 	// EgressWriteTimeout bounds one frame write. It is a per-write deadline: the
 	// connection never carries a whole-connection deadline, because a session
 	// outlives any single call.
@@ -143,7 +152,7 @@ type EgressFrame struct {
 
 // isEgressCallStart says whether a frame type is one a runner starts a call with.
 func isEgressCallStart(t byte) bool {
-	return t == EgressFrameAdmit || t == EgressFrameNotice || t == EgressFramePostgresAdmit
+	return t == EgressFrameAdmit || t == EgressFrameNotice || t == EgressFramePostgresAdmit || t == EgressFrameProxyReport
 }
 
 // egressFrameLimit is the payload bound of a frame type; ok is false for an
@@ -168,6 +177,8 @@ func egressFrameLimit(t byte) (int, bool) {
 		return 11, true
 	case EgressFrameClose:
 		return 1, true
+	case EgressFrameProxyReport:
+		return egressProxyReportMaxBytes, true
 	}
 	return 0, false
 }
@@ -235,7 +246,7 @@ func (r EgressRole) receives(t byte) bool {
 		return true
 	case EgressFrameCommand, EgressFrameRefusal, EgressFrameProof, EgressFrameNoticeResult:
 		return r == EgressRunner
-	case EgressFrameAdmit, EgressFrameChallenge, EgressFrameNotice, EgressFrameOutcome, EgressFramePostgresAdmit:
+	case EgressFrameAdmit, EgressFrameChallenge, EgressFrameNotice, EgressFrameOutcome, EgressFramePostgresAdmit, EgressFrameProxyReport:
 		return r == EgressPortal
 	}
 	return false
@@ -261,6 +272,7 @@ type EgressMux struct {
 
 	mu         sync.Mutex
 	calls      map[EgressCallID]*EgressCall
+	reportOpen int // calls of kind EgressFrameProxyReport in calls
 	finished   map[EgressCallID]time.Time
 	finishedQ  []EgressCallID
 	incoming   chan *EgressCall
@@ -369,7 +381,14 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 			// A late answer to a call its owner already abandoned.
 			return nil
 		}
-		if m.role != EgressPortal || !isEgressCallStart(f.Type) || len(m.calls) >= egressMaxCalls {
+		if m.role != EgressPortal || !isEgressCallStart(f.Type) {
+			return ErrEgressProtocol
+		}
+		if f.Type == EgressFrameProxyReport && m.reportOpen >= egressMaxReportCalls {
+			return nil // a report beyond the bound is dropped: it is one-way and only audit
+		}
+		// Report calls do not count against the calls a runner may have open for real work.
+		if f.Type != EgressFrameProxyReport && len(m.calls)-m.reportOpen >= egressMaxCalls {
 			return ErrEgressProtocol
 		}
 		call = &EgressCall{mux: m, id: f.Call, kind: f.Type, in: make(chan EgressFrame, egressCallBuffer)}
@@ -379,6 +398,9 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 			return ErrEgressProtocol
 		}
 		m.calls[f.Call] = call
+		if f.Type == EgressFrameProxyReport {
+			m.reportOpen++
+		}
 	} else if isEgressCallStart(f.Type) {
 		return ErrEgressProtocol // duplicate start
 	}
@@ -419,6 +441,12 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 // Accept returns the next call the peer started (Portal role). It returns an
 // error when the session ends or ctx is done.
 func (m *EgressMux) Accept(ctx context.Context) (*EgressCall, error) {
+	// A call that arrived before the session ended is still served: its frames are already here.
+	select {
+	case call := <-m.incoming:
+		return call, nil
+	default:
+	}
 	select {
 	case call := <-m.incoming:
 		return call, nil
@@ -573,6 +601,9 @@ func (c *EgressCall) Finish() {
 		return
 	}
 	c.finished = true
+	if _, open := m.calls[c.id]; open && c.kind == EgressFrameProxyReport {
+		m.reportOpen--
+	}
 	delete(m.calls, c.id)
 	now := m.now()
 	m.finished[c.id] = now

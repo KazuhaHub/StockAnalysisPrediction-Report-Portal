@@ -37,7 +37,16 @@ func (s *egressServer) close() {
 }
 
 func (r *egressRegistry) startServer(in *egressInstall) {
-	limited := &egressLimitListener{Listener: in.listener, peerOK: in.peerOK, slots: make(chan struct{}, egressBrokerConnections)}
+	// The raw listener is sniffed first: a PRXY0001 stream goes to the installation's proxy, and every
+	// other connection is the HTTP server's. The peer check is applied by the sniffer, to every
+	// connection before a byte is read, so the limit listener below needs none.
+	sniffer := newEgressSniffListener(in)
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		sniffer.run(&r.wg)
+	}()
+	limited := &egressLimitListener{Listener: sniffer, slots: make(chan struct{}, egressBrokerConnections)}
 	server := &http.Server{
 		Handler:           in,
 		ReadHeaderTimeout: 5 * time.Second,
