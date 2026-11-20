@@ -20,7 +20,9 @@ data import (doc 185 section 5). Run as root on the runner host.
 The tree may hold only regular files and directories: symbolic links, special
 files, setuid, setgid and sticky bits, the reserved name
 .portal-checkpoint-manifest.json, names over 255 bytes and trees deeper than 64
-levels are refused. Hard links are refused until doc 185 phase P2. Owners and
+levels are refused. Hard links are kept when every link of the file is inside the
+tree (stored once, recreated as links on import); a file with a link outside the
+tree is refused. Owners and
 modes are normalised to 65532:65532, 0750 for directories and 0640 for files.
 The archive is written into the import inbox (root-owned, mode 0700) and an
 existing archive is never overwritten. It prints the SHA-256, size and entry

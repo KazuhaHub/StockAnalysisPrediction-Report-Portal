@@ -69,24 +69,34 @@ func importSchemaMarker(file *os.File) (int, error) {
 		return 0, err
 	}
 	reader := tar.NewReader(file)
+	value, found := 0, false
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
-			return 0, nil
+			return value, nil
 		}
 		if err != nil {
 			return 0, err
 		}
+		// The live marker reader requires a single-link file: a link to or from the marker refuses here, before
+		// the import, instead of in every later migration. Links come after their target, so the whole archive is
+		// read.
+		if header.Typeflag == tar.TypeLink && (header.Name == SchemaMarkerName || header.Linkname == SchemaMarkerName) {
+			return 0, ErrMigrationUnsafe
+		}
 		if header.Name != SchemaMarkerName {
 			continue
 		}
-		if header.Typeflag != tar.TypeReg || header.Size > MaxSchemaMarkerBytes {
+		if found || header.Typeflag != tar.TypeReg || header.Size > MaxSchemaMarkerBytes {
 			return 0, ErrMigrationUnsafe
 		}
 		raw, err := io.ReadAll(reader)
 		if err != nil {
 			return 0, err
 		}
-		return parseSchemaMarker(raw)
+		if value, err = parseSchemaMarker(raw); err != nil {
+			return 0, err
+		}
+		found = true
 	}
 }

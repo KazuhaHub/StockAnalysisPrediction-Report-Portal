@@ -145,16 +145,9 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	if _, err := tarWriter.Write(manifestRaw); err != nil {
 		return zero, checkpointIncomplete(err)
 	}
-	walker := checkpointWalker{ctx: ctx, tar: tarWriter, request: request}
-	entries, err := namespace.ReadDir(-1)
-	if err != nil {
-		return zero, checkpointIncomplete(err)
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	for _, entry := range entries {
-		if err := walker.add(namespace, entry.Name(), entry.Name(), 1); err != nil {
-			return zero, err
-		}
+	walker := newCheckpointWalker(ctx, tarWriter, request)
+	if err := walker.walk(namespace); err != nil {
+		return zero, err
 	}
 	if err := checkpointAfter(namespace, namespaceStat); err != nil {
 		return zero, err
@@ -289,15 +282,81 @@ type checkpointWalker struct {
 	ctx     context.Context
 	tar     *tar.Writer
 	request CheckpointRequest
+	// entries counts inodes (directories and first paths of files); links counts the link entries apart from them.
 	entries int64
+	links   int64
 	bytes   int64
+	// inodes tracks every regular file with more than one link (doc 185 section 4): the first path is written
+	// as a file, later paths as link entries, and finish compares the paths found with the inode's link count.
+	inodes map[checkpointInodeKey]*checkpointInode
+}
+
+type checkpointInodeKey struct{ dev, ino uint64 }
+
+type checkpointInode struct {
+	first string
+	stat  unix.Stat_t
+	found uint64
+}
+
+func newCheckpointWalker(ctx context.Context, writer *tar.Writer, request CheckpointRequest) *checkpointWalker {
+	return &checkpointWalker{ctx: ctx, tar: writer, request: request, inodes: map[checkpointInodeKey]*checkpointInode{}}
+}
+
+// walk archives everything under the namespace directory.
+func (w *checkpointWalker) walk(namespace *os.File) error {
+	entries, err := namespace.ReadDir(-1)
+	if err != nil {
+		return checkpointIncomplete(err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, entry := range entries {
+		if err := w.add(namespace, entry.Name(), entry.Name(), 1); err != nil {
+			return err
+		}
+	}
+	return w.finish()
+}
+
+// finish refuses the checkpoint when a file with several links has a link outside the namespace: the paths found
+// must equal the inode's link count, so a restore recreates exactly the links the source had.
+func (w *checkpointWalker) finish() error {
+	for _, inode := range w.inodes {
+		if inode.found != uint64(inode.stat.Nlink) {
+			return ErrCheckpointUnsafe
+		}
+	}
+	return nil
+}
+
+// sameInodeAttributes compares what checkpointAfter compares, plus the link count. Access time is left out: reading
+// the first path changes it.
+func sameInodeAttributes(a, b unix.Stat_t) bool {
+	return a.Dev == b.Dev && a.Ino == b.Ino && a.Mode == b.Mode && a.Uid == b.Uid && a.Gid == b.Gid &&
+		a.Size == b.Size && a.Nlink == b.Nlink && a.Mtim == b.Mtim && a.Ctim == b.Ctim
+}
+
+// link records one more path of a multiply linked file. It returns the first path when this is a later path.
+func (w *checkpointWalker) link(relative string, stat unix.Stat_t) (first string, later bool, err error) {
+	key := checkpointInodeKey{uint64(stat.Dev), stat.Ino}
+	inode := w.inodes[key]
+	if inode == nil {
+		w.inodes[key] = &checkpointInode{first: relative, stat: stat, found: 1}
+		return relative, false, nil
+	}
+	// Every path of one inode reports the same attributes; anything else means it changed during the walk.
+	if !sameInodeAttributes(inode.stat, stat) {
+		return "", false, ErrCheckpointUnsafe
+	}
+	inode.found++
+	return inode.first, true, nil
 }
 
 func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int) error {
 	if err := w.ctx.Err(); err != nil {
 		return checkpointIncomplete(err)
 	}
-	if depth > maxCheckpointDepth || w.entries >= w.request.entryCap() || name == "" || name == "." || name == ".." || len(name) > maxCheckpointNameBytes || len(relative) > 4096 || !utf8.ValidString(name) || strings.ContainsAny(name, "/\x00\r\n") || relative == checkpointManifestEntry {
+	if depth > maxCheckpointDepth || name == "" || name == "." || name == ".." || len(name) > maxCheckpointNameBytes || len(relative) > 4096 || !utf8.ValidString(name) || strings.ContainsAny(name, "/\x00\r\n") || relative == checkpointManifestEntry {
 		return ErrCheckpointUnsafe
 	}
 	var before unix.Stat_t
@@ -312,6 +371,9 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 	}
 	switch before.Mode & unix.S_IFMT {
 	case unix.S_IFDIR:
+		if w.entries >= w.request.entryCap() {
+			return ErrCheckpointUnsafe
+		}
 		if err := w.tar.WriteHeader(checkpointHeader(relative+"/", before, 0, tar.TypeDir)); err != nil {
 			return checkpointIncomplete(err)
 		}
@@ -340,7 +402,26 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 		}
 		return nil
 	case unix.S_IFREG:
-		if before.Nlink > 1 || before.Size < 0 || before.Size > w.request.MaxArchiveBytes-w.bytes {
+		if before.Nlink > 1 {
+			first, later, err := w.link(relative, before)
+			if err != nil {
+				return err
+			}
+			if later {
+				// Another path of an inode already written: a link entry carries no content and no inode.
+				if w.links >= w.request.entryCap() {
+					return ErrCheckpointUnsafe
+				}
+				header := checkpointHeader(relative, before, 0, tar.TypeLink)
+				header.Linkname = first
+				if err := w.tar.WriteHeader(header); err != nil {
+					return checkpointIncomplete(err)
+				}
+				w.links++
+				return nil
+			}
+		}
+		if w.entries >= w.request.entryCap() || before.Size < 0 || before.Size > w.request.MaxArchiveBytes-w.bytes {
 			return ErrCheckpointUnsafe
 		}
 		fd, err := unix.Openat(int(parent.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
@@ -393,7 +474,13 @@ func checkpointAfter(file *os.File, before unix.Stat_t) error {
 	return nil
 }
 
+// extraOwnerAllowed lets a test admit the owners an unprivileged test tree can have. It is nil in production.
+var extraOwnerAllowed func(uid, gid uint32) bool
+
 func checkpointOwnerAllowed(uid, gid uint32) bool {
+	if extra := extraOwnerAllowed; extra != nil && extra(uid, gid) {
+		return true
+	}
 	return (uid == 0 && (gid == 0 || gid == writeAccessGID)) ||
 		(uid == writeAccessGID && gid == writeAccessGID)
 }
@@ -484,8 +571,9 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		return zero, fmt.Errorf("%w: verify checkpoint manifest canonical", ErrCheckpointUnsafe)
 	}
 	seen := map[string]bool{}
+	regular := map[string]archiveRegular{}
 	last := ""
-	var entries, bytes int64
+	var entries, bytes, inodes, links int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return zero, err
@@ -496,8 +584,20 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		}
 		if err != nil || header.Name == "" || header.Name == checkpointManifestEntry || seen[header.Name] || header.Name < last ||
 			header.Name == "." || header.Name == ".." || strings.HasPrefix(header.Name, "/") || strings.Contains(header.Name, "\\") || path.Clean(strings.TrimSuffix(header.Name, "/")) != strings.TrimSuffix(header.Name, "/") ||
-			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || entries >= request.entryCap() {
+			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeLink) {
 			return zero, fmt.Errorf("%w: verify checkpoint entry path", ErrCheckpointUnsafe)
+		}
+		// Inodes and link entries are bounded apart, as the restore reader bounds them.
+		if header.Typeflag == tar.TypeLink {
+			if links >= request.entryCap() {
+				return zero, fmt.Errorf("%w: verify checkpoint link entries", ErrCheckpointUnsafe)
+			}
+			links++
+		} else {
+			if inodes >= request.entryCap() {
+				return zero, fmt.Errorf("%w: verify checkpoint entry path", ErrCheckpointUnsafe)
+			}
+			inodes++
 		}
 		if header.Typeflag == tar.TypeDir {
 			if header.Mode&(unix.S_ISUID|unix.S_ISVTX) != 0 ||
@@ -510,7 +610,11 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		if header.Uid < 0 || header.Gid < 0 || !checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) {
 			return zero, fmt.Errorf("%w: verify checkpoint entry owner", ErrCheckpointUnsafe)
 		}
-		if header.Typeflag == tar.TypeReg {
+		if header.Typeflag == tar.TypeLink {
+			if err := checkArchiveLink(header, regular); err != nil {
+				return zero, fmt.Errorf("%w: verify checkpoint link entry", ErrCheckpointUnsafe)
+			}
+		} else if header.Typeflag == tar.TypeReg {
 			if header.Size < 0 || header.Size > request.MaxArchiveBytes-bytes {
 				return zero, fmt.Errorf("%w: verify checkpoint entry size", ErrCheckpointUnsafe)
 			}
@@ -519,6 +623,7 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 				return zero, fmt.Errorf("%w: verify checkpoint entry content", ErrCheckpointUnsafe)
 			}
 			bytes += copied
+			regular[header.Name] = archiveRegular{mode: header.Mode, uid: header.Uid, gid: header.Gid}
 		} else if header.Size != 0 {
 			return zero, fmt.Errorf("%w: verify checkpoint entry directory size", ErrCheckpointUnsafe)
 		}

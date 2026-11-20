@@ -460,9 +460,39 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if err := os.Link(namespace+"/hello.txt", namespace+"/hard"); err != nil {
 		t.Fatal(err)
 	}
+	// A hard link inside the namespace is checkpointed as a link entry and restored with equal link counts.
 	unsafe.CheckpointID = nativeNamespace(502)
-	if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, unsafe); !errors.Is(err, ErrCheckpointUnsafe) {
-		t.Fatal("hard-linked checkpoint accepted", err)
+	linked, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, unsafe)
+	linkedSnapshot, linkedErr := linked.Snapshot()
+	if err != nil || linkedErr != nil {
+		t.Fatal("an in-namespace hard link was refused", errors.Join(err, linkedErr))
+	}
+	if err := os.Remove(namespace + "/hard"); err != nil {
+		t.Fatal(err)
+	}
+	linkedRestore := restoreRequest
+	linkedRestore.CheckpointID, linkedRestore.ManifestSHA256, linkedRestore.ArchiveBytes = unsafe.CheckpointID, linkedSnapshot.ManifestSHA256, linkedSnapshot.ArchiveBytes
+	if _, err := checkpointRoot.Restore(context.Background(), checkpointIdentity, root, expected, linkedRestore); err != nil {
+		t.Fatal("restore of a checkpoint with a hard link", err)
+	}
+	var hello, hard unix.Stat_t
+	if err := unix.Stat(namespace+"/hello.txt", &hello); err != nil || unix.Stat(namespace+"/hard", &hard) != nil ||
+		hello.Ino != hard.Ino || hello.Nlink != 2 {
+		t.Fatalf("the hard link did not survive the restore: %+v %+v", hello, hard)
+	}
+	// A link from outside the namespace is never checkpointed. XFS refuses such a link across project IDs
+	// (EXDEV); where the filesystem allows it, the walker must refuse.
+	outside := rootPath + "/outside-link"
+	if err := os.Link(namespace+"/hello.txt", outside); err == nil {
+		unsafe.CheckpointID = nativeNamespace(505)
+		if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, unsafe); !errors.Is(err, ErrCheckpointUnsafe) {
+			t.Fatal("a checkpoint with a link outside the namespace was accepted", err)
+		}
+		if err := os.Remove(outside); err != nil {
+			t.Fatal(err)
+		}
+	} else if !errors.Is(err, unix.EXDEV) {
+		t.Fatal("unexpected error linking across the namespace boundary", err)
 	}
 	t.Log("NATIVE_DATA_CHECKPOINT_VERIFIED")
 

@@ -102,12 +102,27 @@ func TestPackRefusesUnsafeTrees(t *testing.T) {
 			f.write(t, strings.Repeat("d/", 65)+"x", "x", 0644)
 		}, []string{"deeper than 64"}},
 		{"invalid utf-8", func(t *testing.T, f fixture) { f.write(t, "bad\xff\xfename", "x", 0644) }, []string{"UTF-8"}},
-		{"hard link", func(t *testing.T, f fixture) {
+		{"hard link outside the tree", func(t *testing.T, f fixture) {
+			f.write(t, "a", "x", 0644)
+			if err := os.Link(filepath.Join(f.from, "a"), filepath.Join(f.root, "elsewhere")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{"a", "hard link", "outside"}},
+		{"one of two hard links outside the tree", func(t *testing.T, f fixture) {
 			f.write(t, "a", "x", 0644)
 			if err := os.Link(filepath.Join(f.from, "a"), filepath.Join(f.from, "b")); err != nil {
 				t.Fatal(err)
 			}
-		}, []string{"hard link", "P2", "185"}},
+			if err := os.Link(filepath.Join(f.from, "a"), filepath.Join(f.root, "elsewhere")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{"hard link", "outside"}},
+		{"hard-linked schema marker", func(t *testing.T, f fixture) {
+			f.write(t, data.SchemaMarkerName, "1\n", 0644)
+			if err := os.Link(filepath.Join(f.from, data.SchemaMarkerName), filepath.Join(f.from, "marker-copy")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{data.SchemaMarkerName, "hard link"}},
 		{"name order", func(t *testing.T, f fixture) {
 			f.write(t, "a/inside", "x", 0644)
 			f.write(t, "a.txt", "x", 0644)
@@ -265,4 +280,62 @@ func TestPackRefusesAnUnsafeInboxOrName(t *testing.T) {
 	if _, err := Pack(context.Background(), Options{From: f.root, Out: filepath.Join(inbox, "self.tar"), Packer: "t"}); err == nil {
 		t.Fatal("a source containing the inbox was accepted")
 	}
+}
+
+func TestPackWritesInTreeHardLinksAsLinkEntries(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "data/part.bin", strings.Repeat("p", 3000), 0600)
+	f.write(t, "plain.txt", "plain", 0600)
+	for _, rel := range []string{"snapshots/1/part.bin", "snapshots/2/part.bin"} {
+		if err := os.MkdirAll(filepath.Join(f.from, filepath.Dir(rel)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(filepath.Join(f.from, "data/part.bin"), filepath.Join(f.from, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := f.pack(t, "seed.tar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 4 directories, 2 files and 2 link entries; content bytes are counted once.
+	if result.Entries != 8 || result.ContentBytes != 3000+5 {
+		t.Fatalf("counts: %+v", result)
+	}
+	file, err := os.Open(f.out("seed.tar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader := tar.NewReader(file)
+	_, _ = reader.Next()
+	links := map[string]string{}
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Typeflag == tar.TypeLink {
+			links[header.Name] = header.Linkname
+			if header.Size != 0 || header.Uid != 65532 || header.Gid != 65532 || header.Mode != data.ImportFileMode {
+				t.Fatalf("link entry %s: size=%d uid=%d gid=%d mode=%o", header.Name, header.Size, header.Uid, header.Gid, header.Mode)
+			}
+		}
+	}
+	if len(links) != 2 || links["snapshots/1/part.bin"] != "data/part.bin" || links["snapshots/2/part.bin"] != "data/part.bin" {
+		t.Fatalf("links: %v", links)
+	}
+	// The runner reader accepts the archive, including its link entries, and agrees with the manifest.
+	inspected, err := data.InspectImportArchive(context.Background(), file, 1000)
+	if err != nil || !inspectedMatches(inspected, result) {
+		t.Fatalf("inspect %+v %v", inspected, err)
+	}
+}
+
+func inspectedMatches(inspected data.ImportInboxArchive, result Result) bool {
+	return inspected.Found && inspected.Manifest.Entries == result.Entries && inspected.Manifest.Bytes == result.ContentBytes &&
+		inspected.Manifest.BodySHA256 == result.SHA256
 }
