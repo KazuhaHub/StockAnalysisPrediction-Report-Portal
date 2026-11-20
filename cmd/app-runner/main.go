@@ -14,12 +14,15 @@ import (
 	"os/signal"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/provision"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
 )
 
+const usageLine = "usage: app-runner <inspect-daemon|bootstrap|serve|provision-xfs-images>"
+
 func run(ctx context.Context, args []string, out io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "usage: app-runner <inspect-daemon|bootstrap|serve>")
+		fmt.Fprintln(out, usageLine)
 		return 2
 	}
 	switch args[0] {
@@ -29,8 +32,10 @@ func run(ctx context.Context, args []string, out io.Writer) int {
 		return bootstrap(ctx, args[1:], out)
 	case "serve":
 		return serve(ctx, args[1:], out)
+	case "provision-xfs-images":
+		return provisionXFSImages(ctx, args[1:], out, provision.SystemEnv)
 	default:
-		fmt.Fprintln(out, "usage: app-runner <inspect-daemon|bootstrap|serve>")
+		fmt.Fprintln(out, usageLine)
 		return 2
 	}
 }
