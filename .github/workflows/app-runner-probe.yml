@@ -28,9 +28,18 @@ concurrency:
   group: app-runner-probe-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  # Runs natively on amd64 and on arm64 (doc 182 phase P2, decision D9: native arm64 evidence before Apple
+  # Silicon guests are supported). The explicit name keeps the amd64 check's name unchanged.
   inspect-disposable-daemon:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    name: inspect-disposable-daemon${{ matrix.suffix }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, suffix: '' }
+          - { runner: ubuntu-24.04-arm, suffix: '-arm64' }
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -415,8 +424,15 @@ jobs:
   # limit. The doc 28 workload table itself stays in app-project-quota-probe.yml. The power-cut test needs a VM
   # and is not run here.
   provision-xfs-images:
-    runs-on: ubuntu-24.04
+    name: provision-xfs-images${{ matrix.suffix }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, suffix: '' }
+          - { runner: ubuntu-24.04-arm, suffix: '-arm64' }
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -554,6 +570,52 @@ jobs:
           test "$(grep -c 'attached image' "$work/reattach.log")" = 2
           sudo -n xfs_quota -x -c 'report -p -b -N' "$data_mount" | awk '$1 == "#4242" { found = 1; exit ($4 != 8192) } END { exit !found }'
           echo "::endgroup::"
+  # Doc 182 phase P2 / decision D9: the doc 28, 46 and 49 native workload (project quota, root identity, journal
+  # and transport on an owned XFS loop volume) executed natively on arm64. The amd64 evidence is
+  # app-project-quota-probe.yml, whose browser and image-delivery fixtures are amd64-only and are not repeated
+  # here; the doc 146 service workflow runs on arm64 in the inspect-disposable-daemon-arm64 leg above. Evidence,
+  # not a gate on its own: until this job has passed on arm64, Apple Silicon guests stay unsupported.
+  native-quota-evidence-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install ephemeral filesystem acceptance tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev iproute2 util-linux
+      - name: Build native probes and run the quota probe on the owned loop volume
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
+          GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-transport-native.test" ./internal/apprunner/transport
+          cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
+          "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT python3 scripts/acceptance/project_quota_probe.py \
+            --disposable-github-worker \
+            --native-binary "$RUNNER_TEMP/app-data-native.test" \
+            --abi-json "$RUNNER_TEMP/xfs-abi.json" \
+            --journal-binary "$RUNNER_TEMP/app-journal-native.test" \
+            --transport-binary "$RUNNER_TEMP/app-transport-native.test" | tee project-quota-evidence-arm64.json
+          test "$(jq -r .architecture project-quota-evidence-arm64.json)" = aarch64
+      - name: Preserve redacted arm64 enforcement evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: project-quota-evidence-arm64
+          path: project-quota-evidence-arm64.json
+          if-no-files-found: warn
+          retention-days: 14
   # Also runs, as root on a real daemon, the overlap checks that need privilege: a bind-backed local volume of a
   # namespace must conflict, and real bind mounts of the namespace, its parent and a descendant must be seen in
   # the mount table (TestBindMountAliasIsAnOverlap, which skips without root).
