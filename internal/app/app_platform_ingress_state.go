@@ -72,6 +72,8 @@ type platformIngressState struct {
 	clients       platformPublicLimiter
 	installations platformPublicLimiter
 	endpoints     platformPublicLimiter
+	// slots caps the concurrent session-less authority reads.
+	slots platformAuthoritySlots
 }
 
 // stopped is closed by shutdown; the summary loop ends on it.

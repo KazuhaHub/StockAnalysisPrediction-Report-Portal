@@ -78,6 +78,7 @@ func (s *Server) platformIngressDeclared(ctx context.Context, release string) (p
 // has learned even when it refuses (routeKnown), so the caller can apply the route's bounds first.
 func (s *Server) readPlatformIngressLight(ctx context.Context, installation, route, endpoint string) (platformIngressLight, error) {
 	light := platformIngressLight{installation: installation, route: route, endpoint: endpoint}
+	s.platformIngressReads.Add(1)
 	if !platformValidUUID(installation) || !appplatform.ValidIngressRouteID(route) || !appplatform.ValidIngressEndpoint(endpoint) {
 		return light, errPlatformIngressNotFound
 	}

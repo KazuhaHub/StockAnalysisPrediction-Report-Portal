@@ -170,7 +170,10 @@ type Server struct {
 	platformPublic platformPublicState
 	// platformPublicArchiveReads counts the verifications that read a stored release and its archive.
 	platformPublicArchiveReads atomic.Int64
-	platformPublicFetchHook    func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
+	// platformPublicLightReads and platformIngressReads count the session-less authority reads that ran.
+	platformPublicLightReads atomic.Int64
+	platformIngressReads     atomic.Int64
+	platformPublicFetchHook  func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
 
 	// platformIngress is the limiters, nonce cache and counters of authenticated inbound ingress
 	// (doc 180). platformIngressForwardHook replaces the runner forward in tests only.

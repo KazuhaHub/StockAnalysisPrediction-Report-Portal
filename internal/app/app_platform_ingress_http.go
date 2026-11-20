@@ -162,7 +162,15 @@ func (s *Server) ingressRequest(w http.ResponseWriter, r *http.Request) {
 	// 3. Authority without a session.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
+	// The read is the one thing here that costs the database, and anyone can ask for it: past a
+	// bounded number at once the overflow is refused, not queued.
+	if !s.platformIngress.slots.acquire() {
+		platformIngressReply(w, 503, `{"ok":false,"code":"unavailable"}`, 5)
+		s.recordPlatformIngress("", "", "busy")
+		return
+	}
 	light, err := s.readPlatformIngressLight(ctx, installation, route, endpoint)
+	s.platformIngress.slots.release()
 	// Once the route is a declared one of a granted installation its own bound applies, before any
 	// authentication work, whether or not the endpoint exists.
 	if light.routeKnown && len(body) > light.decl.BodyBytes {
@@ -207,18 +215,19 @@ func (s *Server) ingressRequest(w http.ResponseWriter, r *http.Request) {
 		platformIngressRefuse(w)
 		return
 	}
-	// 5. A nonce seen inside the window is a replay. Only an authenticated request reaches the cache.
-	if !s.platformIngress.claimNonce(installation, endpoint, appplatform.IngressDigest([]byte(nonce)), now) {
-		s.recordPlatformIngress(installation, endpoint, "replay")
-		platformIngressRefuse(w)
-		return
-	}
 	// The installation's budget is spent by authenticated requests only. Charged before authentication it
 	// would be keyed on an identifier anyone can put in a URL, and a few sources sending junk signatures
 	// could starve every real sender; what bounds the cost of junk is the per-client ceiling of step 2.
 	if !s.platformIngress.installations.allow("installation:"+installation, platformIngressInstallationPerMinute, time.Minute, now) {
 		platformIngressReply(w, 429, `{"ok":false,"code":"rate_limited"}`, 60)
 		s.recordPlatformIngress(installation, endpoint, "rate_installation")
+		return
+	}
+	// 5. A nonce seen inside the window is a replay. Only an authenticated request that the installation's
+	// budget has admitted reaches the cache, so a refused request never takes an entry.
+	if !s.platformIngress.claimNonce(installation, endpoint, appplatform.IngressDigest([]byte(nonce)), now) {
+		s.recordPlatformIngress(installation, endpoint, "replay")
+		platformIngressRefuse(w)
 		return
 	}
 	// 6. The endpoint's own ceiling, from the descriptor.
