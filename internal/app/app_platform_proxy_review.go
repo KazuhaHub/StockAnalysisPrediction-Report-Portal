@@ -6,30 +6,49 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
-// observePlatformProxy asks the runner whether it serves the proxy (PRPX0001) before any transaction, as the
-// capability policy review asks PRNT0001. A runner that does not, or that enforces other limits than this
-// Portal's, refuses the review: nothing is planned or granted against it.
-func (s *Server) observePlatformProxy(ctx context.Context, endpoint platformRuntimeEndpoint) (transport.ProxyProfile, error) {
-	var profile transport.ProxyProfile
+// observePlatformProxy asks the runner whether it serves the proxy (PRPX0002, then PRPX0001 for a runner that
+// predates pins) before any transaction, as the capability policy review asks PRNT0001. A runner that does not,
+// or that enforces other limits than this Portal's, refuses the review: nothing is planned or granted against
+// it.
+func (s *Server) observePlatformProxy(ctx context.Context, endpoint platformRuntimeEndpoint) (transport.ProxyRunnerState, error) {
+	var state transport.ProxyRunnerState
 	var err error
 	if s.platformObserveProxy != nil {
-		profile, err = s.platformObserveProxy(ctx, endpoint)
+		state, err = s.platformObserveProxy(ctx, endpoint)
 	} else {
-		profile, err = platformQueryProxy(ctx, endpoint)
+		state, err = platformQueryProxy(ctx, endpoint)
 	}
 	if err != nil {
-		return transport.ProxyProfile{}, err
+		return transport.ProxyRunnerState{}, err
 	}
-	if profile != transport.NewProxyProfile() {
-		return transport.ProxyProfile{}, transport.ErrProxyUnsupported
+	if state.Profile != transport.NewProxyProfile() {
+		return transport.ProxyRunnerState{}, transport.ErrProxyUnsupported
 	}
-	return profile, nil
+	return state, nil
+}
+
+// platformProxyPinsListed reports whether the runner serves pins and its allowlist holds every one of pins
+// exactly (host, address and port). A review never grants a pin the operator has not listed.
+func platformProxyPinsListed(state transport.ProxyRunnerState, pins []appplatform.ProxyPin) bool {
+	if len(pins) == 0 {
+		return true
+	}
+	if !state.PinsSupported {
+		return false
+	}
+	for _, p := range pins {
+		if !slices.Contains(state.Pins, p) {
+			return false
+		}
+	}
+	return true
 }
 
 // platformProxyRequest is what an administrator asks for: the hosts and the daily budget the grant should
@@ -39,7 +58,9 @@ type platformProxyRequest struct {
 	PolicyRevision       int64
 	PreviousPolicySHA256 string
 	Hosts                []string
-	DailyBytes           int64
+	// Pins are the pinned destinations (doc 186); none is the same as before pins existed.
+	Pins       []appplatform.ProxyPin
+	DailyBytes int64
 }
 
 // platformProxyFacts is what a review and its consume must agree on, read with the installation row locked.
@@ -145,6 +166,20 @@ func platformProxyHosts(hosts []string) ([]string, error) {
 	return sorted, nil
 }
 
+// platformProxyPins is a request's pins in canonical form: sorted by host, valid, each host once, at most
+// appplatform.MaxProxyPins. No pins is an empty, non-nil list.
+func platformProxyPins(pins []appplatform.ProxyPin) ([]appplatform.ProxyPin, error) {
+	if len(pins) > appplatform.MaxProxyPins {
+		return nil, errPlatformManagementInput
+	}
+	sorted := append([]appplatform.ProxyPin{}, pins...)
+	slices.SortFunc(sorted, func(a, b appplatform.ProxyPin) int { return strings.Compare(a.Host, b.Host) })
+	if !appplatform.ValidProxyPins(sorted) {
+		return nil, errPlatformManagementInput
+	}
+	return sorted, nil
+}
+
 type platformProxyResult struct {
 	ID, SHA256, JSON string
 	ExpiresMS        int64
@@ -160,17 +195,33 @@ func (s *Server) createPlatformProxyReview(ctx context.Context, session platform
 	if err != nil {
 		return result, err
 	}
-	withdraw := len(hosts) == 0
+	pins, err := platformProxyPins(req.Pins)
+	if err != nil {
+		return result, err
+	}
+	withdraw := len(hosts)+len(pins) == 0
 	if withdraw && req.DailyBytes != 0 || !withdraw && (req.DailyBytes < appplatform.ProxyDailyBytesMin || req.DailyBytes > appplatform.ProxyDailyBytesMax) {
 		return result, errPlatformManagementInput
 	}
+	if !withdraw {
+		// The policy itself must be valid (the bound on all entries, a pinned name that is also an exact
+		// host) before the runner is asked, so malformed input is an input error whatever the runner says.
+		if _, err := appplatform.NormalizeProxyPolicy(appplatform.ProxyPolicy{Hosts: hosts, Pins: pins, DailyBytes: req.DailyBytes}); err != nil {
+			return result, errPlatformManagementInput
+		}
+	}
 	// Withdrawing a grant is never refused for want of the runner: an old, offline or changed runner is no
 	// reason to leave a reviewed proxy on.
-	profile := transport.NewProxyProfile()
+	state := transport.ProxyRunnerState{Profile: transport.NewProxyProfile()}
 	if !withdraw {
 		var err error
-		if profile, err = s.observePlatformProxy(ctx, endpoint); err != nil {
+		if state, err = s.observePlatformProxy(ctx, endpoint); err != nil {
 			return result, err
+		}
+		// A pin is granted only when the operator has listed the exact destination: a runner without pin
+		// support, or one that lacks the entry, is as unsupported as a runner without the proxy.
+		if !platformProxyPinsListed(state, pins) {
+			return result, transport.ErrProxyUnsupported
 		}
 	}
 	err = s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
@@ -188,10 +239,10 @@ func (s *Server) createPlatformProxyReview(ctx context.Context, session platform
 		if err := f.validate(e, installation); err != nil && !withdraw {
 			return err
 		}
-		oldHosts, oldDaily := []string{}, appplatform.ProxyDailyBytesMax
+		oldHosts, oldPins, oldDaily := []string{}, []appplatform.ProxyPin{}, appplatform.ProxyDailyBytesMax
 		if f.granted {
 			if stored, err := appplatform.ParseProxyPolicy([]byte(f.stored)); err == nil {
-				oldHosts, oldDaily = stored.Policy.Hosts, stored.Policy.DailyBytes
+				oldHosts, oldPins, oldDaily = stored.Policy.Hosts, stored.Policy.Pins, stored.Policy.DailyBytes
 			}
 		}
 		policy := appplatform.EmptyProxyPolicyJSON
@@ -200,7 +251,7 @@ func (s *Server) createPlatformProxyReview(ctx context.Context, session platform
 				return errPlatformManagementInput
 			}
 		} else {
-			raw, err := appplatform.CanonicalProxyPolicy(appplatform.ProxyPolicy{Hosts: hosts, DailyBytes: req.DailyBytes})
+			raw, err := appplatform.CanonicalProxyPolicy(appplatform.ProxyPolicy{Hosts: hosts, Pins: pins, DailyBytes: req.DailyBytes})
 			if err != nil {
 				return errPlatformManagementInput
 			}
@@ -210,13 +261,15 @@ func (s *Server) createPlatformProxyReview(ctx context.Context, session platform
 			}
 		}
 		added, removed := platformProxyHostsDiff(oldHosts, hosts)
+		pinsAdded, pinsRemoved, pinsChanged := platformProxyPinsDiff(oldPins, pins)
 		plan := platformProxyPlan{
-			Format: platformProxyReviewFormat, InstallationID: installation, AppID: f.appID, PublisherID: f.publisherID,
+			Format: platformProxyReviewFormatPins, InstallationID: installation, AppID: f.appID, PublisherID: f.publisherID,
 			Generation: f.generation, InstallationRevision: f.revision, PolicyRevision: f.policyRevision, TrustRevision: f.trustRevision,
 			ControllerEpoch: f.epoch, ReleaseSHA256: f.release, Capability: platformProxyCapability,
 			PreviousPolicySHA256: req.PreviousPolicySHA256, Policy: policy, PolicySHA256: platformDigest([]byte(policy)),
 			HostsAdded: added, HostsRemoved: removed, DailyBytesOld: oldDaily, DailyBytesNew: req.DailyBytes,
-			Runner: profile, ActorAuthority: actor.authorityFingerprint,
+			Runner: state.Profile, ActorAuthority: actor.authorityFingerprint,
+			PinsAdded: pinsAdded, PinsRemoved: pinsRemoved, PinsChanged: pinsChanged, RunnerPins: append([]appplatform.ProxyPin{}, pins...),
 		}
 		raw, err := json.Marshal(plan)
 		if err != nil || len(raw) > 65536 {
@@ -262,7 +315,7 @@ func (s *Server) consumePlatformProxyReview(ctx context.Context, session platfor
 	}
 	// The runner is asked before the transaction. What it says matters unless the plan withdraws the grant,
 	// which is decided from the plan itself, below.
-	profile, observeErr := s.observePlatformProxy(ctx, endpoint)
+	state, observeErr := s.observePlatformProxy(ctx, endpoint)
 	err := s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
@@ -317,8 +370,13 @@ func (s *Server) consumePlatformProxyReview(ctx context.Context, session platfor
 			if observeErr != nil {
 				return observeErr
 			}
-			if plan.Runner != profile {
+			if plan.Runner != state.Profile {
 				return errAppPlatformPlanChanged
+			}
+			// Every pin of the plan must still be an entry of the runner's allowlist, exactly: an operator
+			// edit between the plan and the consume is a refusal, not a grant of a pin nobody lists.
+			if !platformProxyPinsListed(state, plan.RunnerPins) {
+				return transport.ErrProxyUnsupported
 			}
 		}
 		now := control.nowMS
@@ -367,6 +425,7 @@ func (s *Server) consumePlatformProxyReview(ctx context.Context, session platfor
 			"capability": platformProxyCapability, "plan_id": planID, "policy_revision": next,
 			"previous_policy_sha256": plan.PreviousPolicySHA256, "policy_sha256": plan.PolicySHA256,
 			"added": plan.HostsAdded, "removed": plan.HostsRemoved,
+			"pins_added": platformProxyPinLabels(plan.PinsAdded), "pins_removed": platformProxyPinLabels(plan.PinsRemoved), "pins_changed": platformProxyPinChangeRows(plan.PinsChanged),
 			"daily_bytes_old": plan.DailyBytesOld, "daily_bytes_new": plan.DailyBytesNew,
 		})
 		if err != nil {
@@ -383,4 +442,28 @@ func (s *Server) consumePlatformProxyReview(ctx context.Context, session platfor
 		return platformProxyChange{}, err
 	}
 	return result, nil
+}
+
+// platformProxyPinLabels writes each pin as "host → address:port" for the audit row; no pins is an empty list.
+func platformProxyPinLabels(pins []appplatform.ProxyPin) []string {
+	out := make([]string, 0, len(pins))
+	for _, p := range pins {
+		out = append(out, p.Label())
+	}
+	return out
+}
+
+// platformProxyPinChangeRows writes each changed pin as {host, old, new} with "address:port" for the audit row.
+func platformProxyPinChangeRows(changes []platformProxyPinChange) []platformProxyPinChangeRow {
+	out := make([]platformProxyPinChangeRow, 0, len(changes))
+	for _, c := range changes {
+		out = append(out, platformProxyPinChangeRow{Host: c.Host, Old: c.Old.Endpoint(), New: c.New.Endpoint()})
+	}
+	return out
+}
+
+type platformProxyPinChangeRow struct {
+	Host string `json:"host"`
+	Old  string `json:"old"`
+	New  string `json:"new"`
 }

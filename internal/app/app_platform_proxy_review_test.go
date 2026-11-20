@@ -45,16 +45,26 @@ type platformProxyRunner struct {
 	profile transport.ProxyProfile
 	err     error
 	asked   int
+	// pinsSupported and pins are what PRPX0002 answers (doc 186); a runner that predates pins has none.
+	pinsSupported bool
+	pins          []appplatform.ProxyPin
 }
 
-func (r *platformProxyRunner) observe(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error) {
+func (r *platformProxyRunner) observe(context.Context, platformRuntimeEndpoint) (transport.ProxyRunnerState, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.asked++
 	if r.err != nil {
-		return transport.ProxyProfile{}, r.err
+		return transport.ProxyRunnerState{}, r.err
 	}
-	return r.profile, nil
+	return transport.ProxyRunnerState{Profile: r.profile, PinsSupported: r.pinsSupported, Pins: append([]appplatform.ProxyPin{}, r.pins...)}, nil
+}
+
+// servePins makes the runner answer PRPX0002 with the allowlist pins.
+func (r *platformProxyRunner) servePins(pins ...appplatform.ProxyPin) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pinsSupported, r.pins = true, pins
 }
 
 func (r *platformProxyRunner) fail(err error) {

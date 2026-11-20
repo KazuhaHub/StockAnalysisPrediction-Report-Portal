@@ -64,6 +64,12 @@ func platformProxySeedPolicy(t *testing.T, s *Server, installation, policy strin
 			t.Fatal(err)
 		}
 		plan.HostsAdded, plan.DailyBytesNew = parsed.Policy.Hosts, parsed.Policy.DailyBytes
+		if len(parsed.Policy.Pins) > 0 {
+			// A policy with pins is backed by a 1-dev.2 plan (doc 186); one without keeps the 1-dev.1 plan.
+			plan.Format = platformProxyReviewFormatPins
+			plan.PinsAdded, plan.PinsRemoved, plan.PinsChanged = parsed.Policy.Pins, []appplatform.ProxyPin{}, []platformProxyPinChange{}
+			plan.RunnerPins = parsed.Policy.Pins
+		}
 	}
 	encoded, err := json.Marshal(plan)
 	if err != nil {

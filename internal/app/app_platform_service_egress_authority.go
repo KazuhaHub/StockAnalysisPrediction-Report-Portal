@@ -621,6 +621,9 @@ type platformServiceEgressSessionState struct {
 	resources []string
 	pin       platformServiceEgressPin
 	expiresMS int64
+	// proxy is the reviewed proxy policy the session carries, when network.proxy is one of its resources. The
+	// reports of the runner are read against it: a host that is pinned in it is annotated (doc 186).
+	proxy *appplatform.ParsedProxyPolicy
 }
 
 // loadServiceEgressForSession reads current authority for an open session and

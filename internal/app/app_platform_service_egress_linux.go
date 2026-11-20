@@ -18,8 +18,8 @@ func (platformServiceEgressRunner) Query(ctx context.Context, e platformRuntimeE
 	return transport.QueryControllerServiceEgress(ctx, e.path, e.controllerUID, e.controllerGID)
 }
 
-func (platformServiceEgressRunner) QueryProxy(ctx context.Context, e platformRuntimeEndpoint) (transport.ProxyProfile, error) {
-	return transport.QueryControllerProxy(ctx, e.path, e.controllerUID, e.controllerGID)
+func (platformServiceEgressRunner) QueryProxy(ctx context.Context, e platformRuntimeEndpoint) (transport.ProxyRunnerState, error) {
+	return transport.QueryControllerProxyState(ctx, e.path, e.controllerUID, e.controllerGID)
 }
 
 func (platformServiceEgressRunner) Open(ctx context.Context, e platformRuntimeEndpoint, raw, signature []byte, a control.Authority, descriptor []byte) (*transport.EgressMux, error) {
