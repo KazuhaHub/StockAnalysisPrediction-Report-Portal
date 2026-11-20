@@ -24,7 +24,7 @@ type platformServiceFacts struct {
 
 func serviceResourceCapability(resource string) bool {
 	switch resource {
-	case "reports.read", "storage.files", "network.http", "notifications.publish", "events.subscribe", "tasks.schedule", "files.export":
+	case "reports.read", "storage.files", "network.http", "notifications.publish", "events.subscribe", "tasks.schedule", "files.export", "secrets.use":
 		return true
 	default:
 		return false

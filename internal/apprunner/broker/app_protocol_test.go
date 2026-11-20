@@ -46,7 +46,14 @@ func TestBrokerProtocolClosedRequest(t *testing.T) {
 		strings.Replace(validBrokerRequest, `"requestId":"7d5c4d2e-1111-4222-8333-444455556666"`, `"requestId":"`+strings.Repeat("a", 65)+`"`, 1),
 		strings.Replace(validBrokerRequest, `"requestId":"7d5c4d2e-1111-4222-8333-444455556666"`, `"requestId":"a b"`, 1),
 		strings.Replace(validBrokerRequest, `"url":`, `"headers":{"Authorization":"x"},"url":`, 1),
-		strings.Replace(validBrokerRequest, `"url":`, `"credential":"c","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":"","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":"Upstream","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":"1up","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":"a_b","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":"`+strings.Repeat("a", 65)+`","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":null,"url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"credential":"c","credential":"c","url":`, 1),
+		strings.Replace(validBrokerRequest, `"url":`, `"Credential":"c","url":`, 1),
 		strings.Replace(validBrokerRequest, `"url":`, `"binding":{},"url":`, 1),
 		strings.Replace(validBrokerRequest, `"bodyBase64":"AP+ACg=="`, `"bodyBase64":"AP+ACg"`, 1),
 		strings.Replace(validBrokerRequest, `"bodyBase64":"AP+ACg=="`, `"bodyBase64":"AP-_Cg=="`, 1),
@@ -59,6 +66,22 @@ func TestBrokerProtocolClosedRequest(t *testing.T) {
 		got, err := DecodeAppHTTPRequest([]byte(raw))
 		if !errors.Is(err, ErrAppInvalid) || got.Method != "" || len(got.Body) != 0 {
 			t.Fatalf("case %d accepted or returned partial input: %v", i, err)
+		}
+	}
+}
+
+// A request may name one reviewed credential binding (doc 176). It is a name
+// only: the value, the header and the operation are Portal's to decide.
+func TestBrokerProtocolCredentialIsAnOptionalBindingName(t *testing.T) {
+	plain, err := DecodeAppHTTPRequest([]byte(validBrokerRequest))
+	if err != nil || plain.Credential != "" {
+		t.Fatal("a request without a credential carries one", err)
+	}
+	for _, name := range []string{"deepseek", "a", "dify-prod", "a0-b1", strings.Repeat("a", 64)} {
+		raw := strings.Replace(validBrokerRequest, `"url":`, `"credential":"`+name+`","url":`, 1)
+		got, err := DecodeAppHTTPRequest([]byte(raw))
+		if err != nil || got.Credential != name || got.Method != "POST" {
+			t.Fatal("credential", name, err)
 		}
 	}
 }

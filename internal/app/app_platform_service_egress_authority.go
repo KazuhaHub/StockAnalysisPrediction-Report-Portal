@@ -28,6 +28,9 @@ import (
 const (
 	platformServiceEgressNetwork = "network.http"
 	platformServiceEgressNotice  = "notifications.publish"
+	// platformServiceEgressSecrets lets a call of the session name one reviewed
+	// credential binding (doc 176). It is planned only beside network.http.
+	platformServiceEgressSecrets = "secrets.use"
 	// An admit is signed only while the session still has this long to run, so a
 	// command (30 s, the foreground lifetime) never outlives its assertion.
 	platformServiceEgressMinAdmitLeft = 31 * time.Second
@@ -72,12 +75,21 @@ type platformServiceEgressAuthority struct {
 	concurrency  int
 	identity     appplatform.ServiceIdentityGrant
 	history      *platformServiceBackendHistory
+	// binding is the service binding a credential call resolved to, and
+	// credentialName its name. credentialHeader and credentialValue are set only
+	// when the load was asked to open the value (an admit); the value is cleared
+	// by Close.
+	binding          platformSecretBindingUse
+	credentialName   string
+	credentialHeader string
+	credentialValue  []byte
 }
 
 func (a *platformServiceEgressAuthority) Close() {
 	if a == nil {
 		return
 	}
+	clear(a.credentialValue)
 	clear(a.controlSeed)
 	if a.history != nil {
 		a.history.Close()
@@ -113,6 +125,15 @@ type platformServiceEgressLoad struct {
 	identity  []byte
 	resources []string
 	history   bool
+	// credential names the binding the call uses, or is empty. It needs
+	// secrets.use in the session. The binding must be reviewed for the service
+	// and for exactly the current network policy, else the load is denied before
+	// any value is opened; decrypt then opens it (an admit; a check does not).
+	credential string
+	decrypt    bool
+	// admit, when set with a credential, is judged against the reviewed policy
+	// before the binding is resolved or opened.
+	admit *transport.EgressAdmit
 	// beforeCommit is a test seam: it runs with the transaction still open.
 	beforeCommit func()
 }
@@ -139,9 +160,15 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		}
 	}
 	for _, resource := range resources {
-		if resource != platformServiceEgressNetwork && resource != platformServiceEgressNotice {
+		if resource != platformServiceEgressNetwork && resource != platformServiceEgressNotice && resource != platformServiceEgressSecrets {
 			return zero, errPlatformServiceEgressUnavailable
 		}
+	}
+	if slices.Contains(resources, platformServiceEgressSecrets) && !slices.Contains(resources, platformServiceEgressNetwork) {
+		return zero, errPlatformServiceEgressUnavailable
+	}
+	if o.credential != "" && (!slices.Contains(resources, platformServiceEgressSecrets) || !platformSecretBindingNamePattern.MatchString(o.credential) || discover) {
+		return zero, errPlatformServiceEgressDenied
 	}
 	var identity appplatform.ServiceIdentityGrant
 	if len(o.identity) > 0 {
@@ -168,7 +195,7 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 	if discover {
 		rows, err := e.query(`SELECT capability FROM app_platform_capability_grants
 			WHERE installation_id=? AND granted=1
-			AND capability IN ('network.http','notifications.publish')
+			AND capability IN ('network.http','notifications.publish','secrets.use')
 			ORDER BY capability`, installation)
 		if err != nil {
 			return zero, errPlatformServiceEgressUnavailable
@@ -183,6 +210,10 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		}
 		err = rows.Err()
 		rows.Close()
+		// secrets.use is only ever planned beside network.http.
+		if !slices.Contains(resources, platformServiceEgressNetwork) {
+			resources = slices.DeleteFunc(resources, func(r string) bool { return r == platformServiceEgressSecrets })
+		}
 		if err != nil || len(resources) == 0 {
 			return zero, errPlatformServiceEgressUnavailable
 		}
@@ -232,6 +263,11 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		runtime: runtime, authority: platformRuntimeAuthority(runtime), controlSeed: seed,
 		concurrency: 1, identity: identity,
 	}
+	defer func() {
+		if failed {
+			clear(result.credentialValue)
+		}
+	}()
 	if slices.Contains(resources, platformServiceEgressNetwork) {
 		grant, err := loadPlatformNetworkGrantForIntent(e, installation, platformNetworkGrantTarget{
 			release: facts.release, generation: tuple.generation, policy: tuple.policy, runtime: runtime,
@@ -253,6 +289,11 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 			return zero, errPlatformServiceEgressUnavailable
 		}
 		result.grant, result.policy, result.concurrency = grant, parsed, parsed.Policy.Concurrency
+	}
+	if o.credential != "" {
+		if err := s.loadPlatformServiceEgressCredential(e, installation, o, &result); err != nil {
+			return zero, err
+		}
 	}
 	if o.history {
 		now, err := platformDatabaseNow(e)
@@ -282,6 +323,63 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 	}
 	failed = false
 	return result, nil
+}
+
+// loadPlatformServiceEgressCredential resolves the binding of one credential call
+// inside the authority transaction, with the same reading the foreground uses
+// (loadPlatformSecretBindingFacts and the binding's consumed review), for the
+// service principal. A binding that is unknown, revoked, awaiting review,
+// reviewed for the viewer only, or reviewed for another network policy is a
+// denial before anything is decrypted; a value that cannot be opened is
+// unavailable.
+func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation string, o platformServiceEgressLoad, result *platformServiceEgressAuthority) error {
+	if !slices.Contains(result.resources, platformServiceEgressSecrets) || !result.hasNetwork() {
+		return errPlatformServiceEgressDenied
+	}
+	// The destination comes first (doc 176 section 3.3): a call the reviewed
+	// policy does not allow is denied without the binding being looked at, and
+	// so never reaches the custody.
+	if o.admit != nil && (appplatform.ValidateHTTPPolicyTarget(result.policy.Policy, o.admit.Method, o.admit.URL) != nil ||
+		int64(o.admit.BodyBytes) > result.policy.Policy.RequestBytes) {
+		return errPlatformServiceEgressDenied
+	}
+	facts, err := loadPlatformSecretBindingFacts(e, installation, false)
+	if err != nil {
+		return errPlatformServiceEgressUnavailable
+	}
+	if facts.networkPolicySHA != result.policy.SHA256 {
+		return errPlatformServiceEgressDenied
+	}
+	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, o.credential, facts, platformPrincipalService)
+	if err != nil {
+		return platformServiceEgressCredentialError(err)
+	}
+	result.binding, result.credentialName = use, o.credential
+	if !o.decrypt {
+		return nil
+	}
+	plain, err := s.openPlatformCredentialValue(use.credentialID, use.credentialValueRevision, sealed)
+	if err != nil {
+		return errPlatformServiceEgressUnavailable
+	}
+	header, value, ok := platformSecretHeader(use.operation, plain)
+	clear(plain)
+	if !ok || header != use.header {
+		clear(value)
+		return errPlatformServiceEgressUnavailable
+	}
+	result.credentialHeader, result.credentialValue = header, value
+	return nil
+}
+
+// platformServiceEgressCredentialError says what a failed binding read means for
+// a call: an unknown, revoked, unreviewed, wrong-principal or wrong-target binding
+// is a denial; a failure of the store is unavailable and writes no denied row.
+func platformServiceEgressCredentialError(err error) error {
+	if errors.Is(err, errPlatformSecretBindingStore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return errPlatformServiceEgressUnavailable
+	}
+	return errPlatformServiceEgressDenied
 }
 
 // signServiceEgressSession signs the command that opens a session. The assertion
@@ -330,7 +428,8 @@ func platformServiceEgressActorScope(sessionID string) string {
 
 // signServiceEgressCommand signs one admitted call. The reviewed policy decides
 // (target, method, size) exactly as the runner will; the command carries a fresh
-// Portal-minted request id, no credential, and expires with the session at the
+// Portal-minted request id, the credential this authority opened for the admit's
+// binding (none when the admit names none), and expires with the session at the
 // latest. sessionExpiresMS is the session's own end.
 func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID string, admit transport.EgressAdmit, nowMS, sessionExpiresMS int64) (control.NetworkHTTPRequestCommand, []byte, []byte, error) {
 	var zero control.NetworkHTTPRequestCommand
@@ -343,6 +442,12 @@ func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID strin
 	if appplatform.ValidateHTTPPolicyTarget(a.policy.Policy, admit.Method, admit.URL) != nil ||
 		int64(admit.BodyBytes) > a.policy.Policy.RequestBytes {
 		return zero, nil, nil, errPlatformServiceEgressDenied
+	}
+	// A call carries a credential only when its admit named exactly the binding
+	// this authority resolved and opened.
+	if (admit.Credential != "") != (a.credentialName != "") || admit.Credential != a.credentialName ||
+		(admit.Credential != "" && (len(a.credentialValue) == 0 || a.credentialHeader == "")) {
+		return zero, nil, nil, errPlatformServiceEgressUnavailable
 	}
 	id, err := platformNewUUID()
 	if err != nil {
@@ -358,12 +463,14 @@ func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID strin
 		PolicyRaw: []byte(a.grant.policy), PolicySHA256: a.policy.SHA256,
 		Method: admit.Method, URL: admit.URL, Accept: admit.Accept, ContentType: admit.ContentType,
 		BodyBytes: strconv.Itoa(admit.BodyBytes), BodySHA256: admit.BodySHA256,
+		CredentialName: a.credentialName, CredentialHeader: a.credentialHeader, CredentialValue: bytes.Clone(a.credentialValue),
 		IssuedMS: strconv.FormatInt(nowMS, 10), ExpiresMS: strconv.FormatInt(nowMS+platformServiceEgressRequestMS, 10),
 	}
 	key := ed25519.NewKeyFromSeed(a.controlSeed)
 	defer clear(key)
 	raw, signature, err := control.SignNetworkHTTPRequest(c, key, a.authority, nowMS)
 	if err != nil {
+		clear(c.CredentialValue)
 		return zero, nil, nil, errPlatformServiceEgressDenied
 	}
 	return c, raw, signature, nil
@@ -389,7 +496,28 @@ type platformServiceEgressSessionState struct {
 // loadServiceEgressForSession reads current authority for an open session and
 // refuses unless it is still the one the session was opened against.
 func (s *Server) loadServiceEgressForSession(ctx context.Context, state platformServiceEgressSessionState) (platformServiceEgressAuthority, error) {
-	a, err := s.loadPlatformServiceEgressCurrent(ctx, state.pin.installation, platformServiceEgressLoad{identity: state.identity, resources: state.resources})
+	return s.loadServiceEgressForSessionCredential(ctx, state, "", false)
+}
+
+// loadServiceEgressForSessionCredential is that reading for a call that names a
+// credential binding (credential non-empty): see platformServiceEgressLoad.
+func (s *Server) loadServiceEgressForSessionCredential(ctx context.Context, state platformServiceEgressSessionState, credential string, decrypt bool) (platformServiceEgressAuthority, error) {
+	return s.loadServiceEgressForSessionLoad(ctx, state, platformServiceEgressLoad{credential: credential, decrypt: decrypt})
+}
+
+// loadServiceEgressForSessionAdmit is the admit's reading: a credential call has
+// its target judged first and its value opened last.
+func (s *Server) loadServiceEgressForSessionAdmit(ctx context.Context, state platformServiceEgressSessionState, admit transport.EgressAdmit) (platformServiceEgressAuthority, error) {
+	o := platformServiceEgressLoad{credential: admit.Credential, decrypt: admit.Credential != ""}
+	if admit.Credential != "" {
+		o.admit = &admit
+	}
+	return s.loadServiceEgressForSessionLoad(ctx, state, o)
+}
+
+func (s *Server) loadServiceEgressForSessionLoad(ctx context.Context, state platformServiceEgressSessionState, o platformServiceEgressLoad) (platformServiceEgressAuthority, error) {
+	o.identity, o.resources = state.identity, state.resources
+	a, err := s.loadPlatformServiceEgressCurrent(ctx, state.pin.installation, o)
 	if err != nil {
 		return a, err
 	}
@@ -404,25 +532,42 @@ func (s *Server) loadServiceEgressForSession(ctx context.Context, state platform
 // the whole authority load again (nothing is carried over from the admit) inside
 // the one-second budget of a check, and signs the proof only when the call's
 // command is still exactly what this authority would sign now. A refusal is the
-// absence of a proof: the caller withholds it.
-func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformServiceEgressSessionState, command control.NetworkHTTPRequestCommand, commandRaw []byte, challenge string) ([]byte, []byte, error) {
+// absence of a proof: the caller withholds it. binding is the binding the admit
+// resolved for a call that carries a credential (the zero value for one that does
+// not); the check resolves the binding again, without opening the value, and
+// refuses unless it is exactly that one: a revoked binding, a rotated or revoked
+// credential, a withdrawn service principal or a changed policy all differ.
+func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformServiceEgressSessionState, call platformServiceEgressCall, challenge string) ([]byte, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, platformServiceEgressCheckBudget)
 	defer cancel()
-	a, err := s.loadServiceEgressForSession(ctx, state)
+	command, binding := call.command, call.binding
+	if !call.consistent || (command.CredentialName != "") != (binding.id != "") {
+		return nil, nil, errPlatformServiceEgressDenied
+	}
+	a, err := s.loadServiceEgressForSessionCredential(ctx, state, command.CredentialName, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer a.Close()
 	now := time.Now().UnixMilli()
-	raw, err := marshalPlatformServiceEgressCommand(command)
-	if err != nil || !bytes.Equal(raw, commandRaw) || !a.hasNetwork() ||
+	// The call no longer holds the credential value. The fields are validated as
+	// signed, with a stand-in of the right shape for the value, which the
+	// metadata validation only requires to be present.
+	checked := command
+	if call.credentialHeader != "" {
+		checked.CredentialValue = []byte("Bearer x")
+		if call.credentialHeader != "Authorization" {
+			checked.CredentialValue = []byte("x")
+		}
+	}
+	if !a.hasNetwork() ||
 		command.InstallationID != a.installation ||
 		command.ActorScope != platformServiceEgressActorScope(state.sessionID) ||
 		command.ReviewPlanID != a.grant.review || command.PolicySHA256 != a.policy.SHA256 ||
-		command.CredentialName != "" || len(command.CredentialValue) != 0 ||
+		a.binding != binding || command.CredentialHeader != binding.header || (binding.id == "") != (call.credentialHeader == "") ||
 		command.Generation != a.facts.generation || command.PolicyRevision != a.facts.policyRevision ||
 		command.ReleaseSHA256 != a.facts.release ||
-		control.ValidateNetworkHTTPRequestMetadata(command, a.authority, now) != nil {
+		control.ValidateNetworkHTTPRequestMetadata(checked, a.authority, now) != nil {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
 	if expires, err := strconv.ParseInt(command.ExpiresMS, 10, 64); err != nil || expires > state.expiresMS {
@@ -430,14 +575,37 @@ func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformSe
 	}
 	key := ed25519.NewKeyFromSeed(a.controlSeed)
 	defer clear(key)
-	proof, signature, err := control.SignNetworkHTTPCheck(command, challenge, key, a.authority, now)
+	expires, _ := strconv.ParseInt(command.ExpiresMS, 10, 64)
+	proof, signature, err := control.SignNetworkHTTPCheckDigest(call.sha, challenge, expires, key, now)
 	if err != nil || ctx.Err() != nil {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
-	if control.VerifyNetworkHTTPCheck(command, challenge, proof, signature, a.authority, time.Now().UnixMilli()) != nil {
-		return nil, nil, errPlatformServiceEgressDenied
-	}
 	return proof, signature, nil
+}
+
+// platformServiceEgressCall is what a call keeps of its signed command once the
+// command has been sent: the fields the checks compare and the digest the proofs
+// bind, never the credential value and never the signed bytes (which carry it).
+type platformServiceEgressCall struct {
+	command control.NetworkHTTPRequestCommand // CredentialValue is always nil
+	sha     string
+	binding platformSecretBindingUse
+	// credentialHeader is the header the value was placed in, or "".
+	credentialHeader string
+	// consistent is whether the command's fields are exactly the signed bytes.
+	consistent bool
+}
+
+// newPlatformServiceEgressCall keeps the fields and the digest of a signed
+// command. It copies; the caller wipes its own command and bytes.
+func newPlatformServiceEgressCall(command control.NetworkHTTPRequestCommand, raw []byte, binding platformSecretBindingUse) platformServiceEgressCall {
+	kept := command
+	kept.PolicyRaw = bytes.Clone(command.PolicyRaw)
+	kept.CredentialValue = nil
+	again, err := marshalPlatformServiceEgressCommand(command)
+	consistent := err == nil && bytes.Equal(again, raw)
+	clear(again)
+	return platformServiceEgressCall{command: kept, sha: platformDigest(raw), binding: binding, credentialHeader: command.CredentialHeader, consistent: consistent}
 }
 
 func marshalPlatformServiceEgressCommand(c control.NetworkHTTPRequestCommand) ([]byte, error) {

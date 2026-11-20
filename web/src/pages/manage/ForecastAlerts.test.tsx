@@ -169,7 +169,9 @@ describe('ForecastAlerts', () => {
   })
 
   it('shows a successful test as verified', async () => {
-    show({ alerts: { email_to: 'ops@example.com', has_slack: false, test_ok_at: '2026-10-20T08:00:00Z' } })
+    // A test counts for 30 days, so the fixture is dated relative to now rather than to a fixed day.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60_000).toISOString()
+    show({ alerts: { email_to: 'ops@example.com', has_slack: false, test_ok_at: yesterday } })
     expect(screen.getByText(/forecast\.alert\.verifiedAt/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'forecast.alert.test' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/forecast/alert-test', {}))

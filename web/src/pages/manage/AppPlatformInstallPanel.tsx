@@ -293,6 +293,7 @@ export default function AppPlatformInstallPanel() {
   const grants = (capability: string) => grantsCapabilities && !declined.includes(capability) &&
     (reviewRelease?.required_capabilities?.includes(capability) || reviewRelease?.optional_capabilities?.includes(capability)) === true
   const backgroundNetwork = grants('background.run') && grants('network.http')
+  const backgroundCredentials = grants('background.run') && grants('secrets.use')
   const lifecycleTitle = review?.review.action === 'update'
     ? 'appPlatform.confirmUpdateTitle'
     : review?.review.action === 'disable'
@@ -364,6 +365,7 @@ export default function AppPlatformInstallPanel() {
           { key: 'optionalPermissions', label: t('appPlatform.optionalPermissions'), children: permissionList(reviewRelease?.optional_capabilities) },
           ...(declined.length ? [{ key: 'declinedPermissions', label: t('appPlatform.declinedPermissions'), children: permissionList(declined) }] : []),
           ...(backgroundNetwork ? [{ key: 'backgroundNetwork', label: t('appPlatform.backgroundNetwork'), children: t('appPlatform.backgroundNetworkNote') }] : []),
+          ...(backgroundCredentials ? [{ key: 'backgroundCredentials', label: t('appPlatform.backgroundCredentials'), children: t('appPlatform.backgroundCredentialsNote') }] : []),
           ...(updateDiff ? [{ key: 'permissionChanges', label: t('appPlatform.permissionDiffLabel'), children: t('appPlatform.permissionDiff', { added: permissionList(updateDiff.added), removed: permissionList(updateDiff.removed) }) }] : []),
         ]),
         { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : disableReview ? t('appPlatform.disableDataRetained') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : enableReview ? t('appPlatform.enableDataRetained') : t('appPlatform.noData') },

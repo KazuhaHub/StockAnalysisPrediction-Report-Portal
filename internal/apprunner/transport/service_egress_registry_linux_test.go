@@ -106,6 +106,8 @@ type egrFixture struct {
 	peerOK                           atomic.Bool
 	policy                           appplatform.HTTPPolicy
 	executed                         atomic.Int32
+	// lastRaw is the signed command bytes the last background call was handed.
+	lastRaw atomic.Value
 	// bindHook, when set, runs inside every bind (a place a racing close can land).
 	bindHook func(listen bool)
 }
@@ -168,6 +170,7 @@ type egrBackgroundHook func(ctx context.Context, c control.NetworkHTTPRequestCom
 var egrHooks sync.Map // *egrFixture -> egrBackgroundHook
 
 func (b egrBackground) DoBackground(ctx context.Context, raw, sig, body []byte, a control.Authority) (broker.HTTPResponse, error) {
+	b.f.lastRaw.Store(raw)
 	v, err := control.VerifyNetworkHTTPRequest(raw, sig, a, time.Now().UnixMilli())
 	if err != nil || control.ValidateNetworkHTTPBody(v, body) != nil {
 		return broker.HTTPResponse{}, broker.ErrDenied
