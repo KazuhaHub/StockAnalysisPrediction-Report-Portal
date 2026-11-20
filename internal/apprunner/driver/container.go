@@ -350,6 +350,13 @@ func validContainerPlanUncached(plan containerPlan) bool {
 	return err == nil && policySHA == containerHash(policy)
 }
 
+// The proxy environment of a container whose release declares network.proxy.
+const (
+	appContainerProxyListen = "127.0.0.1:3128"
+	appContainerProxyURL    = "http://" + appContainerProxyListen
+	appContainerNoProxy     = "127.0.0.1,localhost"
+)
+
 // planCandidateContainer fixes the Docker create policy from a parsed descriptor
 // and inspected native image. All mount sources derive from infrastructure roots
 // and platform IDs, never manifest paths. Candidate data is read-only; only its
@@ -383,6 +390,18 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	limits := parsed.Manifest.Backend.Resources
 	request := containerCreate{Image: image.ImageID, User: "65532:65532", Hostname: "app", WorkingDir: "/", NetworkDisabled: true,
 		Env: []string{"PORTAL_APP_HTTP_SOCKET=/run/portal-app/http/app.sock", "PORTAL_APP_BROKER_SOCKET=/run/portal-app/broker/broker.sock"}, Labels: ownerContainerLabels(owner), StopSignal: "SIGTERM", StopTimeout: 10}
+	// An app that declares network.proxy (doc 184) gets the proxy variables whether or not the
+	// capability is granted yet, so granting and withdrawing need no restart; without a grant every
+	// CONNECT is refused. The forwarder listens on the container's own loopback, so the container
+	// still has no network. HTTP_PROXY is never set: plain HTTP stays refused.
+	for _, name := range parsed.Manifest.Capabilities.Optional {
+		if name == appplatform.ProxyCapability {
+			request.Env = append(request.Env,
+				"HTTPS_PROXY="+appContainerProxyURL, "https_proxy="+appContainerProxyURL,
+				"NO_PROXY="+appContainerNoProxy, "no_proxy="+appContainerNoProxy,
+				"PORTAL_APP_PROXY_LISTEN="+appContainerProxyListen)
+		}
+	}
 	request.Healthcheck.Test = []string{"NONE"}
 	h := &request.HostConfig
 	h.NetworkMode = "none"
