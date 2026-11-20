@@ -5,7 +5,7 @@ Status: Proposed 2026-11-20. This document changes no code, schema or contract. 
 - [184](184-reviewed-forward-proxy.md): the reviewed forward proxy, its policy, broker steps, limits and refusal codes;
 - [175](175-reviewed-multi-origin-and-private-network.md): the address guard and the operator-owned private-network allowlist (decision 3).
 
-Related: [174](174-background-broker-egress.md), [182](182-cross-platform-backend-runtime.md).
+Related: [174](174-background-broker-egress.md), [182](182-cross-platform-backend-runtime.md), 187 (draft: app-runner as a Compose service).
 
 Evidence is against `main` at `bcb7c03a`.
 
@@ -21,7 +21,7 @@ What is needed is a narrow exception: one reviewed name, one destination chosen 
 
 ## 2. Proposal in one paragraph
 
-**What gets granted.** The proxy policy gains a list of **pinned entries**. Each maps one exact host name, always reached by the app on port 443, to one address and port: `quotes.internal.anchan.kazuhahub.com` → `127.0.0.1:20443`. A Portal administrator sets entries per installation in the existing proxy review. The address and port must be one the host operator permits in the runner's root-owned configuration (a new `proxy_pins` block, the 175 decision-3 model). The descriptor may only suggest the name, through the existing `network_proxy.hosts`.
+**What gets granted.** The proxy policy gains a list of **pinned entries**. Each maps one exact host name, always reached by the app on port 443, to one address and port: `quotes.internal.anchan.kazuhahub.com` → `127.0.0.1:20443`. A Portal administrator sets entries per installation in the existing proxy review. The same name, address and port must be one the host operator permits in the runner's root-owned configuration: a new `proxy_pins` block, following the 175 decision-3 model. The operator thus approves a destination, not only a socket. The descriptor may only suggest the name, through the existing `network_proxy.hosts`.
 
 **What the broker does.** For a CONNECT whose host equals a pinned name, the broker does not resolve the name. It checks the pin against the operator allowlist and a fixed denied set (section 6), and dials the pinned address. `publicAddress` and `onHost` are skipped for that entry only.
 
@@ -29,17 +29,23 @@ What is needed is a narrow exception: one reviewed name, one destination chosen 
 
 ## 3. Where the broker dials from
 
-- **The broker runs in the runner's process.** The runner is a host systemd service running as root with no network isolation (`deploy/app-runner/portal-app-runner.service`: no `PrivateNetwork=` and no `NetworkNamespacePath=`). Proxy tunnels are dialled by `ProxyRunner.Dial` in that process (`proxy.go:126-132`).
-- **So `127.0.0.1` is the host's loopback**, and a bridge gateway (`172.17.0.1`) is the host's own address on that bridge. The app's container (`NetworkMode` `none`) never sees either address. It only names the host.
-- **The runner never runs in a container.** It needs the Docker socket, root and the XFS mounts (182 §2), so there is no container namespace to account for.
+- **The broker runs in the runner's process.** Proxy tunnels are dialled by `ProxyRunner.Dial` in that process (`proxy.go:126-132`), so a pin is reached from whatever network namespace the runner is in.
+- **Systemd deployment.** The shipped unit runs the runner as root with no network isolation (`deploy/app-runner/portal-app-runner.service`: no `PrivateNetwork=` and no `NetworkNamespacePath=`). It is in the host namespace.
+- **Compose deployment.** Draft doc 187 runs app-runner as a Compose service. Pins have one precondition there: the service uses `network_mode: host`. In its own bridge namespace, `127.0.0.1` would be the container's loopback, and a pin would reach nothing or the wrong thing.
+- **Check: pins only in the host network namespace.** The runner already identifies the dockerd on the other end of its Docker socket and compares that process's namespaces with its own (`internal/apprunner/driver/daemon_peer_linux.go:67-74`, `sharesNetworkNamespace`, which compares `/proc/<pid>/ns/net` with `/proc/self/ns/net`). dockerd runs in the host namespace, so it is the reference.
+  - When `proxy_pins` is not empty, the runner requires that check to pass at start, and repeats it on every Docker connection it already vets.
+  - If the namespaces differ, or the dockerd's `/proc/<pid>/ns/net` cannot be read (for example a container without `pid: host`), the runner refuses to start with `proxy_pins_netns`. It fails closed.
+  - 187 must keep a host-namespace reference that this check can use. If it changes the daemon-peer check, it states what replaces it here.
+- **Configuration file in a container.** `readPrivateConfig` (`internal/apprunner/service/config.go:116-127`) requires a regular file with mode `0600` or tighter, owned by the effective user, in a directory that is not a symlink. It must still hold through the Compose bind mount: root-owned on the host, mounted read-only, and the runner running as root. Otherwise the runner refuses its configuration, and so its pins.
+- **So, in the host namespace, `127.0.0.1` is the host's loopback**, and a bridge gateway (`172.17.0.1`) is the host's own address on that bridge. The app's container (`NetworkMode` `none`) never sees either address. It only names the host.
 - **In a 182 M1 deployment** (the whole stack in a Linux VM), the runner runs in the VM. Loopback is then the VM's own, and reaching a service on the physical host means pinning the address of the host as seen from the VM. That is an ordinary private address, so the operator allowlist has to name it.
-- **anchan.** The app platform is not deployed there yet. Before the first entry is reviewed, the deploy must confirm that the runner runs from the shipped unit, in the host namespace.
 
 ## 4. Threat model
 
 | Threat | Control |
 |---|---|
-| A Portal administrator alone opens the host's loopback or the LAN | A pin must lie in the operator's `proxy_pins` allowlist (exact address and port) in the root-owned runner configuration. Portal can only select inside it, as in 175 decision 3 |
+| A Portal administrator alone opens the host's loopback or the LAN, or reuses an operator socket under another name | A pin must equal an entry of the operator's `proxy_pins` allowlist (exact host, address and port) in the root-owned runner configuration. Portal can only select one, as in 175 decision 3 |
+| Pins dialled from the wrong network namespace | Non-empty `proxy_pins` requires the runner to share dockerd's network namespace, checked at start and on each vetted Docker connection (section 3) |
 | The app or its descriptor sets a destination | Pins come only from a consumed administrator review. The descriptor carries names only, and no descriptor field holds an address |
 | Pin to metadata, link-local, multicast or an embedded-IPv4 form | A fixed denied set (section 6) is checked at runner start, at review, at session apply and at every dial. It cannot be configured away |
 | DNS rebinding of a pinned name | A pinned name is never resolved, so no answer can move it |
@@ -66,10 +72,11 @@ What is needed is a narrow exception: one reviewed name, one destination chosen 
 The JSON runner configuration (`internal/apprunner/service/config.go`, beside `private_networks` at `:62`) gains an optional block:
 
 ```json
-"proxy_pins": [{"address": "127.0.0.1", "ports": [20443]}]
+"proxy_pins": [{"host": "quotes.internal.anchan.kazuhahub.com", "address": "127.0.0.1", "port": 20443}]
 ```
 
-- **Bounds.** At most 16 addresses, each with 1 to 16 sorted, unique ports. Addresses are exact, never prefixes. Each must pass section 6, or the runner refuses to start.
+- **Entries.** Each entry is a full destination with the same field rules as a pinned entry (section 5.1). A Portal pin must equal one entry exactly, so an operator who opens `127.0.0.1:20443` for the quotes name has not opened it for any other name.
+- **Bounds.** At most 16 entries, sorted by `(host, address, port)` and unique. Addresses are exact, never prefixes. Each address must pass section 6, and the network-namespace check of section 3 must pass, or the runner refuses to start.
 - **Absent or empty** means no pin can be granted or dialled.
 - **Changes.** Changing the block needs a runner restart, as `private_networks` does.
 - **Advertising.** The runner advertises the block in its proxy profile (section 5.4). Portal shows it in the review dialog as the only choices.
@@ -85,19 +92,37 @@ When a policy has at least one pin, it is `portal.proxy-policy/1-dev.2`:
 ```
 
 - **Without pins.** A policy without pins keeps `1-dev.1` and its exact encoding. Existing grants, digests and sessions are therefore unchanged, and a runner that predates pins still serves them.
-- **Parsing.** `ParseProxyPolicy` accepts both formats, each only in its exact canonical form.
-- **Hosts.** `hosts` may be empty when `pins` is not. A policy needs at least one of the two.
+- **Type.** `ProxyPolicy` gains `Pins []ProxyPin`.
+- **Normalising.** `NormalizeProxyPolicy` changes its first test from `len(p.Hosts) < 1` to `len(p.Hosts)+len(p.Pins) < 1`. It checks the pins (section 5.1) and the combined bound of 64, and returns `Hosts` as a non-nil slice.
+- **Encoding.** `CanonicalProxyPolicy` writes 1-dev.1 when `Pins` is empty and 1-dev.2 otherwise. A pins-only policy canonicalises to `"hosts":[]`, never `null` and never with the key omitted.
+- **Parsing.** `ParseProxyPolicy` dispatches on `format`. It still rejects a nil `hosts`, which keeps `"hosts":[]` the one spelling. It rejects `pins` in 1-dev.1, and an absent or empty `pins` in 1-dev.2. In either format it accepts only bytes equal to the canonical re-encoding.
 - **Matching.** `Match` covers ordinary entries. A new `Pin(host)` returns the pinned entry for an exact name.
 
 ### 5.4 Session command and runner profile
 
 - **Session.** The session command keeps `portal.service-egress-session/1-dev.2`. The `proxy` block already carries the canonical policy text and its digest (`control/service_egress.go:34-50`), so pins travel inside it, signed, and add no new field. `validateServiceEgressProxy` accepts either policy format.
-- **Profile.** The proxy profile becomes `portal.runner.proxy-profile/1-dev.2`. It keeps every 1-dev.1 field and adds:
-  - `policy_formats`: both formats;
-  - `pins`: the canonical operator allowlist;
-  - `pins_sha256`: the digest of that allowlist.
-- **Old runners.** Portal accepts a 1-dev.1 answer for a policy without pins.
-- **Plan and consume.** Both refuse a policy with pins (409, `app_platform_runner_unsupported`) unless the runner answers 1-dev.2 and lists every pin.
+**A new query; the old one is unchanged.**
+- **The old query.** `PRPX0001`/`PRPY0001` keeps answering exactly `portal.runner.proxy-profile/1-dev.1`, byte for byte as today, whatever `proxy_pins` holds. An old Portal's `ParseProxyProfile` (`transport/proxy_profile.go:72-83`) and its equality with `NewProxyProfile()` therefore keep passing after the runner is upgraded. Without this, upgrading the runner before Portal would make `runnerServesProxy` false and silently drop every proxy grant.
+- **The new query.** A new pair, `PRPX0002`/`PRPY0002`, answers `portal.runner.proxy-profile/1-dev.2`:
+  - `fixed`: the exact 1-dev.1 profile object;
+  - `pins`: the canonical operator allowlist.
+- **How a new Portal asks.** It asks `PRPX0002` first. A runner that closes at the unknown magic predates pins, and Portal then asks `PRPX0001`. Any other failure is not "unsupported" (184 §14 item 8).
+- **No upgrade order is needed.** The runner and Portal can be upgraded in either order.
+- **Size.** `maxProxyProfileBytes` (`proxy_profile.go:26`, 1024) applies to `PRPY0001`. `PRPY0002` gets its own cap of 8,192 bytes. The largest valid profile is about 5.6 KB: 16 entries with 253-byte names and a full-length IPv6 address, plus the fixed part, so 8 KiB leaves a margin.
+
+**Comparison: split the fixed limits from the pins.**
+- **Fixed part.** It is still compared with the constant `transport.NewProxyProfile()`:
+  - in `runnerServesProxy`;
+  - in `observePlatformProxy` (`app_platform_proxy_review.go:18`);
+  - in `parsePlatformProxyPlan` (`app_platform_proxy.go:78`).
+
+  A plan's `runner` field stays exactly that 1-dev.1 struct, in both plan formats.
+- **Pins.** A 1-dev.2 plan adds `runner_pins`: the operator entries its own pins use, one per pin, equal to them. It never holds the whole operator list and no digest of it.
+  - **At plan and consume:** every pin must be in the runner's current `pins`. Otherwise the answer is 409, `app_platform_runner_unsupported`.
+  - **At session open:** the coordinator checks the same thing. A pin the operator has since removed is reported on the console as not permitted by the runner. The session still carries the reviewed policy, and the broker refuses that pin as `address_denied` (section 5.5).
+- **Result.** An operator edit to `proxy_pins` cannot invalidate a grant without pins, because nothing in its plan or session refers to the operator list. A pinned grant stays bound to the exact entries it was reviewed against.
+- **Plan lookup across formats.** `platformProxyPlanPattern()` (`app_platform_proxy.go:96-98`) becomes `{"format":"portal.proxy-policy-review/1-dev.%`, which matches both plan formats. `parsePlatformProxyPlan` accepts either format exactly, so the exact parse still decides. `loadPlatformLatestProxyPlan` keeps ordering by `policy_revision DESC`, so a 1-dev.2 plan consumed after a 1-dev.1 plan is the one read.
+- **Runner without pin support.** Plan and consume refuse a policy with pins (409) unless the runner answers `PRPY0002`.
 - **Downgrades.** If a runner is downgraded after a pinned policy is consumed, the coordinator opens the session without the proxy, as 184 §14 item 8 already does for a runner that answers other limits.
 
 ### 5.5 Broker steps (184 §5.5, changed steps only)
@@ -108,7 +133,7 @@ When a policy has at least one pin, it is `portal.proxy-policy/1-dev.2`:
    - Otherwise `Match` decides as today.
    - The CONNECT port must still be 443 (`port_not_permitted`).
 3. **Pin check instead of resolution.** For a pinned tunnel, the broker resolves nothing. It refuses the stream as `address_denied` if either holds:
-   - the address and port are not in the runner's current `proxy_pins`;
+   - the pinned entry `(host, address, port)` does not equal an entry of the runner's current `proxy_pins`;
    - the address fails section 6.
 
    `publicAddress` and `onHost` are not applied.
@@ -136,11 +161,11 @@ Adding, changing or removing a pin therefore takes effect within one session ren
 
 ## 6. Addresses never pinnable
 
-A pinned address must be **positively** one of:
-- IPv4 unicast;
-- `::1`;
-- inside `fc00::/7`;
-- inside `2000::/3`.
+A pinned address must be **positively** one of the following. Go's `IsGlobalUnicast` is not used, because it excludes loopback.
+- **IPv4 unicast:** `Is4()`, not an IPv4-mapped form, and outside `224.0.0.0/4` and `240.0.0.0/4`. The second range covers `255.255.255.255`.
+- `::1`.
+- An address inside `fc00::/7`.
+- An address inside `2000::/3`.
 
 It must also lie **outside** every range below. The rule is checked:
 - at runner start, for `proxy_pins`;
@@ -148,12 +173,17 @@ It must also lie **outside** every range below. The rule is checked:
 - at session apply;
 - at every dial.
 
-The set is `appplatform.AlwaysDenied` with exactly loopback removed (Q2), plus the metadata addresses. It becomes a new function, `appplatform.PinDenied`.
+The set has three parts:
+- `appplatform.AlwaysDenied`, which already contains both metadata addresses, `100.100.100.200` and `fd20:ce::254`;
+- with exactly loopback removed (Q2);
+- with two IPv4 additions that `AlwaysDenied` does not cover because `network.http` reaches them through `publicAddress` instead.
+
+It becomes a new function, `appplatform.PinDenied`.
 
 | Family | Denied |
 |---|---|
-| IPv4 | `0.0.0.0/8`, `169.254.0.0/16` (link-local, AWS/Azure/GCP metadata), `224.0.0.0/4`, `240.0.0.0/4` (incl. `255.255.255.255`), `100.100.100.200/32` (Aliyun metadata) |
-| IPv6 | `::/128`, `fe80::/10`, `ff00::/8`, `::ffff:0:0/96` (IPv4-mapped; refused as written), `64:ff9b::/96`, `64:ff9b:1::/48` (NAT64), `2002::/16` (6to4), `2001::/32` (Teredo), `fd00:ec2::254/128` (AWS metadata), `fd20:ce::254/128` (GCP metadata) |
+| IPv4 | `0.0.0.0/8`; `169.254.0.0/16` (link-local, including AWS, Azure and GCP metadata); `224.0.0.0/4`; `240.0.0.0/4`; `100.100.100.200/32` (Aliyun metadata); added: `192.0.0.0/24` (IETF protocol assignments, including Oracle metadata `192.0.0.192`) and `168.63.129.16/32` (Azure WireServer) |
+| IPv6 | `::/128`; `fe80::/10`; `ff00::/8`; `::ffff:0:0/96` (IPv4-mapped, refused as written); `64:ff9b::/96` and `64:ff9b:1::/48` (NAT64); `2002::/16` (6to4); `2001::/32` (Teredo); `fd00:ec2::254/128` (AWS metadata); `fd20:ce::254/128` (GCP metadata) |
 
 - **Loopback.** Of `AlwaysDenied`, only `127.0.0.0/8` and `::1/128` are released, and only for pins. `AlwaysDenied` itself, `network.http` and ordinary proxy hosts are unchanged.
 - **Other non-public ranges.** RFC 1918, `100.64.0.0/10` (tailnet) and bridge addresses are not denied for pins, but each needs an explicit operator allowlist entry.
@@ -162,12 +192,19 @@ The set is `appplatform.AlwaysDenied` with exactly loopback removed (Q2), plus t
 
 - **What the broker can check.** It cannot see inside TLS. It checks only the outer SNI, which must equal the pinned name (184 step 5). The certificate is verified by the app's TLS stack against the name it dialled, and that verification is the guarantee that the app reached the right site. `NO_PROXY` and the forwarder are unchanged, so `https://quotes.internal.anchan.kazuhahub.com` goes through the tunnel with that name as SNI.
 - **Certificate.** The pinned listener presents a certificate valid for the name. On anchan that is the aaPanel site's Let's Encrypt certificate, issued by DNS-01, because the name need not be publicly reachable.
-- **Dedicated listener (Q3).** nginx selects the TLS server by SNI, but then routes each request by its `Host` header. A pin to the shared `127.0.0.1:443` would let the app send `Host: <any other site on that nginx>`. The operator therefore pins a dedicated listener, for example `listen 127.0.0.1:20443 ssl;`, with one `server` block for this name, the default on that port, that returns 421 when `$host` is not the name. Port 20443 follows the host port plan (20000–20999 for loopback services behind a proxy).
+- **Dedicated listener (Q3).** nginx selects the TLS server by SNI, but then routes each request by its `Host` header. A pin to the shared `127.0.0.1:443` would let the app send `Host: <any other site on that nginx>`. The operator therefore pins a dedicated listener, for example `listen 127.0.0.1:20443 ssl;`, with one `server` block for this name, which returns 421 when `$host` is not the name, and a `default_server` block with `ssl_reject_handshake on;` for any other SNI. Port 20443 follows the host port plan (20000–20999 for loopback services behind a proxy).
+- **What the listener must do.** The P4 acceptance probe (section 14) checks every item:
+  - it is the only `listen` on port 20443, including `[::]:20443`;
+  - it is bound to loopback only;
+  - any other SNI hits the `default_server` block, whose `ssl_reject_handshake on;` refuses the handshake;
+  - it returns 421 when `$host` is not the name, including for an absolute-URI request line (`GET https://other/ HTTP/1.1`), whose host nginx takes as `$host`;
+  - it sends the upstream the fixed name (`proxy_set_header Host quotes.internal.anchan.kazuhahub.com`), never `$http_host`.
+- **aaPanel rewrites its vhost files.** When the site is edited in the panel, aaPanel regenerates `/www/server/panel/vhost/nginx/<site>.conf`. The 20443 listener therefore lives in a separate include that aaPanel does not manage, and the probe is re-run after any panel edit of that site.
 
 ## 8. Limits
 
 - **Unchanged from 184 §6.** A pinned tunnel counts against the same open-tunnel cap, new-tunnel bucket, daily byte budget, throughput cap and timers as any other.
-- **New bounds.** At most 8 pins per installation (within the 64 entries), and at most 16 operator addresses with 16 ports each.
+- **New bounds.** At most 8 pins per installation (within the 64 entries). At most 16 operator entries. `PRPY0002` is at most 8,192 bytes.
 
 ## 9. Refusal codes
 
@@ -175,7 +212,7 @@ No new code; the wire table (`proxyforwarder/wire.go:39-55`) and the forwarder a
 
 | Case | Code |
 |---|---|
-| Pin outside the operator allowlist, or in the denied set | `address_denied` |
+| Pin not equal to an operator entry, or in the denied set | `address_denied` |
 | Pinned dial failed or timed out | `connect_failed` |
 | CONNECT port not 443 | `port_not_permitted` |
 | SNI not the pinned name | closed after `200`, audited as `sni_mismatch` |
@@ -185,33 +222,37 @@ No new code; the wire table (`proxyforwarder/wire.go:39-55`) and the forwarder a
 ## 10. Review, audit, reports and console
 
 - **Review.** The plan of `POST .../installations/{id}/network-proxy/plan` gains `pins: [{host, address, port}]`.
-  - The plan format becomes `portal.proxy-policy-review/1-dev.2`, adding `pins_added`, `pins_removed` and `pins_changed` (`{host, old, new}`) beside `hosts_added` and `hosts_removed`.
+  - The plan format becomes `portal.proxy-policy-review/1-dev.2`. Beside `hosts_added` and `hosts_removed` it adds:
+    - `pins_added`, `pins_removed` and `pins_changed` (`{host, old, new}`);
+    - `runner_pins` (section 5.4).
+
+    `runner` keeps the fixed 1-dev.1 profile.
   - Consume, its compare-and-swap and the revision bump are those of 184 §14 item 12.
-  - The session loader keeps accepting consumed 1-dev.1 plans.
+  - The session loader keeps accepting consumed 1-dev.1 plans. `platformProxyPlanPattern()` matches both formats (section 5.4).
   - A plan that removes every host and every pin withdraws the grant.
 - **Audit of changes.** `app_platform.proxy_policy_changed` gains `pins_added`, `pins_removed` and `pins_changed` in its detail. The administrator, the plan ID and the policy digests are already recorded. Each pin is written as `host → address:port`.
 - **Audit of traffic.** Rollup and refusal reports need no wire change (`EgressFrameProxyReport` is unchanged). When Portal writes `app_platform.proxy_rollup` and `app_platform.proxy_refused`, it adds `pinned: true` and `pin: "address:port"` to the detail of a host that is pinned in the policy of the session carrying the report.
 - **Console.** `AppNetworkProxyPanel` lists pinned entries in the reviewed-hosts list, each with a "pinned to `address:port`" tag.
-  - In the review dialog, an exact host can be marked as pinned. The address and port are chosen from the runner's advertised `proxy_pins` (a select, not free text). Each pin carries a warning line, as wildcards do.
+  - In the review dialog, an exact host can be marked as pinned. The address and port are chosen from the runner's advertised `proxy_pins` entries for that name (a select, not free text). A pin the operator has since removed is shown as not permitted by the runner. Each pin carries a warning line, as wildcards do.
   - The diff shows pins added, changed and removed.
   - The new keys go under `appPlatform.networkProxy.pin.*` in en, zh-CN and zh-TW, and the parity test covers them.
 
 ## 11. Schema change — needs owner approval
 
-- **Portal database: none.** No migration and no new column or table. Pins live in the grant row's existing `policy_json` (J16384), in policy format `portal.proxy-policy/1-dev.2`. Plans live in `app_platform_review_plans.plan_json` in plan format `portal.proxy-policy-review/1-dev.2`, with the new fields `pins_added`, `pins_removed` and `pins_changed`.
+- **Portal database: none.** No migration and no new column or table. Pins live in the grant row's existing `policy_json` (J16384), in policy format `portal.proxy-policy/1-dev.2`. Plans live in `app_platform_review_plans.plan_json` in plan format `portal.proxy-policy-review/1-dev.2`, with the new fields `pins_added`, `pins_removed`, `pins_changed` and `runner_pins`.
 - **JSON formats that change:**
   - policy `portal.proxy-policy/1-dev.2`, with `pins`;
   - plan `portal.proxy-policy-review/1-dev.2`;
-  - runner profile `portal.runner.proxy-profile/1-dev.2`, with `policy_formats`, `pins` and `pins_sha256`;
+  - runner profile `portal.runner.proxy-profile/1-dev.2`, `{format, fixed, pins}`, served only on the new query `PRPX0002`/`PRPY0002`. `PRPX0001` and 1-dev.1 are unchanged;
   - audit details, with the pin fields of section 10.
 
   The session command format is unchanged.
-- **Runner configuration.** An optional `proxy_pins` block. The config format name is unchanged, as with `private_networks`.
+- **Runner configuration.** An optional `proxy_pins` block of `{host, address, port}` entries. The config format name is unchanged, as with `private_networks`.
 - **Runner journal: none.** It stays at schema v5.
 
 ## 12. Open questions (recommended answer in each)
 
-Q1. **Two keys (operator allowlist and administrator review) or the administrator alone?** Recommended: two keys. 175 decision 3 keeps a Portal administrator alone from opening the LAN, and the host's loopback is more sensitive than the LAN. On anchan the operator and the administrator are the same person, so the cost is one line of runner configuration.
+Q1. **Two keys (operator allowlist and administrator review) or the administrator alone?** Recommended: two keys. The operator entry is a full destination, `{host, address, port}`, and the Portal pin must equal it, so the operator approves a destination, not just a socket. 175 decision 3 keeps a Portal administrator alone from opening the LAN, and the host's loopback is more sensitive than the LAN. On anchan the operator and the administrator are the same person, so the cost is one line of runner configuration.
 
 Q2. **Loopback is in `AlwaysDenied`.** The requirement says that whatever `AlwaysDenied` covers stays denied, but it covers `127.0.0.0/8` and `::1`, which the first entry needs. Recommended: release exactly those two prefixes, for pins only, through `PinDenied`. Every other `AlwaysDenied` range and both metadata addresses stay denied.
 
@@ -225,11 +266,15 @@ Q6. **A name that is both pinned and covered by a wildcard.** Recommended: the p
 
 Q7. **A runner without pin support.** Recommended: the review refuses with 409. After a downgrade, the session opens without the proxy (the 184 behaviour), rather than with the proxy minus its pins.
 
-Q8. **Can tailnet, RFC 1918 or bridge addresses be pinned?** Recommended: yes, but only when the operator lists the exact address and port. The fixed denied set covers metadata, link-local and the translation forms, not ordinary private space.
+Q8. **How a new runner stays compatible with an old Portal.** Options: a new query magic, answering 1-dev.1 only while `proxy_pins` is empty, or upgrading Portal first. Recommended: a new query magic (`PRPX0002`), with `PRPX0001` frozen at 1-dev.1. It needs no upgrade order. The "1-dev.1 while empty" option would break an old Portal as soon as the operator adds a pin.
 
-Q9. **New refusal codes.** Recommended: none. The cases map to `address_denied` and `connect_failed`, and the audit row marks the tunnel as pinned. The forwarder and the SDK stay unchanged.
+Q9. **Can tailnet, RFC 1918 or bridge addresses be pinned?** Recommended: yes, but only when the operator lists the exact host, address and port. The fixed denied set covers metadata, link-local and the translation forms, not ordinary private space.
 
-Q10. **A descriptor field for pin suggestions.** Recommended: none. The app suggests the name in `network_proxy.hosts`, and the administrator turns it into a pin. No descriptor field ever carries an address.
+Q10. **New refusal codes.** Recommended: none. The cases map to `address_denied` and `connect_failed`, and the audit row marks the tunnel as pinned. The forwarder and the SDK stay unchanged.
+
+Q11. **A descriptor field for pin suggestions.** Recommended: none. The app suggests the name in `network_proxy.hosts`, and the administrator turns it into a pin. No descriptor field ever carries an address.
+
+Q12. **Pins when the runner runs under Compose (187).** Recommended: allowed only with `network_mode: host`, enforced by the network-namespace check of section 3. Otherwise the runner refuses to start with `proxy_pins` set.
 
 ## 13. Test plan (acceptance conditions; these must fail first)
 
@@ -238,11 +283,19 @@ Each condition states which way the guard fails.
 **Policy and guard (`internal/appplatform`):**
 - A policy without pins encodes byte-identically to 1-dev.1 and keeps its digest. Fails closed: any other encoding is refused by `ParseProxyPolicy`.
 - A pin with a wildcard host, an IP-literal host, port 0, port 65536, a zoned address or an IPv4-mapped literal is refused. A duplicate pin name, or a pin name equal to an exact host, is refused. A 9th pin, or a 65th entry in total, is refused. Fails closed: refused at parse.
-- `PinDenied` refuses every prefix in section 6 at its first and last address, and refuses `100.100.100.200`, `fd00:ec2::254` and `fd20:ce::254`. It also refuses IPv6 outside `::1`, `fc00::/7` and `2000::/3`. It admits `127.0.0.1`, `::1`, `172.17.0.1`, `10.0.0.5` and `100.64.0.1`. Fails closed: a denied address is never admitted.
+- `PinDenied` refuses every prefix in section 6 at its first and last address, and refuses `100.100.100.200`, `192.0.0.192`, `168.63.129.16`, `fd00:ec2::254` and `fd20:ce::254`. It also refuses IPv6 outside `::1`, `fc00::/7` and `2000::/3`. It admits `127.0.0.1`, `::1`, `172.17.0.1`, `10.0.0.5` and `100.64.0.1`. Fails closed: a denied address is never admitted.
 - `AlwaysDenied` is unchanged: `127.0.0.1` is still denied. Fails closed.
+- A pins-only policy encodes `"hosts":[]`. The same bytes with `"hosts":null` or without `hosts` are refused, `pins` in 1-dev.1 is refused, and a 1-dev.2 policy with empty `pins` is refused. Fails closed.
 
 **Runner configuration:**
-- `proxy_pins` with a denied address, a duplicate, an unsorted or duplicate port, or more than 16 entries stops the runner at start. Fails closed: the runner does not run.
+- `proxy_pins` with a denied address, a wildcard host, port 0, a duplicate or unsorted entry, or more than 16 entries stops the runner at start. Fails closed: the runner does not run.
+- Non-empty `proxy_pins` with the dockerd peer in another network namespace, or with an unreadable `/proc/<pid>/ns/net`, stops the runner with `proxy_pins_netns`. Empty `proxy_pins` starts as today. Fails closed.
+- A configuration file that is not `0600` or not owned by the effective user is refused, as today; the Compose recipe's mount is tested to pass. Fails closed.
+
+**Runner profile:**
+- `PRPX0001` answers the exact 1-dev.1 bytes with any `proxy_pins`, including the largest valid one. An old Portal's `ParseProxyProfile` plus its `NewProxyProfile()` equality accept it, so its `runnerServesProxy` stays true. This is the new-runner, old-Portal test. It fails open only for 1-dev.1 policies, which the old Portal can grant anyway.
+- The largest valid `proxy_pins` (16 entries, 253-byte names, full IPv6) gives a `PRPY0002` under 8,192 bytes that a new Portal parses. One byte over the cap is refused as unsupported. Fails closed.
+- A new Portal against an old runner: `PRPX0002` closes, the `PRPX0001` fallback answers, and unpinned grants keep working. Fails closed for pins only.
 
 **Broker, against in-test TLS servers on loopback:**
 - A pinned name in the allowlist connects to `127.0.0.1:<port>`. The `Lookup` seam is never called, which a lookup that fails the test proves.
@@ -255,7 +308,9 @@ Each condition states which way the guard fails.
 - Pinned tunnels count against the 16-tunnel cap, the bucket and the budget. The 17th is `busy`. Fails closed.
 
 **Portal:**
-- A plan with pins against a runner profile 1-dev.1, or one whose `pins` lacks the address, is 409 `app_platform_runner_unsupported`. Fails closed.
+- A plan with pins against a runner that answers only `PRPY0001`, or one whose `pins` lacks the exact `{host, address, port}`, is 409 `app_platform_runner_unsupported`. Fails closed.
+- An operator edit to `proxy_pins` (an entry added, removed or changed, and a runner restart) leaves every unpinned grant's plan, session and console state unchanged. A pinned grant whose entry was removed opens its session, and that pin is refused as `address_denied` and shown as not permitted. Fails closed for the pin only.
+- A 1-dev.2 plan consumed after a 1-dev.1 plan for the same installation: `loadPlatformLatestProxyPlan` returns the 1-dev.2 plan (higher `policy_revision`), and a grant backed by the older plan alone is not granted. Fails closed.
 - Consume writes `policy_json` in 1-dev.2, raises `policy_revision`, and writes one `app_platform.proxy_policy_changed` row with `pins_added`, `pins_changed` and `pins_removed`. A compare-and-swap loss writes nothing. Fails closed.
 - A consumed 1-dev.1 plan still backs its grant after upgrade. Fails open for old grants by design: their policy is unchanged.
 - A session for a pinned policy carries the policy text and digest, and the runner's `validateServiceEgressProxy` accepts it. A downgraded runner (profile 1-dev.1) gets a session without the proxy. Fails closed for the proxy.
@@ -270,6 +325,19 @@ Each condition states which way the guard fails.
 1. **P1, policy and runner.** `ProxyPolicy` 1-dev.2, `PinDenied`, the `proxy_pins` configuration, proxy profile 1-dev.2, and broker steps 2–4 for pins. A runner with this change serves existing 1-dev.1 policies unchanged.
 2. **P2, Portal.** The review plan 1-dev.2, the profile check, the audit fields, the report annotation and the session loader.
 3. **P3, console.** Panel, dialog and i18n. P2 and P3 can ship together, after the owner sees the demo.
-4. **P4, anchan.** No code. Confirm the runner unit and its namespace (section 3). Add the dedicated nginx listener for `quotes.internal.anchan.kazuhahub.com` on `127.0.0.1:20443`, with the Let's Encrypt certificate and the 421 rule. Add `"proxy_pins": [{"address":"127.0.0.1","ports":[20443]}]` and restart the runner. Then review the pin for market-monitor.
+4. **P4, anchan.** No code.
+   1. Add the dedicated nginx listener for `quotes.internal.anchan.kazuhahub.com` on `127.0.0.1:20443`, in an include that aaPanel does not manage, with the Let's Encrypt certificate and the 421 rule.
+   2. Run the acceptance probe below.
+   3. Add `"proxy_pins": [{"host":"quotes.internal.anchan.kazuhahub.com","address":"127.0.0.1","port":20443}]` and restart the runner. The network-namespace check (section 3) replaces any manual confirmation of how the runner is deployed: if the runner is not in the host namespace, it refuses to start.
+   4. Review the pin for market-monitor.
+
+   **Acceptance probe**, run on the host. Each check fails the deploy if it does not hold:
+   - `curl --resolve quotes.internal.anchan.kazuhahub.com:20443:127.0.0.1 https://quotes.internal.anchan.kazuhahub.com:20443/` succeeds with certificate verification on.
+   - The same request with `-H 'Host: portal.anchan.kazuhahub.com'` answers 421.
+   - `openssl s_client -connect 127.0.0.1:20443 -servername other.example` is rejected at the handshake and gets no certificate.
+   - Inside TLS with the right SNI, the request line `GET https://portal.anchan.kazuhahub.com/ HTTP/1.1` with `Host: quotes.internal.anchan.kazuhahub.com` answers 421.
+   - The site config sets `proxy_set_header Host quotes.internal.anchan.kazuhahub.com` (the fixed name, never `$http_host`). The frp upstream log shows that name for the curl request above.
+   - `ss -ltnH 'sport = :20443'` lists exactly one socket, `127.0.0.1:20443`. There is no `[::]:20443` and no `0.0.0.0:20443`.
+   - The probe is re-run after any aaPanel edit of the site, because aaPanel rewrites its vhost files.
 
 **Apps side.** No SDK or forwarder change. market-monitor adds the name to `network_proxy.hosts` and calls `https://quotes.internal.anchan.kazuhahub.com`.
