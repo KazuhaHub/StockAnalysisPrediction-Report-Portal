@@ -240,7 +240,7 @@ func (r *Root) ImportData(ctx context.Context, checkpointExpected RootIdentity, 
 		return zero, errors.Join(ErrImportIncomplete, err)
 	}
 	count := 0
-	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, int(restoreRequest.entryCap())); err != nil {
+	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, restoreRequest.entryLimit()); err != nil {
 		return incomplete(fmt.Errorf("clear namespace: %w", err))
 	}
 	if err := namespace.Sync(); err != nil {
