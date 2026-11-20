@@ -13,18 +13,7 @@ import GeoSection from './GeoSection'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import { notifyError } from '../../lib/notify'
-
-// tzOptions lists the panel-timezone choices: a "follow system" default plus the
-// browser's full IANA zone list (Intl.supportedValuesOf, guarded for older engines).
-function tzOptions(systemLabel: string) {
-  let zones: string[] = []
-  try {
-    zones = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone') ?? []
-  } catch {
-    zones = []
-  }
-  return [{ value: '', label: systemLabel }, ...zones.map((z) => ({ value: z, label: z }))]
-}
+import { tzOptions } from '../../lib/timezones'
 
 // The update-prompt policies, in the order the page presents them: least intrusive first.
 const UPDATE_POLICIES: UpdatePromptPolicy[] = ['dismissible', 'persistent', 'required', 'automatic']
