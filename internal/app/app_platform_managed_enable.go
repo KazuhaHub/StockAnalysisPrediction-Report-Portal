@@ -640,6 +640,7 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 			plan.CheckpointArchiveBytes <= 0)) ||
 		(!hasRecovery && lease.snapshot.Stage != appplatform.StageQueued &&
 			lease.snapshot.Stage != appplatform.StageValidate &&
+			lease.snapshot.Stage != appplatform.StageQuiesce &&
 			lease.snapshot.Stage != appplatform.StageDownload &&
 			lease.snapshot.Stage != appplatform.StageStage &&
 			lease.snapshot.Stage != platformSameReleaseCheckpointStage(

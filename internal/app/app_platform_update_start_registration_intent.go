@@ -111,6 +111,10 @@ func readPlatformUpdateStartRegistrationRows(e migExec, lease platformOperationL
 		return r, err
 	}
 	r.baseEffects = 2
+	if lease.snapshot.Action == appplatform.ActionImportData {
+		// The checkpoint, the import and the start.
+		r.baseEffects = 3
+	}
 	if lease.snapshot.Action == appplatform.ActionUpdate {
 		r.baseEffects = 4
 		migrations, err := platformMigrationEffectCount(e, lease.id)
