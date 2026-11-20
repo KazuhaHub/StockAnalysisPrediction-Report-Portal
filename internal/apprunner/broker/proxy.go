@@ -152,9 +152,9 @@ func (r *ProxyRunner) SetPins(pins []appplatform.ProxyPin) {
 	r.mu.Unlock()
 }
 
-// pinPermitted is the check made at every dial of a pinned tunnel: the entry equals one of the operator's and
+// PinPermitted is the check made at every dial of a pinned tunnel: the entry equals one of the operator's and
 // its address is outside the fixed denied set.
-func (r *ProxyRunner) pinPermitted(pin appplatform.ProxyPin) bool {
+func (r *ProxyRunner) PinPermitted(pin appplatform.ProxyPin) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return appplatform.ProxyPinPermitted(r.pins, pin)
@@ -413,7 +413,7 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	// every answer is judged; only an allowed address may be dialled.
 	var target string
 	if pinned {
-		if !in.runner.pinPermitted(pin) {
+		if !in.runner.PinPermitted(pin) {
 			in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
 			return
 		}

@@ -305,6 +305,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) (detached bo
 	case NetworkTargetsQueryMagic:
 		s.handleNetworkTargets(ctx, conn)
 		return
+	case ProxyPinsQueryMagic:
+		s.handleProxyPinsProfile(ctx, conn)
+		return
 	case ProxyQueryMagic:
 		s.handleProxyProfile(ctx, conn)
 		return

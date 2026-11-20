@@ -88,6 +88,15 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
 		return ErrNotReady
 	}
+	// A pinned proxy destination is an address of the runner's own network namespace (doc 186 section 3): with
+	// proxy_pins set, the daemon must be identified in that namespace, or the runner does not start. An
+	// unreadable namespace file counts as another namespace.
+	if err := CheckProxyPinsNamespace(ctx, cfg.ProxyPins, func(ctx context.Context) error {
+		return driver.CheckHostNetworkNamespace(ctx, cfg.DockerSocket)
+	}); err != nil {
+		logger.Printf("app-runner not ready: proxy_pins_netns: proxy_pins are set but the container daemon is not identified as a local dockerd in the runner's network namespace (a Compose runner needs network_mode: host and pid: host)")
+		return err
+	}
 	// The declared capacity envelope turns percentages of the host into absolute budgets. A fact that cannot be
 	// read, a volume smaller than the disk budget, or a budget below one minimum backend is not ready.
 	// A reserved CPU needs the online list, the runner's own allowed set and a daemon that can pin containers; a
@@ -114,6 +123,10 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if cfg.AllowLocalReferenceImages {
 		options = append(options, driver.WithLocalReferenceImages())
 	}
+	if len(cfg.ProxyPins) > 0 {
+		// The same requirement is applied to every connection the runtime's daemon client makes.
+		options = append(options, driver.WithHostNetworkNamespace())
+	}
 	native, err := driver.OpenCandidateRuntime(ctx, cfg.DockerSocket, cfg.DataRoot, cfg.IPCRoot, root, pin, options...)
 	if err != nil {
 		return ErrNotReady
@@ -130,7 +143,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil {
 		return ErrNotReady
 	}
-	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries, transport.WithPrivateNetworks(cfg.PrivateNetworks))
+	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries, transport.WithPrivateNetworks(cfg.PrivateNetworks), transport.WithProxyPins(cfg.ProxyPins))
 	if err != nil {
 		return ErrNotReady
 	}

@@ -26,6 +26,8 @@ type CandidateRuntime struct {
 	root         *data.Root
 	rootIdentity data.RootIdentity
 	launches     map[*candidateLaunchState]struct{}
+	// requireHostNet vets every connection of the daemon client as being in the runner's network namespace (doc 186).
+	requireHostNet bool
 }
 type candidateLaunchState struct {
 	mu           sync.Mutex
@@ -91,7 +93,7 @@ func OpenCandidateRuntime(ctx context.Context, socket, dataPath, socketsPath str
 	if err := checkAppCPUSet(report, configuration.appCPUs); err != nil {
 		return nil, err
 	}
-	return &CandidateRuntime{socket: socket, imagePolicy: configuration.imagePolicy, roots: containerRoots{Data: dataPath, Sockets: socketsPath, AppCPUs: configuration.appCPUs}, root: root, rootIdentity: expected, launches: map[*candidateLaunchState]struct{}{}}, nil
+	return &CandidateRuntime{socket: socket, imagePolicy: configuration.imagePolicy, roots: containerRoots{Data: dataPath, Sockets: socketsPath, AppCPUs: configuration.appCPUs}, root: root, rootIdentity: expected, launches: map[*candidateLaunchState]struct{}{}, requireHostNet: configuration.requireHostNet}, nil
 }
 func (r *CandidateRuntime) Close() error {
 	if r == nil {
@@ -154,7 +156,11 @@ func (r *CandidateRuntime) checkData(ctx context.Context, identity CandidateIden
 	return nil
 }
 func (r *CandidateRuntime) client() (*http.Client, func()) {
-	return newDockerClient(r.socket, probeTimeout, probeTimeout)
+	client, closeClient := newDockerClient(r.socket, probeTimeout, probeTimeout)
+	if r.requireHostNet {
+		requireHostNetworkNamespace(client)
+	}
+	return client, closeClient
 }
 
 // PrepareCandidate is read-only. It verifies the concrete quota/data root,
