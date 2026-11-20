@@ -146,11 +146,14 @@ apps never depend on the runner and are unaffected.
   optional adapter and is not available.
 
 Production sizing is 8 GiB for the data image and 8 GiB for the checkpoint
-image. Run once, as root, after creating a root-only directory on the host disk
-(not group- or world-writable, no symbolic links in its path):
+image. Run once, as root, after creating the image directory on the host disk
+and the parent of the mount points. Every directory from each path up to `/` must
+be owned by root and not group- or world-writable (a root-owned sticky directory
+such as `/tmp` is accepted), with no symbolic link in the path:
 
 ```sh
 install -d -m 0700 /data/portal-runner
+install -d -m 0755 /srv/portal-runner
 /opt/portal-app-runner/app-runner provision-xfs-images --dry-run \
   --data-image /data/portal-runner/data.img --data-size 8G \
   --checkpoint-image /data/portal-runner/checkpoint.img --checkpoint-size 8G \
@@ -160,13 +163,17 @@ install -d -m 0700 /data/portal-runner
 
 What it does, and what it will not do:
 
-1. Validates the request (absolute clean paths, sizes from 1G, nothing nested
+1. Validates the request (absolute clean paths, sizes from 2G, nothing nested
    inside anything else), then inspects both volumes before changing either.
 2. Creates each image with `fallocate`, never sparse. A sparse image turns a
    full host disk into I/O errors inside XFS, which shuts the whole runner down
-   instead of failing one app's write. The command refuses a sparse image.
-3. Attaches it with `losetup --direct-io=on`, runs `mkfs.xfs` (without `-f`),
-   mounts it `-t xfs -o prjquota,nodev,nosuid,noexec`, sets the mount point to
+   instead of failing one app's write. An existing image that has become sparse
+   is reported as degraded and, while it is unmounted, re-preallocated in place
+   with `fallocate` (written data is kept); it is never deleted, and if it is
+   mounted the command only warns and asks you to unmount and run it again.
+3. Attaches it with `losetup --direct-io=on`, runs `mkfs.xfs -K` (no discard,
+   and without `-f`) and checks the image is still fully allocated, because a
+   discard on a loop device punches holes in the backing file. It then mounts it `-t xfs -o prjquota,nodev,nosuid,noexec`, sets the mount point to
    `0700` and creates the `root` directory inside.
 4. Runs the runner's own data-root checks on that `root` directory (the same
    code `serve` runs: XFS magic, mount flags, ownership and mode, project quota
@@ -178,8 +185,9 @@ What it does, and what it will not do:
 6. Refuses, changing nothing, when an image path holds anything that is not a
    root-owned `0600` preallocated XFS image of the requested size, when a mount
    point is non-empty or already mounted by something else, when an image is
-   already attached or mounted elsewhere, or when the image directory is on tmpfs,
-   overlay, NFS or ZFS. It never unmounts or detaches anything it did not create
+   already attached or mounted elsewhere, or when the image directory is not on
+   ext4, XFS or btrfs. A failed rollback step stops the rollback, so a mount that
+   would not unmount is never followed by detaching or deleting what is under it. It never unmounts or detaches anything it did not create
    in the same run. Running it again after success only re-verifies; after a
    reboot without persistence it re-attaches and mounts the existing images
    without formatting.
@@ -196,10 +204,15 @@ volume that is larger than that.
 
 Operations:
 
-- **Persistence:** install the printed fstab lines or mount units and the drop-in,
-  then `systemctl daemon-reload`. After a reboot `mount(8)` attaches the loop
-  device itself, probably without direct I/O (check on the host); that changes
-  performance only.
+- **Persistence:** install the printed fstab lines (preferred) or mount units, and
+  the drop-in, then `systemctl daemon-reload`. The fstab lines carry `nofail`, so a
+  missing image does not fail the boot (the runner's `RequiresMountsFor=` still
+  keeps it from starting), and `X-fstrim.notrim`, because Ubuntu's `fstrim.timer`
+  would otherwise trim the loop-mounted XFS and punch holes in the preallocated
+  image. A mount unit cannot carry that option; with units, also disable or
+  override `fstrim.timer` for these mounts (verify on the host). After a reboot
+  `mount(8)` attaches the loop device itself, probably without direct I/O (check
+  on the host); that changes performance only.
 - **Growth** (one-way; XFS cannot shrink): with the volume mounted, grow the
   file (`fallocate -l <new size> <image>`), refresh the loop device
   (`losetup -c <loop device>`, found with `losetup -j <image>`), then

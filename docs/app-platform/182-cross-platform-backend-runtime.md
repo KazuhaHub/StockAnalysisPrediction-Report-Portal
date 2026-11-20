@@ -593,6 +593,17 @@ managed runtime profile.
   production images) and the handbook tells the operator to set it. The owner
   may prefer larger images (for example 9 GiB data) instead; the sizes are
   command arguments.
+- **Loop-image hazards found in review.** A discard through a loop device punches
+  holes in the preallocated image, so the command formats with `mkfs.xfs -K`,
+  re-checks the allocation after formatting, and the printed fstab lines carry
+  `X-fstrim.notrim` (a mount unit cannot, so the handbook says to disable
+  `fstrim.timer` for those mounts) and `nofail`. An existing sparse image is
+  re-preallocated in place while unmounted, never deleted. The minimum image is
+  2 GiB, so the suggested `disk_bytes` is always at least 1 GiB. Every directory
+  above an image or mount point must be root-owned and not group- or
+  world-writable (a root-owned sticky directory such as `/tmp` is allowed), the
+  backing filesystem must be ext4, XFS or btrfs, and a failed rollback step stops
+  the rollback.
 - The recipe is a command, not only a document in `deploy/app-runner/`, which is
   what P0 listed; `deploy/app-runner/` is unchanged and the handbook carries the
   procedure.
