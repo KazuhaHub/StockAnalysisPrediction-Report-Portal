@@ -137,6 +137,16 @@ func entryCapOf(configured int64) int64 {
 func (r CheckpointRequest) entryCap() int64 { return entryCapOf(r.MaxEntries) }
 func (r RestoreRequest) entryCap() int64    { return entryCapOf(r.MaxEntries) }
 
+// entryLimit is entryCap as an int for the walks. The explicit bound keeps the conversion safe on
+// every platform; entryCapOf never exceeds it.
+func (r RestoreRequest) entryLimit() int {
+	limit := r.entryCap()
+	if limit < 1 || limit > maxCheckpointEntryCap {
+		return legacyMaxCheckpointEntries
+	}
+	return int(limit)
+}
+
 func (r CheckpointRequest) valid() bool {
 	return namespaceID.MatchString(r.CheckpointID) && namespaceID.MatchString(r.NamespaceID) && r.ProjectID > 0 && r.DataFormat > 0 && r.MaxArchiveBytes > 0 && r.ExpectedDevice > 0 && r.ExpectedNamespaceInode > 0 && r.WriterFence > 0 && sha256Value(r.ReleaseSHA256)
 }

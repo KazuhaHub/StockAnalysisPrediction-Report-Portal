@@ -89,7 +89,7 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 		return zero, errors.Join(ErrRestoreIncomplete, err)
 	}
 	count := 0
-	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, int(request.entryCap())); err != nil {
+	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, request.entryLimit()); err != nil {
 		return incomplete(fmt.Errorf("clear namespace: %w", err))
 	}
 	if err := namespace.Sync(); err != nil {
@@ -536,7 +536,7 @@ func restoreSyncNamespace(ctx context.Context, namespace *os.File, device uint64
 
 func restoreReadNamespace(ctx context.Context, namespace *os.File, device uint64, request RestoreRequest) ([]restoreEntry, error) {
 	result := make([]restoreEntry, 0)
-	if err := restoreReadEntries(ctx, namespace, device, request.MaxArchiveBytes, int(request.entryCap()), "", 1, &result); err != nil {
+	if err := restoreReadEntries(ctx, namespace, device, request.MaxArchiveBytes, request.entryLimit(), "", 1, &result); err != nil {
 		return nil, err
 	}
 	if int64(len(result)) > request.entryCap() {
