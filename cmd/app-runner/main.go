@@ -14,11 +14,14 @@ import (
 	"os/signal"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/hostns"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/hostsetup"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/provision"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/version"
 )
 
-const usageLine = "usage: app-runner <inspect-daemon|bootstrap|serve|provision-xfs-images|pack-import>"
+const usageLine = "usage: app-runner <serve|health|version|host-setup|bootstrap|inspect-daemon|provision-xfs-images|pack-import>"
 
 func run(ctx context.Context, args []string, out io.Writer) int {
 	if len(args) == 0 {
@@ -36,6 +39,17 @@ func run(ctx context.Context, args []string, out io.Writer) int {
 		return provisionXFSImages(ctx, args[1:], out, provision.SystemEnv)
 	case "pack-import":
 		return runPackImport(ctx, args[1:], out)
+	case "version":
+		if len(args) != 1 {
+			fmt.Fprintln(out, usageLine)
+			return 2
+		}
+		fmt.Fprintln(out, version.String())
+		return 0
+	case "health":
+		return health(ctx, args[1:], out)
+	case "host-setup":
+		return hostSetup(ctx, args[1:], out, hostsetup.NewSystemEnv)
 	default:
 		fmt.Fprintln(out, usageLine)
 		return 2
@@ -128,8 +142,36 @@ func serve(ctx context.Context, args []string, out io.Writer) int {
 	return 0
 }
 
+// health is the container healthcheck: the control socket is a socket owned root:controller-gid with mode 0660
+// and accepts a connection (doc 187 section 6). It takes no lock.
+func health(ctx context.Context, args []string, out io.Writer) int {
+	flags := flag.NewFlagSet("health", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	path := flags.String("config", "", "explicit private service configuration")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *path == "" {
+		fmt.Fprintln(out, "an explicit --config is required")
+		return 2
+	}
+	if err := service.Health(ctx, *path); err != nil {
+		fmt.Fprintf(out, "unhealthy: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(out, "healthy")
+	return 0
+}
+
+// start is main without the process: the descriptor the container entry opened on this executable is handled
+// before any command runs (doc 187 section 5), and an entry that did not do what it promises stops the runner.
+func start(ctx context.Context, args []string, out io.Writer) int {
+	if err := hostns.ConsumeExecFD(); err != nil {
+		fmt.Fprintf(out, "app-runner: %v\n", err)
+		return 1
+	}
+	return run(ctx, args, out)
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), serviceSignals()...)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout))
+	os.Exit(start(ctx, os.Args[1:], os.Stdout))
 }
