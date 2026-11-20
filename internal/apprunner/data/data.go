@@ -95,17 +95,28 @@ type CheckpointRequest struct {
 // legacyMaxCheckpointEntries is the entry cap every checkpoint had before the inode quota was per installation.
 const legacyMaxCheckpointEntries = 100000
 
-// checkpointArchiveOverheadBytes is what a checkpoint archive may hold beyond the data itself: tar headers,
-// padding and the manifest.
+// checkpointArchiveOverheadBytes is what a checkpoint archive may hold beyond the data and its entries: the
+// manifest, the end-of-archive blocks and padding.
 const checkpointArchiveOverheadBytes = 64 << 20
 
-// ArchiveCapForQuota is the largest archive a namespace of the given quota may checkpoint: the quota plus a
-// fixed allowance for tar overhead (doc 185 section 4). A missing quota has no cap.
-func ArchiveCapForQuota(quotaBytes int64) int64 {
-	if quotaBytes <= 0 {
+// checkpointArchiveFloorBytes is the cap every checkpoint had before the quota was per installation. It stays
+// the least cap, so a checkpoint that was valid then is valid now.
+const checkpointArchiveFloorBytes = 512 << 20
+
+// checkpointEntryOverheadBytes is what one entry may cost in tar beyond its data: a 512-byte header, plus a PAX
+// header and its padding for a long or non-ASCII name (1.5 KiB in all). It is unbounded by bytes of data, so
+// the cap follows the number of entries the namespace may hold.
+const checkpointEntryOverheadBytes = 1536
+
+// ArchiveCapFor is the largest archive a namespace may checkpoint:
+// max(512 MiB, quota + inode quota x 1.5 KiB + 64 MiB). It returns zero, meaning no cap and so a refused
+// request, for a quota that is not positive or is too large to compute safely.
+func ArchiveCapFor(quotaBytes, inodeQuota int64) int64 {
+	const maxQuotaBytes, maxInodes = int64(1) << 50, int64(1) << 40
+	if quotaBytes <= 0 || inodeQuota <= 0 || quotaBytes > maxQuotaBytes || inodeQuota > maxInodes {
 		return 0
 	}
-	return quotaBytes + checkpointArchiveOverheadBytes
+	return max(checkpointArchiveFloorBytes, quotaBytes+inodeQuota*checkpointEntryOverheadBytes+checkpointArchiveOverheadBytes)
 }
 
 func entryCapOf(configured int64) int64 {
@@ -387,4 +398,15 @@ func (o ImportObservation) Snapshot() (ImportSnapshot, error) {
 type QuarantineReport struct {
 	Files int
 	Bytes int64
+}
+
+// checkpointRequest is the request that re-verifies the checkpoint a restore reads, with the same caps.
+func (r RestoreRequest) checkpointRequest() CheckpointRequest {
+	return CheckpointRequest{
+		CheckpointID: r.CheckpointID, NamespaceID: r.NamespaceID,
+		ReleaseSHA256: r.ReleaseSHA256, ProjectID: r.ProjectID,
+		DataFormat: r.DataFormat, MaxArchiveBytes: r.MaxArchiveBytes, MaxEntries: r.MaxEntries,
+		ExpectedDevice: r.ExpectedDevice, ExpectedNamespaceInode: r.ExpectedNamespaceInode,
+		WriterFence: r.WriterFence,
+	}
 }

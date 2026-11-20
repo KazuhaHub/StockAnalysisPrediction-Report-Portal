@@ -14,7 +14,6 @@ import (
 )
 
 const (
-	maxDeleteEntries       = 100000
 	maxDeleteDepth         = 64
 	deleteQuotaSettleDelay = 5 * time.Second
 	deleteQuotaPoll        = 10 * time.Millisecond
@@ -102,7 +101,7 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	}
 	count := 0
 	if err := deleteNamespaceChildren(
-		ctx, folder, r.device, 0, &count); err != nil {
+		ctx, folder, r.device, 0, &count, request.QuotaInodes); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -216,7 +215,9 @@ func settleDeleteDataQuota(ctx context.Context, file *os.File, request DeleteReq
 	return nil
 }
 
-func deleteNamespaceChildren(ctx context.Context, folder *os.File, device uint64, depth int, count *int) error {
+// deleteNamespaceChildren removes everything under folder. A namespace holds at most its inode quota of entries,
+// so that quota bounds the walk.
+func deleteNamespaceChildren(ctx context.Context, folder *os.File, device uint64, depth int, count *int, maxEntries int64) error {
 	if depth > maxDeleteDepth {
 		return ErrDeleteUnsafe
 	}
@@ -229,7 +230,7 @@ func deleteNamespaceChildren(ctx context.Context, folder *os.File, device uint64
 			return err
 		}
 		*count++
-		if *count > maxDeleteEntries {
+		if int64(*count) > maxEntries {
 			return ErrDeleteUnsafe
 		}
 		name := entry.Name()
@@ -264,7 +265,7 @@ func deleteNamespaceChildren(ctx context.Context, folder *os.File, device uint64
 			return ErrDeleteUnsafe
 		}
 		childErr := deleteNamespaceChildren(
-			ctx, child, device, depth+1, count)
+			ctx, child, device, depth+1, count, maxEntries)
 		closeErr := child.Close()
 		if childErr != nil || closeErr != nil {
 			return errors.Join(childErr, closeErr)

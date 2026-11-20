@@ -391,7 +391,7 @@ func (s *Store) beginImportCheckpoint(ctx context.Context, raw, signature []byte
 	}
 	// Reserve the imported namespace's disk in the claim's own transaction, before its resource row exists.
 	// A refusal is the row of the effect: reverted, with no resource or reservation behind it.
-	if plan, admit := s.namespacePlan(c.Payload.NamespaceID, c.InstallationID, mustDataInt(c.Payload.QuotaBytes)); admit {
+	if plan, admit := s.namespacePlan(c.Payload.NamespaceID, c.InstallationID, mustDataInt(c.Payload.QuotaBytes), mustDataInt(c.Payload.QuotaInodes)); admit {
 		refusal, err := s.admitCapacity(ctx, tx, plan, now)
 		if err != nil {
 			return zero, false, err

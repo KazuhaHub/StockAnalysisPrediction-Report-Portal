@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strconv"
 	"unicode/utf8"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 var ErrInvalidCommand = errors.New("invalid runner command or authority")
@@ -99,7 +101,10 @@ func validLogical(c Command) bool {
 	}
 	slot, _ := counter(c.EffectNumber, true)
 	format, _ := counter(c.Payload.DataFormat, true)
-	return slot <= 32 && format <= 1000000
+	quotaBytes, _ := counter(c.Payload.QuotaBytes, true)
+	quotaInodes, _ := counter(c.Payload.QuotaInodes, true)
+	// The runner holds the quota to the platform bounds whatever the controller signed (doc 185 section 3.1).
+	return slot <= 32 && format <= 1000000 && appplatform.ValidDataQuota(quotaBytes, quotaInodes)
 }
 
 // LogicalDigest binds the stable reviewed effect identity and typed payload.

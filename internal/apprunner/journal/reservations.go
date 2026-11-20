@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
@@ -41,9 +43,19 @@ const (
 	NamespaceReservationBytes = NamespaceQuotaBytes * (1 + RetainedCheckpoints)
 )
 
-// NamespaceReservationFor is the disk one namespace of the given quota reserves: the data and the retained
-// checkpoints, three quotas. A reservation row stores this total, so the quota is a third of it.
-func NamespaceReservationFor(quotaBytes int64) int64 { return quotaBytes * (1 + RetainedCheckpoints) }
+// NamespaceReservation is the disk one namespace reserves: its quota on the data volume, and two retained
+// checkpoints on the checkpoint volume, each the size of the archive cap, because the cap is what a checkpoint
+// may take and a fully reserved volume must still hold both. It reports false for a quota outside the platform
+// bounds, so no arithmetic here can overflow.
+func NamespaceReservation(quotaBytes, inodeQuota int64) (dataBytes, checkpointBytes int64, ok bool) {
+	if !appplatform.ValidDataQuota(quotaBytes, inodeQuota) {
+		return 0, 0, false
+	}
+	return quotaBytes, RetainedCheckpoints * data.ArchiveCapFor(quotaBytes, inodeQuota), true
+}
+
+// checkpointReservationID is the second reservation row of a namespace: its retained checkpoints.
+func checkpointReservationID(namespaceID string) string { return "checkpoints/" + namespaceID }
 
 // imageResourceID is the reservation identity of a loaded image: one per config digest, however many
 // installations use it.

@@ -151,7 +151,7 @@ func (s *Store) ReservePrepareData(ctx context.Context, raw, signature []byte) (
 	} else {
 		// Reserve the namespace's disk in this transaction, before its resource row exists and before any
 		// native call. A refusal reverts the command and leaves no resource or reservation row behind.
-		if plan, admit := s.namespacePlan(c.Payload.DataNamespaceID, c.InstallationID, mustDataInt(c.Payload.QuotaBytes)); admit {
+		if plan, admit := s.namespacePlan(c.Payload.DataNamespaceID, c.InstallationID, mustDataInt(c.Payload.QuotaBytes), mustDataInt(c.Payload.QuotaInodes)); admit {
 			refusal, err := s.admitCapacity(ctx, tx, plan, now)
 			if err != nil {
 				return zero, err

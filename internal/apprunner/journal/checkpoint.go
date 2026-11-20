@@ -753,8 +753,9 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 		CheckpointID: source.command.Payload.CheckpointID, NamespaceID: source.command.Payload.NamespaceID,
 		ReleaseSHA256: source.command.Payload.ReleaseSHA256, ProjectID: projectID,
 		DataFormat: mustDataInt(source.command.Payload.DataFormat),
-		// The archive may hold the namespace's quota plus tar overhead, and no more entries than its inode quota.
-		MaxArchiveBytes: data.ArchiveCapForQuota(mustDataInt(source.data.QuotaBytes)), MaxEntries: mustDataInt(source.data.QuotaInodes),
+		// The archive may hold the quota, the tar overhead of every entry it may hold and a fixed allowance, and no
+		// more entries than the inode quota.
+		MaxArchiveBytes: data.ArchiveCapFor(mustDataInt(source.data.QuotaBytes), mustDataInt(source.data.QuotaInodes)), MaxEntries: mustDataInt(source.data.QuotaInodes),
 		ExpectedDevice: mustDataUint(source.command.Payload.Device), ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
 		WriterFence: mustDataInt(source.command.Payload.WriterFence),
 	}

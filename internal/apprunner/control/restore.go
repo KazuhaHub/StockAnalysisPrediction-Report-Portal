@@ -17,11 +17,11 @@ const restoreSignaturePurpose = "portal.app/runner-data-restore-command/v1"
 const restoreReadPurpose = "portal.app/runner-data-restore-read/v1"
 const restoreEffectPurpose = "portal.app/runner-data-restore-effect/v1"
 
-// MaxCheckpointArchiveBytes is the platform's ceiling for one checkpoint archive: the largest namespace quota
-// (16 GiB) plus the fixed 64 MiB of tar overhead (doc 185 section 4). A command that names more is malformed
-// whatever the namespace; the exact cap of one namespace is its quota plus that overhead, applied where the
-// runner builds the native request.
-const MaxCheckpointArchiveBytes int64 = 16<<30 + 64<<20
+// MaxCheckpointArchiveBytes is the platform's ceiling for one checkpoint archive: the cap of the largest
+// namespace, 16 GiB of data and 1,000,000 entries of 1.5 KiB each plus the fixed 64 MiB (doc 185 section 4,
+// as the P1 implementation notes correct it). A command that names more is malformed whatever the namespace;
+// the exact cap of one namespace is data.ArchiveCapFor, applied where the runner builds the native request.
+const MaxCheckpointArchiveBytes int64 = 16<<30 + 1000000*1536 + 64<<20
 
 const maxRestoreArchiveBytes = MaxCheckpointArchiveBytes
 

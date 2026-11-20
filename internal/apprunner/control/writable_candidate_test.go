@@ -32,7 +32,7 @@ func TestWritableCandidateDomainAndImmutableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.PayloadSHA256 != "e99174d74155ae5fd6f2fbeefbf6afc3c3e9b863a34999b07f35abd080b8fffe" {
+	if c.PayloadSHA256 != "e2f4e1a817d85fc3cc4ce5c6a551f5ea378166fc8ff5442867d19f97f53d76cb" {
 		t.Fatal("independent writable candidate vector changed", c.PayloadSHA256)
 	}
 	if v.Index().Format != WritableCandidateFormat || v.Index().Stage != "start" || v.Index().EffectNumber != "1" || v.Index().Payload.ResourceID != v.Writer().Command().ResourceID || v.Index().Payload.SandboxProfile != WritableCandidateSandboxProfile {

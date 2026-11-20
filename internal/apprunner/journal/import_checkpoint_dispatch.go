@@ -330,7 +330,7 @@ func importNativeRequest(intent importIntent) (data.ImportRequest, error) {
 	return data.ImportRequest{
 		CheckpointID: p.CheckpointID, NamespaceID: p.NamespaceID, ReleaseSHA256: p.ReleaseSHA256,
 		ManifestSHA256: p.ManifestSHA256, ProjectID: intent.project, DataFormat: mustDataInt(p.DataFormat),
-		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: data.ArchiveCapForQuota(intent.quotaBytes),
+		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: data.ArchiveCapFor(intent.quotaBytes, intent.quotaInodes),
 		WriterFence: mustDataInt(p.WriterFence), QuotaBytes: intent.quotaBytes, QuotaInodes: intent.quotaInodes,
 		Provenance: data.ImportProvenance{
 			ProjectID: uint32(sourceProject), NamespaceInode: mustDataUint(p.SourceNamespaceInode),

@@ -55,13 +55,7 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 	if err != nil || sourceIdentity != sourceExpected {
 		return zero, ErrRestoreUnsafe
 	}
-	checkpointRequest := CheckpointRequest{
-		CheckpointID: request.CheckpointID, NamespaceID: request.NamespaceID,
-		ReleaseSHA256: request.ReleaseSHA256, ProjectID: request.ProjectID,
-		DataFormat: request.DataFormat, MaxArchiveBytes: request.MaxArchiveBytes,
-		ExpectedDevice: request.ExpectedDevice, ExpectedNamespaceInode: request.ExpectedNamespaceInode,
-		WriterFence: request.WriterFence,
-	}
+	checkpointRequest := request.checkpointRequest()
 	verified, err := r.verifyCheckpointLocked(ctx, checkpointExpected, sourceExpected, checkpointRequest, request.ManifestSHA256)
 	if err != nil || verified.ArchiveBytes != request.ArchiveBytes {
 		return zero, errors.Join(ErrRestoreUnsafe, fmt.Errorf("verify checkpoint: %w", err))

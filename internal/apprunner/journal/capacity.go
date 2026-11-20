@@ -81,8 +81,9 @@ func (s *Store) CapacityBudgets() (CapacityBudgets, bool) {
 type capacityPlan struct {
 	kind, resourceID, installationID            string
 	memoryMiB, cpuMillis, diskBytes, imageBytes int64
-	// quotaBytes is the namespace quota a namespace plan reserves for. diskBytes is then its whole reservation.
-	quotaBytes int64
+	// quotaBytes is the namespace quota a namespace plan reserves for. diskBytes is then the data share, and
+	// checkpointBytes the share of the two retained checkpoints, held as a second row.
+	quotaBytes, checkpointBytes int64
 	// transferFrom names the stopped source backend an enable or repair start replaces. The native start removes
 	// that container before it creates the target, so admission does not count the source next to the target. The
 	// source's row stays held until the settlement that proves its absence releases it.
@@ -127,6 +128,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 			  OR EXISTS (SELECT 1 FROM runner_commands n WHERE n.installation_id=res.installation_id AND n.kind NOT IN (`+installationNeutralCommandKinds+`) AND n.admitted_fence>res.control_fence)))`, now); err != nil {
 		return nil, err
 	}
+	ownCheckpoints := checkpointReservationID(plan.resourceID)
 	var held struct{ state string }
 	var mem, cpu, disk, image int64
 	err := tx.QueryRowContext(ctx, `SELECT state,memory_mib,cpu_millis,disk_bytes,image_bytes FROM runner_reservations WHERE resource_id=?`, plan.resourceID).Scan(&held.state, &mem, &cpu, &disk, &image)
@@ -134,7 +136,16 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if existing && held.state == reservationHeld && mem == plan.memoryMiB && cpu == plan.cpuMillis && disk == plan.diskBytes && image == plan.imageBytes {
+	checkpointsHeld := plan.checkpointBytes == 0
+	if plan.checkpointBytes > 0 {
+		var held int64
+		err := tx.QueryRowContext(ctx, `SELECT disk_bytes FROM runner_reservations WHERE resource_id=? AND state='held'`, ownCheckpoints).Scan(&held)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		checkpointsHeld = err == nil && held == plan.checkpointBytes
+	}
+	if existing && held.state == reservationHeld && mem == plan.memoryMiB && cpu == plan.cpuMillis && disk == plan.diskBytes && image == plan.imageBytes && checkpointsHeld {
 		// Already counted at exactly this size: a replay, or an image another installation loaded first.
 		return nil, nil
 	}
@@ -144,7 +155,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	}
 	var usedMem, usedCPU, usedDisk, usedImage, usedBackends int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(memory_mib),0),COALESCE(SUM(cpu_millis),0),COALESCE(SUM(disk_bytes),0),COALESCE(SUM(image_bytes),0),COALESCE(SUM(CASE WHEN kind='backend' THEN 1 ELSE 0 END),0)
-		FROM runner_reservations WHERE state='held' AND resource_id<>?`, plan.resourceID).Scan(&usedMem, &usedCPU, &usedDisk, &usedImage, &usedBackends); err != nil {
+		FROM runner_reservations WHERE state='held' AND resource_id<>? AND resource_id<>?`, plan.resourceID, ownCheckpoints).Scan(&usedMem, &usedCPU, &usedDisk, &usedImage, &usedBackends); err != nil {
 		return nil, err
 	}
 	if plan.transferFrom != "" && plan.transferFrom != plan.resourceID {
@@ -171,20 +182,19 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	}
 	diskDims := []dimension{{CapacityDisk, plan.diskBytes, usedDisk, budgets.DiskBytes}}
 	if plan.quotaBytes > 0 {
-		// A namespace reserves its quota on the data volume and two retained checkpoints of at most the
-		// quota on the checkpoint volume, or all three on the data volume when they share a filesystem.
-		// Every held reservation row stores three quotas, so the volumes' shares are a third and two thirds.
+		// A namespace reserves its quota on the data volume and its two retained checkpoints, at the archive cap
+		// each, on the checkpoint volume, or all of it on the data volume when they share a filesystem.
 		if budgets.CheckpointBytes > 0 {
 			var usedData, usedCheckpoint int64
-			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(disk_bytes/3),0),COALESCE(SUM(disk_bytes/3*2),0) FROM runner_reservations WHERE state='held' AND resource_id<>?`, plan.resourceID).Scan(&usedData, &usedCheckpoint); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN resource_id LIKE 'checkpoints/%' THEN 0 ELSE disk_bytes END),0),COALESCE(SUM(CASE WHEN resource_id LIKE 'checkpoints/%' THEN disk_bytes ELSE 0 END),0) FROM runner_reservations WHERE state='held' AND resource_id<>? AND resource_id<>?`, plan.resourceID, ownCheckpoints).Scan(&usedData, &usedCheckpoint); err != nil {
 				return nil, err
 			}
 			diskDims = []dimension{
-				{CapacityDataQuota, plan.quotaBytes, usedData, budgets.DiskBytes},
-				{CapacityDataQuotaCheckpoint, plan.diskBytes - plan.quotaBytes, usedCheckpoint, budgets.CheckpointBytes},
+				{CapacityDataQuota, plan.diskBytes, usedData, budgets.DiskBytes},
+				{CapacityDataQuotaCheckpoint, plan.checkpointBytes, usedCheckpoint, budgets.CheckpointBytes},
 			}
 		} else {
-			diskDims[0].dimension = CapacityDataQuota
+			diskDims = []dimension{{CapacityDataQuota, plan.diskBytes + plan.checkpointBytes, usedDisk, budgets.DiskBytes}}
 		}
 	}
 	dimensions := []dimension{
@@ -211,6 +221,18 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 		image_bytes=CASE WHEN excluded.kind='image' AND runner_reservations.state='held' THEN max(runner_reservations.image_bytes,excluded.image_bytes) ELSE excluded.image_bytes END,
 		state='held',updated_ms=excluded.updated_ms`,
 		id, plan.resourceID, plan.installationID, plan.kind, plan.memoryMiB, plan.cpuMillis, plan.diskBytes, plan.imageBytes, now, now)
+	if err != nil || plan.checkpointBytes == 0 {
+		return nil, err
+	}
+	// The retained checkpoints are a second row of the same namespace, so the volumes can be counted apart.
+	id, err = dataClaimID()
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO runner_reservations(id,resource_id,installation_id,kind,memory_mib,cpu_millis,disk_bytes,image_bytes,state,created_ms,updated_ms)
+		VALUES(?,?,?,?,0,0,?,0,'held',?,?)
+		ON CONFLICT(resource_id) DO UPDATE SET installation_id=excluded.installation_id,kind=excluded.kind,disk_bytes=excluded.disk_bytes,state='held',updated_ms=excluded.updated_ms`,
+		id, ownCheckpoints, plan.installationID, plan.kind, plan.checkpointBytes, now, now)
 	return nil, err
 }
 
@@ -218,7 +240,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 // the resource's proven absence; a stop request is never a release. An unknown or already released resource is
 // not an error.
 func releaseReservation(ctx context.Context, tx *sql.Tx, resourceID string, now int64) error {
-	_, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=? WHERE resource_id=? AND state='held'`, now, resourceID)
+	_, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=? WHERE resource_id IN (?,?) AND state='held'`, now, resourceID, checkpointReservationID(resourceID))
 	return err
 }
 
@@ -248,16 +270,26 @@ func (s *Store) backendPlan(ctx context.Context, kind, resourceID, installationI
 	return capacityPlan{kind: kind, resourceID: resourceID, installationID: installationID, memoryMiB: int64(r.MemoryMiB), cpuMillis: int64(r.CPUMillis)}, true, nil
 }
 
-// namespacePlan builds the reservation of one managed data namespace of the given quota. A quota the command
-// does not carry reserves the default every namespace had before the quota became per installation.
-func (s *Store) namespacePlan(resourceID, installationID string, quotaBytes int64) (capacityPlan, bool) {
+// namespacePlan builds the reservation of one managed data namespace of the given quotas. A quota the command
+// does not carry reserves the default every namespace had before the quota became per installation; one outside
+// the platform bounds reserves nothing and is refused where the command is validated.
+func (s *Store) namespacePlan(resourceID, installationID string, quotaBytes, inodeQuota int64) (capacityPlan, bool) {
 	if _, ok := s.CapacityBudgets(); !ok {
 		return capacityPlan{}, false
 	}
 	if quotaBytes <= 0 {
 		quotaBytes = NamespaceQuotaBytes
 	}
-	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: NamespaceReservationFor(quotaBytes), quotaBytes: quotaBytes}, true
+	if inodeQuota <= 0 {
+		inodeQuota = appplatform.DataQuotaDefaultInode
+	}
+	dataBytes, checkpointBytes, ok := NamespaceReservation(quotaBytes, inodeQuota)
+	if !ok {
+		// Unreachable for a validated command; hold the largest reservation rather than none.
+		dataBytes, checkpointBytes, _ = NamespaceReservation(appplatform.DataQuotaMaxBytes, appplatform.DataQuotaMaxInodes)
+		quotaBytes = dataBytes
+	}
+	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: dataBytes, checkpointBytes: checkpointBytes, quotaBytes: quotaBytes}, true
 }
 
 // lookupCapacityRefusal finds the refusal a capacity refusal stored for this command, or nil.

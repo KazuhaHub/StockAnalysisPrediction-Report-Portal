@@ -23,7 +23,7 @@ func TestImportCheckpointHoldsTheNamespaceDisk(t *testing.T) {
 	if err := store.db.QueryRow(`SELECT kind,disk_bytes FROM runner_reservations WHERE resource_id=? AND state='held'`, command.Payload.NamespaceID).Scan(&kind, &disk); err != nil {
 		t.Fatalf("an imported namespace was not reserved: %v", err)
 	}
-	if kind != "namespace" || disk != NamespaceReservationBytes {
+	if kind != "namespace" || disk != NamespaceQuotaBytes {
 		t.Fatalf("reservation = %s %d", kind, disk)
 	}
 }
@@ -31,7 +31,7 @@ func TestImportCheckpointHoldsTheNamespaceDisk(t *testing.T) {
 func TestImportCheckpointRefusedLeavesNoRowAndReplays(t *testing.T) {
 	store, command, raw, sig := importStoreFixture(t)
 	budgets := roomyBudgets()
-	budgets.DiskBytes = NamespaceReservationBytes - 1
+	budgets.DiskBytes = defaultNamespaceDisk - 1
 	if err := store.SetCapacityBudgets(budgets); err != nil {
 		t.Fatal(err)
 	}
