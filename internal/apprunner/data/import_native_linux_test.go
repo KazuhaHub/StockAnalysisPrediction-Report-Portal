@@ -248,8 +248,8 @@ func TestNativeImportCheckpointOntoASecondRoot(t *testing.T) {
 		t.Fatal("the three roots must be three different filesystems", rootIdentity, checkpointIdentity, secondIdentity)
 	}
 
-	const project = 4270
-	namespaceName := nativeNamespace(70)
+	const project = 4290
+	namespaceName := nativeNamespace(90)
 	prepared, err := root.Prepare(ctx, rootIdentity, Request{namespaceName, project, 8 << 20, 128})
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestNativeImportCheckpointOntoASecondRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkpointRequest := CheckpointRequest{
-		CheckpointID: nativeNamespace(700), NamespaceID: namespaceName, ReleaseSHA256: strings.Repeat("b", 64),
+		CheckpointID: nativeNamespace(900), NamespaceID: namespaceName, ReleaseSHA256: strings.Repeat("b", 64),
 		ProjectID: project, DataFormat: 1, MaxArchiveBytes: 1 << 20, ExpectedDevice: prepared.Device,
 		ExpectedNamespaceInode: prepared.Inode, WriterFence: 1,
 	}

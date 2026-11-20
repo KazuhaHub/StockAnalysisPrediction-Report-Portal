@@ -117,6 +117,12 @@ func TestPackRefusesUnsafeTrees(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, []string{"hard link", "outside"}},
+		{"hard-linked schema marker", func(t *testing.T, f fixture) {
+			f.write(t, data.SchemaMarkerName, "1\n", 0644)
+			if err := os.Link(filepath.Join(f.from, data.SchemaMarkerName), filepath.Join(f.from, "marker-copy")); err != nil {
+				t.Fatal(err)
+			}
+		}, []string{data.SchemaMarkerName, "hard link"}},
 		{"name order", func(t *testing.T, f fixture) {
 			f.write(t, "a/inside", "x", 0644)
 			f.write(t, "a.txt", "x", 0644)

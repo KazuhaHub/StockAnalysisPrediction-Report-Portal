@@ -415,6 +415,12 @@ def main(args):
             if "NATIVE_DATA_RESTORE_VERIFIED" not in native.stdout:
                 raise RuntimeError("native verified data restore missing")
             report["native_go_data_restore"] = True
+            if "--- PASS: TestNativeImportCheckpoint " not in native.stdout or "NATIVE_DATA_IMPORT_VERIFIED" not in native.stdout:
+                raise RuntimeError("native checkpoint import missing")
+            report["native_go_data_checkpoint_import"] = True
+            if "--- PASS: TestNativeRaiseQuotaAndImportData " not in native.stdout:
+                raise RuntimeError("native quota raise and data import missing")
+            report["native_go_data_quota_raise_and_import"] = True
             if candidate:
                 candidate_root = mountpoint / "candidate-data"
                 candidate_root.mkdir(mode=0o700)

@@ -219,3 +219,36 @@ func TestInspectImportArchiveReadsMarkerAndRefusesTampering(t *testing.T) {
 	}
 	_ = strconv.Itoa
 }
+
+// The runner reads the data schema marker only as a single-link file, so an archive that links another path to the
+// marker is refused when it is inspected, before an import replaces anything.
+func TestImportSchemaMarkerRefusesALinkToTheMarker(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	for _, h := range []tar.Header{
+		{Name: SchemaMarkerName, Typeflag: tar.TypeReg, Mode: ImportFileMode, Size: 2},
+		{Name: "marker-copy", Typeflag: tar.TypeLink, Mode: ImportFileMode, Linkname: SchemaMarkerName},
+	} {
+		h.Format, h.ModTime = tar.FormatPAX, time.Unix(0, 0)
+		if err := writer.WriteHeader(&h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			_, _ = writer.Write([]byte("1\n"))
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(filepath.Join(t.TempDir(), "linked-marker.tar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(buffer.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := importSchemaMarker(file); !errors.Is(err, ErrMigrationUnsafe) {
+		t.Fatalf("a linked schema marker was read as %d: %v", value, err)
+	}
+}

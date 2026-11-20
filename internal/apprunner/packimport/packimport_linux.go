@@ -193,6 +193,11 @@ func walk(ctx context.Context, from string) ([]node, error) {
 					return err
 				}
 			case unix.S_IFREG:
+				if child == data.SchemaMarkerName && st.Nlink > 1 {
+					// The runner reads the marker only as a single-link file, so a linked one would break every
+					// later migration of the imported data.
+					return refuse(child, "is the data schema marker and has a hard link; the marker must be a file of its own")
+				}
 				if st.Nlink > 1 {
 					// Doc 185 section 4: a file with several links is accepted when every link is inside the
 					// tree. The first path in archive order carries the content; later paths are link entries.
