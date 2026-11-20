@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Checkbox, Input, InputNumber, Modal, Space, Table, Typography } from 'antd'
+import { Alert, App, Button, Checkbox, Input, InputNumber, Modal, Space, Table, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 
@@ -44,6 +44,7 @@ export default function AppMachineReadPanel({ root, installation, granted, ready
   ready: boolean
   onChanged: () => void
 }) {
+  const { modal } = App.useApp()
   const { t, i18n } = useTranslation()
   const base = `${root}/installations/${installation}`
   const grantRoute = `${base}/machine-read`
@@ -132,7 +133,7 @@ export default function AppMachineReadPanel({ root, installation, granted, ready
     setShown(made)
     await load()
   })
-  const revoke = (token: Token) => Modal.confirm({
+  const revoke = (token: Token) => modal.confirm({
     title: t('appPlatform.settings.machine.revokeTitle', { label: token.label }),
     content: t('appPlatform.settings.machine.revokeBody'),
     okText: t('appPlatform.settings.machine.revoke'),

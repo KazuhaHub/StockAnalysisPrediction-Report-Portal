@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Modal } from 'antd'
+import { App, Modal } from 'antd'
 import AppMachineReadPanel from './AppMachineReadPanel'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
@@ -38,7 +38,7 @@ const secret = `pmr_abcdefghijkl_${'S'.repeat(43)}`
 const changed = vi.fn()
 
 function mount(props: Partial<{ granted: boolean; ready: boolean }> = {}) {
-  return render(<AppMachineReadPanel root={root} installation={installation} granted={props.granted ?? false} ready={props.ready ?? true} onChanged={changed} />)
+  return render(<App><AppMachineReadPanel root={root} installation={installation} granted={props.granted ?? false} ready={props.ready ?? true} onChanged={changed} /></App>)
 }
 
 beforeEach(() => {

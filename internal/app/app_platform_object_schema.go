@@ -90,23 +90,23 @@ func platformPluginDataTableName(appID string) string {
 func platformPluginDataTableDefinition(table string) (platformTable, []platformIndex) {
 	suffix := strings.TrimPrefix(table, platformPrefix)
 	return platformTable{
-		name:    suffix,
-		fields:  "id:ID installation_id:ID owner_username:T320 owner_account_created:T64 owner_account_generation:N collection:T32 label:T256 media_type:T128 content:B1048576 content_sha256:SHA size_bytes:N revision:R idempotency_key:T128 created_ms:MS updated_ms:MS",
-		primary: "id",
-		references: []platformReference{
-			{"installation_id", platformPrefix + "installations", "id", "NO ACTION"},
-			{"owner_username", "users", "username", "NO ACTION"},
-		},
-		checks: []string{
-			"size_bytes<=1048576",
-			"BYTE_LENGTH(content)=size_bytes",
-			"updated_ms>=created_ms",
-		},
-	}, []platformIndex{
-		{name: table + "_uq_idem", table: suffix, columns: "installation_id,owner_username,owner_account_created,owner_account_generation,idempotency_key", unique: true},
-		{name: table + "_idx_owner_list", table: suffix, columns: "installation_id,owner_username,owner_account_created,owner_account_generation,updated_ms,id"},
-		{name: table + "_idx_cleanup", table: suffix, columns: "installation_id,updated_ms"},
-	}
+			name:    suffix,
+			fields:  "id:ID installation_id:ID owner_username:T320 owner_account_created:T64 owner_account_generation:N collection:T32 label:T256 media_type:T128 content:B1048576 content_sha256:SHA size_bytes:N revision:R idempotency_key:T128 created_ms:MS updated_ms:MS",
+			primary: "id",
+			references: []platformReference{
+				{"installation_id", platformPrefix + "installations", "id", "NO ACTION"},
+				{"owner_username", "users", "username", "NO ACTION"},
+			},
+			checks: []string{
+				"size_bytes<=1048576",
+				"BYTE_LENGTH(content)=size_bytes",
+				"updated_ms>=created_ms",
+			},
+		}, []platformIndex{
+			{name: table + "_uq_idem", table: suffix, columns: "installation_id,owner_username,owner_account_created,owner_account_generation,idempotency_key", unique: true},
+			{name: table + "_idx_owner_list", table: suffix, columns: "installation_id,owner_username,owner_account_created,owner_account_generation,updated_ms,id"},
+			{name: table + "_idx_cleanup", table: suffix, columns: "installation_id,updated_ms"},
+		}
 }
 
 func platformObjectSchemaTables() []platformTable {
