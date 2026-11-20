@@ -40,10 +40,10 @@ func testPlatformSecretBindingPrincipals(t *testing.T, pg bool) {
 		listed        string
 		auditContains string
 	}{
-		{"", true, false, "/1-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
-		{platformPrincipalsServiceOnly, false, true, "/2-dev.1", `["service"]`, `"Principals":["service"]`},
-		{platformPrincipalsBoth, true, true, "/2-dev.1", `["service","viewer"]`, `"Principals":["service","viewer"]`},
-		{"", true, false, "/1-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
+		{"", true, false, "/3-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
+		{platformPrincipalsServiceOnly, false, true, "/3-dev.1", `["service"]`, `"Principals":["service"]`},
+		{platformPrincipalsBoth, true, true, "/3-dev.1", `["service","viewer"]`, `"Principals":["service","viewer"]`},
+		{"", true, false, "/3-dev.1", `["viewer"]`, `"Principals":["viewer"]`},
 	} {
 		binding := platformBindingWithPrincipals(t, s, admin, installation, credential, c.principals)
 		if got := scalar[string](t, s.st, `SELECT policy_json FROM app_platform_secret_bindings WHERE id=?`, binding.ID); !strings.Contains(got, c.stored) {
