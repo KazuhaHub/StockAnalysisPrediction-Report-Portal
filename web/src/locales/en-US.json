@@ -4101,7 +4101,6 @@
   "err.app_platform_plan_changed": "The installation plan has changed. Review it again.",
   "err.app_platform_installation_not_ready": "The installation is not ready, or an operation is in progress. Try again when it has finished.",
   "err.app_platform_postgres_unsupported": "This installation cannot use the PostgreSQL liveness probe.",
-  "err.app_platform_private_target_not_allowed": "A private target is not covered by the private-network allowlist.",
   "err.not_permitted": "You are not permitted to do this.",
   "err.app_platform_operation_conflict": "This request conflicts with an existing application operation.",
   "err.app_platform_package_untrusted": "The package signature or publisher trust has changed.",

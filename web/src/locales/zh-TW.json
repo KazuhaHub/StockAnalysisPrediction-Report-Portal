@@ -4101,7 +4101,6 @@
   "err.app_platform_plan_changed": "安裝方案已變更，請重新審核。",
   "err.app_platform_installation_not_ready": "安裝尚未就緒，或有作業正在進行。請於完成後重試。",
   "err.app_platform_postgres_unsupported": "此安裝無法使用 PostgreSQL 存活檢查。",
-  "err.app_platform_private_target_not_allowed": "私有目標不在私有網路允許清單內。",
   "err.not_permitted": "你無權執行此操作。",
   "err.app_platform_operation_conflict": "此請求與既有的應用操作衝突。",
   "err.app_platform_package_untrusted": "軟體套件簽章或發佈者信任已變更。",
