@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "11aecc401573053b720b6fce70cdc61335e0517c39b6a32ec49625e7af836030";
+export const DESCRIPTOR_SCHEMA_SHA256 = "a3fca21e7649fdf34b70dd5ba8a9d45fc1722ef6d5034310a3d876d7012d9eda";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -11,6 +11,7 @@ export interface Descriptor {
  backend?: Backend | null;
  capabilities?: Capabilities | null;
  public?: Public | null;
+ network_proxy?: NetworkProxy | null;
  data: DataCompatibility;
 }
 export interface Compatibility {
@@ -60,7 +61,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "network.proxy")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -90,6 +91,9 @@ export interface RouteQuery {
  min?: number;
  max?: number;
  values?: (string)[];
+}
+export interface NetworkProxy {
+ hosts: (string)[];
 }
 export interface Public {
  routes: (PublicRoute)[];
@@ -127,6 +131,7 @@ export const DESCRIPTOR_LIMITS = {
   "maxImageLayerUncompressedBytes": 1073741824,
   "maxDescriptorVersionBytes": 128,
   "maxPublicRoutes": 8,
+  "maxNetworkProxyHosts": 64,
   "maxPublicQueryNames": 8,
   "minPublicCacheSeconds": 1,
   "maxPublicCacheSeconds": 300,
@@ -172,7 +177,8 @@ export const DESCRIPTOR_CAPABILITIES = [
   "background.run",
   "files.export",
   "principals.read",
-  "public.projection"
+  "public.projection",
+  "network.proxy"
 ] as const;
 export const DESCRIPTOR_LOCALES = [
   "en-US",
@@ -209,6 +215,7 @@ export const DESCRIPTOR_FIELDS = {
     "backend",
     "capabilities",
     "public",
+    "network_proxy",
     "data"
   ],
   "Compatibility": [
@@ -288,6 +295,9 @@ export const DESCRIPTOR_FIELDS = {
     "min",
     "max",
     "values"
+  ],
+  "NetworkProxy": [
+    "hosts"
   ],
   "Public": [
     "routes",

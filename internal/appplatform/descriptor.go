@@ -135,6 +135,15 @@ func validManifest(m Manifest) bool {
 	if declaresPublic != (m.Public != nil) || (m.Public != nil && (m.Backend == nil || !validPublic(*m.Public))) {
 		return false
 	}
+	// Likewise the suggested proxy hosts (doc 184): the block and the capability stand or fall together,
+	// and both need a backend. The block grants nothing; it pre-fills the administrator's review.
+	declaresProxy := false
+	for _, value := range m.Capabilities.Optional {
+		declaresProxy = declaresProxy || value == ProxyCapability
+	}
+	if declaresProxy != (m.NetworkProxy != nil) || (m.NetworkProxy != nil && (m.Backend == nil || len(m.NetworkProxy.Hosts) < 1 || !ValidProxyHosts(m.NetworkProxy.Hosts))) {
+		return false
+	}
 	if m.Data.Schema < minDescriptorDataSchema || m.Data.Schema > maxDescriptorDataSchema || m.Data.WritesOnStartup || len(m.Data.ReadableSchemas) == 0 || len(m.Data.ReadableSchemas) > maxDescriptorReadableSchemas {
 		return false
 	}
@@ -290,7 +299,9 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// after reading the disclosure, so a descriptor cannot make it a condition of install.
 		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
 		// administrator's decision, never a condition of install.
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" {
+		// network.proxy is optional only too (doc 184): reaching hosts through a tunnel is an
+		// administrator's decision, never a condition of install.
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == ProxyCapability {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -301,10 +312,14 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", ProxyCapability} {
 		if seen[value] && !hasBackend {
 			return false
 		}
+	}
+	// The proxy rides the egress session, which exists only with background.run (doc 184 Q2).
+	if seen[ProxyCapability] && !seen["background.run"] {
+		return false
 	}
 	for _, value := range []string{"tasks.schedule", "events.subscribe"} {
 		if seen[value] && !seen["background.run"] {
