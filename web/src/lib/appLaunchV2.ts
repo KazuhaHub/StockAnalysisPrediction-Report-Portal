@@ -7,6 +7,7 @@ const hostCapabilities=new Set([
   'network.http',
   'notifications.publish',
   'principals.read',
+  'public.projection',
   'reports.read',
   'secrets.use',
   'storage.files',

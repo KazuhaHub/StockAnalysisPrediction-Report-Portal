@@ -3,12 +3,16 @@ package appplatform
 import (
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 )
+
+// A viewer assertion is two token parts; a public one has the visible "pub." prefix before them.
+var backendRequestAssertion = regexp.MustCompile(`^(pub\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
 
 const MaxBackendRequestBody = 65536
 const MaxBackendAssertion = 32768
@@ -45,7 +49,12 @@ func ValidBackendRequestRoute(method, path string) bool {
 	return decoded != "/v1/handshake" && !strings.HasPrefix(decoded, "/v1/handshake/")
 }
 func ValidBackendRequestData(method, path string, body []byte, assertion string) bool {
-	return ValidBackendRequestRoute(method, path) && len(body) <= MaxBackendRequestBody && (len(body) == 0 || (method != "GET" && json.Valid(body))) && len(assertion) > 0 && len(assertion) <= MaxBackendAssertion && utf8.ValidString(assertion) && backendHandshakeToken.MatchString(assertion)
+	// A public assertion (doc 179) is read-only and bound to the public route space; the runner
+	// refuses anything else before it picks the public header, whatever the Portal signed.
+	if IsPublicAssertion(assertion) && (method != "GET" || len(body) != 0 || !strings.HasPrefix(path, "/v1/public/")) {
+		return false
+	}
+	return ValidBackendRequestRoute(method, path) && len(body) <= MaxBackendRequestBody && (len(body) == 0 || (method != "GET" && json.Valid(body))) && len(assertion) > 0 && len(assertion) <= MaxBackendAssertion && utf8.ValidString(assertion) && backendRequestAssertion.MatchString(assertion)
 }
 func ValidBackendResponse(status int, body []byte) bool {
 	if len(body) == 0 || len(body) > MaxBackendResponseBody || !json.Valid(body) {

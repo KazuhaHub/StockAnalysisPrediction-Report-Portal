@@ -102,6 +102,9 @@ func validateBackendRequestData(boot, method, path, bodyDigest, assertionDigest 
 	if !appplatform.ValidBackendRequestData(method, path, body, assertion) {
 		return ErrInvalidCommand
 	}
+	if appplatform.IsPublicAssertion(assertion) {
+		return validatePublicAssertionData(boot, method, path, bodyDigest, assertionDigest, body, assertion)
+	}
 	encoded, _, ok := strings.Cut(assertion, ".")
 	if !ok {
 		return ErrInvalidCommand
@@ -120,6 +123,22 @@ func validateBackendRequestData(boot, method, path, bodyDigest, assertionDigest 
 	// Structural consistency is not MAC/viewer authentication. The application
 	// verifier remains mandatory before executing its route.
 	if !bytes.Equal(canonical, claimsRaw) || claims.Version != 1 || claims.BootID != boot || claims.Method != method || claims.Path != path || claims.BodyDigest != bodyDigest {
+		return ErrInvalidCommand
+	}
+	bodySHA, assertionSHA := sha256.Sum256(body), sha256.Sum256([]byte(assertion))
+	if hex.EncodeToString(bodySHA[:]) != bodyDigest || hex.EncodeToString(assertionSHA[:]) != assertionDigest {
+		return ErrInvalidCommand
+	}
+	return nil
+}
+
+// validatePublicAssertionData is the same structural consistency for a public assertion (doc 179):
+// it names this boot and this exact path and query, and the request is a bodiless GET. As with a
+// viewer assertion this is not authentication; the app's verifier remains mandatory.
+func validatePublicAssertionData(boot, method, path, bodyDigest, assertionDigest string, body []byte, assertion string) error {
+	claims, err := appplatform.ParsePublicClaims(assertion)
+	pathOnly, query, _ := strings.Cut(path, "?")
+	if err != nil || method != "GET" || len(body) != 0 || !strings.HasPrefix(pathOnly, "/v1/public/") || claims.BootID != boot || claims.Method != method || claims.Path != pathOnly || claims.QueryDigest != appplatform.PublicQueryDigest(query) {
 		return ErrInvalidCommand
 	}
 	bodySHA, assertionSHA := sha256.Sum256(body), sha256.Sum256([]byte(assertion))

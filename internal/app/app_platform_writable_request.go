@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
@@ -19,7 +20,7 @@ import (
 // Exact mutable viewer/access authority and immutable execution identity must
 // survive the entire operation. Short-lived envelope timestamps may renew.
 func samePlatformWritableBackendAccess(a, b platformWritableBackendAccess) bool {
-	return a.account == b.account && a.policy == b.policy && a.fence == b.fence && a.activationID == b.activationID && a.viewer.Subject == b.viewer.Subject && a.viewer.Role == b.viewer.Role && a.viewer.SessionRevision == b.viewer.SessionRevision && slices.Equal(a.viewer.OUs, b.viewer.OUs) && a.intent.applied && b.intent.applied && samePlatformWritableRegistrationIntent(a.intent, b.intent)
+	return a.publicPolicy == b.publicPolicy && a.account == b.account && a.policy == b.policy && a.fence == b.fence && a.activationID == b.activationID && a.viewer.Subject == b.viewer.Subject && a.viewer.Role == b.viewer.Role && a.viewer.SessionRevision == b.viewer.SessionRevision && slices.Equal(a.viewer.OUs, b.viewer.OUs) && a.intent.applied && b.intent.applied && samePlatformWritableRegistrationIntent(a.intent, b.intent)
 }
 
 // Private host execution path, not an HTTP route. Neither destination nor
@@ -55,7 +56,16 @@ func (s *Server) requestPlatformBoundWritableBackend(ctx context.Context, sessio
 	return s.requestPlatformWritableBackendBinding(ctx, session, installation, &binding, method, path, body, endpoint)
 }
 
+// platformBackendAssertionFunc builds the assertion of one request from the signer of the current
+// registration. Nil means the viewer assertion of the access; the anonymous public projection
+// supplies a public one (doc 179), so an assertion never carries more than its request is owed.
+type platformBackendAssertionFunc func(signer protocol.Signer, a platformWritableBackendAccess, now time.Time) (string, error)
+
 func (s *Server) requestPlatformWritableBackendBinding(ctx context.Context, session platformActorSession, installation string, binding *platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint) (driver.BackendResponse, error) {
+	return s.requestPlatformWritableBackendAs(ctx, session, installation, binding, method, path, body, endpoint, nil)
+}
+
+func (s *Server) requestPlatformWritableBackendAs(ctx context.Context, session platformActorSession, installation string, binding *platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint, assert platformBackendAssertionFunc) (driver.BackendResponse, error) {
 	var zero driver.BackendResponse
 	if !appplatform.ValidBackendRequestRoute(method, path) || len(body) > appplatform.MaxBackendRequestBody || (len(body) > 0 && (method == "GET" || !json.Valid(body))) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -77,7 +87,7 @@ func (s *Server) requestPlatformWritableBackendBinding(ctx context.Context, sess
 	if initial.intent.generation >= 2 {
 		return s.requestPlatformUpdateStartBackend(
 			ctx, session, installation, binding, method, path,
-			body, endpoint, initial)
+			body, endpoint, initial, assert)
 	}
 	intent := initial.intent
 	verified, err := control.VerifyWritableBackendRegistration(intent.raw, intent.signature, intent.start.writer.authority, time.Now().UnixMilli())
@@ -115,7 +125,7 @@ func (s *Server) requestPlatformWritableBackendBinding(ctx context.Context, sess
 			return errAppPlatformLaunchUnavailable
 		}
 		var err error
-		raw, signature, assertion, command, err = signPlatformWritableBackendRequest(a, seed, method, path, body, boot)
+		raw, signature, assertion, command, err = signPlatformWritableBackendRequest(a, seed, method, path, body, boot, assert)
 		return err
 	})
 	if err != nil {
@@ -161,7 +171,7 @@ func validPlatformWritableBackendRequestObservation(proof transport.WritableBack
 
 // Called only inside the current access transaction; outputs remain buffered
 // until that transaction's final authority/time checks and commit succeed.
-func signPlatformWritableBackendRequest(a platformWritableBackendAccess, seed []byte, method, path string, body []byte, boot string) ([]byte, []byte, string, control.WritableBackendRequestCommand, error) {
+func signPlatformWritableBackendRequest(a platformWritableBackendAccess, seed []byte, method, path string, body []byte, boot string, assert platformBackendAssertionFunc) ([]byte, []byte, string, control.WritableBackendRequestCommand, error) {
 	var zero control.WritableBackendRequestCommand
 	if len(seed) != ed25519.SeedSize {
 		return nil, nil, "", zero, errAppPlatformLaunchUnavailable
@@ -171,7 +181,12 @@ func signPlatformWritableBackendRequest(a platformWritableBackendAccess, seed []
 		return nil, nil, "", zero, err
 	}
 	defer clear(signer.Key)
-	assertion, err := signer.Sign(method, path, body, a.viewer, time.Now())
+	var assertion string
+	if assert != nil {
+		assertion, err = assert(signer, a, time.Now())
+	} else {
+		assertion, err = signer.Sign(method, path, body, a.viewer, time.Now())
+	}
 	if err != nil {
 		return nil, nil, "", zero, err
 	}

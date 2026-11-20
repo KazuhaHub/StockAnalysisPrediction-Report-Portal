@@ -65,7 +65,14 @@ func forwardBackendRequest(ctx context.Context, socket string, uid, gid uint32, 
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set(protocol.Header, assertion)
+	// The header follows the token kind: a public token (doc 179) can only reach the public header
+	// and a viewer token only the viewer header. ValidBackendRequestData already refused a public
+	// token on anything but a bodiless GET of /v1/public/.
+	header := protocol.Header
+	if appplatform.IsPublicAssertion(assertion) {
+		header = appplatform.PublicAssertionHeader
+	}
+	request.Header.Set(header, assertion)
 	response, err := client.Do(request)
 	if err != nil {
 		return zero, ErrContainerUncertain

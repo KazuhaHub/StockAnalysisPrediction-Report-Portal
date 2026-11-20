@@ -187,7 +187,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	}
 	access, err := s.withPlatformWritableBackendAccess(ctx, actor, lease.installationID, func(a platformWritableBackendAccess, seed []byte) error {
 		var err error
-		raw, sig, assertion, command, err = signPlatformWritableBackendRequest(a, seed, "POST", "/v1/echo", body, boot)
+		raw, sig, assertion, command, err = signPlatformWritableBackendRequest(a, seed, "POST", "/v1/echo", body, boot, nil)
 		return err
 	})
 	if err != nil {

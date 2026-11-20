@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"strings"
 )
 
 var ErrFrontendFileUnavailable = errors.New("application frontend file is unavailable")
@@ -77,4 +78,34 @@ func (a *frontendArchive) read(name string) (FrontendFile, error) {
 		return zero, ErrFrontendDigestMismatch
 	}
 	return FrontendFile{Metadata: metadata, Content: content}, nil
+}
+
+// ReadFrontendDirectory returns every file of a fully verified archive whose name starts with
+// prefix (which must end in "/"), inspecting the archive once. It refuses a set larger than
+// maxBytes, so a public directory cannot be made to fill a cache. Names are exact archive names.
+func ReadFrontendDirectory(m Manifest, raw []byte, prefix string, maxBytes int64) (map[string]FrontendFile, error) {
+	if !strings.HasSuffix(prefix, "/") || !safeRelativePath(strings.TrimSuffix(prefix, "/")) {
+		return nil, ErrFrontendFileUnavailable
+	}
+	archive, err := newFrontendArchive(m, raw)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]FrontendFile{}
+	var total int64
+	for name := range archive.metadata {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		total += archive.metadata[name].Bytes
+		if total > maxBytes {
+			return nil, ErrFrontendFileUnavailable
+		}
+		file, err := archive.read(name)
+		if err != nil {
+			return nil, err
+		}
+		result[name] = file
+	}
+	return result, nil
 }

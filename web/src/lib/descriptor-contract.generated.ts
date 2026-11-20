@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "f24a7c8a0e71b27f162b88a65d1665515a6f5b989c681197c6b9df77d74ddf76";
+export const DESCRIPTOR_SCHEMA_SHA256 = "11aecc401573053b720b6fce70cdc61335e0517c39b6a32ec49625e7af836030";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -10,6 +10,7 @@ export interface Descriptor {
  frontend: Artifact;
  backend?: Backend | null;
  capabilities?: Capabilities | null;
+ public?: Public | null;
  data: DataCompatibility;
 }
 export interface Compatibility {
@@ -59,7 +60,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -90,6 +91,17 @@ export interface RouteQuery {
  max?: number;
  values?: (string)[];
 }
+export interface Public {
+ routes: (PublicRoute)[];
+ document?: string | null;
+}
+export interface PublicRoute {
+ id: string;
+ path: string;
+ query?: (string)[] | null;
+ cache_seconds: number;
+ response_bytes: number;
+}
 export const DESCRIPTOR_LIMITS = {
   "MaxDescriptorBytes": 131072,
   "MaxAppNameCharacters": 80,
@@ -114,6 +126,11 @@ export const DESCRIPTOR_LIMITS = {
   "maxImageLayers": 32,
   "maxImageLayerUncompressedBytes": 1073741824,
   "maxDescriptorVersionBytes": 128,
+  "maxPublicRoutes": 8,
+  "maxPublicQueryNames": 8,
+  "minPublicCacheSeconds": 1,
+  "maxPublicCacheSeconds": 300,
+  "maxPublicResponseBytes": 1048576,
   "minBackendMemoryMiB": 16,
   "maxBackendMemoryMiB": 4096,
   "minBackendCPUMillis": 25,
@@ -136,7 +153,11 @@ export const DESCRIPTOR_PATTERNS = {
   "version": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
   "range": "^[0-9A-Za-z.*+<>=~^| -]{1,96}$",
   "image": "^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$",
-  "path": "^[A-Za-z0-9._/-]+$"
+  "path": "^[A-Za-z0-9._/-]+$",
+  "publicRouteID": "^[a-z][a-z0-9-]{0,31}$",
+  "publicPath": "^/v1/public/[A-Za-z0-9._/-]+$",
+  "publicQueryName": "^[a-z][a-z0-9_]{0,31}$",
+  "publicDocument": "^public/[A-Za-z0-9._/-]+$"
 } as const;
 export const DESCRIPTOR_CAPABILITIES = [
   "reports.read",
@@ -150,7 +171,8 @@ export const DESCRIPTOR_CAPABILITIES = [
   "secrets.read",
   "background.run",
   "files.export",
-  "principals.read"
+  "principals.read",
+  "public.projection"
 ] as const;
 export const DESCRIPTOR_LOCALES = [
   "en-US",
@@ -186,6 +208,7 @@ export const DESCRIPTOR_FIELDS = {
     "frontend",
     "backend",
     "capabilities",
+    "public",
     "data"
   ],
   "Compatibility": [
@@ -265,5 +288,16 @@ export const DESCRIPTOR_FIELDS = {
     "min",
     "max",
     "values"
+  ],
+  "Public": [
+    "routes",
+    "document"
+  ],
+  "PublicRoute": [
+    "id",
+    "path",
+    "query",
+    "cache_seconds",
+    "response_bytes"
   ]
 } as const;
