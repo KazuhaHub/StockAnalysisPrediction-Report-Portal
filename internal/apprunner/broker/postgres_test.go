@@ -160,6 +160,22 @@ func (s *fakePG) handle(conn net.Conn) {
 	case "stall":
 		<-s.release
 		return
+	case "cleartext":
+		be.Send(&pgproto3.AuthenticationCleartextPassword{})
+		_ = be.Flush()
+		_ = be.SetAuthType(pgproto3.AuthTypeCleartextPassword)
+		m, err := be.Receive()
+		sent, ok := m.(*pgproto3.PasswordMessage)
+		if err != nil || !ok || sent.Password != s.password {
+			be.Send(&pgproto3.ErrorResponse{Severity: "FATAL", SeverityUnlocalized: "FATAL", Code: "28P01", Message: "password authentication failed"})
+			_ = be.Flush()
+			return
+		}
+		s.mu.Lock()
+		s.passwordSeen = true
+		s.mu.Unlock()
+		s.serveQueries(be)
+		return
 	case "md5":
 		be.Send(&pgproto3.AuthenticationMD5Password{Salt: [4]byte{1, 2, 3, 4}})
 		_ = be.Flush()
@@ -177,6 +193,11 @@ func (s *fakePG) handle(conn net.Conn) {
 	if !s.scram(be) {
 		return
 	}
+	s.serveQueries(be)
+}
+
+// serveQueries finishes authentication and answers simple queries with the one fixed row.
+func (s *fakePG) serveQueries(be *pgproto3.Backend) {
 	be.Send(&pgproto3.AuthenticationOk{})
 	be.Send(&pgproto3.ParameterStatus{Name: "server_version", Value: "16.0"})
 	be.Send(&pgproto3.BackendKeyData{ProcessID: 1, SecretKey: []byte{1, 2, 3, 4}})
@@ -364,15 +385,18 @@ func TestPostgresProbeOutcomes(t *testing.T) {
 		mode     string
 		password string
 		wrongCA  bool
+		systemCA bool
 		deadline time.Duration
 		want     string
 	}{
-		{"reachable", "scram", good, false, 5 * time.Second, PostgresReachable},
-		{"wrong password", "scram", "another password", false, 5 * time.Second, PostgresAuthFailed},
-		{"md5 offered", "md5", good, false, 5 * time.Second, PostgresAuthFailed},
-		{"certificate from another authority", "scram", good, true, 5 * time.Second, PostgresTLSFailed},
-		{"server without TLS", "notls", good, false, 5 * time.Second, PostgresTLSFailed},
-		{"stall after startup", "stall", good, false, 400 * time.Millisecond, PostgresTimeout},
+		{"reachable", "scram", good, false, false, 5 * time.Second, PostgresReachable},
+		{"cleartext password asked after verified TLS", "cleartext", good, false, false, 5 * time.Second, PostgresReachable},
+		{"no reviewed CA, system roots", "scram", good, false, true, 5 * time.Second, PostgresReachable},
+		{"wrong password", "scram", "another password", false, false, 5 * time.Second, PostgresAuthFailed},
+		{"md5 offered", "md5", good, false, false, 5 * time.Second, PostgresAuthFailed},
+		{"certificate from another authority", "scram", good, true, false, 5 * time.Second, PostgresTLSFailed},
+		{"server without TLS", "notls", good, false, false, 5 * time.Second, PostgresTLSFailed},
+		{"stall after startup", "stall", good, false, false, 400 * time.Millisecond, PostgresTimeout},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,7 +407,14 @@ func TestPostgresProbeOutcomes(t *testing.T) {
 			}
 			server := newFakePG(t, tc.mode, tc.password, &tls.Config{Certificates: []tls.Certificate{signer.serverCert(t, probeHost)}})
 			f.serve(server.addr(), nil)
-			policy := f.policy(t, probePublicTarget(f.ca), tc.deadline, 2, "")
+			target := probePublicTarget(f.ca)
+			if tc.systemCA {
+				// No reviewed CA: the system roots apply, here injected through the test seam.
+				target.CAPEM = ""
+				f.probe.systemRoots = x509.NewCertPool()
+				f.probe.systemRoots.AddCert(f.ca.cert)
+			}
+			policy := f.policy(t, target, tc.deadline, 2, "")
 			raw, sig := f.command(t, policy, "orders", "status_probe", good, "")
 			checks := 0
 			started := time.Now()
@@ -401,6 +432,9 @@ func TestPostgresProbeOutcomes(t *testing.T) {
 			defer server.mu.Unlock()
 			if tc.mode == "md5" && server.passwordSeen {
 				t.Fatal("a password was sent in answer to an md5 challenge")
+			}
+			if tc.mode == "cleartext" && !server.passwordSeen {
+				t.Fatal("the cleartext password was not sent inside the verified session")
 			}
 			if tc.want != PostgresReachable {
 				if len(server.statements) != 0 {
