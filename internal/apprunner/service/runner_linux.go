@@ -63,6 +63,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	rootFile, err := openRootDirectory(cfg.DataRoot)
 	if err != nil {
+		logger.Printf("app-runner not ready: data_root cannot be opened as a directory")
 		return ErrNotReady
 	}
 	defer rootFile.Close()
@@ -74,10 +75,12 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	defer root.Close()
 	pin, err := root.Identity(ctx)
 	if err != nil {
+		logger.Printf("app-runner not ready: data_root has no readable root identity")
 		return ErrNotReady
 	}
 	checkpointFile, err := openRootDirectory(cfg.CheckpointRoot)
 	if err != nil {
+		logger.Printf("app-runner not ready: checkpoint_root cannot be opened as a directory")
 		return ErrNotReady
 	}
 	defer checkpointFile.Close()
@@ -89,10 +92,12 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	defer checkpointRoot.Close()
 	checkpointPin, err := checkpointRoot.Identity(ctx)
 	if err != nil || checkpointPin == pin {
+		logger.Printf("app-runner not ready: checkpoint_root has no readable root identity, or is the same volume as data_root")
 		return ErrNotReady
 	}
 	report, err := driver.InspectDaemon(ctx, cfg.DockerSocket)
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
+		logger.Printf("app-runner not ready: the Docker daemon does not pass the rootful profile check or the reported CPU and memory floors")
 		return ErrNotReady
 	}
 	// The runner and dockerd must share a mount namespace and a network namespace (doc 187 section 2). Checked
@@ -128,15 +133,19 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		var notReady *NotReadyError
 		if errors.As(err, &notReady) {
 			logger.Printf("app-runner not ready: capacity: %s", notReady.Reason)
+		} else {
+			logger.Printf("app-runner not ready: capacity: %v", err)
 		}
 		return ErrNotReady
 	}
 	if err := store.SetCapacityBudgets(budgets); err != nil {
+		logger.Printf("app-runner not ready: capacity budgets cannot be recorded: %v", err)
 		return ErrNotReady
 	}
 	// The scratch is opened first: it removes any blobs an earlier run left, before anything can read them.
 	images, err := imagestore.Open(cfg.ImageRoot)
 	if err != nil {
+		logger.Printf("app-runner not ready: image_root cannot be opened (root-owned directory mode 0700 expected): %v", err)
 		return ErrNotReady
 	}
 	if cfg.AllowLocalReferenceImages {
@@ -148,6 +157,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	native, err := driver.OpenCandidateRuntime(ctx, cfg.DockerSocket, cfg.DataRoot, cfg.IPCRoot, root, pin, options...)
 	if err != nil {
+		logger.Printf("app-runner not ready: the container runtime cannot be opened (docker_socket, the data_root path chain or the daemon profile): %v", err)
 		return ErrNotReady
 	}
 	defer native.Close()
@@ -160,6 +170,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	estimated, err := store.EstimatedReservations(ctx)
 	if err != nil {
+		logger.Printf("app-runner not ready: capacity: estimated reservations: %v", err)
 		return ErrNotReady
 	}
 	// A socket left by a runner that was killed would be refused by the listener. The journal's owner lock is held
@@ -170,6 +181,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries, transport.WithPrivateNetworks(cfg.PrivateNetworks), transport.WithProxyPins(cfg.ProxyPins))
 	if err != nil {
+		logger.Printf("app-runner not ready: the control endpoint cannot be bound (control_root must be root:controller-gid 0750 under root-owned ancestors, and the path short enough for a socket): %v", err)
 		return ErrNotReady
 	}
 	defer server.Close()

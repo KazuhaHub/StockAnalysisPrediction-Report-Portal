@@ -228,10 +228,10 @@ func (r *run) resolveExisting() error {
 // ---- directories ---------------------------------------------------------------------------------------
 
 type dirWant struct {
-	role     string
-	path     string
-	uid, gid uint32
-	mode     os.FileMode
+	role string
+	path string
+	gid  uint32
+	mode os.FileMode
 	// exact: the leaf must have exactly this owner and mode. Otherwise an existing leaf is accepted under the
 	// ancestor rule (root-owned, not group- or world-writable).
 	exact bool

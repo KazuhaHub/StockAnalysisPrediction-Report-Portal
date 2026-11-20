@@ -15,9 +15,16 @@ import (
 
 // Defaults of the operator-owned fields of a new service.json. They are the shipped example's values; from then
 // on they are the operator's, and a later run never reads or rewrites them.
+// PortalSocketPath is where the control socket appears inside the Portal container: the target of the compose
+// file's read-only bind of RP_APP_RUNNER_CONTROL_DIR.
+const PortalSocketPath = "/var/lib/portal-app-runner/control/runner.sock"
+
 const (
-	defaultNetworkActive   = 4
-	defaultNetworkEntries  = 1024
+	defaultNetworkActive = 4
+	// The broker's pools hold at most 32 executors (broker.MaxNetworkPoolEntries), and a runner whose
+	// network_entries is above that fails to start although LoadConfig accepts up to 4096. The shipped example
+	// used to say 1024, which a real start refuses.
+	defaultNetworkEntries  = 32
 	defaultMinimumCPUs     = 2
 	defaultMinimumMemory   = int64(2) << 30
 	configFileMode         = 0o600
@@ -138,6 +145,8 @@ func (r *run) report() {
 		r.printf("# PORTAL_VERSION=<the release tag of the Portal and app-runner images, for example v2026.47.1>\n")
 	}
 	r.printf("PORTAL_UID=%d\nPORTAL_GID=%d\n", c.uid, c.gid)
-	r.printf("RP_APP_RUNNER_CONTROL_DIR=%s\nRP_APP_RUNNER_SOCKET=%s\n", c.controlRoot, c.controlSocket)
+	// Portal sees the control directory at a fixed path inside its container (the compose file's bind target), so
+	// its socket variable names that path whatever the host path is.
+	r.printf("RP_APP_RUNNER_CONTROL_DIR=%s\nRP_APP_RUNNER_SOCKET=%s\n", c.controlRoot, PortalSocketPath)
 	r.printf("RP_APP_RUNNER_CONTROLLER_UID=%d\nRP_APP_RUNNER_CONTROLLER_GID=%d\n", c.uid, c.gid)
 }

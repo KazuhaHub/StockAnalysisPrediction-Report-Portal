@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/broker"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
 )
 
@@ -104,6 +105,10 @@ func TestFirstApplyCreatesEveryItem(t *testing.T) {
 		cfg.CheckpointRoot != "/srv/portal-runner/checkpoint/root" || cfg.ControlSocket != "/var/lib/portal-app-runner/control/runner.sock" ||
 		cfg.IPCRoot != "/run/portal-app-runner/ipc" || cfg.JournalDir != "/var/lib/portal-app-runner/journal" || cfg.Capacity == nil || cfg.Capacity.DiskBytes == nil || *cfg.Capacity.DiskBytes < 1<<30 {
 		t.Fatalf("service.json: %+v", cfg)
+	}
+	// The broker's pools refuse more than their maximum at start, although LoadConfig allows more.
+	if cfg.NetworkActive > broker.MaxNetworkPoolActive || cfg.NetworkEntries > broker.MaxNetworkPoolEntries {
+		t.Fatalf("network_active %d / network_entries %d exceed what the broker's pools accept", cfg.NetworkActive, cfg.NetworkEntries)
 	}
 	if _, err := service.LoadBootstrapConfig(h.p("/etc/portal-app-runner/bootstrap.json")); err != nil {
 		t.Fatalf("bootstrap.json: %v", err)
@@ -379,5 +384,26 @@ func TestNewHostEnrollmentConflictsWithAnEnrolledJournal(t *testing.T) {
 	}
 	if h.snapshot() != before {
 		t.Fatal("a refused run changed the host")
+	}
+}
+
+// Portal sees the control directory at the compose file's fixed bind target, so the socket variable names that
+// path even when the host's control root is elsewhere.
+func TestEnvReportNamesTheContainerSideSocketForACustomControlRoot(t *testing.T) {
+	h := newHost(t)
+	opts := h.options(true)
+	opts.ControlRoot = "/srv/runner-control"
+	opts.Enrollment = h.enrollmentFile(enrollmentDoc(1))
+	code, out := h.run(opts)
+	if code != ExitOK {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	for _, line := range []string{"RP_APP_RUNNER_CONTROL_DIR=/srv/runner-control", "RP_APP_RUNNER_SOCKET=/var/lib/portal-app-runner/control/runner.sock"} {
+		if !strings.Contains(out, "\n"+line+"\n") {
+			t.Errorf("the report lacks %q:\n%s", line, out)
+		}
+	}
+	if cfg := mustLoad(t, h, "/etc/portal-app-runner/service.json"); cfg.ControlSocket != "/srv/runner-control/runner.sock" {
+		t.Fatalf("the runner's own socket path: %s", cfg.ControlSocket)
 	}
 }
