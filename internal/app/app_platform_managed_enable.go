@@ -890,13 +890,29 @@ func (s *Server) runPlatformManagedSameRelease(
 		var next platformOperationLease
 		var err error
 		switch result.snapshot.Stage {
-		case appplatform.StageQueued, appplatform.StageValidate,
-			appplatform.StageDownload, appplatform.StageStage:
+		case appplatform.StageQueued, appplatform.StageDownload, appplatform.StageStage:
 			next, err = s.advancePlatformManagedEnableStage(ctx, result)
+		case appplatform.StageValidate:
+			// An import's validate asks the runner again for the reviewed inbox archive before anything changes.
+			if result.snapshot.Action == appplatform.ActionImportData {
+				next, err = s.validatePlatformImportData(ctx, result, endpoint)
+			} else {
+				next, err = s.advancePlatformManagedEnableStage(ctx, result)
+			}
 		case appplatform.StageSnapshot:
 			next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
 		case appplatform.StageQuiesce:
-			next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
+			// An import's quiesce is the stopped state its review required: it only moves on to the snapshot.
+			if result.snapshot.Action == appplatform.ActionImportData {
+				next, err = s.advancePlatformManagedEnableStage(ctx, result)
+			} else {
+				next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
+			}
+		case appplatform.StageImport:
+			if result.snapshot.Action != appplatform.ActionImportData {
+				return result, errAppPlatformStageEvidence
+			}
+			next, err = s.dispatchPlatformImportData(ctx, result, endpoint)
 		case appplatform.StageStart:
 			next, err = s.executePlatformUpdateStart(ctx, result, endpoint)
 		case appplatform.StageProbe:

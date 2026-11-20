@@ -299,10 +299,6 @@ type platformImportDataIntent struct {
 	raw, signature, readSignature []byte
 }
 
-// platformImportEffectStage is the stage name of the Portal's effect rows of an import: the journal's own stage list
-// has none, and the runner records them under restore_data.
-const platformImportEffectStage = "import"
-
 func platformImportDataCommand(expected platformOperationLease, runtime platformRuntimeRegistration, plan platformManagedUpdatePlan, checkpoint journal.CheckpointReceipt, effectID string) (control.ImportDataCommand, error) {
 	step := plan.Import
 	if step == nil || !step.valid() {

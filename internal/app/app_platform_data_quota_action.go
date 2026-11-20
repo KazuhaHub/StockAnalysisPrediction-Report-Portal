@@ -519,7 +519,6 @@ func loadPlatformAdmittedDataQuota(e migExec, lease platformOperationLease) (pla
 		return zero, errAppPlatformStageEvidence
 	}
 	var plan platformDataQuotaPlan
-	canonical, marshalErr := json.Marshal(plan)
 	if json.Unmarshal([]byte(raw), &plan) != nil || len(raw) > 65536 || platformDigest([]byte(raw)) != digest || managed != 1 || !consumed.Valid ||
 		plan.Format != platformSetDataQuotaFormat || plan.Action != appplatform.ActionSetDataQuota || plan.InstallationID != lease.installationID ||
 		plan.ControllerEpoch != lease.controllerEpoch || plan.Generation != source || target != source+1 || target != int64(lease.snapshot.Generation) ||
@@ -527,7 +526,7 @@ func loadPlatformAdmittedDataQuota(e migExec, lease platformOperationLease) (pla
 		!platformValidUUID(plan.DataNamespaceID) || !platformValidUUID(plan.DataEffectID) || !platformValidSHA(plan.DataReceiptSHA256) {
 		return zero, errAppPlatformStageEvidence
 	}
-	canonical, marshalErr = json.Marshal(plan)
+	canonical, marshalErr := json.Marshal(plan)
 	if marshalErr != nil || string(canonical) != raw {
 		return zero, errAppPlatformStageEvidence
 	}

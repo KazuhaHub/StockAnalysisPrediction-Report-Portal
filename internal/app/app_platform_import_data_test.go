@@ -119,6 +119,11 @@ func testPlatformImportDataReplacesContentAndCompletes(t *testing.T, pg bool) {
 	if _, err := s.validatePlatformImportData(context.Background(), current, endpoint); !errors.Is(err, errPlatformDataImportArchiveMissing) {
 		t.Fatalf("a missing archive was validated: %v", err)
 	}
+	// The scheduler's stage loop asks the runner at validate too: it must not move past a missing archive.
+	if after, err := s.runPlatformManagedSameRelease(context.Background(), current, endpoint); !errors.Is(err, errPlatformDataImportArchiveMissing) ||
+		after.snapshot.Stage != appplatform.StageValidate {
+		t.Fatalf("the stage loop moved an import past validate without the runner's check: %v %v", after.snapshot.Stage, err)
+	}
 	runner.archive = saved
 	if current, err = s.validatePlatformImportData(context.Background(), current, endpoint); err != nil || current.snapshot.Stage != appplatform.StageQuiesce {
 		t.Fatal("import validated", current.snapshot, err)
