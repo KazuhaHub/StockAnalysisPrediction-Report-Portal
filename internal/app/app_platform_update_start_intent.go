@@ -172,6 +172,9 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		(plan.Migration != nil && action != appplatform.ActionUpdate) {
 		return zero, nil, errAppPlatformStageEvidence
 	}
+	if err := platformCheckPlanQuota(e, expected.installationID, action, plan, parsed.Manifest); err != nil {
+		return zero, nil, err
+	}
 	platformFound := false
 	for _, platform := range parsed.Manifest.Backend.Platforms {
 		if platform == source.platform {

@@ -614,9 +614,14 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 		DeclinedCapabilities: platformDeclinedCapabilities(selection),
 		DataQuotaBytes:       quota, Runtime: target,
 	}
-	var currentBytes, currentInodes int64
-	if err := e.queryRow(`SELECT quota_bytes,quota_inodes FROM app_platform_data_namespaces WHERE owner_installation_id=? AND state='active'`, installation).Scan(&currentBytes, &currentInodes); err != nil {
+	var namespaceID string
+	if err := e.queryRow(`SELECT id FROM app_platform_data_namespaces WHERE owner_installation_id=? AND state='active'`, installation).Scan(&namespaceID); err != nil {
 		return platformUpdateProjection{}, errAppPlatformPlanChanged
+	}
+	// The quota the update is compared with is the last link of the namespace's chain, proven against its row.
+	currentBytes, currentInodes, _, err := platformCurrentNamespaceQuota(e, installation, namespaceID)
+	if err != nil {
+		return platformUpdateProjection{}, err
 	}
 	return platformUpdateProjection{
 		DataQuota: platformUpdateQuotaDifference(currentBytes, currentInodes, parsed.Manifest),
@@ -661,83 +666,104 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 		return platformRemovalReview{}, err
 	}
 	var result platformRemovalReview
-	err = s.withPlatformStagedReleaseContext(
-		ctx, session, release, trustRevision,
-		func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
-			lock := ""
-			if e.s.driver == "postgres" {
-				lock = " FOR UPDATE"
-			}
-			var appID, publisher, desired, phase, epoch, runtimeID string
-			var generation, revision, policy int64
-			if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,
+	// An update that raises the quota asks the runner whether its capacity can hold the raise, in two phases: the
+	// question is signed in one transaction, the runner is asked outside any transaction, and the review is built
+	// again and written in a second one with the answer. An update that raises nothing is written in the first.
+	var query platformDataQueryRequest
+	var base platformUpdateQuotaReview
+	asked := false
+	pass := func(answer *journal.DataQueryReport) error {
+		return s.withPlatformStagedReleaseContext(
+			ctx, session, release, trustRevision,
+			func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
+				lock := ""
+				if e.s.driver == "postgres" {
+					lock = " FOR UPDATE"
+				}
+				var appID, publisher, desired, phase, epoch, runtimeID string
+				var generation, revision, policy int64
+				if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,
 				phase,generation,revision,policy_revision,controller_epoch,runtime_id
 				FROM app_platform_installations WHERE id=?`+lock,
-				installation).
-				Scan(&appID, &publisher, &desired, &phase, &generation,
-					&revision, &policy, &epoch, &runtimeID); err != nil ||
-				desired != "enabled" || !platformRetryPhaseAllowed(phase, recovers) ||
-				(recovers == "") != (phase == "ready") ||
-				epoch != control.epoch || runtimeID != target.RuntimeID ||
-				generation < 1 || generation == math.MaxInt64 ||
-				revision < 1 || revision == math.MaxInt64 ||
-				policy < 1 || policy == math.MaxInt64 {
-				return errAppPlatformPlanChanged
-			}
-			if recovers != "" {
-				if err := requirePlatformRetrySource(e, installation, recovers); err != nil {
-					return err
+					installation).
+					Scan(&appID, &publisher, &desired, &phase, &generation,
+						&revision, &policy, &epoch, &runtimeID); err != nil ||
+					desired != "enabled" || !platformRetryPhaseAllowed(phase, recovers) ||
+					(recovers == "") != (phase == "ready") ||
+					epoch != control.epoch || runtimeID != target.RuntimeID ||
+					generation < 1 || generation == math.MaxInt64 ||
+					revision < 1 || revision == math.MaxInt64 ||
+					policy < 1 || policy == math.MaxInt64 {
+					return errAppPlatformPlanChanged
 				}
-			}
-			var activeRelease string
-			var activeFormat int64
-			if err := e.queryRow(`SELECT release_sha256,data_format
+				if recovers != "" {
+					if err := requirePlatformRetrySource(e, installation, recovers); err != nil {
+						return err
+					}
+				}
+				var activeRelease string
+				var activeFormat int64
+				if err := e.queryRow(`SELECT release_sha256,data_format
 				FROM app_platform_activations
 				WHERE installation_id=? AND generation=? AND policy_revision=?
 				AND state='active'`, installation, generation, policy).
-				Scan(&activeRelease, &activeFormat); err != nil ||
-				!platformValidSHA(activeRelease) ||
-				activeRelease == verified.sha256 || activeFormat < 1 {
-				return errAppPlatformPlanChanged
-			}
-			if verified.appID != appID || verified.publisherID != publisher {
-				return errAppPlatformPlanChanged
-			}
-			source, err := loadPlatformManagedUpdateSource(
-				e, installation, activeRelease, generation, target)
-			if err != nil {
-				return err
-			}
-			if err := validateManagedInstallTarget(
-				e, target, control.epoch); err != nil {
-				return err
-			}
-			projection, err := platformBuildManagedUpdateProjection(
-				e, installation, source, revision, policy, activeFormat,
-				actor, control, target, verified)
-			if err != nil {
-				return err
-			}
-			projection.RecoversOperationID = recovers
-			control, err = platformRefreshActor(e, session, actor, control)
-			if err != nil {
-				return err
-			}
-			raw, err := json.Marshal(projection)
-			if err != nil || len(raw) > 65536 ||
-				control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
-				return errAppPlatformPlanChanged
-			}
-			if !validPlatformInstallRuntimeFacts(*facts, endpoint) {
-				return errAppPlatformRuntimeConflict
-			}
-			id, err := platformNewUUID()
-			if err != nil {
-				return err
-			}
-			digest := platformDigest(raw)
-			expires := control.nowMS + platformReviewPlanValidityMS
-			if _, err := e.exec(`INSERT INTO app_platform_review_plans(
+					Scan(&activeRelease, &activeFormat); err != nil ||
+					!platformValidSHA(activeRelease) ||
+					activeRelease == verified.sha256 || activeFormat < 1 {
+					return errAppPlatformPlanChanged
+				}
+				if verified.appID != appID || verified.publisherID != publisher {
+					return errAppPlatformPlanChanged
+				}
+				source, err := loadPlatformManagedUpdateSource(
+					e, installation, activeRelease, generation, target)
+				if err != nil {
+					return err
+				}
+				if err := validateManagedInstallTarget(
+					e, target, control.epoch); err != nil {
+					return err
+				}
+				projection, err := platformBuildManagedUpdateProjection(
+					e, installation, source, revision, policy, activeFormat,
+					actor, control, target, verified)
+				if err != nil {
+					return err
+				}
+				projection.RecoversOperationID = recovers
+				if projection.DataQuota != nil {
+					if answer == nil {
+						query, err = s.signPlatformUpdateCapacityQuery(e, control.epoch, installation, activeRelease, projection.DataQuota)
+						if err != nil {
+							return err
+						}
+						base, asked = *projection.DataQuota, true
+						return nil
+					}
+					if !projection.DataQuota.sameFacts(&base) {
+						return errAppPlatformPlanChanged
+					}
+					platformApplyQuotaCapacity(projection.DataQuota, *answer)
+				}
+				control, err = platformRefreshActor(e, session, actor, control)
+				if err != nil {
+					return err
+				}
+				raw, err := json.Marshal(projection)
+				if err != nil || len(raw) > 65536 ||
+					control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
+					return errAppPlatformPlanChanged
+				}
+				if !validPlatformInstallRuntimeFacts(*facts, endpoint) {
+					return errAppPlatformRuntimeConflict
+				}
+				id, err := platformNewUUID()
+				if err != nil {
+					return err
+				}
+				digest := platformDigest(raw)
+				expires := control.nowMS + platformReviewPlanValidityMS
+				if _, err := e.exec(`INSERT INTO app_platform_review_plans(
 				id,installation_id,app_id,publisher_id,action,
 				source_release_sha256,target_release_sha256,
 				installation_revision,policy_revision,trust_revision,
@@ -745,19 +771,28 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 				account_generation,authority_fingerprint,plan_sha256,
 				plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
 				VALUES(?,?,?,?,'update',?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`,
-				id, installation, appID, publisher, activeRelease,
-				verified.sha256, revision, policy, trustRevision,
-				control.epoch, actor.scope, actor.username, actor.created,
-				actor.generation, actor.authorityFingerprint, digest,
-				string(raw), expires, control.nowMS, control.nowMS); err != nil {
+					id, installation, appID, publisher, activeRelease,
+					verified.sha256, revision, policy, trustRevision,
+					control.epoch, actor.scope, actor.username, actor.created,
+					actor.generation, actor.authorityFingerprint, digest,
+					string(raw), expires, control.nowMS, control.nowMS); err != nil {
+					return err
+				}
+				result = platformRemovalReview{
+					ID: id, SHA256: digest, JSON: string(raw), ExpiresMS: expires,
+				}
+				_, err = platformRefreshActor(e, session, actor, control)
 				return err
-			}
-			result = platformRemovalReview{
-				ID: id, SHA256: digest, JSON: string(raw), ExpiresMS: expires,
-			}
-			_, err = platformRefreshActor(e, session, actor, control)
-			return err
-		})
+			})
+	}
+	err = pass(nil)
+	if err == nil && asked {
+		report, queryErr := s.queryPlatformData(ctx, endpoint, query)
+		if queryErr != nil {
+			return platformRemovalReview{}, queryErr
+		}
+		err = pass(&report)
+	}
 	if err != nil {
 		return platformRemovalReview{}, err
 	}
@@ -875,6 +910,16 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 				!platformManagedFormat(projection.Target.Format) {
 				return errAppPlatformPlanChanged
 			}
+			if projection.DataQuota != nil {
+				// A review stored before the update raised the quota must be reviewed again, and one the runner's
+				// capacity cannot hold is never admitted.
+				if !projection.DataQuota.RaiseApplied {
+					return errAppPlatformPlanChanged
+				}
+				if projection.DataQuota.Capacity != "fits" {
+					return errPlatformDataQuotaCapacity
+				}
+			}
 			var currentApp, currentPublisher, desired, phase,
 				currentEpoch, runtimeID string
 			var generation, currentRevision, currentPolicy int64
@@ -938,6 +983,9 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 				return err
 			}
 			expected.RecoversOperationID = projection.RecoversOperationID
+			if !platformKeepStoredQuotaAnswer(expected.DataQuota, projection.DataQuota) {
+				return errAppPlatformPlanChanged
+			}
 			expectedRaw, marshalErr := json.Marshal(expected)
 			if marshalErr != nil || string(expectedRaw) != raw {
 				return errAppPlatformPlanChanged

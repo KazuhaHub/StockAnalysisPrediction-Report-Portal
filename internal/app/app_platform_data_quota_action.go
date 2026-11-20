@@ -217,7 +217,7 @@ func platformDataEffectFailure(observation platformDataEffectStatusObservation, 
 		!platformObservedBinding(observation.Controller(), observation.Endpoint(), observation.ReceivedAt(), observation.CommandSHA256(), raw, authority, endpoint) {
 		return errAppPlatformStageEvidence
 	}
-	return fmt.Errorf("%w: %s", errPlatformDataEffectFailed, status.Code)
+	return &platformDataEffectFailedError{code: status.Code}
 }
 
 func validPlatformDataQueryObservation(observation platformDataQueryObservation, request platformDataQueryRequest, endpoint platformRuntimeEndpoint) (journal.DataQueryReport, bool) {
@@ -697,28 +697,16 @@ type platformSetDataQuotaIntent struct {
 	plan                          platformDataQuotaPlan
 	descriptor                    []byte
 	raw, signature, readSignature []byte
-}
-
-func platformSetDataQuotaCommand(expected platformOperationLease, runtime platformRuntimeRegistration, plan platformDataQuotaPlan, effectID string) (control.SetDataQuotaCommand, error) {
-	command := control.SetDataQuotaCommand{CommandHeader: control.CommandHeader{
-		Format: control.SetDataQuotaFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
-		ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: expected.installationID, OperationID: expected.id,
-		TargetGeneration: strconv.FormatUint(expected.snapshot.Generation, 10), Stage: control.SetDataQuotaStage,
-		EffectNumber: control.SetDataQuotaEffectNumber, EffectID: effectID, Kind: control.SetDataQuotaKind,
-		InstallationFence: strconv.FormatInt(expected.fence, 10),
-	}, Payload: control.SetDataQuotaPayload{
-		NamespaceID: plan.DataNamespaceID, ReleaseSHA256: plan.ReleaseSHA256, DataFormat: strconv.FormatInt(plan.DataFormat, 10),
-		WriterFence: strconv.FormatInt(plan.WriterFence, 10), ProjectID: plan.ProjectID, NamespaceInode: plan.NamespaceInode, Device: plan.Device,
-		DataEffectID: plan.DataEffectID, DataReceiptSHA256: plan.DataReceiptSHA256,
-		OldBytes: strconv.FormatInt(plan.CurrentQuotaBytes, 10), OldInodes: strconv.FormatInt(plan.CurrentQuotaInodes, 10),
-		NewBytes: strconv.FormatInt(plan.NewQuotaBytes, 10), NewInodes: strconv.FormatInt(plan.NewQuotaInodes, 10),
-	}}
-	digest, err := control.SetDataQuotaLogicalDigest(command)
-	if err != nil {
-		return control.SetDataQuotaCommand{}, errAppPlatformStageEvidence
-	}
-	command.PayloadSHA256 = digest
-	return command, nil
+	// slot is where the Portal keeps the effect row, and admittedFence the fence it was admitted under.
+	slot          platformRaiseSlot
+	admittedFence int64
+	// priorSignedUntil is the latest expiry of any command signed for the effect before this one, and rowState
+	// and rowReceipt the row as it was read. recorded is set when this command's own window was written on the
+	// row, which is when it can be executed.
+	priorSignedUntil int64
+	rowState         string
+	rowReceipt       string
+	recorded         bool
 }
 
 // preparePlatformSetDataQuota records the effect, once, and signs the raise. A retry reuses the same effect.
@@ -761,29 +749,23 @@ func (s *Server) preparePlatformSetDataQuota(ctx context.Context, expected platf
 	if !samePlatformDataQuotaFacts(sourcePlan, plan) {
 		return zero, errAppPlatformStageEvidence
 	}
-	lock := ""
-	if e.s.driver == "postgres" {
-		lock = " FOR UPDATE"
-	}
-	var effectID, kind, digest, effectState, receipt string
-	var admitted, observed int64
-	effectErr := e.queryRow(`SELECT effect_id,kind,payload_sha256,admitted_fence,observed_fence,state,receipt_json FROM app_platform_operation_effects
-		WHERE operation_id=? AND stage='prepare_data' AND effect_number=1`+lock, expected.id).Scan(&effectID, &kind, &digest, &admitted, &observed, &effectState, &receipt)
-	if effectErr != nil && !errors.Is(effectErr, sql.ErrNoRows) {
-		return zero, effectErr
-	}
-	fresh := errors.Is(effectErr, sql.ErrNoRows)
-	if fresh {
-		effectID, err = platformNewUUID()
-		if err != nil {
-			return zero, err
-		}
-	}
-	command, err := platformSetDataQuotaCommand(expected, runtime, plan, effectID)
+	row, err := loadPlatformRaiseRow(e, expected.id, platformStandaloneRaiseSlot, true)
 	if err != nil {
 		return zero, err
 	}
-	if fresh {
+	effectID, admitted := row.effectID, row.admitted
+	if !row.exists {
+		if effectID, err = platformNewUUID(); err != nil {
+			return zero, err
+		}
+		admitted = expected.fence
+	}
+	command, err := platformRaiseCommand(runtime, expected.controllerEpoch, expected.installationID, expected.id, expected.snapshot.Generation,
+		admitted, platformRaiseFacts{}.fromPlan(plan), effectID)
+	if err != nil {
+		return zero, err
+	}
+	if !row.exists {
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
 			VALUES(?,'prepare_data',1,?,'set-data-quota',?,?,?,?,0,'prepared','{}',?,?)`,
 			expected.id, effectID, command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence, facts.now, facts.now); err != nil {
@@ -797,29 +779,24 @@ func (s *Server) preparePlatformSetDataQuota(ctx context.Context, expected platf
 			time.UnixMilli(facts.now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
 			return zero, err
 		}
-	} else if kind != "set-data-quota" || digest != command.PayloadSHA256 || admitted != expected.fence || observed != 0 || effectState != "prepared" || receipt != "{}" {
+		row = platformRaiseRow{exists: true, effectID: effectID, kind: "set-data-quota", digest: command.PayloadSHA256, state: "prepared", receipt: "{}", admitted: admitted, runtimeID: runtime.id, epoch: expected.controllerEpoch}
+	} else if row.kind != "set-data-quota" || row.digest != command.PayloadSHA256 || row.admitted != expected.fence || row.observed != 0 ||
+		row.state != "prepared" || row.runtimeID != runtime.id || row.epoch != expected.controllerEpoch {
 		return zero, errAppPlatformStageEvidence
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
-	if err != nil || now > math.MaxInt64-25000 {
+	if err != nil {
 		return zero, errAppPlatformLeaseConflict
 	}
-	issued := time.Now().UnixMilli()
-	expires := min(issued+25000, expected.leaseUntilMS-1000)
-	if issued < now-1000 || issued > now+1000 || expires <= issued {
-		return zero, errAppPlatformLeaseConflict
-	}
-	command.IssuedMS, command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(expires, 10)
-	authority := platformRuntimeAuthority(runtime)
-	key := ed25519.NewKeyFromSeed(seed)
-	defer clear(key)
-	intent := platformSetDataQuotaIntent{effectID: effectID, runtime: runtime, authority: authority, command: command, plan: plan, descriptor: bytes.Clone(source.descriptor)}
-	if intent.raw, intent.signature, err = control.SignSetDataQuota(command, key, authority, issued); err != nil {
+	issued, expires, err := platformRaiseWindow(now, expected.leaseUntilMS)
+	if err != nil {
 		return zero, err
 	}
-	if intent.readSignature, err = control.SignSetDataQuotaRead(intent.raw, key, authority, issued); err != nil {
+	intent, err := platformSignRaise(e, seed, runtime, row, platformStandaloneRaiseSlot, expected.id, command, source.descriptor, issued, expires, true)
+	if err != nil {
 		return zero, err
 	}
+	intent.plan = plan
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
 		return zero, err
 	}
@@ -853,29 +830,38 @@ func validPlatformSetDataQuotaObservation(observation platformSetDataQuotaObserv
 }
 
 // dispatchPlatformSetDataQuota sends the raise and commits its receipt. When the answer is a typed status (the
-// runner is still working, or knows nothing of the effect) it is read back on the next attempt.
+// runner is still working, or knows nothing of the effect) it is read back on the next attempt. A definite failure
+// ends the operation at once: the row is reverted, the operation failed and nothing was changed.
 func (s *Server) dispatchPlatformSetDataQuota(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
 	intent, err := s.preparePlatformSetDataQuota(ctx, expected)
 	if err != nil {
 		return platformOperationLease{}, err
 	}
-	observation, err := platformExecuteSetDataQuota(ctx, endpoint, intent)
+	observation, err := sendPlatformSetDataQuota(ctx, endpoint, intent)
 	if err != nil {
-		var refusal *journal.CapacityRefusalError
-		if errors.As(err, &refusal) {
-			return platformOperationLease{}, err
+		var failed *platformDataEffectFailedError
+		if errors.As(err, &failed) {
+			receipt := platformRaiseFailedReceipt(intent, failed.code)
+			if endErr := s.finishPlatformSetDataQuotaWith(ctx, expected, "", func(e migExec, now int64) error {
+				return revertPlatformRaiseRow(e, expected.id, intent, receipt, now)
+			}); endErr != nil {
+				return platformOperationLease{}, endErr
+			}
+			return platformOperationLease{}, errPlatformMigrationEnded
 		}
-		// The effect may have run: read it back, never send it again under another identity.
-		var readErr error
-		observation, readErr = platformReadSetDataQuota(ctx, endpoint, intent)
-		if readErr != nil {
-			return platformOperationLease{}, errors.Join(err, readErr)
-		}
-	}
-	if err := platformDataEffectFailure(observation, intent.command.CommandHeader, intent.raw, intent.authority, endpoint); err != nil {
 		return platformOperationLease{}, err
 	}
 	return s.commitPlatformSetDataQuota(ctx, expected, intent, endpoint, observation)
+}
+
+// revertPlatformRaiseRow closes a raise row whose effect the runner answered with a definite failure or proved it
+// never claimed: reverted, with that answer as its receipt. It runs in the transaction that ends the operation.
+func revertPlatformRaiseRow(e migExec, operation string, intent platformSetDataQuotaIntent, receipt string, now int64) error {
+	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+		WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id=? AND kind='set-data-quota' AND payload_sha256=?
+		AND admitted_fence=? AND state IN ('prepared','unknown') AND observed_fence=0`,
+		receipt, now, operation, intent.slot.stage, intent.slot.number, intent.effectID, intent.command.PayloadSHA256, intent.admittedFence)
+	return platformLeaseCAS(changed, err)
 }
 
 // commitPlatformSetDataQuota settles the effect, updates the namespace row and completes the operation in one
@@ -889,12 +875,9 @@ func (s *Server) commitPlatformSetDataQuota(ctx context.Context, expected platfo
 	if !ok {
 		return zero, errAppPlatformStageEvidence
 	}
-	encoded, err := json.Marshal(receipt)
-	if err != nil || len(encoded) > 8192 {
-		return zero, errAppPlatformStageEvidence
-	}
-	if parsed, parseErr := journal.ParseSetDataQuotaReceipt(encoded); parseErr != nil || parsed != receipt {
-		return zero, errAppPlatformStageEvidence
+	encoded, err := platformEncodeRaiseReceipt(receipt)
+	if err != nil {
+		return zero, err
 	}
 	dek, err := s.dek()
 	if err != nil {
@@ -927,19 +910,11 @@ func (s *Server) commitPlatformSetDataQuota(ctx context.Context, expected platfo
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
-		WHERE operation_id=? AND stage='prepare_data' AND effect_number=1 AND effect_id=? AND kind='set-data-quota' AND payload_sha256=?
-		AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`,
-		expected.fence, string(encoded), now, expected.id, intent.effectID, intent.command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return zero, err
-	}
-	// The namespace row takes the new limits only if it still holds the ones the review saw.
-	changed, err = e.exec(`UPDATE app_platform_data_namespaces SET quota_bytes=?,quota_inodes=?,observed_bytes=?,revision=revision+1,updated_ms=?
-		WHERE id=? AND origin_installation_id=? AND owner_installation_id=? AND state='active' AND quota_bytes=? AND quota_inodes=?`,
-		plan.NewQuotaBytes, plan.NewQuotaInodes, mustPlatformCheckpointInt(receipt.UsedBytes), now, plan.DataNamespaceID,
-		expected.installationID, expected.installationID, plan.CurrentQuotaBytes, plan.CurrentQuotaInodes)
-	if err := platformLeaseCAS(changed, err); err != nil {
+	if err := applyPlatformRaise(e, platformRaiseCommitRef{
+		operation: expected.id, installation: expected.installationID, namespace: plan.DataNamespaceID, slot: platformStandaloneRaiseSlot,
+		effectID: intent.effectID, digest: intent.command.PayloadSHA256, runtimeID: runtime.id, epoch: expected.controllerEpoch,
+		admittedFence: expected.fence, observedFence: expected.fence,
+	}, receipt, encoded, now); err != nil {
 		return zero, err
 	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
@@ -953,25 +928,12 @@ func (s *Server) commitPlatformSetDataQuota(ctx context.Context, expected platfo
 	result := expected
 	result.snapshot, result.rowRevision = next.Snapshot(), expected.rowRevision+1
 	result.owner, result.leaseUntilMS = "", 0
-	changed, err = e.exec(`UPDATE app_platform_operations SET stage='complete',state_revision=?,row_revision=row_revision+1,completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
+	changed, err := e.exec(`UPDATE app_platform_operations SET stage='complete',state_revision=?,row_revision=row_revision+1,completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
 		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage='prepare_data' AND state_revision=? AND row_revision=? AND fence=?
 		AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`,
 		int64(result.snapshot.Revision), now, now, expected.id, expected.installationID, expected.controllerEpoch,
 		int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner, expected.leaseUntilMS, now)
 	if err := platformLeaseCAS(changed, err); err != nil {
-		return zero, err
-	}
-	detail, _ := json.Marshal(struct {
-		NewBytes   string `json:"new_quota_bytes"`
-		NewInodes  string `json:"new_quota_inodes"`
-		OldBytes   string `json:"old_quota_bytes"`
-		OldInodes  string `json:"old_quota_inodes"`
-		UsedBytes  string `json:"used_bytes"`
-		UsedInodes string `json:"used_inodes"`
-	}{receipt.NewBytes, receipt.NewInodes, receipt.OldBytes, receipt.OldInodes, receipt.UsedBytes, receipt.UsedInodes})
-	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
-		VALUES(?,'system',0,'app_platform.data_quota_raised','app_platform_operation',?,?,'')`,
-		time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
 		return zero, err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
@@ -1006,9 +968,17 @@ func (s *Server) runPlatformSetDataQuota(ctx context.Context, expected platformO
 
 // finishPlatformSetDataQuotaForReview ends a raise that could not complete. It changes nothing but the operation:
 // the installation keeps running and the namespace keeps its quota. A refusal for capacity, or a failure before the
-// effect, ends it failed; a raise whose effect is unknown ends recovery_required, and the runner's own evidence
-// decides the limits (a limit above the journal evidence refuses a start until a raise is reviewed again).
+// effect, ends it failed; a raise whose effect is unknown ends recovery_required with the effect unknown, and the
+// convergence step settles it from the runner's own answer (a limit above the journal evidence refuses a start until
+// it is).
 func (s *Server) finishPlatformSetDataQuotaForReview(ctx context.Context, expected platformOperationLease, capacityCode string) error {
+	return s.finishPlatformSetDataQuotaWith(ctx, expected, capacityCode, nil)
+}
+
+// finishPlatformSetDataQuotaWith ends a raise. settle, when set, is the runner's definite answer about the effect
+// (a failure it will answer for ever): it closes the row in the same transaction and the operation ends failed with
+// nothing applied.
+func (s *Server) finishPlatformSetDataQuotaWith(ctx context.Context, expected platformOperationLease, capacityCode string, settle func(e migExec, now int64) error) error {
 	if expected.snapshot.Action != appplatform.ActionSetDataQuota || !expected.snapshot.Managed {
 		return errAppPlatformStageEvidence
 	}
@@ -1034,11 +1004,24 @@ func (s *Server) finishPlatformSetDataQuotaForReview(ctx context.Context, expect
 		return errAppPlatformStageEvidence
 	}
 	outcome, code := appplatform.EffectsUnknown, "data_quota_recovery_required"
-	if expected.snapshot.Stage != appplatform.StagePrepareData || capacityCode != "" {
+	if expected.snapshot.Stage != appplatform.StagePrepareData || capacityCode != "" || settle != nil {
 		outcome, code = appplatform.EffectsNone, "data_quota_unavailable"
 	}
 	if capacityCode != "" {
 		code = capacityCode
+	}
+	if settle != nil {
+		if err := settle(e, now); err != nil {
+			return err
+		}
+	}
+	if outcome == appplatform.EffectsUnknown {
+		// An effect with no verdict is unknown from here: it is never sent as a new effect, and the convergence step
+		// reads it back under its own identity.
+		if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=?
+			WHERE operation_id=? AND kind='set-data-quota' AND state='prepared'`, now, expected.id); err != nil {
+			return err
+		}
 	}
 	failed, err := model.Fail(expected.snapshot.Revision, outcome)
 	if err != nil {

@@ -14,6 +14,9 @@ var (
 	errPlatformDataQuotaInvalid = errors.New("the requested data quota is not a valid raise")
 	// errPlatformDataQuotaCapacity is a raise the runner has no room to reserve.
 	errPlatformDataQuotaCapacity = errors.New("the runner cannot reserve the requested data quota")
+	// errAppPlatformQuotaRaiseUnsettled refuses a recovery choice of a failed update whose quota raise has no verdict
+	// yet: the runner may have raised the limits, and the choice depends on whether it did.
+	errAppPlatformQuotaRaiseUnsettled = errors.New("the data quota raise of the update is not settled")
 	// errPlatformDataImportRequiresDisabled is an import for an installation that is still running. The import
 	// replaces the namespace while the backend is stopped, so the installation is disabled first.
 	errPlatformDataImportRequiresDisabled = errors.New("an installation must be disabled before its data is imported")

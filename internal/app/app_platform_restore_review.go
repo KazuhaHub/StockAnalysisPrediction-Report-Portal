@@ -84,13 +84,17 @@ func loadPlatformManagedRestoreReviewCandidate(
 		targetGeneration != sourceGeneration+1 ||
 		updateStage != "recovery_required" ||
 		updateFence < 1 || !completed.Valid ||
-		updateError != "update_recovery_required" ||
+		!platformUpdateRecoveryCodes(updateError) ||
 		result.plan.InstallationID != installation ||
 		installationEpoch != runtime.controllerEpoch {
 		return result, errAppPlatformStageEvidence
 	}
 	// A migration that has not been settled may have left migrated data in the namespace.
 	if err := platformRequireSettledMigration(e, updateOperation); err != nil {
+		return result, err
+	}
+	// A quota raise with no verdict may have raised the limits: the rollback waits for the runner's answer.
+	if err := platformRequireSettledRaise(e, updateOperation); err != nil {
 		return result, err
 	}
 	var sourceOperationID string

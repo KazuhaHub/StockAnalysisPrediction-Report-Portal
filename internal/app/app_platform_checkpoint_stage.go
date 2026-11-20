@@ -271,6 +271,17 @@ func platformFinalizeManagedUpdatePlan(e migExec, expected platformOperationLeas
 		Migration:           review.Migration,
 		RecoversOperationID: review.RecoversOperationID,
 	}
+	// A review that raises the quota hands the raise to the finalized plan, over the quota the checkpoint was cut at.
+	// A review stored before the update raised the quota (raise_applied false) carries none: its update runs with
+	// no raise.
+	if review.DataQuota != nil && review.DataQuota.RaiseApplied {
+		if review.DataQuota.CurrentBytes != mustPlatformCheckpointInt(checkpoint.source.quotaBytes) ||
+			review.DataQuota.CurrentInodes != mustPlatformCheckpointInt(checkpoint.source.quotaInodes) {
+			return errAppPlatformStageEvidence
+		}
+		raise := *review.DataQuota
+		plan.DataQuota = &raise
+	}
 	planRaw, err := json.Marshal(plan)
 	if err != nil || len(planRaw) > 65536 {
 		return errAppPlatformStageEvidence

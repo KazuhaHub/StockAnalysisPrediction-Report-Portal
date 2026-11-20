@@ -128,7 +128,9 @@ func platformNamespaceQuotaChain(e migExec, installation, namespace string) ([]p
 // digest, this installation and namespace, and the operation's own plan agrees with the receipt. It fills in the
 // receipt's limits.
 func (r *platformAppliedQuotaRaise) verify(installation, namespace string) error {
-	bad := func(reason string) error { return fmt.Errorf("%w: quota chain %s", errAppPlatformStageEvidence, reason) }
+	bad := func(reason string) error {
+		return fmt.Errorf("%w: quota chain %s", errAppPlatformStageEvidence, reason)
+	}
 	receipt, err := journal.ParseSetDataQuotaReceipt([]byte(r.receiptRaw))
 	if err != nil {
 		return bad("receipt")

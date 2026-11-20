@@ -105,5 +105,9 @@ func testPlatformQuotaChainFromEffects(t *testing.T, pg bool) {
 	platformRequireSameRaiseRows(t, rowsBefore, platformAppliedRaiseRows(t, s))
 }
 
-func TestPlatformQuotaChainFromEffectsSQLite(t *testing.T)   { testPlatformQuotaChainFromEffects(t, false) }
-func TestPlatformQuotaChainFromEffectsPostgres(t *testing.T) { testPlatformQuotaChainFromEffects(t, true) }
+func TestPlatformQuotaChainFromEffectsSQLite(t *testing.T) {
+	testPlatformQuotaChainFromEffects(t, false)
+}
+func TestPlatformQuotaChainFromEffectsPostgres(t *testing.T) {
+	testPlatformQuotaChainFromEffects(t, true)
+}
