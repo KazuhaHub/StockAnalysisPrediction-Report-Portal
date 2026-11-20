@@ -715,5 +715,6 @@ real relay signer and the runner's validation: `appplatform/machine_test.go`,
 `apprunner/transport/machine_support_linux_test.go`,
 `app/app_platform_machine_token_schema_test.go`,
 `app_platform_machine_token_restore_test.go`, `app_platform_machine_test.go`,
-`app_platform_machine_support_test.go`, `app_platform_machine_log_test.go` and
+`app_platform_machine_support_test.go`, `app_platform_machine_slots_test.go`,
+`app_platform_machine_log_test.go` and
 `web/src/pages/manage/AppMachineReadPanel.test.tsx`.
