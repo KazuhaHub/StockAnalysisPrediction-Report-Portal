@@ -132,8 +132,10 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 	defer verified.Clear()
 	command := verified.Command()
 	defer clear(command.CredentialValue)
+	defer command.ClearSignedHeaders()
 	view := verified.Command()
 	defer clear(view.CredentialValue)
+	defer view.ClearSignedHeaders()
 	policy, err := appplatform.ParseHTTPPolicy(command.PolicyRaw)
 	if err != nil {
 		return zero, ErrDenied
