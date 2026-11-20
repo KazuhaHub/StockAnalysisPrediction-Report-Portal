@@ -1,6 +1,6 @@
 # Proposal: per-installation data quota and administrator data import
 
-Status: Accepted 2026-11-20. Phases P1 (quota) and P3 (reviewed `set_data_quota` and `import_data`, `pack-import`) are implemented; see the implementation notes at the end. P2 (hard links) is pending. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20. All three phases are implemented: P1 (quota), P3 (reviewed `set_data_quota` and `import_data`, `pack-import`) and P2 (hard links in checkpoints); see the implementation notes at the end. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
@@ -20,7 +20,7 @@ market-monitor will run on the same host as Portal. A new installation needs a o
    - D10's quota was decided but never implemented.
 2. **The quota cannot be raised by hand.** Start requires the live XFS limits to equal the journal evidence (`driver/candidate_runtime_linux.go:~155`, `writable_candidate_linux.go:~25`). A changed limit refuses the start.
 3. **A checkpoint is capped at 512 MiB** (`journal/checkpoint.go:21`). Install, update, managed enable and repair all take one first (154, 155), so a 750 MB tree fails at the next lifecycle action.
-4. **The checkpoint walker refuses hard links** (`data/checkpoint_linux.go:335`, `Nlink > 1`). market-monitor hard-links changed partitions into `snapshots/` before each write (182 §2, from `pipeline/MarketData/README.md:131-142`).
+4. **The checkpoint walker refused hard links** (`data/checkpoint_linux.go:335`, `Nlink > 1`), until P2. market-monitor hard-links changed partitions into `snapshots/` before each write (182 §2, from `pipeline/MarketData/README.md:131-142`).
 5. **Admission reserves a flat 768 MiB per namespace** (`journal/reservations.go:40`: live data plus two retained checkpoints of 256 MiB). It ignores any larger quota, so it would under-count.
 6. **There is no supported way to put data into an existing installation.**
    - The runner has no per-installation command (`cmd/app-runner/main.go:21`).
@@ -203,7 +203,7 @@ All of them need en-US, zh-CN and zh-TW translations.
 ## 10. Phasing
 
 - **P1, quota:** the descriptor field, review, runner admission, `set_data_quota`, and the checkpoint caps scaled to the quota. On its own this lets market-monitor fetch its seed through the proxy.
-- **P2, hard links in checkpoints.**
+- **P2, hard links in checkpoints.** Implemented; see "Implementation notes (P2)".
 - **P3, import:** `pack-import`, the `import_data` action, console and handbook.
 
 The three phases ship as separate PRs.
@@ -278,7 +278,7 @@ P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and 
 
 - **Update raise not applied.** The update review shows the raise, but the update keeps the approved quota (`raise_applied` is false). Applying it in the update would change the update-start evidence of every update path; it belongs with `set_data_quota`.
 - **Restore walk bound.** A restore's entry walk (re-verify and clear) is bounded by the namespace's own inode quota, read from its prepare-data receipt in the runner journal. The platform maximum (1,000,000) stands in only when the journal does not know the quota. Its archive bound is the checkpoint's own verified size, and the XFS project quota is the binding limit either way. The walk holds its entries in memory, at most the inode quota of them.
-- **Hard links** are still refused by the walker (P2).
+- **Hard links** were still refused by the walker at this point; P2 lifted that.
 - **Migration shape.** `quota_inodes` carries a CHECK of 65,536 to 1,000,000 (a table constraint on PostgreSQL, part of the column on SQLite, which cannot add a table constraint to an existing table) and the PostgreSQL verifier checks its default is 65,536. A database at 0023 verifies under the 0015 and 0021 verifiers through the 0021-era shape.
 - **Plans written before the upgrade** carry no inode or request fields. They read as 256 MiB and 65,536, still stage and consume, and the rebuilt plan is compared in that form. The install, activation, writer, candidate and checkpoint checks now bind the namespace to the quota the install review approved, bytes and inodes.
 - A frontend-only descriptor with `data.quota` is refused at parse.
@@ -290,7 +290,7 @@ P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and 
   - Doing it properly means a new lifecycle action in the generation history chain: every history loader (install, update, resume, restore) must read the quota from the namespace row rather than the install-time receipt.
   - The runner also needs a signed command with its own receipt and a journal evidence update fenced together with the namespace row.
 - **Console "Raise quota"** and its review dialog, which need `set_data_quota`. The console install review does not yet offer a smaller approval; the API does.
-- **Hard links** (P2), and **import** (P3), as the phasing says.
+- **Hard links** (P2), and **import** (P3), as the phasing says. Both are done now.
 
 ## Implementation notes (set_data_quota, P3)
 
@@ -306,7 +306,7 @@ P3 and the reviewed `set_data_quota` action are implemented, apart from the item
   - Import: requires no running container, the operation's own applied pre-import checkpoint (verified and kept), and the namespace's current quota. The native import replaces the contents in the same namespace inode (`restoreExtract`, `importFits`, restore read-back) and returns the bytes and inodes the project quota reports.
 - **Quota chain.** The install's prepare-data receipt stays immutable, because later checkpoints rebuild its digest. The current quota is its limits followed by every applied `set-data-quota` row of the namespace (only that namespace's rows are read, and the 4,096-link bound is per namespace), each starting where the last ended. Checkpoint sources (archive and entry caps), the update-start evidence, restore bounds, delete-data and managed removal read the last link; the stop and remove-code checks accept any link for the quota a start recorded at its own time.
 - **Data query** (`data-query`, no journal row): the questions a review asks, signed by Portal. Does exactly one inbox archive carry a digest (and its size, entries, content bytes and data schema marker), would a larger quota fit the runner's capacity (a rolled-back dry run of admission), and the deletion of an inbox archive after a completed import.
-- **`pack-import` and the natives** are as in the first pass of these notes: validation with the checkpoint walker's rules (hard links refused until P2), normalised owners and modes, a canonical archive in `<checkpoint_root>/.portal-imports/` that is never overwritten. The printed digest is that of everything after the manifest block.
+- **`pack-import` and the natives** are as in the first pass of these notes: validation with the checkpoint walker's rules (hard links with every link inside the tree are accepted since P2), normalised owners and modes, a canonical archive in `<checkpoint_root>/.portal-imports/` that is never overwritten. The printed digest is that of everything after the manifest block.
 
 **Portal**
 
@@ -334,4 +334,39 @@ P3 and the reviewed `set_data_quota` action are implemented, apart from the item
 **Not done**
 
 - **Update raises quota.** An approved update that asks for more still keeps the approved quota (`raise_applied` stays false); raising is the separate reviewed action. Folding it into the update changes the update's start evidence on every update path. The design that fits: run the same `set-data-quota` effect between the checkpoint and the start, derive the Portal's quota chain from applied `set-data-quota` effect receipts (which also covers an update's own raise, in flight), and count the extra effect in the registration's base. It needs its own review.
-- **Hard links** (P2).
+- **Hard links** (P2): done, see the next section.
+
+## Implementation notes (P2)
+
+Hard links inside a namespace survive checkpoint, restore, import and `pack-import`. No journal schema change, no Portal migration, no new contract field.
+
+**Format**
+
+- The archive keeps its format string (`portal.runner.data-checkpoint/1-dev.1`) and its manifest. A later path of a multiply linked file is a tar `TypeLink` entry whose `Linkname` is the first path in archive order, in the same canonical namespace-relative form as every name. It has size 0 and the same mode, uid and gid as that file. A checkpoint without links has no such entry, reads exactly as before and restores unchanged. An older runner refuses a checkpoint with link entries as an unknown entry type, so a downgrade fails closed.
+- **Reading an archive** (one shared check, `checkArchiveLink`, used by the checkpoint verify and by the restore, import and inbox readers): a link must name an earlier regular-file entry of the same archive that is not itself a link. A directory, a symlink entry, a later or unknown entry, a link to a link, itself, the manifest, an absolute, `..`, backslash or non-canonical name, content on the link, or attributes that differ from the file's refuse the archive (`ErrRestoreUnsafe` / `ErrCheckpointUnsafe`).
+
+**Checkpoint walker**
+
+- A regular file with `Nlink > 1` is tracked by (device, inode). The first path met is written as a file; later paths are link entries, after a check that the inode's attributes are unchanged. When the walk ends, the paths found must equal `Nlink` for every tracked inode. Otherwise the checkpoint is refused with the same `ErrCheckpointUnsafe` as before. XFS already refuses a link across project IDs (`EXDEV`), so a file in a namespace with a link outside it does not occur in practice; the check is the guard if it ever does.
+- **Restore and import** create the links with `linkat` between two directory descriptors opened with `O_NOFOLLOW` along the path (the same `restoreOpenParent` as for files), so a link cannot leave the namespace. The read-back walks the namespace, records the paths of every inode with more than one link, produces the same link entries as the archive and requires the paths found to equal each inode's link count, so a restored file with an extra outside link fails the read-back.
+
+**Bounds: entries versus inodes (decision)**
+
+- The inode quota counts inodes, and links share an inode, so a link entry costs no inode and no bytes anywhere: the import footprint (`importFootprintOf`), the content-byte total, `observed_bytes` and the archive cap formula are unchanged. A link entry costs only its tar header, which the 1.5 KiB per entry in the cap formula already covers for as many entries as the inode quota.
+- The **entry cap keeps meaning the inode quota, now for inodes only** (directories and first paths of files). Link entries are bounded **separately by the same number**, in the checkpoint walker, the verify and restore readers and the inbox inspection. So a namespace of N inodes may have up to N extra link paths, and an archive can never exceed twice the cap in entries. A tree with more link paths than that is refused whole (`ErrCheckpointUnsafe`), failing closed like the too-large archive.
+- The walks over the live namespace (restore clear, read-back, delete) count **paths**, and are bounded by twice the inode cap (`RestoreRequest.pathLimit`, `deletePathLimit`), clamped to the platform maximum.
+- The checkpoint receipt's `Entries` and the restore receipt's `Entries` count tar entries, links included, on both sides, so they still agree. The import manifest's `entries` also counts tar entries, and `InspectImportArchive` still requires it to equal the archive.
+
+**pack-import**
+
+- It accepts a file with several links when every link is inside the tree (links found equal `Nlink`) and writes the same `TypeLink` form with the normalised owner and mode. A file with a link outside the tree is refused and named (`has a hard link outside the tree`). Content bytes are counted once.
+
+**Tests**
+
+- Run (no root, no XFS; an unexported test hook admits the test user as an owner so the walker, readers and extractor run on a temporary directory): the walker writes link entries and counts bytes once; refuses a link count larger than the links found; bounds links apart from inodes; the full path walker, archive reader, clear, extract, directory metadata and read-back, with equal link counts and inode, and refusal of an outside link at read-back; an archive without links reads as before; 17 bad-link-target archives; separate inode and link bounds in the reader; the footprint; the path limits and the delete walk; `pack-import` accepting in-tree links (and the runner's inspection accepting the archive) and refusing outside links.
+- Written, **not run**: the native acceptance tests that need the disposable XFS fixture. `TestNativeDataPrimitive` now checkpoints and restores a namespace with a hard link and checks the link survives with `Nlink` 2; `TestNativeImportCheckpoint` carries a link through checkpoint and import. The checkpoint verify method itself (`verifyCheckpointLocked`) needs a root-owned checkpoint directory and is covered only through the shared `checkArchiveLink` and those native tests.
+
+**Not done**
+
+- The Portal import review compares the manifest's `entries` (links included) with the inode quota, so it is conservative for an archive whose link paths push the entry count over the quota; the runner's exact footprint check at the import is not. Splitting the manifest count needs a contract change, which this phase avoids.
+- The data schema marker file must not be a hard link (its reader still requires `Nlink == 1`); that fails closed.

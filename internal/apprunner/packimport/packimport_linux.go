@@ -35,7 +35,6 @@ const (
 	maxPathBytes  = 4096
 	maxEntries    = 1000000
 	maxFileBytes  = int64(16) << 30
-	hardLinkHelp  = "hard links are not supported yet (doc 185 phase P2); copy the file or remove the extra link"
 	partialPrefix = ".packing-"
 )
 
@@ -79,7 +78,20 @@ type node struct {
 	size      int64
 	dev, ino  uint64
 	mtime     unix.Timespec
+	// nlink is the file's link count when it was walked (more than one only for a file with hard links).
+	nlink uint64
+	// link is the first path of the same inode when this is a later path of a hard-linked file. Such a node is
+	// written as a link entry: no content, no inode.
+	link string
 }
+
+// linkedFile is a regular file met more than once during the walk.
+type linkedFile struct {
+	first        string
+	nlink, found uint64
+}
+
+type inodeKey struct{ dev, ino uint64 }
 
 // Pack validates and packs a tree. It writes nothing under the inbox until the whole tree has been accepted, and
 // removes its partial file on any failure.
@@ -123,6 +135,7 @@ func walk(ctx context.Context, from string) ([]node, error) {
 	}
 	var nodes []node
 	var total int64
+	linked := map[inodeKey]*linkedFile{}
 	var visit func(dir, rel string, depth int) error
 	visit = func(dir, rel string, depth int) error {
 		if err := ctx.Err(); err != nil {
@@ -181,13 +194,24 @@ func walk(ctx context.Context, from string) ([]node, error) {
 				}
 			case unix.S_IFREG:
 				if st.Nlink > 1 {
-					return refuse(child, "%s", hardLinkHelp)
+					// Doc 185 section 4: a file with several links is accepted when every link is inside the
+					// tree. The first path in archive order carries the content; later paths are link entries.
+					key := inodeKey{uint64(st.Dev), st.Ino}
+					if file := linked[key]; file != nil {
+						if file.nlink != uint64(st.Nlink) {
+							return refuse(child, "changed while packing")
+						}
+						file.found++
+						nodes = append(nodes, node{rel: child, dev: uint64(st.Dev), ino: st.Ino, nlink: file.nlink, link: file.first})
+						continue
+					}
+					linked[key] = &linkedFile{first: child, nlink: uint64(st.Nlink), found: 1}
 				}
 				if st.Size < 0 || st.Size > maxFileBytes || total > maxFileBytes-st.Size {
 					return refuse(child, "the tree is larger than %d GiB", maxFileBytes>>30)
 				}
 				total += st.Size
-				nodes = append(nodes, node{rel: child, size: st.Size, dev: uint64(st.Dev), ino: st.Ino, mtime: st.Mtim})
+				nodes = append(nodes, node{rel: child, size: st.Size, dev: uint64(st.Dev), ino: st.Ino, mtime: st.Mtim, nlink: uint64(st.Nlink)})
 			case unix.S_IFLNK:
 				return refuse(child, "is a symbolic link; the tree may hold only regular files and directories")
 			default:
@@ -198,6 +222,18 @@ func walk(ctx context.Context, from string) ([]node, error) {
 	}
 	if err := visit(from, "", 0); err != nil {
 		return nil, err
+	}
+	// A link outside the tree would make the restored file differ from the source, and the namespace cannot hold
+	// it: the paths found must equal the link count. The first such file in name order is named.
+	outside := ""
+	var missing uint64
+	for _, file := range linked {
+		if file.found != file.nlink && (outside == "" || file.first < outside) {
+			outside, missing = file.first, file.nlink-file.found
+		}
+	}
+	if outside != "" {
+		return nil, refuse(outside, "has a hard link outside the tree (%d more than the tree holds); a hard link must have all its links inside the tree, so copy the file or remove the outside link", missing)
 	}
 	// The restore reader requires strictly ascending full names with a directory written as "name/". A tree whose
 	// walk order differs (a directory "a" next to a sibling such as "a.txt", which sorts before "a/") cannot be
@@ -277,6 +313,14 @@ func write(ctx context.Context, from string, dir *os.File, name string, nodes []
 			entries++
 			continue
 		}
+		if n.link != "" {
+			header.Typeflag, header.Mode, header.Linkname = tar.TypeLink, data.ImportFileMode, n.link
+			if err := writer.WriteHeader(header); err != nil {
+				return zero, err
+			}
+			entries++
+			continue
+		}
 		header.Typeflag, header.Mode, header.Size = tar.TypeReg, data.ImportFileMode, n.size
 		if err := writer.WriteHeader(header); err != nil {
 			return zero, err
@@ -348,7 +392,7 @@ func copyFile(w io.Writer, name string, n node) error {
 	defer file.Close()
 	var before unix.Stat_t
 	if err := unix.Fstat(fd, &before); err != nil || before.Mode&unix.S_IFMT != unix.S_IFREG ||
-		uint64(before.Dev) != n.dev || before.Ino != n.ino || before.Size != n.size || before.Nlink != 1 {
+		uint64(before.Dev) != n.dev || before.Ino != n.ino || before.Size != n.size || uint64(before.Nlink) != max(n.nlink, 1) {
 		return errors.New("changed while packing")
 	}
 	copied, err := io.CopyN(w, file, n.size)

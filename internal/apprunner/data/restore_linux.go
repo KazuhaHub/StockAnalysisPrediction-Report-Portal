@@ -26,6 +26,9 @@ type restoreEntry struct {
 	uid, gid     uint32
 	size         int64
 	directory    bool
+	// link is the earlier regular-file entry this path is another hard link of. It is empty for a directory and
+	// for the first path of a file.
+	link string
 }
 
 // Restore replaces only the bound namespace's contents. The namespace inode,
@@ -89,7 +92,7 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 		return zero, errors.Join(ErrRestoreIncomplete, err)
 	}
 	count := 0
-	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, request.entryLimit()); err != nil {
+	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, request.pathLimit()); err != nil {
 		return incomplete(fmt.Errorf("clear namespace: %w", err))
 	}
 	if err := namespace.Sync(); err != nil {
@@ -210,6 +213,8 @@ func restoreArchiveEntries(ctx context.Context, archive *os.File, request Restor
 	entries := make([]restoreEntry, 0)
 	last := ""
 	seen := map[string]bool{}
+	regular := map[string]archiveRegular{}
+	var inodes, links int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -220,11 +225,23 @@ func restoreArchiveEntries(ctx context.Context, archive *os.File, request Restor
 		}
 		if err != nil || header.Name == "" || header.Name == checkpointManifestEntry ||
 			seen[header.Name] || header.Name < last || !validRestorePath(header.Name) ||
-			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) ||
+			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeLink) ||
 			header.Uid < 0 || header.Gid < 0 ||
-			!checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) ||
-			int64(len(entries)) >= request.entryCap() {
+			!checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) {
 			return nil, ErrRestoreUnsafe
+		}
+		// Inodes (directories and files) and link entries are bounded apart: the inode quota counts inodes, and a
+		// file with many links must not use up the cap of the inodes around it.
+		if header.Typeflag == tar.TypeLink {
+			if links >= request.entryCap() {
+				return nil, ErrRestoreUnsafe
+			}
+			links++
+		} else {
+			if inodes >= request.entryCap() {
+				return nil, ErrRestoreUnsafe
+			}
+			inodes++
 		}
 		if header.Typeflag == tar.TypeDir {
 			if header.Mode&(unix.S_ISUID|unix.S_ISVTX) != 0 ||
@@ -243,7 +260,12 @@ func restoreArchiveEntries(ctx context.Context, archive *os.File, request Restor
 			uid: uint32(header.Uid), gid: uint32(header.Gid),
 			directory: header.Typeflag == tar.TypeDir,
 		}
-		if entry.directory {
+		if header.Typeflag == tar.TypeLink {
+			if err := checkArchiveLink(header, regular); err != nil {
+				return nil, err
+			}
+			entry.link = header.Linkname
+		} else if entry.directory {
 			if header.Size != 0 || !strings.HasSuffix(entry.name, "/") {
 				return nil, ErrRestoreUnsafe
 			}
@@ -259,11 +281,36 @@ func restoreArchiveEntries(ctx context.Context, archive *os.File, request Restor
 				return nil, ErrRestoreUnsafe
 			}
 			entry.digest = hex.EncodeToString(hash.Sum(nil))
+			regular[entry.name] = archiveRegular{mode: header.Mode, uid: header.Uid, gid: header.Gid}
 		}
 		seen[entry.name], last = true, entry.name
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// archiveRegular is what a link entry must agree with: the regular file it names.
+type archiveRegular struct {
+	mode     int64
+	uid, gid int
+}
+
+// checkArchiveLink validates a hard-link entry against the regular-file entries read before it (doc 185 section
+// 4). A link names an earlier entry of the same archive that is a regular file and not itself a link, in the same
+// canonical namespace-relative form as every name, so it can never name a directory, a later or unknown entry, or
+// anything outside the namespace. It carries no content and the attributes of the file it names, which is what
+// one inode has.
+func checkArchiveLink(header *tar.Header, regular map[string]archiveRegular) error {
+	target := header.Linkname
+	if header.Size != 0 || strings.HasSuffix(header.Name, "/") || target == "" || len(target) > 4096 ||
+		strings.HasSuffix(target, "/") || !validRestorePath(target) {
+		return ErrRestoreUnsafe
+	}
+	file, ok := regular[target]
+	if !ok || file.mode != header.Mode || file.uid != header.Uid || file.gid != header.Gid {
+		return ErrRestoreUnsafe
+	}
+	return nil
 }
 
 func validRestorePath(name string) bool {
@@ -374,7 +421,7 @@ func restoreExtract(ctx context.Context, archive *os.File, namespace *os.File, d
 				(header.Mode&unix.S_ISGID != 0 && header.Gid != int(writeAccessGID)) {
 				return ErrRestoreUnsafe
 			}
-		} else if header.Typeflag != tar.TypeReg || header.Mode&07000 != 0 {
+		} else if (header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeLink) || header.Mode&07000 != 0 {
 			return ErrRestoreUnsafe
 		}
 		parent, base, err := restoreOpenParent(namespace, header.Name, device)
@@ -390,6 +437,25 @@ func restoreExtract(ctx context.Context, archive *os.File, namespace *os.File, d
 			if err := unix.Mkdirat(int(parent.Fd()), base, 0700); err != nil {
 				parent.Close()
 				return err
+			}
+		case tar.TypeLink:
+			// The archive was verified: the target is an earlier regular file of this namespace. The link is made
+			// between two descriptors opened without following symbolic links, so it cannot leave the namespace.
+			if header.Size != 0 || strings.HasSuffix(header.Name, "/") || header.Linkname == "" ||
+				strings.HasSuffix(header.Linkname, "/") || !validRestorePath(header.Linkname) {
+				parent.Close()
+				return ErrRestoreUnsafe
+			}
+			targetParent, targetBase, err := restoreOpenParent(namespace, header.Linkname, device)
+			if err != nil {
+				parent.Close()
+				return err
+			}
+			linkErr := unix.Linkat(int(targetParent.Fd()), targetBase, int(parent.Fd()), base, 0)
+			closeErr := targetParent.Close()
+			if linkErr != nil || closeErr != nil {
+				parent.Close()
+				return errors.Join(linkErr, closeErr)
 			}
 		case tar.TypeReg:
 			if strings.HasSuffix(header.Name, "/") || header.Size < 0 || header.Size > request.ArchiveBytes {
@@ -536,17 +602,37 @@ func restoreSyncNamespace(ctx context.Context, namespace *os.File, device uint64
 
 func restoreReadNamespace(ctx context.Context, namespace *os.File, device uint64, request RestoreRequest) ([]restoreEntry, error) {
 	result := make([]restoreEntry, 0)
-	if err := restoreReadEntries(ctx, namespace, device, request.MaxArchiveBytes, request.entryLimit(), "", 1, &result); err != nil {
+	links := map[checkpointInodeKey]*restoreLinked{}
+	if err := restoreReadEntries(ctx, namespace, device, request.MaxArchiveBytes, request.pathLimit(), "", 1, &result, links); err != nil {
 		return nil, err
 	}
-	if int64(len(result)) > request.entryCap() {
+	// Every link of a file with several links must be inside the namespace: the paths found equal the link count.
+	for _, linked := range links {
+		if linked.found != linked.nlink {
+			return nil, ErrRestoreUnsafe
+		}
+	}
+	var inodes, paths int64
+	for _, entry := range result {
+		paths++
+		if entry.link == "" {
+			inodes++
+		}
+	}
+	if inodes > request.entryCap() || paths-inodes > request.entryCap() {
 		return nil, ErrRestoreUnsafe
 	}
 	return result, nil
 }
 
-func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, maxArchiveBytes int64, maxEntries int, prefix string, depth int, result *[]restoreEntry) error {
-	if depth > maxCheckpointDepth || len(*result) >= maxEntries {
+// restoreLinked is a regular file with more than one link met during the read-back.
+type restoreLinked struct {
+	first        string
+	nlink, found uint64
+}
+
+func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, maxArchiveBytes int64, maxPaths int, prefix string, depth int, result *[]restoreEntry, links map[checkpointInodeKey]*restoreLinked) error {
+	if depth > maxCheckpointDepth || len(*result) >= maxPaths {
 		return ErrRestoreUnsafe
 	}
 	entries, err := restoreReadDir(parent)
@@ -587,7 +673,7 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 			if folder == nil {
 				return ErrRestoreUnsafe
 			}
-			err = restoreReadEntries(ctx, folder, device, maxArchiveBytes, maxEntries, relative, depth+1, result)
+			err = restoreReadEntries(ctx, folder, device, maxArchiveBytes, maxPaths, relative, depth+1, result, links)
 			if closeErr := folder.Close(); err == nil {
 				err = closeErr
 			}
@@ -595,8 +681,24 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 				return err
 			}
 		case unix.S_IFREG:
-			if stat.Nlink != 1 || stat.Size < 0 || stat.Size > maxArchiveBytes {
+			if stat.Size < 0 || stat.Size > maxArchiveBytes {
 				return ErrRestoreUnsafe
+			}
+			if stat.Nlink > 1 {
+				// Paths come in archive order, so the first one met is the entry the others link to.
+				key := checkpointInodeKey{uint64(stat.Dev), stat.Ino}
+				if linked := links[key]; linked != nil {
+					if linked.nlink != uint64(stat.Nlink) {
+						return ErrRestoreUnsafe
+					}
+					linked.found++
+					*result = append(*result, restoreEntry{
+						name: relative, link: linked.first,
+						mode: stat.Mode & 07777, uid: stat.Uid, gid: stat.Gid,
+					})
+					continue
+				}
+				links[key] = &restoreLinked{first: relative, nlink: uint64(stat.Nlink), found: 1}
 			}
 			fd, err := unix.Openat(int(parent.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 			if err != nil {

@@ -216,14 +216,7 @@ func (r *Root) importFitsQuota(entries []restoreEntry, quotaBytes, quotaInodes i
 	if err := native(r.file, func(fd uintptr) error { return unix.Fstatfs(int(fd), &fs) }); err != nil {
 		return errors.Join(ErrImportUnsafe, err)
 	}
-	footprint := newImportFootprint(int64(fs.Bsize))
-	for _, entry := range entries {
-		if entry.directory {
-			footprint.addDirectory()
-		} else {
-			footprint.addFile(entry.size)
-		}
-	}
+	footprint := importFootprintOf(entries, int64(fs.Bsize))
 	if err := footprint.fits(quotaBytes, quotaInodes); err != nil {
 		return fmt.Errorf("%w: archive footprint exceeds the requested quota", err)
 	}
