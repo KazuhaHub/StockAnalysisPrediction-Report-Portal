@@ -340,6 +340,142 @@ describe('application credential settings', () => {
     expect(screen.getByText('appCredentials.operation.raw_read')).toBeTruthy()
   })
 
+  it('creates an Alibaba Cloud AccessKey credential from its parts without displaying them', async () => {
+    const user = userEvent.setup()
+    apiMock.post.mockResolvedValue({ ...credential, id: '00000000-0000-4000-8000-000000000103' })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.createCredential/ }))
+    await user.type(screen.getByLabelText('appCredentials.label'), 'Qwen billing')
+    await user.click(screen.getByLabelText('appCredentials.kind'))
+    fireEvent.click(await screen.findByText('appCredentials.kind.acs3', { selector: '.ant-select-item-option-content' }))
+    await waitFor(() => expect(screen.queryByLabelText('appCredentials.value')).toBeNull())
+    await user.type(await screen.findByLabelText('appCredentials.accessKeyId'), 'LTAIexample')
+    await user.type(screen.getByLabelText('appCredentials.accessKeySecret'), 'sec"ret\\value')
+    await user.type(screen.getByLabelText('appCredentials.securityToken'), 'STS.example-token')
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    const expected = JSON.stringify({ access_key_id: 'LTAIexample', access_key_secret: 'sec"ret\\value', security_token: 'STS.example-token' })
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenCalledWith('/api/admin/app-platform/credentials', {
+        label: 'Qwen billing',
+        value_base64: btoa(expected),
+      }),
+    )
+    expect(document.body.textContent).not.toContain('sec"ret')
+    expect(document.body.textContent).not.toContain('STS.example-token')
+  })
+
+  it('leaves the security token empty when none is given', async () => {
+    const user = userEvent.setup()
+    apiMock.post.mockResolvedValue({ ...credential, id: '00000000-0000-4000-8000-000000000103' })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.createCredential/ }))
+    await user.type(screen.getByLabelText('appCredentials.label'), 'Qwen billing')
+    await user.click(screen.getByLabelText('appCredentials.kind'))
+    fireEvent.click(await screen.findByText('appCredentials.kind.acs3', { selector: '.ant-select-item-option-content' }))
+    await user.type(await screen.findByLabelText('appCredentials.accessKeyId'), 'LTAIexample')
+    await user.type(screen.getByLabelText('appCredentials.accessKeySecret'), 'secret-value')
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenCalledWith('/api/admin/app-platform/credentials', {
+        label: 'Qwen billing',
+        value_base64: btoa(JSON.stringify({ access_key_id: 'LTAIexample', access_key_secret: 'secret-value', security_token: '' })),
+      }),
+    )
+  })
+
+  it('reviews an Alibaba Cloud signed-request binding with its allowed actions, origin and RAM advice', async () => {
+    const user = userEvent.setup()
+    const planID = '00000000-0000-4000-8000-000000000124'
+    apiMock.post
+      .mockResolvedValueOnce({
+        installation_id: '00000000-0000-4000-8000-000000000105',
+        plan_id: planID,
+        plan_sha256: 'a'.repeat(64),
+        review: {
+          name: 'qwen-billing',
+          credential_id: credential.id,
+          credential_label: credential.label,
+          operation: 'acs3_hmac_sha256',
+          network_origin: 'https://business.aliyuncs.com',
+          network_policy_sha256: 'b'.repeat(64),
+          principals: ['service'],
+          acs3_actions: [
+            { action: 'DescribeBill', version: '2017-12-14' },
+            { action: 'QueryAccountBalance', version: '2017-12-14' },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({ ...binding, name: 'qwen-billing', operation: 'acs3_hmac_sha256' })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    await user.type(screen.getByLabelText('appCredentials.name'), 'qwen-billing')
+    await user.click(screen.getByLabelText('appCredentials.credential'))
+    fireEvent.click(await screen.findByText('Upstream API', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByLabelText('appCredentials.operation'))
+    fireEvent.click(await screen.findByText('appCredentials.operation.acs3_hmac_sha256', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByLabelText('appCredentials.principals'))
+    fireEvent.click(await screen.findByText('appCredentials.principals.service', { selector: '.ant-select-item-option-content' }))
+    // Out of order on purpose: the request is sorted for the canonical review.
+    await user.type(screen.getByLabelText('appCredentials.acs3Action'), 'QueryAccountBalance')
+    await user.type(screen.getByLabelText('appCredentials.acs3Version'), '2017-12-14')
+    await user.click(screen.getByRole('button', { name: 'appCredentials.acs3AddAction' }))
+    const actions = screen.getAllByLabelText('appCredentials.acs3Action')
+    const versions = screen.getAllByLabelText('appCredentials.acs3Version')
+    await user.type(actions[1], 'DescribeBill')
+    await user.type(versions[1], '2017-12-14')
+    await user.click(screen.getByRole('button', { name: 'appCredentials.reviewBinding' }))
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenCalledWith('/api/admin/app-platform/apps/hello/secret-bindings/plan', {
+        name: 'qwen-billing',
+        credential_id: credential.id,
+        operation: 'acs3_hmac_sha256',
+        principals: ['service'],
+        acs3_actions: [
+          { action: 'DescribeBill', version: '2017-12-14' },
+          { action: 'QueryAccountBalance', version: '2017-12-14' },
+        ],
+      }),
+    )
+    expect(await screen.findByText('https://business.aliyuncs.com')).toBeTruthy()
+    expect(screen.getByText('DescribeBill · 2017-12-14')).toBeTruthy()
+    expect(screen.getByText('QueryAccountBalance · 2017-12-14')).toBeTruthy()
+    expect(screen.getByText('appCredentials.acs3Disclosure')).toBeTruthy()
+    expect(screen.getByText('appCredentials.backgroundDisclosure')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'appCredentials.approve' }))
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenLastCalledWith(
+        `/api/admin/app-platform/secret-binding-reviews/${planID}`,
+        { plan_id: planID, plan_sha256: 'a'.repeat(64) },
+      ),
+    )
+  })
+
+  it('lists the actions of a signed-request binding and reopens them for a new review', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/hello/secret-bindings')
+        return {
+          bindings: [
+            { ...binding, name: 'qwen-billing', operation: 'acs3_hmac_sha256', principals: ['service'], acs3_actions: [{ action: 'QueryAccountBalance', version: '2017-12-14' }] },
+          ],
+        }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    expect(screen.getByText('QueryAccountBalance · 2017-12-14')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'appCredentials.changeUse' }))
+    expect((screen.getByLabelText('appCredentials.acs3Action') as HTMLInputElement).value).toBe('QueryAccountBalance')
+    expect((screen.getByLabelText('appCredentials.acs3Version') as HTMLInputElement).value).toBe('2017-12-14')
+  })
+
   it('opens the shared revoke confirmation from the keyboard and restores focus on Escape', async () => {
     const user = userEvent.setup()
     renderPage()

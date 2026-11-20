@@ -48,6 +48,7 @@ func (i *platformNetworkRequestIntent) Close() {
 	clear(i.signature)
 	clear(i.command.PolicyRaw)
 	clear(i.command.CredentialValue)
+	i.command.ClearSignedHeaders()
 	*i = platformNetworkRequestIntent{}
 }
 func (platformNetworkRequestIntent) MarshalJSON() ([]byte, error) {
@@ -171,16 +172,26 @@ func loadPlatformNetworkGrantForIntent(e migExec, installation string, t platfor
 }
 
 func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte) (platformNetworkRequestIntent, error) {
-	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, body, false)
+	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, appplatform.SigningRequest{}, body, false)
+}
+
+// preparePlatformNetworkSigned is preparePlatformNetworkRequest for a call that may ask to be signed
+// (doc 177): signing and credential are mutually exclusive.
+func (s *Server) preparePlatformNetworkSigned(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, signing appplatform.SigningRequest, body []byte) (platformNetworkRequestIntent, error) {
+	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, signing, body, false)
 }
 
 func (s *Server) preparePlatformNetworkStreamRequest(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte) (platformNetworkRequestIntent, error) {
-	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, body, true)
+	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, appplatform.SigningRequest{}, body, true)
 }
 
-func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte, stream bool) (platformNetworkRequestIntent, error) {
+func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, signing appplatform.SigningRequest, body []byte, stream bool) (platformNetworkRequestIntent, error) {
 	var result platformNetworkRequestIntent
-	if !platformValidUUID(installation) || !binding.valid() || len(body) > appplatform.MaxHTTPRequestBytes || len(method) > 16 || len(target) > 4096 || !appplatform.ValidHTTPPolicyHeaderValue(accept) || !appplatform.ValidHTTPPolicyHeaderValue(kind) || (credential != "" && !platformSecretBindingNamePattern.MatchString(credential)) {
+	signed := signing != (appplatform.SigningRequest{})
+	if !platformValidUUID(installation) || !binding.valid() || len(body) > appplatform.MaxHTTPRequestBytes || len(method) > 16 || len(target) > 4096 || !appplatform.ValidHTTPPolicyHeaderValue(accept) || !appplatform.ValidHTTPPolicyHeaderValue(kind) || (credential != "" && !platformSecretBindingNamePattern.MatchString(credential)) ||
+		// A signed call names its binding in the signing object, never beside a plain credential, and
+		// a signed stream is not a thing: a streamed command carries no signing.
+		signed && (credential != "" || stream || !signing.Valid()) {
 		return result, errAppPlatformNetworkUnavailable
 	}
 	body = bytes.Clone(body)
@@ -235,6 +246,25 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 		}
 		var credentialHeader string
 		var credentialValue []byte
+		var signedHeaders []appplatform.SignedHeader
+		defer func() {
+			for _, h := range signedHeaders {
+				clear(h.Value)
+			}
+		}()
+		if signed {
+			// Portal computes the signature here, from the exact request, and keeps only the headers.
+			bodySHA := platformDigest(body)
+			use, headers, err := s.signPlatformACS3(e, installation, platformPrincipalViewer, platformACS3Call{
+				name: signing.Credential, action: signing.Action, version: signing.Version,
+				method: method, target: target, contentType: kind, bodySHA256: bodySHA,
+			})
+			if err != nil {
+				return errAppPlatformNetworkUnavailable
+			}
+			signedHeaders = headers
+			result.secretBinding = use
+		}
 		if credential != "" {
 			use, header, value, err := s.resolvePlatformSecretBindingCommand(e, installation, credential, platformBindingDestination{method: method, url: target})
 			if err != nil {
@@ -264,7 +294,14 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			lifetime = platformNetworkStreamRequestLifetime
 		}
 		result.stream = stream
+		if signed {
+			credential = signing.Credential
+		}
 		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, PrivateNetworksSHA256: privateSHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}
+		if signed {
+			result.command.SigningScheme = signing.Scheme
+			result.command.SetSignedHeaders(cloneSignedHeaders(signedHeaders))
+		}
 		key := ed25519.NewKeyFromSeed(seed)
 		defer clear(key)
 		if stream {
@@ -278,6 +315,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 	if err != nil {
 		clear(result.raw)
 		clear(result.command.CredentialValue)
+		result.command.ClearSignedHeaders()
 		clear(result.command.PolicyRaw)
 		return platformNetworkRequestIntent{}, errAppPlatformNetworkUnavailable
 	}
@@ -405,6 +443,11 @@ func (s *Server) completePlatformNetworkRequest(ctx context.Context, session pla
 // Private foreground execution, one attempt only. Public route/SDK admission
 // must also provide current session, origin/CSRF/enrollment and page binding.
 func (s *Server) requestPlatformNetwork(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte, e platformRuntimeEndpoint) (broker.HTTPResponse, error) {
+	return s.requestPlatformNetworkSigned(ctx, session, installation, binding, method, target, accept, kind, credential, appplatform.SigningRequest{}, body, e)
+}
+
+// requestPlatformNetworkSigned is requestPlatformNetwork for a call that may ask to be signed.
+func (s *Server) requestPlatformNetworkSigned(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, signing appplatform.SigningRequest, body []byte, e platformRuntimeEndpoint) (broker.HTTPResponse, error) {
 	if len(body) > appplatform.MaxHTTPRequestBytes {
 		return broker.HTTPResponse{}, errAppPlatformNetworkUnavailable
 	}
@@ -412,7 +455,7 @@ func (s *Server) requestPlatformNetwork(ctx context.Context, session platformAct
 	defer clear(body)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	i, err := s.preparePlatformNetworkRequest(ctx, session, installation, binding, method, target, accept, kind, credential, body)
+	i, err := s.preparePlatformNetworkSigned(ctx, session, installation, binding, method, target, accept, kind, credential, signing, body)
 	if err != nil {
 		return broker.HTTPResponse{}, errAppPlatformNetworkUnavailable
 	}

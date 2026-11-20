@@ -437,9 +437,21 @@ func (s *egressSession) checkCommand(c control.NetworkHTTPRequestCommand, admit 
 
 func (s *egressSession) credentialMatches(c control.NetworkHTTPRequestCommand, admit EgressAdmit) bool {
 	if admit.Credential == "" {
-		return c.CredentialName == "" && c.CredentialHeader == "" && len(c.CredentialValue) == 0
+		return c.CredentialName == "" && c.CredentialHeader == "" && len(c.CredentialValue) == 0 && c.SigningScheme == "" && len(c.SignedHeaderNames) == 0
 	}
-	return s.allows("secrets.use") && c.CredentialName == admit.Credential && c.CredentialHeader != "" && len(c.CredentialValue) != 0
+	if !s.allows("secrets.use") || c.CredentialName != admit.Credential {
+		return false
+	}
+	if admit.SigningScheme == "" {
+		return c.CredentialHeader != "" && len(c.CredentialValue) != 0 && c.SigningScheme == "" && len(c.SignedHeaderNames) == 0
+	}
+	// A signed call: the command carries the headers Portal computed for exactly the action and
+	// version the admit named, and no credential header or value beside them. The runner holds no
+	// key, so it cannot check the signature itself; the provider will refuse a request it altered.
+	headers, ok := c.SignedHeaderList()
+	action, version := appplatform.ACS3ActionOf(headers)
+	return ok && c.SigningScheme == admit.SigningScheme && c.CredentialHeader == "" && len(c.CredentialValue) == 0 &&
+		action == admit.SigningAction && version == admit.SigningVersion
 }
 
 func parseCounter(s string) (int64, bool) {

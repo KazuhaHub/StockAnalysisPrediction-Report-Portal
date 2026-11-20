@@ -1,6 +1,6 @@
 # Proposal: provider request signing, Alibaba ACS3 first
 
-Status: accepted 2026-11-17; implementation pending. Depends on
+Status: accepted 2026-11-17; implemented 2026-11-19 (section 10). Depends on
 [176](176-background-credential-use.md) (and therefore 174, 175). Index and
 order: doc 174.
 
@@ -209,3 +209,86 @@ The owner decided every question below on 2026-11-17.
    AccessKeys and cost nothing extra.
 3. Next schemes (AWS SigV4, Tencent TC3). Decided: not now; add each as its own
    operation value and review when an app needs it.
+
+## 10. Implementation notes (2026-11-19)
+
+What shipped, and where it differs from sections 3 to 8.
+
+- **Where the secret lives.** `ParseACS3Credential` decodes the credential JSON by hand
+  from the opened plaintext into byte slices, so the AccessKey secret and the token are
+  never Go strings; Portal wipes the plaintext and the parsed slices as soon as
+  `ACS3Sign` has run. What leaves Portal is the closed header set of
+  section 3.3 (the Authorization value carries the signature; the security token is
+  sent as `x-acs-security-token`, because the provider needs it there). The HMAC key is
+  never in any command, frame, log or audit row. The signed command copy is wiped in
+  Portal once the command is sent, and in the runner when the call ends.
+- **Policy field.** The policy carries `network_policy_sha256`, not
+  `network_target_sha256`, as doc 176 section 10 records. The block is
+  `"acs3":{"actions":[{"action","version"}]}` after `principals`, in the `2-dev.1`
+  format. An ACS3 policy is always written as v2, with `["viewer"]` as its principals for a
+  viewer-only binding (a viewer-only HTTP policy keeps its v1 spelling).
+- **Review.** A binding review for `acs3_hmac_sha256` carries `acs3_actions`; the
+  credential is opened in custody and validated at review creation and again at commit;
+  a value that is not an AccessKey never produces a plan. The review response also shows
+  the reviewed origin (`network_origin`). The consumed review stores the actions; the binding
+  read at use compares them with the policy, so a policy edited behind the review is
+  refused.
+- **Canonical target.** The signed bytes are the sent bytes: the runner sends the command's
+  URL, so Portal refuses (`denied`) a target whose query is not already in canonical form
+  (pairs sorted by name then value, RFC 3986 escapes, no `+`, `;` or empty pair) or whose
+  path is not canonically escaped. Section 3.3 step 2 sorts the query for the canonical
+  request; because the URL must be sent as signed, the application sends it sorted. A
+  request with no query (the Qwen balance probe) is unaffected.
+- **Wire.** The application's `signing` object is `{credential, scheme, action, version}`
+  on the broker (`portal.broker/1`) and the foreground gateway, never beside a
+  `credential`, and never on a stream. The admit frame carries the binding name in
+  `credential` and `signingScheme`, `signingAction`, `signingVersion` (all or none). The
+  signed command carries `signing_scheme` and the headers as two parallel scalar arrays
+  (`signed_header_names`, `signed_header_values`), because a command is a flat object whose
+  arrays hold only scalars. The runner accepts them only with `acs3`, only as the closed
+  set (at most 9 pairs, 16 KiB, sorted, `host` and `content-type` equal to the request's,
+  `x-acs-content-sha256` equal to the command's body digest and to the digest of the body it
+  holds, an Authorization whose `SignedHeaders` is exactly the other names), and in a
+  background call only when they carry exactly the admit's action and version.
+- **What the runner cannot do, and what it can.** It holds no key, so it cannot check the
+  signature; it checks everything that is not secret, and the command is itself signed by
+  Portal's Ed25519 key, so it cannot change method, URL, headers or body hash without
+  failing verification. The provider refuses a request whose bytes differ from what was
+  signed.
+- **Checks.** Every authority challenge of a background call resolves the binding again
+  without opening it and refuses unless it is the binding the admit resolved and its
+  policy still lists the command's action and version (rotation, revocation, a withdrawn
+  principal, `secrets.use`, `background.run` and a re-review with other actions all
+  differ). The call keeps stand-ins for the Authorization value and the token, not the
+  values.
+- **Order and errors.** A pair outside the policy, a binding that is not an ACS3 one, a
+  plain credential naming an ACS3 binding, a target that cannot be signed as sent and a
+  value that is not an AccessKey are `denied` before any signature (the first four before
+  the credential is opened; the last needs the plaintext to be known). A store or custody
+  failure is `unavailable`.
+- **Echo.** The runner withholds a response (body or content type) that gives back the
+  Authorization value, the signature in it or the security token, in the forms of doc 176
+  section 10. The AccessKey secret is never in the runner, so it has nothing to match.
+- **Audit.** The binding review audit detail carries `Actions`. The summary row's
+  `bindings` entries gain `actions` (`"Action@Version"` to count) for calls whose binding
+  resolved, which implies the policy listed the pair.
+- **Migration.** `0022` widens the operation CHECK by `acs3_hmac_sha256`, `pg_password`
+  and `ingress_hmac_sha256` together; `0016` keeps creating the frozen three-value list.
+  Its verifier accepts either list before `0022` has run; `0022` declares
+  `olderDumpOK`, as `0021` does. PostgreSQL constraint `app_platform_secret_bindings_ck_15`,
+  SQLite check 29, as in section 8.
+- **Console.** The credential form has a type (single secret, or Alibaba Cloud
+  AccessKey with ID, secret and optional token, sent as the JSON of section 3.1); the
+  binding form has the "Alibaba Cloud signed request" operation with a list of allowed
+  (action, version) pairs, sorted before the review is requested; the approval step shows
+  the origin, the actions and the RAM advice.
+- **Not done here.** The runner network profile does not yet advertise
+  `signing_schemes: ["acs3"]` (section 6). The profile is compared for equality with the one
+  stored at install, so adding a member would make every installed runtime mismatch until
+  it is reinstalled; a runner built before this change refuses a signed command at decode
+  (it knows no `signing_scheme` member), so the call fails closed. Gating on the profile
+  needs that comparison to become a capability check and is left for a separate change.
+  The native test of section 7 item 8 is covered by a disposable TLS upstream in the
+  broker package that rebuilds the canonical request independently and verifies the
+  signature; the cross-repo Status change (deleting `signAlibaba`) is not part of this
+  repository.

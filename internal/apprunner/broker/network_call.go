@@ -52,9 +52,11 @@ func NewNetworkCall(h *HTTP, raw, signature, body []byte, a control.Authority, c
 	// a policy that differs in any way (even a narrower limit) is refused.
 	if len(h.raw) == 0 || !bytes.Equal(h.raw, command.PolicyRaw) || !h.allowlistMatches(command.PrivateNetworksSHA256) {
 		clear(command.CredentialValue)
+		command.ClearSignedHeaders()
 		return nil, ErrDenied
 	}
 	clear(command.CredentialValue)
+	command.ClearSignedHeaders()
 	expires, err := strconv.ParseInt(command.ExpiresMS, 10, 64)
 	if err != nil {
 		return nil, ErrDenied
@@ -71,9 +73,15 @@ func (n *NetworkCall) Do(parent context.Context) (HTTPResponse, error) {
 	defer cancel()
 	c := n.verified.Command()
 	defer clear(c.CredentialValue)
+	defer c.ClearSignedHeaders()
+	signed, ok := c.SignedHeaderList()
+	if !ok {
+		return HTTPResponse{}, ErrDenied
+	}
 	check := func(ctx context.Context) error {
 		current := n.verified.Command()
 		defer clear(current.CredentialValue)
+		defer current.ClearSignedHeaders()
 		a, err := n.current(ctx, current)
 		if err != nil {
 			return ErrDenied
@@ -83,5 +91,5 @@ func (n *NetworkCall) Do(parent context.Context) (HTTPResponse, error) {
 		}
 		return nil
 	}
-	return n.executor.do(ctx, HTTPRequest{Method: c.Method, URL: c.URL, Accept: c.Accept, ContentType: c.ContentType, Body: n.body, HeaderName: c.CredentialHeader, HeaderValue: c.CredentialValue}, check)
+	return n.executor.do(ctx, HTTPRequest{Method: c.Method, URL: c.URL, Accept: c.Accept, ContentType: c.ContentType, Body: n.body, HeaderName: c.CredentialHeader, HeaderValue: c.CredentialValue, SignedHeaders: signed}, check)
 }
