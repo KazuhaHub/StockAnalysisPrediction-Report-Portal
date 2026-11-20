@@ -230,6 +230,12 @@ func restoreArchiveEntries(ctx context.Context, archive *os.File, request Restor
 			!checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) {
 			return nil, ErrRestoreUnsafe
 		}
+		// Every entry is extracted into its parent, so the parent must be an earlier directory entry. Refusing here,
+		// when the archive is read and before a restore or import clears the namespace, keeps such an archive from
+		// failing half way through.
+		if parent := path.Dir(strings.TrimSuffix(header.Name, "/")); parent != "." && !seen[parent+"/"] {
+			return nil, ErrRestoreUnsafe
+		}
 		// Inodes (directories and files) and link entries are bounded apart: the inode quota counts inodes, and a
 		// file with many links must not use up the cap of the inodes around it.
 		if header.Typeflag == tar.TypeLink {
