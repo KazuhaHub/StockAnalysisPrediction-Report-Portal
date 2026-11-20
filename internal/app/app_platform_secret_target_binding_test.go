@@ -232,21 +232,40 @@ func testPlatformTargetBindingRefusesPlainHTTP(t *testing.T, pg bool) {
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_secret_bindings`) != 1 {
 		t.Fatal("a refused review wrote a binding")
 	}
-	// A binding forged for the http target's digest is still no way to it.
+	// A binding and a consumed review both forged for the http target's digest
+	// are still no way to it: the plain-http refusal is the use-time check alone.
 	lan, err := appplatform.ParseHTTPPolicyAny([]byte(platformTargetV2(t, platformTargetLAN())))
 	if err != nil {
 		t.Fatal(err)
 	}
 	lanSHA, _ := appplatform.HTTPTargetSHA256(lan.Policy.Targets[0])
-	forged, err := canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: "http_bearer", networkTargetSHA256: lanSHA})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, s.st, `UPDATE app_platform_secret_bindings SET policy_json=? WHERE id=?`, string(forged), api.ID)
+	platformTargetForgeTarget(t, s, api.ID, lanSHA)
 	platformTargetExpectDenied(t, s, installation, "api-a", platformPrincipalViewer, platformTargetLANURL, "a binding on a plain-http target")
 	if platformCredentialOpenCount.Load() != before {
 		t.Fatal("a refusal reached the custody")
 	}
+}
+
+// platformTargetForgeTarget points a binding, and the consumed review that
+// admits it, at another target digest, as a store write could.
+func platformTargetForgeTarget(t *testing.T, s *Server, id, sha string) {
+	t.Helper()
+	planID := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_secret_bindings WHERE id=?`, id)
+	var plan platformSecretBindingReview
+	if err := json.Unmarshal([]byte(scalar[string](t, s.st, `SELECT plan_json FROM app_platform_review_plans WHERE id=?`, planID)), &plan); err != nil {
+		t.Fatal(err)
+	}
+	plan.NetworkTargetSHA256 = sha
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: plan.Operation, networkTargetSHA256: sha})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=? WHERE id=?`, string(raw), platformDigest(raw), planID)
+	mustExec(t, s.st, `UPDATE app_platform_secret_bindings SET policy_json=? WHERE id=?`, string(policy), id)
 }
 
 // The egress path judges the target before it reads the binding: a binding for
@@ -362,4 +381,94 @@ func TestPlatformSecretBindingPolicyV3(t *testing.T) {
 	if _, err := canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: "raw_read", networkTargetSHA256: sha}); err == nil {
 		t.Fatal("raw_read carried a target")
 	}
+}
+
+// A v3 binding is never used without a destination: a zero destination skips
+// neither the target selection nor the plain-http refusal.
+func testPlatformTargetBindingNeedsDestination(t *testing.T, pg bool) {
+	s, _, installation, _ := platformServiceCredentialFixture(t, pg, platformPrincipalsBoth)
+	e := s.st.poolExec()
+	facts, err := loadPlatformSecretBindingFacts(e, installation, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, principal := range []string{platformPrincipalViewer, platformPrincipalService} {
+		if _, _, err := loadPlatformSecretBindingUseFor(e, installation, "upstream-api", facts, principal, platformBindingDestination{}); err == nil {
+			t.Fatal("a v3 binding was read without a destination for", principal)
+		}
+	}
+	// The egress load that opens the value refuses a call with no destination.
+	state := platformServiceEgressState(t, s, installation, platformServiceCredentialResources...)
+	before := platformCredentialOpenCount.Load()
+	if a, err := s.loadPlatformServiceEgressCurrent(context.Background(), installation, platformServiceEgressLoad{
+		identity: state.identity, resources: state.resources, credential: "upstream-api", decrypt: true,
+	}); err == nil {
+		a.Close()
+		t.Fatal("an egress load opened a credential with no destination")
+	}
+	if platformCredentialOpenCount.Load() != before {
+		t.Fatal("a load with no destination reached the custody")
+	}
+	// Nor does a whole-policy binding open for a call that names no destination.
+	id := scalar[string](t, s.st, `SELECT id FROM app_platform_secret_bindings WHERE installation_id=?`, installation)
+	platformTargetMakeLegacy(t, s, id, installation, platformPrincipalsBoth)
+	if a, err := s.loadPlatformServiceEgressCurrent(context.Background(), installation, platformServiceEgressLoad{
+		identity: state.identity, resources: state.resources, credential: "upstream-api", decrypt: true, destination: platformTargetDefaultURL,
+	}); err != nil {
+		t.Fatal("whole-policy binding refused with a destination:", err)
+	} else {
+		a.Close()
+	}
+	before = platformCredentialOpenCount.Load()
+	if a, err := s.loadPlatformServiceEgressCurrent(context.Background(), installation, platformServiceEgressLoad{
+		identity: state.identity, resources: state.resources, credential: "upstream-api", decrypt: true,
+	}); err == nil {
+		a.Close()
+		t.Fatal("a whole-policy binding opened with no destination")
+	}
+	if platformCredentialOpenCount.Load() != before {
+		t.Fatal("a whole-policy load with no destination reached the custody")
+	}
+}
+
+// The commit audit and the binding list say which target a binding is for.
+func testPlatformTargetBindingShowsTarget(t *testing.T, pg bool) {
+	s, admin, installation, credential := platformSecretBindingFixture(t, pg)
+	binding := platformTargetBind(t, s, admin, installation, "api-a", credential.ID, "", "")
+	sha := platformTargetPolicy(t, s, binding.ID).networkTargetSHA256
+	detail := scalar[string](t, s.st, `SELECT detail FROM audit_log WHERE action='app_platform.secret_binding_active' AND target_id=?`, binding.ID)
+	if !strings.Contains(detail, `"NetworkTargetSHA256":"`+sha+`"`) || !strings.Contains(detail, `"NetworkTarget":"https://api.example.com"`) {
+		t.Fatal("commit audit lacks the target", detail)
+	}
+	list, err := s.listPlatformSecretBindings(admin, installation)
+	if err != nil || len(list) != 1 || list[0].NetworkTargetSHA256 != sha || list[0].NetworkTarget != "https://api.example.com" {
+		t.Fatal("list lacks the target", list, err)
+	}
+	// A legacy whole-policy binding names no target.
+	platformTargetMakeLegacy(t, s, binding.ID, installation, "")
+	list, err = s.listPlatformSecretBindings(admin, installation)
+	if err != nil || len(list) != 1 || list[0].NetworkTargetSHA256 != "" || list[0].NetworkTarget != "" {
+		t.Fatal("legacy binding lists a target", list, err)
+	}
+	targets, err := s.listPlatformSecretBindingTargets(admin, installation)
+	if err != nil || len(targets) != 1 || targets[0].ID != "default" || targets[0].Origin != "https://api.example.com" {
+		t.Fatal("grant targets", targets, err)
+	}
+	platformTargetSetGrant(t, s, installation, platformTargetV2(t, platformTargetDefault(), platformTargetLAN(), platformTargetOther()))
+	if targets, err = s.listPlatformSecretBindingTargets(admin, installation); err != nil || len(targets) != 2 || targets[0].ID != "default" || targets[1].ID != "other" {
+		t.Fatal("plain-http target offered", targets, err)
+	}
+}
+
+func TestPlatformTargetBindingNeedsDestinationSQLite(t *testing.T) {
+	testPlatformTargetBindingNeedsDestination(t, false)
+}
+func TestPlatformTargetBindingNeedsDestinationPostgres(t *testing.T) {
+	testPlatformTargetBindingNeedsDestination(t, true)
+}
+func TestPlatformTargetBindingShowsTargetSQLite(t *testing.T) {
+	testPlatformTargetBindingShowsTarget(t, false)
+}
+func TestPlatformTargetBindingShowsTargetPostgres(t *testing.T) {
+	testPlatformTargetBindingShowsTarget(t, true)
 }

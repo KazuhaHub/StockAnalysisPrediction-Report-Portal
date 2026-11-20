@@ -35,4 +35,15 @@ func TestPlatformSecretBindingTargetHTTP(t *testing.T) {
 	if code, _ := plan("raw_read", `,"target":"default"`); code != 400 {
 		t.Fatal("a raw read named a target", code)
 	}
+	// The app's binding list names the grant's https targets for the review form,
+	// and a committed binding's target.
+	list := sessionTestRequest(mux, "GET", "/api/admin/app-platform/apps/"+appID+"/secret-bindings", cookie, "")
+	if list.Code != 200 || !strings.Contains(list.Body.String(), `"targets":[{"id":"default","origin":"https://api.example.com"}]`) {
+		t.Fatal("binding list lacks the targets", list.Code, list.Body.String())
+	}
+	platformTargetBind(t, s, admin, installation, "api-a", credential.ID, "", "")
+	list = sessionTestRequest(mux, "GET", "/api/admin/app-platform/apps/"+appID+"/secret-bindings", cookie, "")
+	if !strings.Contains(list.Body.String(), `"network_target":"https://api.example.com"`) || !strings.Contains(list.Body.String(), `"network_target_sha256":"`) {
+		t.Fatal("binding list lacks the binding's target", list.Body.String())
+	}
 }

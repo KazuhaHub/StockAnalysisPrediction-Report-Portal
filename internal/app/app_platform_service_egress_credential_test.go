@@ -56,7 +56,7 @@ func platformServiceCredentialAdmit() transport.EgressAdmit {
 // way an admit does, and signs it.
 func platformServiceCredentialSign(t *testing.T, s *Server, state platformServiceEgressSessionState) (control.NetworkHTTPRequestCommand, []byte, []byte, platformSecretBindingUse) {
 	t.Helper()
-	a, err := s.loadServiceEgressForSessionCredential(context.Background(), state, "upstream-api", true)
+	a, err := s.loadServiceEgressForSessionCredential(context.Background(), state, "upstream-api", true, platformTargetDefaultURL)
 	if err != nil {
 		t.Fatal("load credential authority:", err)
 	}
@@ -143,7 +143,7 @@ func testPlatformServiceEgressCredentialDeniedBeforeDecrypt(t *testing.T, pg boo
 	denied := func(what string, state platformServiceEgressSessionState, name string) {
 		t.Helper()
 		before := platformCredentialOpenCount.Load()
-		a, err := s.loadServiceEgressForSessionCredential(ctx, state, name, true)
+		a, err := s.loadServiceEgressForSessionCredential(ctx, state, name, true, platformTargetDefaultURL)
 		if err == nil {
 			a.Close()
 			t.Fatal(what, "was not refused")
@@ -169,7 +169,7 @@ func testPlatformServiceEgressCredentialDeniedBeforeDecrypt(t *testing.T, pg boo
 	if _, err := s.consumePlatformSecretBindingReview(admin, plan.ID, plan.SHA256); err != nil {
 		t.Fatal(err)
 	}
-	if a, err := s.loadServiceEgressForSessionCredential(ctx, state, "upstream-api", true); err != nil {
+	if a, err := s.loadServiceEgressForSessionCredential(ctx, state, "upstream-api", true, platformTargetDefaultURL); err != nil {
 		t.Fatal("service binding refused:", err)
 	} else {
 		a.Close()

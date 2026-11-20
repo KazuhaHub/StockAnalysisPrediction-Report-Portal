@@ -348,7 +348,12 @@ func (s *Server) apiPlatformAppSecretBindingList(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"installation_id": installation, "bindings": items})
+	targets, err := s.listPlatformSecretBindingTargets(actor, installation)
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"installation_id": installation, "bindings": items, "targets": targets})
 }
 
 func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.Request, user string) {
