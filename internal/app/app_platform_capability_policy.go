@@ -171,8 +171,10 @@ func loadPlatformLatestCapabilityPlan(e migExec, installation string) (platformC
 
 // platformCapabilityGrantFor returns the consumed capability plan that backs a
 // network.http grant row, or an error. The plan must be the installation's
-// latest, belong to this release, generation and epoch, and carry exactly the
-// policy the row holds. This is the one place a row policy different from the
+// latest, belong to this release and epoch, and carry exactly the policy the row
+// holds. Enable, repair and restore advance the generation while they retain the
+// grant rows, so the plan stays valid for any generation at or after its own; an
+// update to another release rewrites the rows and changes the release. This is the one place a row policy different from the
 // reviewed install policy is accepted.
 func platformCapabilityGrantFor(e migExec, installation, release, epoch, review, stored string) (platformCapabilityPlanRow, error) {
 	row, err := loadPlatformLatestCapabilityPlan(e, installation)
@@ -184,7 +186,7 @@ func platformCapabilityGrantFor(e migExec, installation, release, epoch, review,
 		return platformCapabilityPlanRow{}, platformBindingReadError(err)
 	}
 	plan := row.plan
-	if row.id != review || plan.ReleaseSHA256 != release || plan.ControllerEpoch != epoch || plan.Generation != generation ||
+	if row.id != review || plan.ReleaseSHA256 != release || plan.ControllerEpoch != epoch || plan.Generation > generation ||
 		plan.Runtime == nil || plan.Runtime.NetworkPolicy != stored {
 		return platformCapabilityPlanRow{}, errPlatformCapabilityPolicy
 	}
@@ -218,7 +220,7 @@ func loadPlatformCapabilityNetworkGrant(e migExec, installation string, t platfo
 		return platformNetworkGrant{}, fail
 	}
 	row, err := platformCapabilityGrantFor(e, installation, t.release, t.runtime.controllerEpoch, g.review, g.policy)
-	if err != nil || row.plan.Generation != t.generation {
+	if err != nil || row.plan.Generation > t.generation {
 		return platformNetworkGrant{}, fail
 	}
 	target := row.plan.Runtime

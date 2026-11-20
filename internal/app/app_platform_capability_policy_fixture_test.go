@@ -171,7 +171,8 @@ func platformCapabilityPrepare(t *testing.T, s *Server, actor platformActorSessi
 	t.Helper()
 	release := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	revision := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_installations WHERE id=?`, installation)
-	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: itoa64(revision), ReleaseSHA256: release}
+	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation)
+	binding := platformBackendRequestBinding{Generation: itoa64(generation), PolicyRevision: itoa64(revision), ReleaseSHA256: release}
 	intent, err := s.preparePlatformNetworkRequest(context.Background(), actor, installation, binding, "GET", url, "application/json", "", "", nil)
 	if err == nil {
 		intent.Close()
