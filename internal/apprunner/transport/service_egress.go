@@ -50,6 +50,9 @@ const (
 	EgressFrameNoticeResult byte = 0x07 // Portal -> runner: its outcome
 	EgressFrameOutcome      byte = 0x08 // runner -> Portal: how the call ended, for audit
 	EgressFrameClose        byte = 0x09 // either: the session ends
+	// EgressFrameProxyReport (doc 184 section 7) is a one-way call from the runner: a rollup, a
+	// refusal row or the day's usage of the installation's proxy tunnels. Portal answers nothing.
+	EgressFrameProxyReport byte = 0x0A // runner -> Portal
 )
 
 // Refusal codes (EgressFrameRefusal payload).
@@ -105,6 +108,8 @@ const (
 	egressAdmitMaxBytes  = 8192
 	egressNoticeMaxBytes = broker.MaxAppNoticeBytes
 	egressResultMaxBytes = 256
+	// egressProxyReportMaxBytes bounds a report: 64 hosts with their close counts.
+	egressProxyReportMaxBytes = 16384
 	// EgressWriteTimeout bounds one frame write. It is a per-write deadline: the
 	// connection never carries a whole-connection deadline, because a session
 	// outlives any single call.
@@ -160,6 +165,8 @@ func egressFrameLimit(t byte) (int, bool) {
 		return 11, true
 	case EgressFrameClose:
 		return 1, true
+	case EgressFrameProxyReport:
+		return egressProxyReportMaxBytes, true
 	}
 	return 0, false
 }
@@ -227,7 +234,7 @@ func (r EgressRole) receives(t byte) bool {
 		return true
 	case EgressFrameCommand, EgressFrameRefusal, EgressFrameProof, EgressFrameNoticeResult:
 		return r == EgressRunner
-	case EgressFrameAdmit, EgressFrameChallenge, EgressFrameNotice, EgressFrameOutcome:
+	case EgressFrameAdmit, EgressFrameChallenge, EgressFrameNotice, EgressFrameOutcome, EgressFrameProxyReport:
 		return r == EgressPortal
 	}
 	return false
@@ -355,13 +362,13 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 	call := m.calls[f.Call]
 	if call == nil {
 		if _, finished := m.finished[f.Call]; finished {
-			if f.Type == EgressFrameAdmit || f.Type == EgressFrameNotice {
+			if f.Type == EgressFrameAdmit || f.Type == EgressFrameNotice || f.Type == EgressFrameProxyReport {
 				return ErrEgressProtocol // a call ID is never reused
 			}
 			// A late answer to a call its owner already abandoned.
 			return nil
 		}
-		if m.role != EgressPortal || (f.Type != EgressFrameAdmit && f.Type != EgressFrameNotice) || len(m.calls) >= egressMaxCalls {
+		if m.role != EgressPortal || (f.Type != EgressFrameAdmit && f.Type != EgressFrameNotice && f.Type != EgressFrameProxyReport) || len(m.calls) >= egressMaxCalls {
 			return ErrEgressProtocol
 		}
 		call = &EgressCall{mux: m, id: f.Call, kind: f.Type, in: make(chan EgressFrame, egressCallBuffer)}
@@ -371,7 +378,7 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 			return ErrEgressProtocol
 		}
 		m.calls[f.Call] = call
-	} else if f.Type == EgressFrameAdmit || f.Type == EgressFrameNotice {
+	} else if f.Type == EgressFrameAdmit || f.Type == EgressFrameNotice || f.Type == EgressFrameProxyReport {
 		return ErrEgressProtocol // duplicate start
 	}
 	switch f.Type {
@@ -508,7 +515,7 @@ func (c *EgressCall) Send(t byte, payload []byte) error {
 	case c.finished:
 		m.mu.Unlock()
 		return ErrEgressClosed
-	case (t == EgressFrameAdmit || t == EgressFrameNotice) && m.role == EgressRunner:
+	case (t == EgressFrameAdmit || t == EgressFrameNotice || t == EgressFrameProxyReport) && m.role == EgressRunner:
 		if c.kind != 0 {
 			m.mu.Unlock()
 			return ErrEgressProtocol

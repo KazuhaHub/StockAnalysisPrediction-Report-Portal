@@ -260,6 +260,8 @@ type portalSide struct {
 	noticeR func(broker.AppNotice) (byte, EgressNoticeResult)
 	gate    chan struct{}
 	admits  chan EgressAdmit
+	// reports collects the proxy reports (doc 184 section 7) the runner sends.
+	reports chan broker.ProxyReport
 }
 
 // open sends a signed session over a fresh connection and returns the Portal
@@ -281,7 +283,7 @@ func (f *egrFixture) openRaw(command control.ServiceEgressSessionCommand, raw, s
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	p := &portalSide{f: f, t: f.t, command: command, conn: client, openErr: make(chan error, 1), outcomes: make(chan EgressOutcome, 64), notices: make(chan broker.AppNotice, 16), admits: make(chan EgressAdmit, 16)}
+	p := &portalSide{f: f, t: f.t, command: command, conn: client, openErr: make(chan error, 1), outcomes: make(chan EgressOutcome, 64), notices: make(chan broker.AppNotice, 16), admits: make(chan EgressAdmit, 16), reports: make(chan broker.ProxyReport, 64)}
 	go func() {
 		open, err := ReadEgressOpen(server, false)
 		if err != nil {
@@ -343,6 +345,13 @@ func (p *portalSide) handle(call *EgressCall) {
 		return
 	}
 	switch first.Type {
+	case EgressFrameProxyReport:
+		report, err := DecodeEgressProxyReport(first.Payload)
+		if err != nil {
+			p.t.Errorf("proxy report frame: %v", err)
+			return
+		}
+		p.reports <- report
 	case EgressFrameNotice:
 		n, err := DecodeEgressNotice(first.Payload)
 		if err != nil {

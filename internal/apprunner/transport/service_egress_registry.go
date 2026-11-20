@@ -74,6 +74,9 @@ type egressRegistry struct {
 	wg       sync.WaitGroup
 	// maxSessions is the bound on live sessions that a new installation meets.
 	maxSessions int
+	// proxy is what every installation's proxy tunnels share (doc 184): the runner-wide tunnel
+	// cap, the daily budget store and the network seams.
+	proxy *broker.ProxyRunner
 
 	// openMu serialises opens, which are rare and may touch the journal.
 	openMu sync.Mutex
@@ -94,6 +97,8 @@ type egressInstall struct {
 	peerOK     func(net.Conn) bool
 	intact     func() error
 	server     *egressServer
+	// proxy is the installation's tunnels. Its authority follows the current session.
+	proxy *broker.ProxyInstall
 
 	mu       sync.Mutex
 	bucket   *broker.TokenBucket
@@ -112,6 +117,8 @@ type egressSession struct {
 	resources   []string
 	expires     time.Time
 	mux         *EgressMux
+	// proxy is the reviewed proxy policy the session carries, if any.
+	proxy *appplatform.ParsedProxyPolicy
 
 	// Guarded by install.mu.
 	draining bool
@@ -123,7 +130,8 @@ type egressSession struct {
 
 func newEgressRegistry(parent context.Context, provider *networkProvider, bind EgressBinder) *egressRegistry {
 	ctx, cancel := context.WithCancel(parent)
-	r := &egressRegistry{provider: provider, bind: bind, now: time.Now, maxSessions: maxEgressSessions, ctx: ctx, cancel: cancel, installs: make(map[string]*egressInstall)}
+	r := &egressRegistry{provider: provider, bind: bind, now: time.Now, maxSessions: maxEgressSessions, ctx: ctx, cancel: cancel, installs: make(map[string]*egressInstall),
+		proxy: broker.NewProxyRunner(appplatform.ProxyTunnelsPerRunner, nil)}
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -133,6 +141,7 @@ func newEgressRegistry(parent context.Context, provider *networkProvider, bind E
 			select {
 			case <-ticker.C:
 				r.sweep()
+				r.flushProxyReports()
 			case <-ctx.Done():
 				return
 			}
@@ -237,6 +246,9 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		return refuse(err)
 	}
 	session := &egressSession{command: command, revision: revision, concurrency: concurrency, resources: slices.Clone(command.Resources), expires: time.UnixMilli(expires), mux: NewEgressMux(conn, EgressRunner), seen: make(map[string]struct{})}
+	if policy, ok := proxyPolicyOf(command); ok {
+		session.proxy = &policy
+	}
 	// The last checks and the acknowledgement happen under the registry lock, so
 	// an installation closed meanwhile (a disabled close, shutdown) is refused
 	// here instead of being acknowledged as open and dropped. The write is one
@@ -271,7 +283,8 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 			install.mu.Unlock()
 			replaced = install
 		}
-		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{})}
+		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{}),
+			proxy: broker.NewProxyInstall(command.InstallationID, r.proxy, broker.DefaultProxyLimits())}
 		r.installs[command.InstallationID] = install
 	}
 	session.install = install
@@ -284,6 +297,8 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 	}
 	drainNow := previous != nil && previous.inflight == 0
 	install.mu.Unlock()
+	// The session that is now current decides the proxy authority: its policy, or none.
+	install.applyProxy(session)
 	r.live++
 	if listen {
 		r.startServer(install)
@@ -316,11 +331,17 @@ func (r *egressRegistry) detach(s *egressSession) {
 		delete(in.sessions, s)
 		r.live--
 	}
-	if in.current == s {
+	lost := in.current == s
+	if lost {
 		in.current = nil
 	}
 	in.mu.Unlock()
 	r.mu.Unlock()
+	if lost {
+		// No session is current any more: Portal no longer vouches for the proxy, so every
+		// tunnel is cut. A session replaced by a newer one is not this case.
+		in.proxy.Revoke()
+	}
 	if s.mux.PeerReason() == EgressCloseDisabled {
 		r.closeInstall(in, EgressCloseDisabled)
 	}
@@ -345,6 +366,7 @@ func (r *egressRegistry) closeInstall(in *egressInstall, reason byte) {
 	}
 	in.mu.Unlock()
 	r.mu.Unlock()
+	in.proxy.Revoke()
 	if in.server != nil {
 		in.server.close()
 	}
