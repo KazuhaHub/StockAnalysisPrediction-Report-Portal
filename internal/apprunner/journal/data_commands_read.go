@@ -32,7 +32,11 @@ func readDataEffectOrStatus[R any](s *Store, read func() (R, control.CommandHead
 		return receipt, nil
 	}
 	now := time.Now().UTC().UnixMilli()
+	var failed *DataEffectFailedError
 	switch {
+	case errors.As(err, &failed):
+		// A definite end: the effect failed and the journal says so. It never waits for a running dispatch.
+		return failed.Status(now), nil
 	case errors.Is(err, ErrNoSuchEffect):
 		if !s.tryAcquireDataExecution() {
 			return dataEffectStatus(header, "pending", now), nil

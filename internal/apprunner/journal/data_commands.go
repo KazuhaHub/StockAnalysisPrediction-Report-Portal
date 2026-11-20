@@ -345,6 +345,10 @@ func (s *Store) claimSetDataQuota(ctx context.Context, raw, signature []byte) (c
 			return command, &parsed, nil
 		case "unknown":
 			return command, nil, tx.Commit()
+		case "reverted":
+			if failed := failedDataEffectOf(row, command.CommandHeader); failed != nil {
+				return command, nil, failed
+			}
 		}
 		return command, nil, ErrFenceReconciliation
 	}
@@ -421,6 +425,18 @@ func (s *Store) DispatchSetDataQuota(ctx context.Context, raw, signature []byte,
 	defer cancel()
 	snapshot, err := native(ctx, quotaRaiseRequestFor(command))
 	if err != nil {
+		// A raise the native layer refused before it changed anything is a known failure. Any other error leaves the
+		// effect unknown: the raise may have applied, and sending the same command again converges.
+		if code, known := classifyRaiseFailure(err); known {
+			failure := &DataEffectFailedError{Header: command.CommandHeader, Code: code, Cause: err}
+			if failErr := s.failDataEffect(ctx, command.CommandHeader, command.Payload.NamespaceID, code, false, func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error {
+				_, err := control.VerifySetDataQuotaSettlement(raw, signature, a, now)
+				return err
+			}); failErr != nil {
+				return zero, fmt.Errorf("raise data quota: %w", errors.Join(err, failErr))
+			}
+			return zero, fmt.Errorf("raise data quota: %w", failure)
+		}
 		return zero, fmt.Errorf("raise data quota: %w", err)
 	}
 	p := command.Payload
@@ -482,6 +498,9 @@ func (s *Store) ReadSetDataQuotaReceipt(ctx context.Context, raw, signature []by
 	if !rowMatchesHeader(row, command.CommandHeader) {
 		return zero, ErrCommandConflict
 	}
+	if failed := failedDataEffectOf(row, command.CommandHeader); failed != nil {
+		return zero, failed
+	}
 	if row.state != "applied" {
 		return zero, ErrDataCommandUnavailable
 	}
@@ -541,6 +560,10 @@ func (s *Store) claimImportData(ctx context.Context, raw, signature []byte) (com
 			return command, &parsed, nil
 		case "unknown":
 			return command, nil, tx.Commit()
+		case "reverted":
+			if failed := failedDataEffectOf(row, command.CommandHeader); failed != nil {
+				return command, nil, failed
+			}
 		}
 		return command, nil, ErrFenceReconciliation
 	}
@@ -640,7 +663,18 @@ func (s *Store) DispatchImportData(ctx context.Context, raw, signature []byte, n
 	defer cancel()
 	snapshot, err := native(ctx, importDataRequestFor(command))
 	if err != nil {
-		return zero, fmt.Errorf("import data: %w", err)
+		// The native call returned: the import did not complete, and that is known. The row ends reverted with the
+		// failure code, so the restore that undoes a half-done import is not blocked by an unsettled command of
+		// the installation. It is 'unknown' only if the process dies before this point.
+		code, dirty := classifyImportFailure(err)
+		failure := &DataEffectFailedError{Header: command.CommandHeader, Code: code, Cause: err}
+		if failErr := s.failDataEffect(ctx, command.CommandHeader, command.Payload.NamespaceID, code, dirty, func(ctx context.Context, tx *sql.Tx, a control.Authority, now int64) error {
+			_, err := control.VerifyImportDataSettlement(raw, signature, a, now)
+			return err
+		}); failErr != nil {
+			return zero, fmt.Errorf("import data: %w", errors.Join(err, failErr))
+		}
+		return zero, fmt.Errorf("import data: %w", failure)
 	}
 	p := command.Payload
 	if snapshot.NamespaceID != p.NamespaceID || snapshot.ArchiveSHA256 != p.ArchiveSHA256 || snapshot.Entries != mustDataInt(p.ArchiveEntries) ||
@@ -705,6 +739,9 @@ func (s *Store) ReadImportDataReceipt(ctx context.Context, raw, signature []byte
 	}
 	if !rowMatchesHeader(row, command.CommandHeader) {
 		return zero, ErrCommandConflict
+	}
+	if failed := failedDataEffectOf(row, command.CommandHeader); failed != nil {
+		return zero, failed
 	}
 	if row.state != "applied" {
 		return zero, ErrDataCommandUnavailable

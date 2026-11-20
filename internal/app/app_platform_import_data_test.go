@@ -17,6 +17,7 @@ import (
 
 type platformDataImportTestObservation struct {
 	receipt    journal.ImportDataReceipt
+	status     *journal.MigrateDataStatus
 	authority  control.Authority
 	endpoint   transport.CandidateReceiptEndpoint
 	receivedAt time.Time
@@ -25,6 +26,12 @@ type platformDataImportTestObservation struct {
 
 func (o platformDataImportTestObservation) ImportDataReceipt() (journal.ImportDataReceipt, error) {
 	return o.receipt, nil
+}
+func (o platformDataImportTestObservation) DataEffectStatus() (journal.MigrateDataStatus, error) {
+	if o.status == nil {
+		return journal.MigrateDataStatus{}, errors.New("no status")
+	}
+	return *o.status, nil
 }
 func (o platformDataImportTestObservation) Controller() control.Authority { return o.authority }
 func (o platformDataImportTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
@@ -141,6 +148,11 @@ func testPlatformImportDataReplacesContentAndCompletes(t *testing.T, pg bool) {
 	if err != nil || startLease.snapshot.Stage != appplatform.StageStart {
 		t.Fatal("import commit", startLease.snapshot, err)
 	}
+	// The import is not complete yet: its archive stays.
+	s.removePlatformImportArchive(context.Background(), startLease, endpoint)
+	if len(runner.removed) != 0 {
+		t.Fatalf("the inbox archive was deleted before the import completed: %v", runner.removed)
+	}
 	namespace := plan.DataNamespaceID
 	if scalar[int64](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces WHERE id=?`, namespace) != 786432 {
 		t.Fatal("observed_bytes is not what the project quota reported")
@@ -160,8 +172,24 @@ func testPlatformImportDataReplacesContentAndCompletes(t *testing.T, pg bool) {
 		scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation) != plan.TargetGeneration {
 		t.Fatal("the import did not activate the retained tuple")
 	}
+	// A runner that cannot delete the archive does not undo the completed import: the failure is audited and the
+	// archive stays.
+	healthy := platformDataQueryRunner
+	platformDataQueryRunner = func(context.Context, platformRuntimeEndpoint, platformDataQueryRequest) (platformDataQueryObservation, error) {
+		return nil, errors.New("runner unavailable")
+	}
 	s.removePlatformImportArchive(context.Background(), startLease, endpoint)
-	if len(runner.removed) != 1 || runner.removed[0] != platformTestArchiveSHA {
+	platformDataQueryRunner = healthy
+	if len(runner.removed) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_import_archive_remove_failed' AND target_id=?`, startLease.id) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_import_archive_removed'`) != 0 ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, startLease.id) != string(appplatform.StageComplete) {
+		t.Fatal("a failed archive removal was not recorded or undid the import")
+	}
+	w := platformSchedulerFixture(t, s)
+	w.afterOperationComplete(context.Background(), startLease)
+	if len(runner.removed) != 1 || runner.removed[0] != platformTestArchiveSHA ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.data_import_archive_removed' AND target_id=?`, startLease.id) != 1 {
 		t.Fatalf("the inbox archive was not deleted on completion: %v", runner.removed)
 	}
 	access, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, installation)
@@ -317,7 +345,7 @@ func TestPlatformImportDataFailureAfterImportRestoresTheCheckpointPostgres(t *te
 }
 
 func TestPlatformImportDataFailureWithoutRollbackRequiresRecovery(t *testing.T) {
-	s, actor, enabled, target, runtime, _ := platformImportDisabledFixture(t, false)
+	s, actor, enabled, target, runtime, runner := platformImportDisabledFixture(t, false)
 	installation := enabled.installationID
 	endpoint := platformCheckpointEndpointFixture()
 	review, err := s.createPlatformManagedImportDataReviewWithRuntimeContext(context.Background(), actor, installation, platformTestArchiveSHA, target, runtime, endpoint)
@@ -339,5 +367,10 @@ func TestPlatformImportDataFailureWithoutRollbackRequiresRecovery(t *testing.T) 
 	if scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, commit.OperationID) != "failed:managed_import_data_unavailable" ||
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "disabled:disabled" {
 		t.Fatal("a failure before the import left the installation changed")
+	}
+	// A failed import keeps its archive for another try.
+	s.removePlatformImportArchive(context.Background(), selected.lease, endpoint)
+	if len(runner.removed) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action LIKE 'app_platform.data_import_archive_%'`) != 0 {
+		t.Fatalf("a failed import lost its archive: %v", runner.removed)
 	}
 }

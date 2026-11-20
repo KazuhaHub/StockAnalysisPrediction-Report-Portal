@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"time"
@@ -463,6 +464,7 @@ func (s *Server) preparePlatformImportData(ctx context.Context, expected platfor
 
 type platformImportDataObservation interface {
 	ImportDataReceipt() (journal.ImportDataReceipt, error)
+	DataEffectStatus() (journal.MigrateDataStatus, error)
 	Controller() control.Authority
 	Endpoint() transport.CandidateReceiptEndpoint
 	ReceivedAt() time.Time
@@ -498,6 +500,9 @@ func (s *Server) dispatchPlatformImportData(ctx context.Context, expected platfo
 		if readErr != nil {
 			return platformOperationLease{}, errors.Join(err, readErr)
 		}
+	}
+	if err := platformDataEffectFailure(observation, intent.command.CommandHeader, intent.raw, intent.authority, endpoint); err != nil {
+		return platformOperationLease{}, err
 	}
 	return s.commitPlatformImportData(ctx, expected, intent, endpoint, observation)
 }
@@ -603,20 +608,31 @@ func (s *Server) commitPlatformImportData(ctx context.Context, expected platform
 	return result, nil
 }
 
-// removePlatformImportArchive deletes the inbox archive of a completed import. It is best effort: the import is
-// complete either way, and an archive left behind is only disk the operator can remove.
+// removePlatformImportArchive deletes the inbox archive of an import that reached complete, and only of that: a failed
+// or unfinished import keeps its archive for another try. It is best effort. The import is complete either way, so a
+// failure here never fails or undoes it: it is logged and audited, and the archive stays for the operator to remove.
 func (s *Server) removePlatformImportArchive(ctx context.Context, lease platformOperationLease, endpoint platformRuntimeEndpoint) {
-	var raw string
-	if err := s.st.queryRowContext(ctx, `SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, lease.id).Scan(&raw); err != nil {
+	var raw, stage string
+	if err := s.st.queryRowContext(ctx, `SELECT p.plan_json,o.stage FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=? AND o.action=?`,
+		lease.id, string(appplatform.ActionImportData)).Scan(&raw, &stage); err != nil || stage != string(appplatform.StageComplete) {
 		return
 	}
 	var plan platformManagedUpdatePlan
 	if json.Unmarshal([]byte(raw), &plan) != nil || plan.Import == nil || !plan.Import.valid() {
 		return
 	}
+	fail := func(err error) {
+		log.Printf("app-platform import archive removal (operation %s): %v", lease.id, err)
+		detail, _ := json.Marshal(struct {
+			Archive string `json:"archive_sha256"`
+		}{plan.Import.ArchiveSHA256})
+		_, _ = s.st.execContext(ctx, `INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.data_import_archive_remove_failed','app_platform_operation',?,?,'')`,
+			time.Now().UTC().Format(time.RFC3339), lease.id, string(detail))
+	}
 	var request platformDataQueryRequest
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
+		fail(err)
 		return
 	}
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
@@ -632,9 +648,11 @@ func (s *Server) removePlatformImportArchive(ctx context.Context, lease platform
 		return signErr
 	}()
 	if err != nil {
+		fail(err)
 		return
 	}
 	if _, err := s.queryPlatformData(ctx, endpoint, request); err != nil {
+		fail(err)
 		return
 	}
 	detail, _ := json.Marshal(struct {

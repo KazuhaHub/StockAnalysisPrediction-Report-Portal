@@ -369,6 +369,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			return nil
 		}
 		w.publish("complete", w.active.id, appplatform.StageComplete)
+		w.afterOperationComplete(ctx, w.active)
 		w.active, w.attempts = platformOperationLease{}, 0
 		// An operation ended: blobs no release pins any more may go, and so may the images of the releases it
 		// moved away from or removed.
@@ -394,6 +395,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	if refusal, ok := platformCapacityRefusalOf(err); ok {
 		// A definite refusal by the runner is not retried: the operation ends with the typed outcome.
 		return w.finishCapacity(ctx, refusal)
+	}
+	if errors.Is(err, errPlatformDataEffectFailed) {
+		// The runner proved the raise or the import failed: a definite end, never a retry. An import restores its
+		// pre-import checkpoint; a raise changed nothing.
+		return w.finish(ctx)
 	}
 	if orphan, ok := platformCandidateOrphanOf(err); ok {
 		// The runner proved the start never ran: a definite end, never a retry. A receipt that disagrees with the
@@ -425,6 +431,15 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	return err
 }
+
+// afterOperationComplete does what an operation owes once it has reached complete. An import's inbox archive goes
+// only now; a failure to delete it is recorded and never undoes the import.
+func (w *platformInstallScheduler) afterOperationComplete(ctx context.Context, lease platformOperationLease) {
+	if lease.snapshot.Action == appplatform.ActionImportData && lease.snapshot.Managed {
+		w.server.removePlatformImportArchive(ctx, lease, w.endpoint)
+	}
+}
+
 func (w *platformInstallScheduler) finish(ctx context.Context) error { return w.finishAs(ctx, "") }
 
 // finishAs ends the active operation by its action's review path. A capacity code, when given, becomes the

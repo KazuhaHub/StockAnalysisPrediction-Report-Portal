@@ -137,6 +137,9 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	if err := requireUntaintedMigrationNamespace(ctx, tx, c); err != nil {
 		return zero, err
 	}
+	if err := requireNoUnrestoredImport(ctx, tx, c.InstallationID, p.NamespaceID); err != nil {
+		return zero, err
+	}
 	var sourceKind string
 	if err := tx.QueryRowContext(ctx, `SELECT kind FROM runner_commands WHERE effect_id=?`,
 		p.SourceCheckpointEffectID).Scan(&sourceKind); err == nil && sourceKind == "import-checkpoint" {

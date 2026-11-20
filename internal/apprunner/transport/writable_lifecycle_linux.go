@@ -436,6 +436,14 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 			result, err = orphan.Receipt, nil
 		}
 	}
+	if err != nil && (action == SetDataQuotaExecute || action == ImportDataExecute) {
+		var failed *journal.DataEffectFailedError
+		if errors.As(err, &failed) {
+			// A raise or an import that ended failed is replied as a typed, definite status: the sender must not
+			// mistake it for a lost answer and wait for a receipt that will never come.
+			result, err = failed.Status(time.Now().UTC().UnixMilli()), nil
+		}
+	}
 	if err != nil && capacityRefusalAction(action) {
 		var refusal *journal.CapacityRefusalError
 		if errors.As(err, &refusal) {

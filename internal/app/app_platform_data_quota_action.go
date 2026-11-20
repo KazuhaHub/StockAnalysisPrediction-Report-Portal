@@ -193,6 +193,33 @@ func platformObservedBinding(controller control.Authority, peer transport.Candid
 		peer.ControllerUID == endpoint.controllerUID && peer.ControllerGID == endpoint.controllerGID && age >= 0 && age <= 3*time.Second
 }
 
+// errPlatformDataEffectFailed is the runner's definite answer that a raise or an import failed: its journal row ended
+// failed and nothing will complete it. The operation takes its failure path now (the import restores its pre-import
+// checkpoint) instead of spending retries on a command that answers the same failure every time.
+var errPlatformDataEffectFailed = errors.New("runner reports the data command failed")
+
+type platformDataEffectStatusObservation interface {
+	DataEffectStatus() (journal.MigrateDataStatus, error)
+	Controller() control.Authority
+	Endpoint() transport.CandidateReceiptEndpoint
+	ReceivedAt() time.Time
+	CommandSHA256() string
+}
+
+// platformDataEffectFailure reports errPlatformDataEffectFailed when the observation is the runner's failed status for
+// exactly this command. Any other observation (a receipt, a pending or orphaned status) is not a failure.
+func platformDataEffectFailure(observation platformDataEffectStatusObservation, header control.CommandHeader, raw []byte, authority control.Authority, endpoint platformRuntimeEndpoint) error {
+	status, err := observation.DataEffectStatus()
+	if err != nil || status.State != "failed" {
+		return nil
+	}
+	if !journal.DataEffectStatusMatchesHeader(status, header) ||
+		!platformObservedBinding(observation.Controller(), observation.Endpoint(), observation.ReceivedAt(), observation.CommandSHA256(), raw, authority, endpoint) {
+		return errAppPlatformStageEvidence
+	}
+	return fmt.Errorf("%w: %s", errPlatformDataEffectFailed, status.Code)
+}
+
 func validPlatformDataQueryObservation(observation platformDataQueryObservation, request platformDataQueryRequest, endpoint platformRuntimeEndpoint) (journal.DataQueryReport, bool) {
 	report, err := observation.DataQueryReport()
 	if err != nil || !journal.DataQueryReportMatchesCommand(report, request.command) ||
@@ -845,6 +872,9 @@ func (s *Server) dispatchPlatformSetDataQuota(ctx context.Context, expected plat
 		if readErr != nil {
 			return platformOperationLease{}, errors.Join(err, readErr)
 		}
+	}
+	if err := platformDataEffectFailure(observation, intent.command.CommandHeader, intent.raw, intent.authority, endpoint); err != nil {
+		return platformOperationLease{}, err
 	}
 	return s.commitPlatformSetDataQuota(ctx, expected, intent, endpoint, observation)
 }

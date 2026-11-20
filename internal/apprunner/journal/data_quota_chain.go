@@ -28,7 +28,8 @@ func loadQuotaChain(ctx context.Context, q queryer, namespaceID string, installB
 		return nil, fmt.Errorf("%w: install quota", ErrFenceReconciliation)
 	}
 	chain := []quotaLink{{bytes, inodes}}
-	rows, err := q.QueryContext(ctx, `SELECT receipt_json FROM runner_commands WHERE kind='set-data-quota' AND state='applied' ORDER BY rowid LIMIT 4097`)
+	// Only this namespace's raises are read, so the bound below limits one namespace's chain and never the runner's.
+	rows, err := q.QueryContext(ctx, `SELECT receipt_json FROM runner_commands WHERE kind='set-data-quota' AND state='applied' AND json_extract(receipt_json,'$.namespace_id')=? ORDER BY rowid LIMIT 4097`, namespaceID)
 	if err != nil {
 		return nil, err
 	}

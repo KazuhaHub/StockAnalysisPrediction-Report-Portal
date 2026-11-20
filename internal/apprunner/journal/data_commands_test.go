@@ -324,18 +324,19 @@ func TestImportDataFinishesAnUnknownImportUnderTheSameClaim(t *testing.T) {
 	f, checkpoint := appliedCheckpointFixture(t)
 	stoppedFixture(t, f, checkpoint)
 	command, raw, sig := importCommandFor(t, f, checkpoint, 1, mustDataInt(f.data.QuotaBytes), mustDataInt(f.data.QuotaInodes))
-	failing := func(ctx context.Context, request data.ImportDataRequest) (data.ImportDataSnapshot, error) {
-		return data.ImportDataSnapshot{}, data.ErrImportIncomplete
-	}
-	if _, err := f.store.DispatchImportData(ctx, raw, sig, failing); err == nil {
-		t.Fatal("a failed native import settled")
+	// The crash window: the claim is written and the process dies before the native call returns.
+	if _, _, err := f.store.claimImportData(ctx, raw, sig); err != nil {
+		t.Fatal(err)
 	}
 	var state string
 	if err := f.store.db.QueryRow(`SELECT state FROM runner_commands WHERE effect_id=?`, command.EffectID).Scan(&state); err != nil || state != "unknown" {
-		t.Fatalf("an incomplete import is %q: %v", state, err)
+		t.Fatalf("a claimed import is %q: %v", state, err)
 	}
 	calls := 0
 	if _, err := f.store.DispatchImportData(ctx, raw, sig, importNative(&calls)); err != nil || calls != 1 {
 		t.Fatalf("the unknown import was not finished: %v", err)
+	}
+	if scalarJournalInt(t, f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE kind='import-data'`) != 1 {
+		t.Fatal("finishing an import claimed it again")
 	}
 }

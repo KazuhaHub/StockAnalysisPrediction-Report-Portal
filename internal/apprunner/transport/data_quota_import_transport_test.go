@@ -173,3 +173,45 @@ func TestImportDataTransportActionsAndSignaturePurposes(t *testing.T) {
 		t.Fatal("a read signature was accepted as an execute")
 	}
 }
+
+func TestSetDataQuotaFailedStatusIsAcceptedOnlyWithItsCode(t *testing.T) {
+	a, command, raw, sig, descriptor, _ := quotaTransportFixture(t)
+	for _, action := range []WritableLifecycleAction{SetDataQuotaExecute, SetDataQuotaRead} {
+		signature := sig
+		if action == SetDataQuotaRead {
+			signature = lifecycleSignature(t, action, a, raw, sig)
+		}
+		ref, err := verifyWritableLifecycle(action, raw, signature, descriptor, a, time.Now().UnixMilli())
+		if err != nil {
+			t.Fatal(err)
+		}
+		failed := journal.MigrateDataStatus{
+			Format: "portal.runner.migration-status/1-dev.1", Kind: "set-data-quota", DeploymentID: command.DeploymentID,
+			ControllerEpoch: command.ControllerEpoch, InstallationID: command.InstallationID, OperationID: command.OperationID,
+			TargetGeneration: command.TargetGeneration, Stage: command.Stage, EffectNumber: command.EffectNumber, EffectID: command.EffectID,
+			PayloadSHA256: command.PayloadSHA256, State: "failed", Code: "quota_raise_unsafe", ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10),
+		}
+		body, _ := json.Marshal(failed)
+		if !validWritableLifecycleReply(action, body, ref, time.Now().Add(-time.Second), time.Now().Add(time.Second)) {
+			t.Fatalf("action %d: a failed status was refused", action)
+		}
+		if dataEffectAbsenceReply(action, body) {
+			t.Fatal("a failed effect was reported absent")
+		}
+		for name, mutate := range map[string]func(*journal.MigrateDataStatus){
+			"no code":      func(s *journal.MigrateDataStatus) { s.Code = "" },
+			"unknown code": func(s *journal.MigrateDataStatus) { s.Code = "made_up" },
+			"code on a pending status": func(s *journal.MigrateDataStatus) {
+				s.State = "pending"
+			},
+			"another kind": func(s *journal.MigrateDataStatus) { s.Kind = "migrate-data"; s.Stage = "migrate" },
+		} {
+			bad := failed
+			mutate(&bad)
+			body, _ := json.Marshal(bad)
+			if validWritableLifecycleReply(action, body, ref, time.Now().Add(-time.Second), time.Now().Add(time.Second)) {
+				t.Fatalf("action %d: %s was accepted", action, name)
+			}
+		}
+	}
+}
