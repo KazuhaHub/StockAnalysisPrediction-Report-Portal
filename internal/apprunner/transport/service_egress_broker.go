@@ -118,7 +118,7 @@ func writeAppError(w http.ResponseWriter, code string) {
 	writeAppJSON(w, broker.AppErrorStatus(code), broker.AppErrorBody(code), broker.AppErrorRetryAfter(code))
 }
 
-// ServeHTTP routes the three calls of portal.broker/1; everything else is an
+// ServeHTTP routes the calls of portal.broker/1; everything else is an
 // invalid request.
 func (in *egressInstall) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
@@ -128,6 +128,8 @@ func (in *egressInstall) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/network/http":
 		in.handlePost(w, r, broker.MaxAppRequestBytes, in.network)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/postgres/liveness":
+		in.handlePost(w, r, broker.MaxAppPostgresRequestBytes, in.postgres)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/notifications":
 		in.handlePost(w, r, broker.MaxAppNoticeBytes, in.notice)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/status":

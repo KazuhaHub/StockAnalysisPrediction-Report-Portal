@@ -39,6 +39,7 @@ func TestDescriptorContractSourceAndTypes(t *testing.T) {
 		"DataCompatibility": reflect.TypeFor[DataCompatibility](),
 		"DataMigration":     reflect.TypeFor[DataMigration](),
 		"Public":            reflect.TypeFor[Public](), "PublicRoute": reflect.TypeFor[PublicRoute](),
+		"Ingress": reflect.TypeFor[Ingress](), "IngressRoute": reflect.TypeFor[IngressRoute](),
 		"NetworkProxy": reflect.TypeFor[NetworkProxy](),
 	}
 	if len(types) != len(schema.Definitions) {

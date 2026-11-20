@@ -27,7 +27,7 @@ const ProxyCapability = "network.proxy"
 // Platform-fixed limits of the proxy (doc 184 section 6). They are carried in the
 // signed session command and compared exactly, so a change is a format revision.
 const (
-	MaxProxyHosts = 64
+	MaxProxyHosts = maxNetworkProxyHosts
 	// MaxProxyPolicyBytes bounds the canonical policy to the grant row's policy_json column. A list of
 	// the longest entries can exceed it, and is then refused as input.
 	MaxProxyPolicyBytes = 16384

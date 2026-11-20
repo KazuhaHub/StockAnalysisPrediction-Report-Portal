@@ -182,7 +182,6 @@ type ProxyInstall struct {
 
 	stats    map[int64]map[string]*proxyHostStats
 	refusals map[proxyRefusalKey]*proxyRefusalCount
-	lastUse  time.Time
 	usageDay int64
 	usageAt  time.Time
 	usageSet int64

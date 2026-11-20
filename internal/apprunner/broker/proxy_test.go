@@ -877,11 +877,32 @@ func TestProxyLifetimeCountsFromAdmission(t *testing.T) {
 		return nil, ctx.Err()
 	}
 	start := time.Now()
-	if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalUnavailable {
-		t.Fatalf("a resolve cut by the lifetime: %q", got)
+	client, server := tcpPair(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.in.Serve(server, bufio.NewReader(server), e.usable.Load)
+	}()
+	frame, _ := proxyforwarder.EncodeOpen("qt.gtimg.cn", 443)
+	if _, err := client.Write(frame); err != nil {
+		t.Fatal(err)
+	}
+	// A tunnel cut by its lifetime is closed; whether the refusal gets out before the close is a race, and
+	// either is a closed tunnel to the forwarder.
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if refusal, err := proxyforwarder.ReadReply(client); err == nil && refusal != proxyforwarder.RefusalUnavailable {
+		t.Fatalf("a resolve cut by the lifetime: %q", refusal)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tunnel was not ended by its lifetime")
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
 		t.Fatalf("the lifetime did not bound the resolve: %v", elapsed)
+	}
+	if e.in.Open() != 0 || e.runner.Open() != 0 {
+		t.Fatal("slots leaked")
 	}
 }
 

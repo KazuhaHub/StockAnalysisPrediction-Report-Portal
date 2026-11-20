@@ -307,6 +307,8 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) (detached bo
 		return
 	case ProxyQueryMagic:
 		s.handleProxyProfile(ctx, conn)
+	case PostgresProbeQueryMagic:
+		s.handlePostgresProbeQuery(ctx, conn)
 		return
 	case networkRequestMagic:
 		if s.network == nil || ctx.Err() != nil || !stop() {

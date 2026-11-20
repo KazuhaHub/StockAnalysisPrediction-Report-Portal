@@ -31,6 +31,20 @@ type fakeEgressRunner struct {
 	opens        int
 	openErr      error
 	sessions     chan *fakeEgressSession
+	// postgres is whether the runner answers the PostgreSQL probe query (doc 178); queriedPostgres
+	// counts the questions.
+	postgres        bool
+	queriedPostgres int
+}
+
+func (f *fakeEgressRunner) QueryPostgres(context.Context, platformRuntimeEndpoint) (transport.PostgresProbeProfile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queriedPostgres++
+	if !f.postgres {
+		return transport.PostgresProbeProfile{}, transport.ErrPostgresProbeUnsupported
+	}
+	return transport.NewPostgresProbeProfile(), nil
 }
 
 type fakeEgressSession struct {

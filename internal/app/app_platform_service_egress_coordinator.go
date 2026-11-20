@@ -265,7 +265,7 @@ func (s *Server) listPlatformServiceEgressInstallations(ctx context.Context) ([]
 	rows, err := s.st.queryContext(ctx, `SELECT i.id FROM app_platform_installations i
 		WHERE i.desired_state='enabled' AND i.phase='ready' AND i.runtime_id IS NOT NULL
 		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability='background.run' AND g.granted=1)
-		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability IN ('network.http','network.proxy','notifications.publish') AND g.granted=1)
+		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability IN ('network.http','network.postgres','network.proxy','notifications.publish') AND g.granted=1)
 		ORDER BY i.id LIMIT ?`, platformServiceEgressMaxInstallations)
 	if err != nil {
 		return nil, false
@@ -356,6 +356,10 @@ func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint pl
 		c.unsupportedUntil = c.now().Add(platformServiceEgressUnsupportedRetry)
 		c.mu.Unlock()
 		return transport.ErrServiceEgressUnsupported
+	}
+	// network.postgres rides on a session only if this runner answered the probe query.
+	if resources, err = c.platformServicePostgresResources(ctx, endpoint, resources); err != nil {
+		return err
 	}
 	sessionID, err := platformNewUUID()
 	if err != nil {
@@ -515,6 +519,8 @@ func (c *platformServiceEgressCoordinator) serveCall(ctx context.Context, l *pla
 		c.serveAdmit(ctx, l, call, first.Payload)
 	case transport.EgressFrameNotice:
 		c.serveNotice(ctx, l, call, first.Payload)
+	case transport.EgressFramePostgresAdmit:
+		c.servePostgres(ctx, l, call, first.Payload)
 	}
 }
 

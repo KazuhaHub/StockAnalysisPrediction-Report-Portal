@@ -87,6 +87,8 @@ type Server struct {
 	// platformObserveProxy is the runner seam of the proxy review: the PRPX0001 answer. nil selects the
 	// local socket.
 	platformObserveProxy func(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error)
+	// platformObservePostgres is the runner seam of the network.postgres grant review (doc 178).
+	platformObservePostgres func(ctx context.Context, endpoint platformRuntimeEndpoint, needTargets bool) (platformPostgresObservation, error)
 
 	// platformImageDir overrides the directory the managed image stores live under; empty selects the data
 	// directory next to the database. platformImageRunner is the runner seam of the blob channel and the
@@ -177,7 +179,15 @@ type Server struct {
 	platformPublic platformPublicState
 	// platformPublicArchiveReads counts the verifications that read a stored release and its archive.
 	platformPublicArchiveReads atomic.Int64
-	platformPublicFetchHook    func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
+	// platformPublicLightReads and platformIngressReads count the session-less authority reads that ran.
+	platformPublicLightReads atomic.Int64
+	platformIngressReads     atomic.Int64
+	platformPublicFetchHook  func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
+
+	// platformIngress is the limiters, nonce cache and counters of authenticated inbound ingress
+	// (doc 180). platformIngressForwardHook replaces the runner forward in tests only.
+	platformIngress            platformIngressState
+	platformIngressForwardHook func(ctx context.Context, l platformIngressLight, body []byte, nonce string, received time.Time) (driver.BackendResponse, error)
 
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.
@@ -224,7 +234,9 @@ func (s *Server) logMiddleware(next http.Handler) http.Handler {
 			p == "/pwa-icon" || p == "/sw.js" ||
 			// The public projection is anonymous traffic: a log line would carry the visitor's address
 			// and query. Its aggregate, address-free summary is the audit record (doc 179 section 5).
-			strings.HasPrefix(p, "/public/apps/") {
+			strings.HasPrefix(p, "/public/apps/") ||
+			// Inbound ingress is machine traffic from senders the Portal does not know: the same rule.
+			strings.HasPrefix(p, "/ingress/apps/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -382,7 +394,8 @@ func RunServer(cfgPath string) {
 	go s.forecastWatchdog()
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
-	go s.platformPublicSummaryLoop() // writes the public projection traffic windows that have ended
+	go s.platformPublicSummaryLoop()  // writes the public projection traffic windows that have ended
+	go s.platformIngressSummaryLoop() // writes the ingress traffic windows that have ended
 	s.wireExportCleanup()
 	s.exportRecover()        // return jobs a restart interrupted to the queue before the worker starts
 	s.platformImageRecover() // drop what a crash left in the managed image stores before any operation uses them
@@ -403,7 +416,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic, s.stopPlatformIngress)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter

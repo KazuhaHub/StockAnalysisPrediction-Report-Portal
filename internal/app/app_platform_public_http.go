@@ -157,7 +157,15 @@ func (s *Server) publicAdmit(w http.ResponseWriter, r *http.Request) (platformPu
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
+	// The read is the one thing here that costs the database, and anyone can ask for it: past a
+	// bounded number at once the overflow is refused, not queued.
+	if !s.platformPublic.slots.acquire() {
+		platformPublicFail(w, 503, "unavailable", 1)
+		s.recordPlatformPublic("", "busy")
+		return zero, false
+	}
 	light, err := s.readPlatformPublicLight(ctx, installation)
+	s.platformPublic.slots.release()
 	if err != nil {
 		class := platformPublicClassify(w, err)
 		// Nothing is counted for an installation that is unknown or has the projection off, and

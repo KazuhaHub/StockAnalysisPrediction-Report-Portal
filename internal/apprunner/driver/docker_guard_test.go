@@ -37,7 +37,7 @@ var guardAllowList = []guardAllowed{
 }
 
 var guardAllowedEgressFiles = map[string]bool{
-	"broker/http.go": true, "broker/http_stream.go": true, "broker/proxy.go": true,
+	"broker/http.go": true, "broker/http_stream.go": true, "broker/postgres.go": true, "broker/proxy.go": true,
 	"driver/backend_handshake_linux.go": true, "driver/backend_request_linux.go": true, "driver/candidate_readiness_linux.go": true,
 	"driver/service_backend_task_linux.go": true, "transport/transport_linux.go": true,
 }
