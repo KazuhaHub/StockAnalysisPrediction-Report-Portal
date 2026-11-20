@@ -1,6 +1,6 @@
 # Proposal: app-runner as a service in the Portal compose project
 
-Status: Proposed 2026-11-20, revised the same day after review. Awaiting owner decisions (section 13). This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20. The owner accepted the recommended answer to every open question (section 13) and the release-metadata.json format change; not yet implemented. This document changes no code, schema or contract. It builds on:
 
 - [146](146-runner-service.md): the runner service, its startup order and the Portal connection;
 - [182](182-cross-platform-backend-runtime.md): `app-runner provision-xfs-images` and the XFS images on ext4 hosts;
