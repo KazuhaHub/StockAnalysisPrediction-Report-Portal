@@ -553,7 +553,7 @@
           ],
           "x-go-pointer": true,
           "x-go-omitempty": true,
-          "description": "Requested per-installation data quota (doc 185). Absent means 256 MiB and 65,536 inodes. The administrator approves it or a smaller value."
+          "description": "Requested per-installation data quota (doc 185). Requires a backend. Absent means 256 MiB and 65,536 inodes. The administrator approves it or a smaller value."
         }
       },
       "required": [

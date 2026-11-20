@@ -1,10 +1,30 @@
 package appplatform
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func declareQuota(bytes, inodes any) func(map[string]any) {
 	return func(d map[string]any) {
 		d["data"].(map[string]any)["quota"] = map[string]any{"bytes": bytes, "inodes": inodes}
+	}
+}
+
+// A quota is the XFS limit of a backend's data volume; a frontend-only app has none, so a block is refused
+// rather than silently ignored.
+func TestDescriptorQuotaNeedsABackend(t *testing.T) {
+	var d map[string]any
+	if err := json.Unmarshal(descriptorFixture(t, false), &d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseDescriptor(descriptorFixture(t, false)); err != nil {
+		t.Fatal(err)
+	}
+	declareQuota(256<<20, 65536)(d)
+	raw, _ := json.Marshal(d)
+	if _, err := ParseDescriptor(raw); err == nil {
+		t.Fatal("a frontend-only descriptor with data.quota was accepted")
 	}
 }
 

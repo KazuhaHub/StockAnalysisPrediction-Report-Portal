@@ -168,7 +168,7 @@ func validManifest(m Manifest) bool {
 		}
 		schemas[schema] = true
 	}
-	if m.Data.Quota != nil && !ValidDataQuota(int64(m.Data.Quota.Bytes), int64(m.Data.Quota.Inodes)) {
+	if m.Data.Quota != nil && (m.Backend == nil || !ValidDataQuota(int64(m.Data.Quota.Bytes), int64(m.Data.Quota.Inodes))) {
 		return false
 	}
 	return schemas[m.Data.Schema] && validMigrations(m.Data, m.Backend != nil)

@@ -339,13 +339,10 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if requiredFormat != "" && storedProjection.Format != requiredFormat {
 			return errAppPlatformPlanChanged
 		}
-		approval := platformQuotaApproval{}
-		if platformBackendQuotaFormat(storedProjection.Format) {
-			approval = platformQuotaApproval{storedProjection.DataQuotaBytes, storedProjection.DataQuotaInodes}
-		}
-		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format, approval); err != nil {
+		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format, platformApprovalOfStoredPlan(storedProjection)); err != nil {
 			return err
 		}
+		platformKeepPreUpgradeForm(storedProjection, &projection)
 		if err := validatePlatformInstallAudience(e, storedProjection.Audience, control.nowMS); err != nil {
 			return err
 		}

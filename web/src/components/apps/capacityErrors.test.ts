@@ -7,7 +7,8 @@ import { parseAppStatus } from './AppInstallationStatus'
 // One failure code per dimension the runner names in a capacity_exhausted receipt, plus the Portal's own
 // installation cap. Each needs a message in every language.
 const dimensions = ['memory', 'cpu', 'disk', 'image_store', 'running_backends']
-const codes = [...dimensions.map((d) => `capacity_exhausted_${d}`), 'installation_capacity']
+// data_quota_capacity is the namespace quota the runner cannot reserve (doc 185).
+const codes = [...dimensions.map((d) => `capacity_exhausted_${d}`), 'installation_capacity', 'data_quota_capacity']
 
 describe('capacity failure messages', () => {
   for (const [name, bundle] of [['en-US', en], ['zh-CN', zhCN], ['zh-TW', zhTW]] as const) {
@@ -21,13 +22,14 @@ describe('capacity failure messages', () => {
     })
   }
 
-  it('the installation status accepts exactly the five capacity codes the server can send', () => {
+  it('the installation status accepts exactly the six capacity codes the server can send', () => {
     const base = { state: 'attention', openable: false, control_paused: false, timeline: [] }
     for (const dimension of dimensions) {
       const code = `capacity_exhausted_${dimension}`
       expect(parseAppStatus({ ...base, error_code: code })).toEqual({ ...base, error_code: code })
       expect(parseAppStatus({ ...base, timeline: [{ at: '2026-11-04T12:00:00Z', event: 'failed', error_code: code }] })).not.toBeNull()
     }
+    expect(parseAppStatus({ ...base, error_code: 'data_quota_capacity' })).toEqual({ ...base, error_code: 'data_quota_capacity' })
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted_swap' })).toBeNull()
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted' })).toBeNull()
   })

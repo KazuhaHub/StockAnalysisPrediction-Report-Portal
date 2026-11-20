@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "a46037c020cbacfcece0f0e12639ef564aa52710c5ade00fd3b102aa836baa93";
+export const DESCRIPTOR_SCHEMA_SHA256 = "7d0b5fcc91778b3a3ff456c6f368b5e21de0487a138e0b331d07c77920f6eb5e";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;

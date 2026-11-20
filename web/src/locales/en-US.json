@@ -4143,7 +4143,6 @@
   "err.capacity_exhausted_cpu": "The runner has no CPU left for this app. Stop or remove another app, then try again.",
   "err.capacity_exhausted_disk": "The runner has no disk left for this app's data. Delete the data of apps you no longer use, then try again.",
   "err.data_quota_capacity": "The runner cannot reserve this app's data quota and its recovery checkpoints. Ask the operator to grow the runner's volumes, or approve a smaller quota.",
-  "err.data_quota_lower_refused": "The data quota can only be raised. Lowering it is not supported.",
   "err.capacity_exhausted_image_store": "The runner's image store is full. Images that no installation uses are reclaimed only after the app versions that referenced them are removed. An administrator can raise the image store budget.",
   "err.capacity_exhausted_running_backends": "The runner already runs the maximum number of app backends. Stop or remove one, then try again.",
   "err.installation_capacity": "The installation limit of 50 apps is reached. Remove an app to install another.",

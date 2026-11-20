@@ -91,6 +91,15 @@ func platformApplyInstallQuota(p *platformInstallProjection, format string, mani
 // platformCheckInstallQuota proves a stored plan's quota fields are exactly what review would have
 // written: the request is the descriptor's, and the approval is inside the bounds and not above it.
 func platformCheckInstallQuota(p platformInstallProjection, format string, manifest appplatform.Manifest) error {
+	if platformPreUpgradeQuota(p) {
+		// Reviewed before the quota was per installation: 256 MiB and 65,536 inodes, for a descriptor that
+		// asks for no more than that.
+		if requestedBytes, requestedInodes := manifest.Data.QuotaOrDefault(); p.DataQuotaBytes != appplatform.DataQuotaDefaultBytes ||
+			requestedBytes != appplatform.DataQuotaDefaultBytes || requestedInodes != appplatform.DataQuotaDefaultInode {
+			return errAppPlatformPlanChanged
+		}
+		return nil
+	}
 	approval := platformQuotaApproval{}
 	if platformBackendQuotaFormat(format) {
 		if p.DataQuotaInodes == 0 {
@@ -107,6 +116,26 @@ func platformCheckInstallQuota(p platformInstallProjection, format string, manif
 		return errAppPlatformPlanChanged
 	}
 	return nil
+}
+
+// platformPreUpgradeQuota reports a backend install plan written before the inode and request fields existed.
+func platformPreUpgradeQuota(p platformInstallProjection) bool {
+	return platformBackendQuotaFormat(p.Format) && p.DataQuotaInodes == 0 && p.RequestedDataQuotaBytes == 0 && p.RequestedDataQuotaInodes == 0
+}
+
+// platformApprovalOfStoredPlan is the approval a stored plan carries, for rebuilding it at consumption.
+func platformApprovalOfStoredPlan(p platformInstallProjection) platformQuotaApproval {
+	if !platformBackendQuotaFormat(p.Format) {
+		return platformQuotaApproval{}
+	}
+	return platformQuotaApproval{p.DataQuotaBytes, p.DataQuotaInodes}
+}
+
+// platformKeepPreUpgradeForm makes the rebuilt projection of a pre-upgrade plan match its stored bytes.
+func platformKeepPreUpgradeForm(stored platformInstallProjection, rebuilt *platformInstallProjection) {
+	if platformPreUpgradeQuota(stored) {
+		rebuilt.DataQuotaInodes, rebuilt.RequestedDataQuotaBytes, rebuilt.RequestedDataQuotaInodes = 0, 0, 0
+	}
 }
 
 // approvedQuota is the quota an install plan approved. A plan written before the inode fields existed
@@ -162,4 +191,27 @@ func platformUpdateQuotaDifference(currentBytes, currentInodes int64, target app
 // platformValidQuotaBytes is the platform's bound on one namespace's byte limit.
 func platformValidQuotaBytes(bytes int64) bool {
 	return appplatform.ValidDataQuota(bytes, appplatform.DataQuotaMinInodes)
+}
+
+// platformApprovedNamespaceQuota returns the namespace's byte quota after proving that both its limits are the
+// ones the installation's install review approved. The quota only changes through a reviewed action, so until
+// one exists the row and the approved plan agree.
+func platformApprovedNamespaceQuota(e migExec, installation, namespace string) (int64, error) {
+	var raw string
+	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='install' ORDER BY o.created_ms,o.id LIMIT 1`, installation).Scan(&raw); err != nil {
+		return 0, err
+	}
+	approvedBytes, approvedInodes, err := platformPlanQuota(raw)
+	if err != nil {
+		return 0, err
+	}
+	var bytes, inodes int64
+	if err := e.queryRow(`SELECT quota_bytes,quota_inodes FROM app_platform_data_namespaces WHERE id=?`, namespace).Scan(&bytes, &inodes); err != nil {
+		return 0, err
+	}
+	if bytes != approvedBytes || inodes != approvedInodes {
+		return 0, errAppPlatformStageEvidence
+	}
+	return bytes, nil
 }
