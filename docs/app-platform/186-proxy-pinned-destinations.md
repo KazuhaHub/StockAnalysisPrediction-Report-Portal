@@ -1,6 +1,6 @@
 # Proposal: pinned destinations for the reviewed forward proxy
 
-Status: Proposed 2026-11-20. This document changes no code, schema or contract. It extends:
+Status: Accepted 2026-11-20. The owner accepted the recommended answer to every open question and the JSON format changes (proxy policy and plan 1-dev.2, the PRPX0002 profile query); not yet implemented. This document changes no code, schema or contract. It extends:
 
 - [184](184-reviewed-forward-proxy.md): the reviewed forward proxy, its policy, broker steps, limits and refusal codes;
 - [175](175-reviewed-multi-origin-and-private-network.md): the address guard and the operator-owned private-network allowlist (decision 3).
