@@ -40,6 +40,14 @@ var alwaysDeniedPrefixes = func() []netip.Prefix {
 	return out
 }()
 
+// metadataAddresses are cloud metadata endpoints inside ranges an allowlist may
+// legitimately cover: Alibaba Cloud (CGNAT) and GCP IPv6 (ULA). They are denied
+// by AlwaysDenied for any containing prefix; an allowlist entry that is exactly
+// one of them is refused at validation. AWS (169.254.169.254, fd00:ec2::254 in
+// the prefix list above), Azure and the other link-local endpoints are already
+// covered, and Oracle's 192.0.0.192 is outside every allowable range.
+var metadataAddresses = []netip.Addr{netip.MustParseAddr("100.100.100.200"), netip.MustParseAddr("fd20:ce::254")}
+
 var nonPublicPrefixes = func() []netip.Prefix {
 	raw := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7"}
 	out := make([]netip.Prefix, 0, len(raw))
@@ -48,6 +56,12 @@ var nonPublicPrefixes = func() []netip.Prefix {
 	}
 	return out
 }()
+
+// nonPublicAddress reports whether the address lies in a range an allowlist may
+// cover: RFC 1918, 100.64/10 or fc00::/7.
+func nonPublicAddress(a netip.Addr) bool {
+	return slices.ContainsFunc(nonPublicPrefixes, func(p netip.Prefix) bool { return p.Contains(a) })
+}
 
 // Unmap returns the address a connection would actually reach: IPv4-mapped IPv6
 // becomes IPv4. A zoned or invalid address yields the invalid address.
@@ -70,7 +84,7 @@ func AlwaysDenied(a netip.Addr) bool {
 			return true
 		}
 	}
-	return false
+	return slices.Contains(metadataAddresses, a)
 }
 
 func parsePrivateNetwork(n PrivateNetwork) (netip.Prefix, error) {
@@ -95,6 +109,9 @@ func parsePrivateNetwork(n PrivateNetwork) (netip.Prefix, error) {
 		if d.Overlaps(p) {
 			return zero, ErrInvalidPrivateNetworks
 		}
+	}
+	if p.IsSingleIP() && slices.Contains(metadataAddresses, p.Addr()) {
+		return zero, ErrInvalidPrivateNetworks
 	}
 	if len(n.Ports) < 1 || len(n.Ports) > MaxPrivateNetworkPorts {
 		return zero, ErrInvalidPrivateNetworks

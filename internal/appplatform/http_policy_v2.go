@@ -149,7 +149,7 @@ func parseHTTPTargetOrigin(origin, network string) (httpTargetOrigin, bool) {
 		}
 	case HTTPNetworkPrivate:
 		if addr, err := netip.ParseAddr(host); err == nil {
-			if addr.Zone() != "" || addr.String() != host || addr.Is4In6() || AlwaysDenied(addr) {
+			if addr.Zone() != "" || addr.String() != host || addr.Is4In6() || AlwaysDenied(addr) || !nonPublicAddress(addr) {
 				return zero, false
 			}
 			literal = addr
