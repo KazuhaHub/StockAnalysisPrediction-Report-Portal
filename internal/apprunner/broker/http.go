@@ -12,10 +12,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
+	"slices"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/hostnet"
 )
 
 var (
@@ -86,16 +89,36 @@ func parseRetryAfter(status int, values []string) int {
 }
 
 type HTTP struct {
-	policy    HTTPPolicy
-	origin    *url.URL
+	// policy is the v1 policy this executor was built from; it is the zero value
+	// for an executor built from raw (v1 or v2) bytes.
+	policy HTTPPolicy
+	// set is the parsed policy and raw the exact bytes it came from; a signed
+	// command must carry these bytes to use this executor.
+	set       appplatform.HTTPPolicyV2
+	raw       []byte
+	networks  []appplatform.PrivateNetwork
 	authorize func(context.Context) error
 	slots     chan struct{}
 	lookup    func(context.Context, string) ([]netip.Addr, error)
 	dial      func(context.Context, string, string) (net.Conn, error)
 	tlsConfig *tls.Config
+	now       func() time.Time
+	// interfaces lists this host's interfaces. A private call reads a snapshot at
+	// most hostAddressTTL old and denies every address assigned to any interface
+	// and every address inside the subnet of a bridge interface (hostnet's
+	// definition, the same as the startup refusal), so a bridge created after the
+	// runner started is covered once the snapshot is refreshed.
+	interfaces func() ([]hostnet.Interface, error)
+	hostMu     sync.Mutex
+	hostAt     time.Time
+	hostIfaces []hostnet.Interface
+	hostValid  bool
 }
 
-// NewHTTP snapshots a host-selected policy. authorize must check the current
+// hostAddressTTL bounds how stale the interface snapshot of a private call is.
+const hostAddressTTL = 5 * time.Second
+
+// NewHTTP snapshots a host-selected v1 policy. authorize must check the current
 // installation/generation/epoch, grant revision and actor/resource authority
 // against that same policy; a successful callback is never cached. One executor
 // must be shared by all calls using its concurrency allocation. No production
@@ -105,14 +128,112 @@ func NewHTTP(p HTTPPolicy, authorize func(context.Context) error) (*HTTP, error)
 	if err != nil || authorize == nil {
 		return nil, ErrDenied
 	}
-	u, err := url.Parse(p.Origin)
+	raw, err := appplatform.CanonicalHTTPPolicy(p)
 	if err != nil {
 		return nil, ErrDenied
 	}
+	h, err := newHTTP(appplatform.HTTPPolicyFromV1(p), raw, nil, authorize)
+	if err != nil {
+		return nil, err
+	}
+	h.policy = p
+	return h, nil
+}
+
+// NewHTTPPolicy builds an executor from exact canonical v1 or v2 policy bytes.
+// A policy with a private target needs the runner's private-network allowlist;
+// an empty allowlist can never serve one.
+func NewHTTPPolicy(raw []byte, networks []appplatform.PrivateNetwork, authorize func(context.Context) error) (*HTTP, error) {
+	parsed, err := appplatform.ParseHTTPPolicyAny(raw)
+	if err != nil || authorize == nil {
+		return nil, ErrDenied
+	}
+	return newHTTP(parsed.Policy, bytes.Clone(raw), networks, authorize)
+}
+
+func newHTTP(set appplatform.HTTPPolicyV2, raw []byte, networks []appplatform.PrivateNetwork, authorize func(context.Context) error) (*HTTP, error) {
+	if appplatform.ValidatePrivateNetworks(networks) != nil || set.HasPrivate() && len(networks) == 0 {
+		return nil, ErrDenied
+	}
+	networks = slices.Clone(networks)
+	for i := range networks {
+		networks[i].Ports = slices.Clone(networks[i].Ports)
+	}
 	d := &net.Dialer{Timeout: 5 * time.Second}
-	return &HTTP{policy: p, origin: u, authorize: authorize, slots: make(chan struct{}, p.Concurrency), lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
+	return &HTTP{set: set, raw: raw, networks: networks, authorize: authorize, slots: make(chan struct{}, set.Concurrency), now: time.Now, lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	}, dial: d.DialContext}, nil
+	}, dial: d.DialContext, interfaces: hostnet.List}, nil
+}
+
+// allowlistMatches reports whether a command's private-network digest is the one
+// this executor serves: required exactly when its policy has a private target,
+// and then equal to the digest of the allowlist the executor was built with.
+func (h *HTTP) allowlistMatches(digest string) bool {
+	if !h.set.HasPrivate() {
+		return digest == ""
+	}
+	sum, err := appplatform.PrivateNetworksSHA256(h.networks)
+	return err == nil && digest == sum
+}
+
+// hostSnapshot is the interface snapshot, reused for hostAddressTTL.
+func (h *HTTP) hostSnapshot() ([]hostnet.Interface, bool) {
+	h.hostMu.Lock()
+	defer h.hostMu.Unlock()
+	if h.hostValid && h.now().Sub(h.hostAt) < hostAddressTTL {
+		return h.hostIfaces, true
+	}
+	if h.interfaces == nil {
+		return nil, false
+	}
+	list, err := h.interfaces()
+	if err != nil {
+		h.hostValid = false
+		return nil, false
+	}
+	h.hostIfaces, h.hostAt, h.hostValid = list, h.now(), true
+	return list, true
+}
+
+// onHost reports whether ip is an address of this host or inside a bridge subnet.
+func onHost(interfaces []hostnet.Interface, ip netip.Addr) bool {
+	for _, i := range interfaces {
+		bridge := i.IsBridge()
+		for _, a := range i.Addrs {
+			if appplatform.Unmap(a.Addr()) == ip || bridge && a.Masked().Contains(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// addressesAllowed applies the target's class to every address. Public targets
+// keep the public-only rule. Private targets admit only addresses the runner's
+// allowlist admits for the port and scheme, never an always-denied address and
+// never one of this host's own or inside a bridge's subnet (per call, from the
+// snapshot); a public address is in no allowlist, so a
+// mixed answer is denied as a whole.
+func (h *HTTP) addressesAllowed(target appplatform.EffectiveHTTPTarget, addresses []netip.Addr) bool {
+	if !target.Private {
+		for _, ip := range addresses {
+			if !publicAddress(ip) {
+				return false
+			}
+		}
+		return true
+	}
+	host, ok := h.hostSnapshot()
+	if !ok {
+		return false
+	}
+	for _, ip := range addresses {
+		ip = appplatform.Unmap(ip)
+		if appplatform.AlwaysDenied(ip) || !appplatform.Admit(h.networks, ip, target.Port, target.Scheme) || onHost(host, ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, error) {
@@ -121,14 +242,18 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 
 func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.Context) error) (HTTPResponse, error) {
 	var zero HTTPResponse
-	if h == nil || h.authorize == nil || h.origin == nil || parent == nil {
+	if h == nil || h.authorize == nil || len(h.set.Targets) == 0 || parent == nil {
 		return zero, ErrDenied
 	}
 	if parent.Err() != nil {
 		return zero, ErrUnavailable
 	}
-	// Validate before allocating a slot or invoking any external work.
-	if int64(len(input.Body)) > h.policy.RequestBytes || !appplatform.ValidHTTPPolicyHeaderValue(input.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(input.ContentType) {
+	// Select the target before allocating a slot or invoking any external work.
+	target, err := h.set.Select(input.Method, input.URL)
+	if err != nil {
+		return zero, ErrDenied
+	}
+	if int64(len(input.Body)) > target.RequestBytes || !appplatform.ValidHTTPPolicyHeaderValue(input.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(input.ContentType) {
 		return zero, ErrDenied
 	}
 	if len(input.HeaderValue) > 0 && (input.HeaderName != "Authorization" || len(input.HeaderValue) > 16400) {
@@ -139,10 +264,11 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if len(input.HeaderValue) == 0 && input.HeaderName != "" {
 		return zero, ErrDenied
 	}
-	if appplatform.ValidateHTTPPolicyTarget(h.policy, input.Method, input.URL) != nil {
+	// A credential is never sent over plain HTTP.
+	if target.Scheme != "https" && input.HeaderName != "" {
 		return zero, ErrDenied
 	}
-	ctx, cancel := context.WithTimeout(parent, h.policy.Deadline)
+	ctx, cancel := context.WithTimeout(parent, target.Deadline)
 	defer cancel()
 	select {
 	case h.slots <- struct{}{}:
@@ -163,17 +289,19 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if authorize(ctx) != nil {
 		return zero, ErrDenied
 	}
-	addresses, err := h.lookup(ctx, h.origin.Hostname())
-	if err != nil || ctx.Err() != nil {
-		return zero, ErrUnavailable
+	// An IP literal needs no lookup: the reviewed origin already names the address.
+	addresses := []netip.Addr{target.Literal}
+	if !target.Literal.IsValid() {
+		addresses, err = h.lookup(ctx, target.Host)
+		if err != nil || ctx.Err() != nil {
+			return zero, ErrUnavailable
+		}
 	}
 	if len(addresses) == 0 || len(addresses) > 16 {
 		return zero, ErrDenied
 	}
-	for _, ip := range addresses {
-		if !publicAddress(ip) {
-			return zero, ErrDenied
-		}
+	if !h.addressesAllowed(target, addresses) {
+		return zero, ErrDenied
 	}
 	if authorize(ctx) != nil {
 		return zero, ErrDenied
@@ -181,22 +309,26 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if ctx.Err() != nil {
 		return zero, ErrUnavailable
 	}
-	port := h.origin.Port()
-	if port == "" {
-		port = "443"
-	}
+	port := strconv.Itoa(int(target.Port))
 	pinned := net.JoinHostPort(addresses[0].Unmap().String(), port)
-	config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: h.origin.Hostname()}
-	if h.tlsConfig != nil {
-		config = h.tlsConfig.Clone()
-	}
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, DisableCompression: true, MaxResponseHeaderBytes: 8192, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: h.policy.Deadline, TLSClientConfig: config, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, DisableCompression: true, MaxResponseHeaderBytes: 8192, ResponseHeaderTimeout: target.Deadline, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		// No second DNS resolution, environment proxy or caller-selected dial target.
-		if address != net.JoinHostPort(h.origin.Hostname(), port) {
+		if address != net.JoinHostPort(target.Host, port) {
 			return nil, ErrDenied
 		}
 		return h.dial(ctx, "tcp", pinned)
 	}}
+	if target.Scheme == "https" {
+		config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: target.Host}
+		if h.tlsConfig != nil {
+			config = h.tlsConfig.Clone()
+			if config.ServerName == "" {
+				config.ServerName = target.Host
+			}
+		}
+		transport.TLSClientConfig = config
+		transport.TLSHandshakeTimeout = 5 * time.Second
+	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	req, err := http.NewRequestWithContext(ctx, input.Method, input.URL, bytes.NewReader(input.Body))
@@ -221,11 +353,11 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	defer response.Body.Close()
 	// No response or raw diagnostic is released on an uncertain/revoked outcome.
 	encodings := response.Header.Values("Content-Encoding")
-	if response.StatusCode < 200 || response.StatusCode >= 300 && response.StatusCode < 400 || response.StatusCode > 599 || response.ContentLength > h.policy.ResponseBytes || len(encodings) > 1 || len(encodings) == 1 && encodings[0] != "identity" {
+	if response.StatusCode < 200 || response.StatusCode >= 300 && response.StatusCode < 400 || response.StatusCode > 599 || response.ContentLength > target.ResponseBytes || len(encodings) > 1 || len(encodings) == 1 && encodings[0] != "identity" {
 		return zero, ErrUncertain
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, h.policy.ResponseBytes+1))
-	if err != nil || int64(len(body)) > h.policy.ResponseBytes || ctx.Err() != nil {
+	body, err := io.ReadAll(io.LimitReader(response.Body, target.ResponseBytes+1))
+	if err != nil || int64(len(body)) > target.ResponseBytes || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
 	echo := newEchoMatcher(input.HeaderName, input.HeaderValue)
