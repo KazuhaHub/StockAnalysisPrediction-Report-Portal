@@ -99,7 +99,7 @@ func platformPostgresGrant(t *testing.T, s *Server, admin platformActorSession, 
 	if err != nil {
 		t.Fatal("postgres plan:", err)
 	}
-	if _, err := s.consumePlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, plan.ID, plan.SHA256); err != nil {
+	if _, err := s.consumePlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, installation, plan.ID, plan.SHA256); err != nil {
 		t.Fatal("postgres consume:", err)
 	}
 	return plan
@@ -178,7 +178,7 @@ func testPlatformPostgresPolicyReviewPair(t *testing.T, pg bool) {
 	if len(granted.Plan.Targets) != 1 || granted.Plan.Targets[0].CAFingerprint == "" || granted.Plan.Targets[0].Label != "postgres://db.example.com:5432/orders" {
 		t.Fatalf("plan view: %+v", granted.Plan.Targets)
 	}
-	change, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, granted.ID, granted.SHA256)
+	change, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, installation, granted.ID, granted.SHA256)
 	if err != nil || !change.Granted {
 		t.Fatal("consume:", err)
 	}
@@ -196,7 +196,7 @@ func testPlatformPostgresPolicyReviewPair(t *testing.T, pg bool) {
 	if !strings.Contains(audit, platformPostgresPolicyAudit) || strings.Contains(audit, "BEGIN CERTIFICATE") || strings.Contains(audit, platformPostgresPassword) {
 		t.Fatal("audit rows of the grant", audit)
 	}
-	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, granted.ID, granted.SHA256); !errors.Is(err, errAppPlatformOperationConflict) {
+	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, installation, granted.ID, granted.SHA256); !errors.Is(err, errAppPlatformOperationConflict) {
 		t.Fatalf("a plan consumed twice: %v", err)
 	}
 
@@ -204,7 +204,7 @@ func testPlatformPostgresPolicyReviewPair(t *testing.T, pg bool) {
 	next := platformPostgresRequestFor(t, s, installation, platformPostgresTarget(""))
 	second := plan0(t, plan, next)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_json=? WHERE installation_id=? AND capability='network.postgres'`, strings.Replace(row, `"concurrency":2`, `"concurrency":1`, 1), installation)
-	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, second.ID, second.SHA256); err == nil {
+	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, installation, second.ID, second.SHA256); err == nil {
 		t.Fatal("a plan was consumed against a row that had changed")
 	}
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_json=? WHERE installation_id=? AND capability='network.postgres'`, row, installation)
@@ -217,13 +217,13 @@ func testPlatformPostgresPolicyReviewPair(t *testing.T, pg bool) {
 		t.Fatal("the policy is not bound to the allowlist digest", lanPlan.Plan.Policy)
 	}
 	state.networks = []appplatform.PrivateNetwork{{Prefix: "10.30.0.0/16", Ports: []int{5432}}}
-	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, lanPlan.ID, lanPlan.SHA256); !errors.Is(err, errAppPlatformPlanChanged) {
+	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, installation, lanPlan.ID, lanPlan.SHA256); !errors.Is(err, errAppPlatformPlanChanged) {
 		t.Fatalf("a plan consumed against another allowlist: %v", err)
 	}
 
 	// Withdrawing resets the row exactly.
 	withdraw := plan0(t, plan, platformPostgresRequestFor(t, s, installation))
-	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, withdraw.ID, withdraw.SHA256); err != nil {
+	if _, err := s.consumePlatformPostgresPolicyReview(ctx, admin, platformRuntimeEndpoint{}, installation, withdraw.ID, withdraw.SHA256); err != nil {
 		t.Fatal(err)
 	}
 	if scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.postgres' AND policy_json='{}'`, installation) != 0 {
@@ -331,7 +331,7 @@ func testPlatformPostgresBindingReviewAndUse(t *testing.T, pg bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.consumePlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, withdraw.ID, withdraw.SHA256); err != nil {
+	if _, err := s.consumePlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, installation, withdraw.ID, withdraw.SHA256); err != nil {
 		t.Fatal(err)
 	}
 	if use(platformPrincipalService, good) == nil {
@@ -525,7 +525,7 @@ func testPlatformPostgresGrantWithdrawalClosesTheSession(t *testing.T, pg bool) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.consumePlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, withdraw.ID, withdraw.SHA256); err != nil {
+	if _, err := s.consumePlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, installation, withdraw.ID, withdraw.SHA256); err != nil {
 		t.Fatal(err)
 	}
 	c.checkDrift(context.Background(), time.Now())

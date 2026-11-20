@@ -226,7 +226,7 @@ func (s *Server) apiPlatformPostgresPolicyConsume(w http.ResponseWriter, r *http
 		platformManagementError(w, errAppPlatformRuntimeConflict)
 		return
 	}
-	change, err := s.consumePlatformPostgresPolicyReview(r.Context(), session, endpoint, planID, planSHA)
+	change, err := s.consumePlatformPostgresPolicyReview(r.Context(), session, endpoint, r.PathValue("installation"), planID, planSHA)
 	if err != nil {
 		platformPostgresError(w, err)
 		return

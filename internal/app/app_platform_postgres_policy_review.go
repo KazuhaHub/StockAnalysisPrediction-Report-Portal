@@ -357,12 +357,29 @@ type platformPostgresPolicyChange struct {
 	Granted        bool
 }
 
-func (s *Server) consumePlatformPostgresPolicyReview(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint, planID, planSHA string) (platformPostgresPolicyChange, error) {
+func (s *Server) consumePlatformPostgresPolicyReview(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint, installationID, planID, planSHA string) (platformPostgresPolicyChange, error) {
 	var result platformPostgresPolicyChange
-	if !platformValidUUID(planID) || !platformValidSHA(planSHA) {
+	if !platformValidUUID(installationID) || !platformValidUUID(planID) || !platformValidSHA(planSHA) {
 		return result, errPlatformManagementInput
 	}
-	err := s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	// The runner is asked before the transaction opens, as the capability review does, so the
+	// publisher-trust lock and the installation row are never held across a slow answer. The plan
+	// is read here only to know what to ask; the transaction reads it again and compares.
+	var preRaw string
+	if err := s.st.queryRowContext(ctx, `SELECT plan_json FROM app_platform_review_plans WHERE id=?`, planID).Scan(&preRaw); err != nil {
+		return result, errAppPlatformPlanChanged
+	}
+	pre, err := parsePlatformPostgresPolicyPlan(preRaw)
+	if err != nil || pre.InstallationID != installationID {
+		return result, errAppPlatformPlanChanged
+	}
+	var obs platformPostgresObservation
+	if pre.Granted {
+		if obs, err = s.observePlatformPostgresRuntime(ctx, endpoint, pre.PrivateNetworksSHA256 != ""); err != nil {
+			return result, err
+		}
+	}
+	err = s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
 		}
@@ -393,7 +410,7 @@ func (s *Server) consumePlatformPostgresPolicyReview(ctx context.Context, sessio
 			return errAppPlatformPlanChanged
 		}
 		plan, err := parsePlatformPostgresPolicyPlan(raw)
-		if err != nil || plan.InstallationID != installation.String || plan.ActorAuthority != authority || plan.ReleaseSHA256 != source || plan.ControllerEpoch != epoch ||
+		if err != nil || plan.InstallationID != installation.String || plan.InstallationID != installationID || plan.Granted != pre.Granted || plan.PrivateNetworksSHA256 != pre.PrivateNetworksSHA256 || plan.ActorAuthority != authority || plan.ReleaseSHA256 != source || plan.ControllerEpoch != epoch ||
 			plan.InstallationRevision != installationRevision || plan.PolicyRevision != policyRevision || plan.TrustRevision != trustRevision {
 			return errAppPlatformPlanChanged
 		}
@@ -409,10 +426,6 @@ func (s *Server) consumePlatformPostgresPolicyReview(ctx context.Context, sessio
 		if plan.Granted {
 			// The runner is asked again: it must still serve the probe, and a policy bound to an
 			// allowlist digest is only applied while the runner's allowlist is that one.
-			obs, err := s.observePlatformPostgresRuntime(ctx, endpoint, plan.PrivateNetworksSHA256 != "")
-			if err != nil {
-				return err
-			}
 			policy, err := appplatform.ParsePostgresPolicy([]byte(plan.Policy))
 			if err != nil {
 				return errAppPlatformPlanChanged
