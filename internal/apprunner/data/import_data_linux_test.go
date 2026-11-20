@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -84,13 +85,27 @@ func TestImportDataRefusesMalformedRequests(t *testing.T) {
 // importArchiveBytes builds an import archive by hand, to prove the reader and the format agree without the packer.
 func importArchiveBytes(t *testing.T, files map[string]string, marker string) []byte {
 	t.Helper()
+	return importArchiveBytesWith(t, files, marker, true)
+}
+
+// importArchiveBytesWith builds an import archive as pack-import does; withDirectories false leaves out the directory
+// entries of the files' parents, which pack-import never does.
+func importArchiveBytesWith(t *testing.T, files map[string]string, marker string, withDirectories bool) []byte {
+	t.Helper()
 	var body bytes.Buffer
 	writer := tar.NewWriter(&body)
 	names := []string{}
+	directories := map[string]bool{}
 	for name := range files {
 		names = append(names, name)
+		for dir := path.Dir(name); withDirectories && dir != "."; dir = path.Dir(dir) {
+			directories[dir+"/"] = true
+		}
 	}
-	// ascending order, files only, so no directory ordering is involved
+	for dir := range directories {
+		names = append(names, dir)
+	}
+	// ascending order: a directory "d/" sorts before its contents
 	for i := range names {
 		for j := i + 1; j < len(names); j++ {
 			if names[j] < names[i] {
@@ -100,6 +115,13 @@ func importArchiveBytes(t *testing.T, files map[string]string, marker string) []
 	}
 	var size int64
 	for _, name := range names {
+		if directories[name] {
+			if err := writer.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: ImportDirectoryMode, Uid: ImportOwner, Gid: ImportOwner,
+				ModTime: time.Unix(0, 0), Format: tar.FormatPAX}); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		content := files[name]
 		if err := writer.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0640, Uid: 65532, Gid: 65532,
 			Size: int64(len(content)), ModTime: time.Unix(0, 0), Format: tar.FormatPAX}); err != nil {
@@ -134,6 +156,23 @@ func importArchiveBytes(t *testing.T, files map[string]string, marker string) []
 	return append(head.Bytes(), body.Bytes()...)
 }
 
+// An entry whose parent directory is not an earlier entry cannot be extracted: it must be refused when the archive is
+// inspected, before an import clears anything.
+func TestInspectImportArchiveRefusesAnEntryWithoutItsDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.tar")
+	if err := os.WriteFile(path, importArchiveBytesWith(t, map[string]string{"seed/a.bin": "alpha"}, "", false), 0400); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if got, err := InspectImportArchive(context.Background(), file, 100); !errors.Is(err, ErrImportArchiveInvalid) {
+		t.Fatalf("an archive without the directory of its file was accepted: %+v %v", got, err)
+	}
+}
+
 func TestInspectImportArchiveReadsMarkerAndRefusesTampering(t *testing.T) {
 	archive := importArchiveBytes(t, map[string]string{SchemaMarkerName: "4\n", "bars/part": "data"}, "")
 	path := filepath.Join(t.TempDir(), "a.tar")
@@ -149,7 +188,7 @@ func TestInspectImportArchiveReadsMarkerAndRefusesTampering(t *testing.T) {
 		return f
 	}
 	got, err := InspectImportArchive(context.Background(), open(path), 100)
-	if err != nil || got.SchemaMarker != 4 || got.Manifest.Entries != 2 || got.Manifest.Bytes != int64(len("4\n")+len("data")) {
+	if err != nil || got.SchemaMarker != 4 || got.Manifest.Entries != 3 || got.Manifest.Bytes != int64(len("4\n")+len("data")) {
 		t.Fatalf("inspect: %+v %v", got, err)
 	}
 	// A marker is optional: none means data format 0.
@@ -179,4 +218,37 @@ func TestInspectImportArchiveReadsMarkerAndRefusesTampering(t *testing.T) {
 		t.Fatal("foreign manifest format accepted")
 	}
 	_ = strconv.Itoa
+}
+
+// The runner reads the data schema marker only as a single-link file, so an archive that links another path to the
+// marker is refused when it is inspected, before an import replaces anything.
+func TestImportSchemaMarkerRefusesALinkToTheMarker(t *testing.T) {
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	for _, h := range []tar.Header{
+		{Name: SchemaMarkerName, Typeflag: tar.TypeReg, Mode: ImportFileMode, Size: 2},
+		{Name: "marker-copy", Typeflag: tar.TypeLink, Mode: ImportFileMode, Linkname: SchemaMarkerName},
+	} {
+		h.Format, h.ModTime = tar.FormatPAX, time.Unix(0, 0)
+		if err := writer.WriteHeader(&h); err != nil {
+			t.Fatal(err)
+		}
+		if h.Typeflag == tar.TypeReg {
+			_, _ = writer.Write([]byte("1\n"))
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(filepath.Join(t.TempDir(), "linked-marker.tar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(buffer.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := importSchemaMarker(file); !errors.Is(err, ErrMigrationUnsafe) {
+		t.Fatalf("a linked schema marker was read as %d: %v", value, err)
+	}
 }

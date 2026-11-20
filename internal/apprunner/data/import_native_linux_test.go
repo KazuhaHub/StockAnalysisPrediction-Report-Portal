@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // TestNativeImportCheckpoint models a lost host: a namespace is checkpointed,
@@ -70,6 +72,10 @@ func TestNativeImportCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(namespacePath, "nested", "value.json"), []byte(`{"v":2}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A hard link inside the namespace travels through the checkpoint and the import as a link entry.
+	if err := os.Link(filepath.Join(namespacePath, "hello.txt"), filepath.Join(namespacePath, "nested", "hello-link.txt")); err != nil {
 		t.Fatal(err)
 	}
 	checkpointRequest := CheckpointRequest{
@@ -171,6 +177,12 @@ func TestNativeImportCheckpoint(t *testing.T) {
 	if content, err := os.ReadFile(filepath.Join(namespacePath, "nested", "value.json")); err != nil || string(content) != `{"v":2}` {
 		t.Fatal("imported nested content", string(content), err)
 	}
+	var first, second unix.Stat_t
+	if err := unix.Stat(filepath.Join(namespacePath, "hello.txt"), &first); err != nil ||
+		unix.Stat(filepath.Join(namespacePath, "nested", "hello-link.txt"), &second) != nil ||
+		first.Ino != second.Ino || first.Nlink != 2 {
+		t.Fatalf("the hard link did not survive the import: %+v %+v", first, second)
+	}
 	reconciled, err := root.VerifyImportedCheckpoint(ctx, rootIdentity, checkpointRoot, checkpointIdentity, good)
 	reconciledSnapshot, reconciledErr := reconciled.Snapshot()
 	if err != nil || reconciledErr != nil || reconciledSnapshot.NamespaceInode != imported.NamespaceInode || reconciledSnapshot.Entries != imported.Entries {
@@ -236,8 +248,8 @@ func TestNativeImportCheckpointOntoASecondRoot(t *testing.T) {
 		t.Fatal("the three roots must be three different filesystems", rootIdentity, checkpointIdentity, secondIdentity)
 	}
 
-	const project = 4270
-	namespaceName := nativeNamespace(70)
+	const project = 4290
+	namespaceName := nativeNamespace(90)
 	prepared, err := root.Prepare(ctx, rootIdentity, Request{namespaceName, project, 8 << 20, 128})
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +258,7 @@ func TestNativeImportCheckpointOntoASecondRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkpointRequest := CheckpointRequest{
-		CheckpointID: nativeNamespace(700), NamespaceID: namespaceName, ReleaseSHA256: strings.Repeat("b", 64),
+		CheckpointID: nativeNamespace(900), NamespaceID: namespaceName, ReleaseSHA256: strings.Repeat("b", 64),
 		ProjectID: project, DataFormat: 1, MaxArchiveBytes: 1 << 20, ExpectedDevice: prepared.Device,
 		ExpectedNamespaceInode: prepared.Inode, WriterFence: 1,
 	}

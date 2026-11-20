@@ -389,16 +389,24 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 		in.refuse(conn, host, refusal)
 		return
 	}
-	defer release()
+	var freeOnce sync.Once
+	free := func() { freeOnce.Do(release) }
+	defer free()
+	// A refused tunnel gives its slot back before the application reads the refusal: otherwise an application
+	// that opens its next tunnel as soon as it is told no can find the slots still held and be told busy.
+	refuseFreed := func(refusal proxyforwarder.Refusal) {
+		free()
+		in.refuse(conn, host, refusal)
+	}
 	// Step 2: a pinned name (doc 186) or a reviewed host must match, and the port must be 443. A name that is
 	// an IP literal or not a plain lower-case DNS name matches nothing. A pin wins for its exact name.
 	pin, pinned := auth.policy.Pin(host)
 	if !pinned && !auth.policy.Match(host) {
-		in.refuse(conn, host, proxyforwarder.RefusalHostNotReviewed)
+		refuseFreed(proxyforwarder.RefusalHostNotReviewed)
 		return
 	}
 	if port != appplatform.ProxyPort {
-		in.refuse(conn, host, proxyforwarder.RefusalPortNotPermitted)
+		refuseFreed(proxyforwarder.RefusalPortNotPermitted)
 		return
 	}
 	ctx, cancel := context.WithCancelCause(auth.ctx)
@@ -414,7 +422,7 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	var target string
 	if pinned {
 		if !in.runner.PinPermitted(pin) {
-			in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
+			refuseFreed(proxyforwarder.RefusalAddressDenied)
 			return
 		}
 		target = pin.Endpoint()
@@ -426,15 +434,15 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 		stopResolve()
 		if err != nil || len(addresses) == 0 || len(addresses) > 16 {
 			if ctx.Err() != nil {
-				in.refuse(conn, host, proxyforwarder.RefusalUnavailable)
+				refuseFreed(proxyforwarder.RefusalUnavailable)
 				return
 			}
-			in.refuse(conn, host, proxyforwarder.RefusalResolveFailed)
+			refuseFreed(proxyforwarder.RefusalResolveFailed)
 			return
 		}
 		allowed, ok := in.runner.firstAllowed(addresses)
 		if !ok {
-			in.refuse(conn, host, proxyforwarder.RefusalAddressDenied)
+			refuseFreed(proxyforwarder.RefusalAddressDenied)
 			return
 		}
 		target = net.JoinHostPort(allowed.String(), strconv.Itoa(appplatform.ProxyPort))
@@ -444,7 +452,7 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	upstream, err := in.runner.Dial(dialCtx, "tcp", target)
 	stopDial()
 	if err != nil {
-		in.refuse(conn, host, proxyforwarder.RefusalConnectFailed)
+		refuseFreed(proxyforwarder.RefusalConnectFailed)
 		return
 	}
 	defer upstream.Close()
