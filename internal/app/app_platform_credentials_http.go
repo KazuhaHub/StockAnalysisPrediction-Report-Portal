@@ -208,7 +208,7 @@ func platformSecretBindingPlanFields(w http.ResponseWriter, r *http.Request) (pl
 	credential, credentialErr := platformManagementString(fields, "credential_id")
 	operation, operationErr := platformManagementString(fields, "operation")
 	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) ||
-		(operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256") {
+		(operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256" && operation != "pg_password") {
 		return zero, errPlatformManagementInput
 	}
 	if hasTarget {
@@ -417,7 +417,12 @@ func (s *Server) apiPlatformAppSecretBindingList(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"installation_id": installation, "bindings": items, "targets": targets})
+	postgresTargets, err := s.listPlatformPostgresBindingTargets(actor, installation)
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"installation_id": installation, "bindings": items, "targets": targets, "postgres_targets": postgresTargets})
 }
 
 func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.Request, user string) {

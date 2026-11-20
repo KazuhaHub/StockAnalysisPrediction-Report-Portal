@@ -148,6 +148,12 @@ func canonicalPlatformSecretBindingPolicy(p platformSecretBindingPolicy) ([]byte
 		}
 		return json.Marshal(platformSecretBindingPolicyWireV2{platformSecretBindingPolicyFormatV2, p.operation, p.networkPolicySHA256,
 			platformSecretBindingPrincipalList(p.principals), &platformACS3PolicyWire{platformACS3ActionList(p.acs3)}})
+	case "pg_password":
+		// Doc 178 amendment C4: always the target-scoped v3 spelling, for one reviewed PostgreSQL
+		// target, and for the service only (a foreground request never reaches a database).
+		if !platformValidSHA(p.networkTargetSHA256) || p.networkPolicySHA256 != "" || p.acs3 != "" || p.principals != platformPrincipalsServiceOnly {
+			return nil, errAppPlatformCredentialUnavailable
+		}
 	case "raw_read":
 		if p.networkPolicySHA256 != "" || p.networkTargetSHA256 != "" || p.principals != "" || p.acs3 != "" {
 			return nil, errAppPlatformCredentialUnavailable

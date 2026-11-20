@@ -141,6 +141,13 @@ func SignPostgresProbeCommand(c PostgresProbeCommand, key ed25519.PrivateKey, a 
 	return raw, sig, nil
 }
 
+// ValidatePostgresProbeMetadata checks the bounded logical fields of a command against current
+// enrollment. It verifies neither a signature nor SQL authority; Portal's checks use it on the
+// fields it kept of a command whose role it has wiped, with stand-ins of the right shape.
+func ValidatePostgresProbeMetadata(c PostgresProbeCommand, a Authority, nowMS int64) error {
+	return validatePostgresProbe(c, a, nowMS)
+}
+
 func validatePostgresProbe(c PostgresProbeCommand, a Authority, nowMS int64) error {
 	if c.Format != PostgresProbeCommandFormat || nowMS < 0 || a.ControlRevision < 1 || len(a.PublicKey) != ed25519.PublicKeySize {
 		return ErrInvalidCommand
