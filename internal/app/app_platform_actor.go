@@ -25,6 +25,10 @@ type platformActorSession struct {
 	// anonymousPublic marks the sessionless identity of a public projection read (doc 179). Only
 	// the public handlers set it; it admits no account, audience or viewer.
 	anonymousPublic bool
+	// anonymousIngress names the endpoint of an authenticated inbound request (doc 180). Only the
+	// ingress handler sets it; like anonymousPublic it admits no account, audience or viewer, and it
+	// must show the ingress.webhook grant and the active endpoint binding instead.
+	anonymousIngress string
 }
 
 type platformActorFacts struct {

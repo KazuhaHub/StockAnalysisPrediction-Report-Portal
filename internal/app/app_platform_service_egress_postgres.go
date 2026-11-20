@@ -90,7 +90,7 @@ func (s *Server) loadPlatformServiceEgressPostgres(e migExec, installation strin
 	if err != nil {
 		return errPlatformServiceEgressDenied
 	}
-	facts, err := loadPlatformSecretBindingFactsMode(e, installation, false, true)
+	facts, err := loadPlatformSecretBindingFactsKind(e, installation, false, true, false)
 	if err != nil || facts.postgresPolicyRaw != result.postgresRaw {
 		return errPlatformServiceEgressUnavailable
 	}

@@ -103,7 +103,7 @@ func (s *Server) listPlatformPostgresBindingTargets(session platformActorSession
 	}
 	result := []platformSecretBindingPostgresChoice{}
 	err := s.withAppPlatformActor(session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
-		if facts, err := loadPlatformSecretBindingFactsMode(e, installation, false, true); err == nil && facts.postgresPolicyRaw != "" {
+		if facts, err := loadPlatformSecretBindingFactsKind(e, installation, false, true, false); err == nil && facts.postgresPolicyRaw != "" {
 			if policy, err := platformPostgresPolicy(facts); err == nil {
 				for _, t := range policy.Policy.Targets {
 					result = append(result, platformSecretBindingPostgresChoice{ID: t.ID, Origin: platformPostgresTargetLabel(t)})

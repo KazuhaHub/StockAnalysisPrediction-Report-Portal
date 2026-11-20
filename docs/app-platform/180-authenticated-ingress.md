@@ -1,6 +1,6 @@
 # Proposal: authenticated inbound ingress for heartbeats
 
-Status: accepted 2026-11-17; implementation pending. No dependency on 174–178;
+Status: accepted 2026-11-17; implemented (see "Implementation notes"). No dependency on 174–178;
 shares the anonymous-route machinery of [179](179-public-projection.md).
 Index and order: doc [174](174-background-broker-egress.md).
 
@@ -198,3 +198,44 @@ The owner decided every question below on 2026-11-17.
 2. Durable nonce table. Decided: no (above).
 3. Portal-generated secrets shown once. Decided: not now; it would be the
    first value-reveal path in custody and needs its own review.
+
+## 10. Implementation notes (2026-11-19)
+
+What shipped, and where it differs from sections 3 to 8. There is no schema change beyond migration
+`0022`, which already carries `ingress_hmac_sha256`.
+
+- **No new runner command.** Section 3.3 step 7 names a `portal.app-ingress-request/1-dev.1` runner
+  command. As for doc 179 (amendment C1), the relay commands already bind method, path, body digest
+  and assertion digest, so Portal signs a separate assertion instead: `ing.` + `<claims>.<mac>`, MAC
+  domain `rp-extension-ingress-v1`, claims `installation`, `generation`, `route`, `endpoint`, `path`,
+  `received_ms`, `nonce_sha256` and `body_sha256`, no secret and no address. The runner picks
+  `X-Portal-Ingress-Assertion` from the prefix and refuses an `ing.` token on anything but a POST of
+  `/v1/ingress/` with the exact body; it also refuses a viewer or public token on that path space.
+- **Descriptor.** The `ingress` block and the optional `ingress.webhook` capability are in the signed
+  descriptor schema; `route.id` is `^[a-z][a-z0-9-]{0,31}$`. The Apps SDK schema and generated types are
+  regenerated from it (`scripts/generate_app_contract.py`).
+- **Endpoint binding.** The policy is `{"format":"portal.secret-binding-policy/2-dev.1","operation":
+  "ingress_hmac_sha256","ingress_route":"<route>"}`: no network target, no principals. The review needs
+  the capability granted (not `secrets.use`) and refuses a credential that is not 32 to 256 bytes or a
+  route the active release does not declare. The administrator enters the secret as any credential; Portal
+  generates and shows nothing (owner decision 3). An endpoint is never usable as an outbound credential.
+- **Granting.** Until the doc 175 capability policy review exists, an interim administrator route,
+  modelled on `public.projection`, shows the routes, the address pattern and a digest, and enables or
+  withdraws the grant row (`GET`/`POST .../installations/{installation}/ingress`; audit
+  `app_platform.ingress_enabled` and `_disabled`). Withdrawal is immediate and allowed in any state.
+- **Step 1 and the route's body bound.** The route's `body_bytes` is known only once the installation
+  and its descriptor are read, so step 1 refuses anything over the largest allowed bound (4,096) with 413,
+  and the route's own bound is applied right after the authority read, before any decryption, for a
+  granted installation and a declared route whether or not the endpoint exists.
+- **Statuses.** Unknown installation, route or endpoint, capability off, disabled app, revoked or changed
+  binding, bad signature, replay and malformed requests are the one 401 `{"ok":false}`; an unknown
+  endpoint still spends the work of a signature check. A restore pause, an unfinished operation, a trust
+  failure or a custody failure of a real endpoint is 503 with `Retry-After: 30`. Backend 2xx is 202, any
+  4xx is 400, anything else 503. The nonce is claimed at step 5 and is not given back on a later 429 or
+  503, so a sender retries with a fresh nonce and timestamp.
+- **Nothing is written by a request.** The summary (`app_platform.ingress_summary`, per installation per
+  10 minutes: requests, accepted, forwarded, backend failures, refusals by class, per-endpoint accepted and
+  refused) is written by the timer only. The open window's per-endpoint counts are shown in the binding list
+  (console detail). Counters before an installation is known share one global bucket.
+- **Console.** The credentials page offers the operation with a route field and shows the endpoint address
+  and the signing recipe in the approval step; the settings page has the grant panel.

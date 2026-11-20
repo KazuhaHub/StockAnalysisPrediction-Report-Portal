@@ -288,7 +288,7 @@ func testPlatformPostgresBindingReviewAndUse(t *testing.T, pg bool) {
 	}
 	use := func(principal string, dest platformBindingDestination) error {
 		return s.withPlatformTestExec(t, func(e migExec) error {
-			facts, err := loadPlatformSecretBindingFactsMode(e, installation, false, true)
+			facts, err := loadPlatformSecretBindingFactsKind(e, installation, false, true, false)
 			if err != nil {
 				return err
 			}
