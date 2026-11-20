@@ -80,6 +80,9 @@ type Server struct {
 	// platformReadManagedRuntime is the runner seam of the profile read behind a managed review and commit;
 	// nil selects the local socket.
 	platformReadManagedRuntime func(context.Context, platformRuntimeEndpoint, control.Authority) (platformManagedRuntimeObserved, error)
+	// platformObserveCapability is the runner seam of the capability policy review: the managed and
+	// network profiles and the PRNT0001 answer, as plain data. nil selects the local socket.
+	platformObserveCapability func(context.Context, platformActorSession, platformRuntimeEndpoint) (platformCapabilityObservation, error)
 
 	// platformImageDir overrides the directory the managed image stores live under; empty selects the data
 	// directory next to the database. platformImageRunner is the runner seam of the blob channel and the

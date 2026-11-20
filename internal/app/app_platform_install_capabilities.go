@@ -55,6 +55,16 @@ func platformPolicyMatches(capability string, granted int, stored, reviewed stri
 	return stored == reviewed || (capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored))
 }
 
+// platformNetworkRowAccepted is the row test of one capability: the reviewed selection, or, for a
+// granted network.http row the selection also grants, a policy and review a valid latest consumed
+// capability plan backs (doc 175 section 2.5). overlay is nil where only the selection counts.
+func platformNetworkRowAccepted(name string, granted int, stored, review string, expected platformSelectedCapability, planID string, overlay platformNetworkRowOverlay) bool {
+	if platformPolicyMatches(name, granted, stored, expected.policy) && (planID == "" || review == planID) {
+		return true
+	}
+	return overlay != nil && name == platformCapabilityNetworkHTTP && granted == 1 && expected.granted && overlay(review, stored)
+}
+
 type platformSelectedCapability struct {
 	capability string
 	granted    bool
@@ -75,7 +85,9 @@ func platformNetworkTargetPolicies(target *platformManagedInstallTarget) (string
 		return "", "", errAppPlatformInstallUnavailable
 	}
 	if target.NetworkPolicy != "" {
-		if _, err := appplatform.ParseHTTPPolicy([]byte(target.NetworkPolicy)); err != nil {
+		// A v2 policy at install carries public targets only: a private target is granted by a
+		// capability review, which can bind the runner allowlist digest an install review cannot.
+		if parsed, err := appplatform.ParseHTTPPolicyAny([]byte(target.NetworkPolicy)); err != nil || parsed.Policy.HasPrivate() {
 			return "", "", errAppPlatformInstallUnavailable
 		}
 	}
@@ -154,7 +166,7 @@ func platformDeclinedCapabilities(selection []platformSelectedCapability) []stri
 	return result
 }
 
-func verifyPlatformInstallCapabilityRows(e migExec, installation string, m appplatform.Manifest, p platformInstallProjection, active bool, policy int64, planID string, fail error) error {
+func verifyPlatformInstallCapabilityRows(e migExec, installation string, m appplatform.Manifest, p platformInstallProjection, active bool, policy int64, planID string, overlay platformNetworkRowOverlay, fail error) error {
 	expected, err := platformInstallCapabilitySelection(m, p.Runtime)
 	if err != nil || policy < 1 || !platformValidUUID(planID) {
 		return fail
@@ -162,74 +174,71 @@ func verifyPlatformInstallCapabilityRows(e migExec, installation string, m apppl
 	if !slices.Equal(p.DeclinedCapabilities, platformDeclinedCapabilities(expected)) {
 		return fail
 	}
-	return verifyPlatformSelectedCapabilityRows(e, installation, expected, active, policy, planID, fail)
+	return verifyPlatformSelectedCapabilityRows(e, installation, expected, active, policy, planID, overlay, fail)
 }
-func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expected []platformSelectedCapability, active bool, policy int64, planID string, fail error) error {
+
+// platformCapabilityRow is one stored grant row. The rows are read in full before any is judged: the
+// network overlay reads the database itself, which a driver cannot do while a row set is still open.
+type platformCapabilityRow struct {
+	name, restriction, review string
+	granted                   int
+	revision                  int64
+}
+
+func readPlatformCapabilityRows(e migExec, installation string) ([]platformCapabilityRow, error) {
+	rows, err := e.query(`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []platformCapabilityRow
+	for rows.Next() {
+		var r platformCapabilityRow
+		if err := rows.Scan(&r.name, &r.granted, &r.restriction, &r.revision, &r.review); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expected []platformSelectedCapability, active bool, policy int64, planID string, overlay platformNetworkRowOverlay, fail error) error {
 	if policy < 1 || !platformValidUUID(planID) {
 		return fail
 	}
-	rows, err := e.query(`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
+	rows, err := readPlatformCapabilityRows(e, installation)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	index := 0
-	for rows.Next() {
-		var name, restriction, review string
-		var granted int
-		var revision int64
-		if err := rows.Scan(&name, &granted, &restriction, &revision, &review); err != nil {
-			return err
-		}
-		if index >= len(expected) || expected[index].capability != name || !platformGrantMatches(name, granted, active && expected[index].granted) || !platformPolicyMatches(name, granted, restriction, expected[index].policy) || revision != policy || review != planID {
+	if len(rows) != len(expected) {
+		return fail
+	}
+	for index, r := range rows {
+		if expected[index].capability != r.name || !platformGrantMatches(r.name, r.granted, active && expected[index].granted) || !platformNetworkRowAccepted(r.name, r.granted, r.restriction, r.review, expected[index], planID, overlay) || r.revision != policy {
 			return fail
 		}
-		index++
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if index != len(expected) {
-		return fail
 	}
 	return nil
 }
 
-func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expected []platformSelectedCapability, policy int64, fail error) error {
+func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expected []platformSelectedCapability, policy int64, overlay platformNetworkRowOverlay, fail error) error {
 	if policy < 1 {
 		return fail
 	}
-	rows, err := e.query(`SELECT capability,granted,policy_json,
-		policy_revision,review_plan_id
-		FROM app_platform_capability_grants
-		WHERE installation_id=? ORDER BY capability`, installation)
+	rows, err := readPlatformCapabilityRows(e, installation)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	index := 0
-	for rows.Next() {
-		var name, restriction, review string
-		var granted int
-		var revision int64
-		if err := rows.Scan(&name, &granted, &restriction, &revision,
-			&review); err != nil {
-			return err
-		}
-		if index >= len(expected) ||
-			expected[index].capability != name ||
-			!platformGrantMatches(name, granted, expected[index].granted) ||
-			!platformPolicyMatches(name, granted, restriction, expected[index].policy) ||
-			revision != policy || !platformValidUUID(review) {
+	if len(rows) != len(expected) {
+		return fail
+	}
+	for index, r := range rows {
+		if expected[index].capability != r.name ||
+			!platformGrantMatches(r.name, r.granted, expected[index].granted) ||
+			!platformNetworkRowAccepted(r.name, r.granted, r.restriction, r.review, expected[index], "", overlay) ||
+			r.revision != policy || !platformValidUUID(r.review) {
 			return fail
 		}
-		index++
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if index != len(expected) {
-		return fail
 	}
 	return nil
 }

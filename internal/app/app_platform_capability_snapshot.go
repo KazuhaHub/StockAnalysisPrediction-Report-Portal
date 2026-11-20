@@ -15,6 +15,10 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	if policy < 1 {
 		return fail
 	}
+	// A network.http row may hold a policy a consumed capability review set (doc 175
+	// section 2.5); everything else is judged against the signed declaration and the
+	// operation's own review exactly as before.
+	overlay := platformCapabilityOverlay(e, installation, release, epoch)
 	var planID, raw, digest, action string
 	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,o.action FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_installations i ON i.id=o.installation_id
 		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable' OR o.action='repair') AND o.target_generation=i.generation) OR
@@ -65,7 +69,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 				return fail
 			}
 			return verifyPlatformSelectedCapabilityRows(
-				e, installation, expected, true, policy, planID, fail)
+				e, installation, expected, true, policy, planID, overlay, fail)
 		case platformUpdateReviewFormat:
 			var update platformUpdateProjection
 			if json.Unmarshal([]byte(raw), &update) != nil {
@@ -111,7 +115,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 			return fail
 		}
 		return verifyPlatformRetainedCapabilityRows(
-			e, installation, expected, policy, fail)
+			e, installation, expected, policy, overlay, fail)
 	case "enable", "repair":
 		var formatProbe struct {
 			Format string `json:"format"`
@@ -146,7 +150,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 				return fail
 			}
 			return verifyPlatformRetainedCapabilityRows(
-				e, installation, expected, policy, fail)
+				e, installation, expected, policy, overlay, fail)
 		}
 		expectedFormat := platformSameReleaseLifecycleFormat(
 			appplatform.Action(action))
@@ -184,7 +188,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 			return fail
 		}
 		return verifyPlatformRetainedCapabilityRows(
-			e, installation, expected, policy, fail)
+			e, installation, expected, policy, overlay, fail)
 	default:
 		return fail
 	}
@@ -194,5 +198,5 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	if installRequirementsForTarget(m, projection.Format, projection.Runtime) != nil {
 		return fail
 	}
-	return verifyPlatformInstallCapabilityRows(e, installation, m, projection, true, policy, planID, fail)
+	return verifyPlatformInstallCapabilityRows(e, installation, m, projection, true, policy, planID, overlay, fail)
 }

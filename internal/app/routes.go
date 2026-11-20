@@ -494,6 +494,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicGrant)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/ingress", s.apiPlatformIngressPreview)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/ingress", s.apiPlatformIngressGrant)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/capability-policy/plan", s.apiPlatformCapabilityPolicyPlan)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/capability-policy-reviews/{id}", s.apiPlatformCapabilityPolicyConsume)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/catalogue", s.apiPlatformMarketCatalogue)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/stage", s.apiPlatformMarketStage)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/offline", s.apiPlatformMarketOffline)

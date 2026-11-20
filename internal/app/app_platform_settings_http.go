@@ -90,6 +90,52 @@ type platformInstallationSettings struct {
 	// ServiceEgress is the background broker egress diagnostics (doc 174 F9): the last session event and the last
 	// summary of this installation, read from audit_log. Both are null until something was recorded.
 	ServiceEgress platformSettingsServiceEgress `json:"serviceEgress"`
+	// NetworkPolicy is the reviewed network.http destination set while the grant is on (doc 175
+	// section 2.6): a v1 policy is shown as one public target named "default". PolicySHA256 is what a
+	// change request names as the policy it was made against.
+	NetworkPolicy *platformSettingsNetworkPolicy `json:"networkPolicy,omitempty"`
+}
+
+type platformSettingsNetworkPolicy struct {
+	Format       string                     `json:"format"`
+	Targets      []platformCapabilityTarget `json:"targets"`
+	PolicySHA256 string                     `json:"policy_sha256"`
+	Bounds       platformSettingsBounds     `json:"bounds"`
+}
+
+type platformSettingsBounds struct {
+	RequestBytes  int64 `json:"request_bytes"`
+	ResponseBytes int64 `json:"response_bytes"`
+	DeadlineMS    int64 `json:"deadline_ms"`
+	Concurrency   int   `json:"concurrency"`
+}
+
+// platformReadSettingsNetworkPolicy reads the granted network.http policy for display. It is a
+// projection, not an authority: a policy that does not parse is simply not shown.
+func platformReadSettingsNetworkPolicy(e migExec, installation string, policyRevision int64) (*platformSettingsNetworkPolicy, error) {
+	var raw string
+	err := e.queryRow(`SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http' AND granted=1 AND policy_revision=?`, installation, policyRevision).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := appplatform.ParseHTTPPolicyAny([]byte(raw))
+	if err != nil {
+		return nil, nil
+	}
+	targets, err := platformCapabilityTargetViews(parsed.Policy.Targets)
+	if err != nil {
+		return nil, nil
+	}
+	format := appplatform.HTTPPolicyV2Format
+	if parsed.Version == 1 {
+		format = appplatform.HTTPPolicyFormat
+	}
+	p := parsed.Policy
+	return &platformSettingsNetworkPolicy{Format: format, Targets: targets, PolicySHA256: parsed.SHA256,
+		Bounds: platformSettingsBounds{RequestBytes: p.RequestBytes, ResponseBytes: p.ResponseBytes, DeadlineMS: p.Deadline.Milliseconds(), Concurrency: p.Concurrency}}, nil
 }
 
 // platformSettingsServiceEgress is {lastSession, lastSummary}.
@@ -252,6 +298,9 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
+			return err
+		}
+		if result.NetworkPolicy, err = platformReadSettingsNetworkPolicy(e, installation, policyRevision); err != nil {
 			return err
 		}
 		missing := make([]string, 0)

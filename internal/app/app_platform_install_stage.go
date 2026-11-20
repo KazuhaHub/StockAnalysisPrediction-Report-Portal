@@ -148,7 +148,7 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if string(expectedRaw) != raw {
 		return errAppPlatformStageEvidence
 	}
-	return verifyPlatformInstallCapabilityRows(e, lease.installationID, parsed.Manifest, p, false, 1, planID, errAppPlatformStageEvidence)
+	return verifyPlatformInstallCapabilityRows(e, lease.installationID, parsed.Manifest, p, false, 1, planID, nil, errAppPlatformStageEvidence)
 }
 
 func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) error {

@@ -286,7 +286,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		}
 		if err := verifyPlatformSelectedCapabilityRows(
 			e, lease.installationID, capabilities, true,
-			plan.TargetPolicyRevision, planID,
+			plan.TargetPolicyRevision, planID, nil,
 			errAppPlatformStageEvidence); err != nil {
 			return zero, err
 		}
