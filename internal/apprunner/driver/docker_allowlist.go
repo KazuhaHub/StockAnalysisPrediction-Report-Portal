@@ -92,8 +92,18 @@ func (t allowListTransport) RoundTrip(request *http.Request) (*http.Response, er
 			t.peer.refused = t.peer.refuse("the connection of the answer is unknown")
 		}
 		t.peer.mu.Unlock()
+		if err := t.peer.hostNetworkViolation(); err != nil {
+			response.Body.Close()
+			return nil, err
+		}
 		return response, nil
 	}
 	t.peer.verifyOnce(request.Context(), conn) // a refusal is remembered, and the overlap check asks for it
+	if err := t.peer.hostNetworkViolation(); err != nil {
+		// Pinned proxy destinations are addresses of the runner's own namespace: nothing is served by a
+		// daemon that is not in it.
+		response.Body.Close()
+		return nil, err
+	}
 	return response, nil
 }

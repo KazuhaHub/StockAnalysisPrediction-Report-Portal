@@ -56,6 +56,9 @@ type networkProvider struct {
 	targets NetworkTargets
 	// postgres is the PostgreSQL liveness probe (doc 178), drawing on the pool's background share.
 	postgres *broker.PostgresProbe
+	// proxyPins is the operator's allowlist of pinned proxy destinations (doc 186): what PRPX0002 advertises
+	// and what the broker judges every pinned dial against.
+	proxyPins []appplatform.ProxyPin
 }
 
 // ManagedControllerOption configures trusted runner state of the managed
@@ -64,6 +67,13 @@ type ManagedControllerOption func(*managedControllerOptions)
 
 type managedControllerOptions struct {
 	privateNetworks []appplatform.PrivateNetwork
+	proxyPins       []appplatform.ProxyPin
+}
+
+// WithProxyPins gives the runner's allowlist of pinned proxy destinations (doc 186) to the proxy query and to
+// the broker. Without it, no pin can be granted or dialled and the query advertises an empty list.
+func WithProxyPins(pins []appplatform.ProxyPin) ManagedControllerOption {
+	return func(o *managedControllerOptions) { o.proxyPins = pins }
 }
 
 // WithPrivateNetworks gives the runner's private-network allowlist (doc 175) to
@@ -115,6 +125,9 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int, optio
 	if err != nil {
 		return nil, broker.ErrDenied
 	}
+	if appplatform.ValidateProxyOperatorPins(settings.proxyPins) != nil {
+		return nil, broker.ErrDenied
+	}
 	p := &networkProvider{
 		store:          store,
 		sessions:       make(map[string]networkChecker),
@@ -122,6 +135,7 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int, optio
 		activeLimit:    active,
 		cacheLimit:     entries,
 		targets:        targets,
+		proxyPins:      append([]appplatform.ProxyPin{}, settings.proxyPins...),
 	}
 	current, err := broker.NewConfirmedNetworkAuthority(p.enrollment, p.confirm)
 	if err != nil {

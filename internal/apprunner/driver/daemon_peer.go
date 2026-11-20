@@ -2,10 +2,13 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // daemonPeer identifies, for one client built by newDockerClient, the process on the other end of every
@@ -22,6 +25,62 @@ type daemonPeer struct {
 	refused error
 	// netDiffers is set when a holder of a connection is in another network namespace than the runner.
 	netDiffers bool
+	// requireHostNet is set when the runner holds pinned proxy destinations (doc 186): they are addresses in
+	// the runner's own network namespace, so a daemon in another one, or one that cannot be identified, makes
+	// every request fail.
+	requireHostNet bool
+}
+
+// ErrHostNetworkNamespace is returned when pinned proxy destinations are configured and the daemon is not
+// identified as being in the runner's network namespace.
+var ErrHostNetworkNamespace = fmt.Errorf("%w: the container daemon is not in the runner's network namespace (proxy_pins need the host network namespace)", ErrUnavailable)
+
+// requireHostNetworkNamespace makes client refuse, from the first answer on, any connection whose daemon is in
+// another network namespace than the runner or cannot be identified. The refusal is remembered, so every later
+// request fails too until the runner restarts.
+func requireHostNetworkNamespace(client *http.Client) {
+	if transport, ok := client.Transport.(allowListTransport); ok && transport.peer != nil {
+		transport.peer.mu.Lock()
+		transport.peer.requireHostNet = true
+		transport.peer.mu.Unlock()
+	}
+}
+
+// hostNetworkViolation is the refusal a client that requires the host network namespace applies.
+func (p *daemonPeer) hostNetworkViolation() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.requireHostNet && (p.netDiffers || p.refused != nil) {
+		return ErrHostNetworkNamespace
+	}
+	return nil
+}
+
+// CheckHostNetworkNamespace is the start-time check of the runner's proxy_pins: it asks the daemon on socket
+// one read-only question and refuses unless the daemon is identified as a local dockerd in the runner's
+// network namespace. A namespace that cannot be read is not shared, and no answer is a failure.
+func CheckHostNetworkNamespace(ctx context.Context, socket string) error {
+	client, closeClient := newDockerClient(socket, time.Second, probeTimeout)
+	defer closeClient()
+	return checkHostNetworkNamespace(ctx, client)
+}
+
+func checkHostNetworkNamespace(ctx context.Context, client *http.Client) error {
+	requireHostNetworkNamespace(client)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dockerRequestHost+"/version", nil)
+	if err != nil {
+		return ErrHostNetworkNamespace
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		if errors.Is(err, ErrHostNetworkNamespace) {
+			return ErrHostNetworkNamespace
+		}
+		return fmt.Errorf("%w: %w", ErrHostNetworkNamespace, err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+	response.Body.Close()
+	return nil
 }
 
 // verifyOnce identifies the daemon behind a connection the first time it answers and remembers a refusal.

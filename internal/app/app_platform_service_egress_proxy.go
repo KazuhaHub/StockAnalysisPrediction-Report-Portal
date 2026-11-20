@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/broker"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
@@ -28,18 +29,19 @@ const (
 	platformProxyRefusalInstallations = 1024
 )
 
-// runnerServesProxy asks the runner whether it serves the proxy with the limits this Portal carries. A runner
-// that predates the query, or answers other limits, does not; any other failure to ask is an error, so that a
-// transient failure never silently drops a granted proxy from a session.
-func (c *platformServiceEgressCoordinator) runnerServesProxy(ctx context.Context, endpoint platformRuntimeEndpoint) (bool, error) {
-	profile, err := c.transport.QueryProxy(ctx, endpoint)
+// runnerServesProxy asks the runner whether it serves the proxy with the limits this Portal carries, and, for
+// a policy that holds pins, whether it serves pinned destinations. A runner that predates the query, or answers
+// other limits, or (for pins) predates pins, does not; any other failure to ask is an error, so that a transient
+// failure never silently drops a granted proxy from a session.
+func (c *platformServiceEgressCoordinator) runnerServesProxy(ctx context.Context, endpoint platformRuntimeEndpoint, pinned bool) (bool, error) {
+	state, err := c.transport.QueryProxy(ctx, endpoint)
 	switch {
 	case errors.Is(err, transport.ErrProxyUnsupported):
 		return false, nil
 	case err != nil:
 		return false, err
 	}
-	return profile == transport.NewProxyProfile(), nil
+	return state.Profile == transport.NewProxyProfile() && (!pinned || state.PinsSupported), nil
 }
 
 // platformProxyRefusalLimiter keeps at most one refusal row per installation, host and code per interval, and
@@ -115,20 +117,32 @@ func (c *platformServiceEgressCoordinator) serveProxyReport(l *platformServiceEg
 	switch report.Kind {
 	case broker.ProxyReportRollup:
 		for _, h := range report.Hosts {
-			c.auditLog(platformProxyAuditRollup, installation, map[string]any{
+			c.auditLog(platformProxyAuditRollup, installation, platformProxyPinnedDetail(l.state.proxy, h.Host, map[string]any{
 				"session_id": l.state.sessionID, "hour": report.Hour, "host": h.Host, "tunnels": h.Tunnels,
 				"bytes_in": h.BytesIn, "bytes_out": h.BytesOut, "closes": h.Closes,
-			})
+			}))
 		}
 	case broker.ProxyReportRefusal:
 		if c.refusals.allow(installation, report.Host, report.Code, now) {
-			c.auditLog(platformProxyAuditRefused, installation, map[string]any{
+			c.auditLog(platformProxyAuditRefused, installation, platformProxyPinnedDetail(l.state.proxy, report.Host, map[string]any{
 				"session_id": l.state.sessionID, "host": report.Host, "code": report.Code, "count": report.Count,
-			})
+			}))
 		}
 	case broker.ProxyReportUsage:
 		c.auditLog(platformProxyAuditUsage, installation, map[string]any{
 			"session_id": l.state.sessionID, "day": report.Day, "bytes": report.Bytes, "budget": report.Budget,
 		})
 	}
+}
+
+// platformProxyPinnedDetail marks the audit detail of a host that is pinned in the policy of the session that
+// carried the report (doc 186): pinned is true and pin is "address:port". Any other host's detail is unchanged.
+func platformProxyPinnedDetail(policy *appplatform.ParsedProxyPolicy, host string, detail map[string]any) map[string]any {
+	if policy == nil {
+		return detail
+	}
+	if pin, ok := policy.Policy.Pin(host); ok {
+		detail["pinned"], detail["pin"] = true, pin.Endpoint()
+	}
+	return detail
 }

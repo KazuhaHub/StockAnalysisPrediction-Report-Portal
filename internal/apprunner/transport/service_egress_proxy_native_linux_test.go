@@ -11,17 +11,20 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform/proxyforwarder"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
@@ -41,6 +44,7 @@ const (
 	proxyAcceptanceSocketEnv = "PORTAL_PROXY_ACCEPTANCE_SOCKET"
 	proxyAcceptanceCertEnv   = "PORTAL_PROXY_ACCEPTANCE_CERT"
 	proxyAcceptanceMarker    = "PORTAL_PROXY_ACCEPTANCE_OK"
+	proxyAcceptancePinned    = "quotes.internal.anchan.kazuhahub.com"
 )
 
 func TestProxyEndpointAcceptance(t *testing.T) {
@@ -56,6 +60,18 @@ func TestProxyEndpointAcceptance(t *testing.T) {
 	}
 	f := newEgrFixture(t)
 	server := f.proxySeams()
+	// The pinned name (doc 186) reaches the loopback fixture with no resolver in the path: the operator's
+	// allowlist holds the entry and any lookup of that name is recorded, to be refused below.
+	pin := appplatform.ProxyPin{Host: proxyAcceptancePinned, Address: "127.0.0.1", Port: 20443}
+	f.registry.applyProxyPins([]appplatform.ProxyPin{pin})
+	var pinnedLookups atomic.Int32
+	seamLookup := f.registry.proxy.Lookup
+	f.registry.proxy.Lookup = func(ctx context.Context, host string) ([]netip.Addr, error) {
+		if strings.TrimSuffix(host, ".") == proxyAcceptancePinned {
+			pinnedLookups.Add(1)
+		}
+		return seamLookup(ctx, host)
+	}
 	dir, err := os.MkdirTemp("/run", "portal-proxy-")
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +92,7 @@ func TestProxyEndpointAcceptance(t *testing.T) {
 		return EgressListener{Listener: broker.Listener, PeerOK: egressPeerUID(EgressAppUID), Intact: broker.Intact}, nil
 	}
 	path, _ := egressEndpoint(t, f, true)
-	command := f.sessionCommand(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+	command := f.sessionCommand(pinnedProxyOptions(t, proxyAndHTTP, pin, "qt.gtimg.cn"))
 	raw, sig, err := control.SignServiceEgressSession(command, f.key, f.a, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +113,9 @@ func TestProxyEndpointAcceptance(t *testing.T) {
 	out, err := child.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), proxyAcceptanceMarker) {
 		t.Fatalf("the network-less application did not reach the fixture through the proxy: %v\n%s", err, out)
+	}
+	if pinnedLookups.Load() != 0 {
+		t.Fatalf("the pinned name was resolved %d times", pinnedLookups.Load())
 	}
 }
 
@@ -157,6 +176,15 @@ func proxyAcceptanceChild(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(body), "hello from upstream") {
 		t.Fatalf("through the proxy: %d %q", resp.StatusCode, body)
+	}
+	resp, err = client.Get("https://" + proxyAcceptancePinned + "/")
+	if err != nil {
+		t.Fatal("pinned name:", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "hello from upstream") {
+		t.Fatalf("through the proxy to the pinned name: %d %q", resp.StatusCode, body)
 	}
 	if _, err := client.Get("https://evil.example.com/"); err == nil {
 		t.Fatal("an unreviewed host was reached")

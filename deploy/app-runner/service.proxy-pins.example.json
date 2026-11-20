@@ -1,0 +1,35 @@
+{
+  "format": "portal.app-runner.config/1-dev.1",
+  "docker_socket": "/run/docker.sock",
+  "journal_dir": "/var/lib/portal-app-runner/journal",
+  "data_root": "/srv/portal-apps/data",
+  "checkpoint_root": "/var/lib/portal-app-runner/checkpoints",
+  "image_root": "/var/lib/portal-app-runner/images",
+  "allow_local_reference_images": false,
+  "ipc_root": "/run/portal-app-runner/ipc",
+  "control_root": "/run/portal-app-runner/control",
+  "control_socket": "/run/portal-app-runner/control/runner.sock",
+  "controller_uid": 41001,
+  "controller_gid": 41001,
+  "network_active": 4,
+  "network_entries": 1024,
+  "minimum_reported_cpus": 2,
+  "minimum_reported_memory_bytes": 2147483648,
+  "capacity": {
+    "memory_percent": 25,
+    "cpu_percent": 50,
+    "disk_bytes": 8589934592,
+    "running_backends": 8,
+    "image_store_bytes": 10737418240,
+    "reserved_cpus": 1
+  },
+  "controller": {
+    "deployment_id": "10000000-0000-4000-8000-000000000001",
+    "controller_epoch": "20000000-0000-4000-8000-000000000002",
+    "control_revision": 1,
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "proxy_pins": [
+    {"host": "quotes.internal.anchan.kazuhahub.com", "address": "127.0.0.1", "port": 20443}
+  ]
+}

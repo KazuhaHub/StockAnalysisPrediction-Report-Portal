@@ -65,6 +65,8 @@ func ListenNetworkManagedController(ctx context.Context, path string, uid, gid u
 	server.egress = newEgressRegistry(ctx, network, newJournalEgressBinder(store, native))
 	// The proxy's daily byte budget lives in the journal, so a restart does not give a fresh day.
 	server.egress.useProxyBudget(store)
+	// The operator's pinned destinations reach the broker that dials them, and the query that advertises them.
+	server.egress.applyProxyPins(network.proxyPins)
 	server.candidateExecution.images = images
 	server.imageBlobs = &imageBlobProvider{store: images, enrollment: func(ctx context.Context) (control.Authority, error) {
 		enrollment, err := store.ControllerDeployment(ctx)
