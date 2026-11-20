@@ -1,6 +1,6 @@
 # Proposal: a reviewed forward proxy for backend egress
 
-Status: Proposed 2026-11-20. The owner decided D1–D5 on 2026-11-20 (section 12). Q1–Q7 are open, each with a recommended answer. This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20; implementation pending. The owner decided D1–D5 and accepted the recommended answers to Q1–Q7 on 2026-11-20 (sections 12 and 13). This document changes no code, schema or contract. It builds on:
 
 - [174](174-background-broker-egress.md): the background egress session, the broker socket and the session lifetime;
 - [175](175-reviewed-multi-origin-and-private-network.md): reviewed targets, the private-network allowlist and the address guard.
@@ -146,7 +146,7 @@ The limits are fixed per platform version and carried in the signed session comm
 
 **Measured fit.** market-monitor's 8 concurrent margin-trading workers with `requests.Session` reuse need about 8–16 tunnels, and its traffic is estimated at a few hundred MB a day.
 
-**Bandwidth cap.** Whether to add a per-installation throughput cap on the shared host is Q4.
+**Bandwidth cap.** 50 Mbit/s per installation, enforced in the splice (Q4).
 
 **Why the proxy has its own pool.** `network.http` calls keep their own pool and limits. The proxy's 64 tunnels are separate, so bulk scraping cannot take the slots that interactive calls need.
 
@@ -253,18 +253,20 @@ Also confirmed by the owner:
 - The 45 s background task limit (`internal/app/app_platform_task_worker.go:15`) fits a task that only enqueues and returns at once.
 - Calls that fail when the egress session is interrupted are retried at the next scheduled run.
 
-## 13. Open questions
+## 13. Further decisions (2026-11-20)
 
-Q1. **Ports other than 443.** Recommended: 443 only in version 1. An exact entry may later carry an explicit port if a real source needs one.
+The owner accepted the recommended answer to each question below.
 
-Q2. **Does a `network.proxy` grant require `background.run`.** Recommended: yes. The proxy rides the egress session, which exists only with `background.run`. There is no foreground proxy in version 1.
+Q1. **Ports other than 443.** Decided: 443 only in version 1. An exact entry may later carry an explicit port if a real source needs one.
 
-Q3. **Handling of Encrypted ClientHello.** Recommended: refuse. When the outer SNI is not the CONNECT host, the tunnel closes as `sni_mismatch`. Browsers' ECH GREASE carries the real SNI outside, so impersonation still works.
+Q2. **Does a `network.proxy` grant require `background.run`.** Decided: yes. The proxy rides the egress session, which exists only with `background.run`. There is no foreground proxy in version 1.
 
-Q4. **A per-installation throughput cap on the shared host.** Recommended: 50 Mbit/s per installation, enforced in the splice. This protects other apps and the second user's desktop without slowing market-monitor's few hundred MB a day.
+Q3. **Handling of Encrypted ClientHello.** Decided: refuse. When the outer SNI is not the CONNECT host, the tunnel closes as `sni_mismatch`. Browsers' ECH GREASE carries the real SNI outside, so impersonation still works.
 
-Q5. **Who may create wildcard entries.** Recommended: the same administrators who review `network.http` targets (175 decision 1). The dialog shows each wildcard with a warning line; there is no separate role.
+Q4. **A per-installation throughput cap on the shared host.** Decided: 50 Mbit/s per installation, enforced in the splice. This protects other apps and the second user's desktop without slowing market-monitor's few hundred MB a day.
 
-Q6. **Rollups in the audit log versus a table.** Recommended: the audit log (hourly rows per installation and host, at most 24 × 64 per installation per day). A table only if the console needs queries the audit log cannot answer.
+Q5. **Who may create wildcard entries.** Decided: the same administrators who review `network.http` targets (175 decision 1). The dialog shows each wildcard with a warning line; there is no separate role.
 
-Q7. **Descriptor suggestions.** Recommended: an app may suggest hosts, and the review dialog pre-fills them for the administrator to accept or edit, as 175 in-context consent does. Nothing is granted without the review.
+Q6. **Rollups in the audit log versus a table.** Decided: the audit log (hourly rows per installation and host, at most 24 × 64 per installation per day). A table only if the console needs queries the audit log cannot answer.
+
+Q7. **Descriptor suggestions.** Decided: an app may suggest hosts, and the review dialog pre-fills them for the administrator to accept or edit, as 175 in-context consent does. Nothing is granted without the review.
