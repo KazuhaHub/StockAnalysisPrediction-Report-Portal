@@ -390,6 +390,16 @@ func (s *Server) validateAnnouncement(w http.ResponseWriter, in announcementInpu
 		}
 		a.Content = str(in.Content)
 	}
+	// Both fields are checked, not only the one being written: a PUT that changes the title alone
+	// still answers for the row it saves.
+	bad := checkAnnouncementVars(a.Title)
+	if bad == "" {
+		bad = checkAnnouncementVars(a.Content)
+	}
+	if bad != "" {
+		jsonErrorCode(w, http.StatusBadRequest, "bad_announcement_variable", "无法识别的公告变量: "+bad)
+		return a, false
+	}
 	if in.Scope != nil {
 		if v := strings.ToLower(str(in.Scope)); v != "home" && v != "app" {
 			jsonErrorCode(w, http.StatusBadRequest, "bad_announcement_scope", "无效的显示范围")

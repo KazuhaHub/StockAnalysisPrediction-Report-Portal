@@ -149,6 +149,14 @@ export function useSite(): SiteCtx {
   return c
 }
 
+/**
+ * The site context when there is one. For components that also render outside the provider — the
+ * announcement row is drawn by isolated tests and previews — and can fall back on their own.
+ */
+export function useOptionalSite(): SiteCtx | null {
+  return useContext(Ctx)
+}
+
 export function SiteLogo({
   size = 22,
   color,

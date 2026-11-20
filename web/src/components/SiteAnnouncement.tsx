@@ -23,6 +23,8 @@ import {
   type DismissalState,
 } from '../lib/announcementDismissal'
 import type { Announcement, AnnouncementLevel } from '../api/types'
+import { hasClockVars, readerZone, renderAnnouncementVars } from '../lib/announcementVars'
+import { useOptionalSite } from '../site'
 
 const LEVEL_ICON: Record<AnnouncementLevel, typeof InfoCircleFilled> = {
   notice: InfoCircleFilled,
@@ -63,8 +65,9 @@ export function AnnouncementRow({
   const palette = token as unknown as Record<string, string>
   const Icon = LEVEL_ICON[announcement.level]
   const tokens = LEVEL_TOKENS[announcement.level]
-  const title = announcement.title.trim()
-  const content = announcement.content.trim()
+  const render = useAnnouncementVars(announcement.title + announcement.content)
+  const title = render(announcement.title.trim())
+  const content = render(announcement.content.trim())
   return (
     <div
       className="rp-announce-item"
@@ -103,6 +106,31 @@ export function AnnouncementRow({
       )}
     </div>
   )
+}
+
+/**
+ * The renderer for an announcement's variables, ticking once every 15s only while the text holds a
+ * variable that moves with the clock. Rendering touches nothing the dismissal signature reads: that
+ * is computed over the stored template, so a ticking clock never re-interrupts anybody.
+ */
+export function useAnnouncementVars(text: string): (s: string) => string {
+  const { t, i18n } = useTranslation()
+  const site = useOptionalSite()
+  const ticks = hasClockVars(text)
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    if (!ticks) return
+    setNow(new Date())
+    const id = window.setInterval(() => setNow(new Date()), 15000)
+    return () => window.clearInterval(id)
+  }, [ticks])
+  const ctx = {
+    now,
+    zone: readerZone(),
+    site: site?.title || t('brand'),
+    lang: i18n?.language || 'zh-CN',
+  }
+  return (s: string) => renderAnnouncementVars(s, ctx)
 }
 
 // The fold animation. The overflow stays mounted while it collapses so the grid can run 1fr→0fr,
