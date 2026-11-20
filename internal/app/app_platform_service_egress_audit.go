@@ -96,6 +96,12 @@ type platformServiceEgressWindow struct {
 	// not resolve (unknown, revoked, awaiting review, not for the service, or for
 	// another target). The application chose that name, so it is not recorded.
 	unresolved map[string]int
+	// postgres counts, per resolved PostgreSQL target (doc 178), the finished liveness calls by
+	// outcome: the probe's six outcome names for a check that ran, else the call's class. Names are
+	// reviewed target ids; a call whose target or binding did not resolve is counted in
+	// postgresUnresolved by outcome only, since the application chose what it named.
+	postgres           map[string]map[string]int
+	postgresUnresolved map[string]int
 }
 
 // platformServiceEgressAggregator turns the per-call facts into one summary row
@@ -233,6 +239,44 @@ func (a *platformServiceEgressAggregator) recordBinding(installation, session st
 	}
 }
 
+// recordPostgres counts one finished liveness call: against its target if it resolved (target is
+// its reviewed id), else as unresolved. A call that ran is counted by its outcome (status is the
+// probe's code), any other by its class.
+func (a *platformServiceEgressAggregator) recordPostgres(installation, session string, now time.Time, target string, class byte, status uint16) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	w := a.window(installation, session, now)
+	if w == nil {
+		return
+	}
+	name, ok := platformServiceEgressClassNames[class]
+	if !ok {
+		return
+	}
+	if class == transport.EgressOutcomeOK {
+		if name = transport.EgressPostgresOutcome(status); name == "" {
+			return
+		}
+	}
+	if target == "" {
+		if w.postgresUnresolved == nil {
+			w.postgresUnresolved = map[string]int{}
+		}
+		w.postgresUnresolved[name]++
+		return
+	}
+	if w.postgres == nil {
+		w.postgres = map[string]map[string]int{}
+	}
+	if _, known := w.postgres[target]; !known && len(w.postgres) >= 64 {
+		return
+	}
+	if w.postgres[target] == nil {
+		w.postgres[target] = map[string]int{}
+	}
+	w.postgres[target][name]++
+}
+
 func (a *platformServiceEgressAggregator) recordNotice(installation, session string, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -279,7 +323,7 @@ func (a *platformServiceEgressAggregator) due(now time.Time, flush bool) []platf
 			continue
 		}
 		delete(a.windows, installation)
-		if len(w.counts) == 0 && w.notices == 0 && w.deniedSuppressed == 0 {
+		if len(w.counts) == 0 && w.notices == 0 && w.deniedSuppressed == 0 && len(w.postgres) == 0 && len(w.postgresUnresolved) == 0 {
 			continue
 		}
 		origins := make([]string, 0, len(w.origins))
@@ -316,6 +360,21 @@ func (a *platformServiceEgressAggregator) due(now time.Time, flush bool) []platf
 		}
 		if len(w.unresolved) > 0 {
 			summary["credential_unresolved"] = w.unresolved
+		}
+		if len(w.postgres) > 0 {
+			type postgresCount struct {
+				Target   string         `json:"target"`
+				Outcomes map[string]int `json:"outcomes"`
+			}
+			used := make([]postgresCount, 0, len(w.postgres))
+			for target, outcomes := range w.postgres {
+				used = append(used, postgresCount{target, outcomes})
+			}
+			slices.SortFunc(used, func(x, y postgresCount) int { return strings.Compare(x.Target, y.Target) })
+			summary["postgres"] = used
+		}
+		if len(w.postgresUnresolved) > 0 {
+			summary["postgres_unresolved"] = w.postgresUnresolved
 		}
 		detail, err := json.Marshal(summary)
 		if err == nil {

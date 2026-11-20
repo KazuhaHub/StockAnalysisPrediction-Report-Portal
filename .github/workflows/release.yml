@@ -9,6 +9,7 @@ name: Release
 #             matrix leg would be wasted work)
 #   build   → matrix cross-compiles 6 platforms, downloads the web bundle into web/internal/dist and
 #             //go:embed-s it into the binary
+#   build-runner → cross-compiles app-runner for linux/amd64 and linux/arm64 only (doc 182 decision D8)
 #   smoke-arm64 → start the linux/arm64 binary on an arm64 runner before the tag, draft or image
 #   release → tar/zip + SHA256SUMS, then create or update the DRAFT GitHub Release
 #   docker  → reuse the linux amd64/arm64 binaries to push the FIXED multi-arch image tag, then
@@ -244,7 +245,7 @@ jobs:
     # Keep tag creation late: a failed platform build must not leave behind a version with no
     # publishable artifact set. The build itself needs only setup's resolved version and commit.
     # An arm64 binary that builds but cannot start is such a failure, so the smoke gates this too.
-    needs: [setup, ci, build, smoke-arm64]
+    needs: [setup, ci, build, build-runner, smoke-arm64]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -394,6 +395,51 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # THE APP RUNNER IS A SEPARATE, LINUX-ONLY BUILD. The runner drives rootful Docker and an XFS project-quota
+  # root, so it exists only for linux/amd64 and linux/arm64 (docs/app-platform/182-cross-platform-backend-runtime.md,
+  # D8). It is deliberately not a leg of the six-platform build above: that matrix and the six report-portal
+  # artifacts stay exactly as they were. The matrix is spelled by architecture alone so the platform list the CI
+  # tests read from `build` is not changed. The archives join the same SHA256SUMS.txt and the same provenance
+  # check (module path, platform, commit, clean worktree, CGO off).
+  build-runner:
+    name: Build app-runner linux/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [setup]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goarch: amd64 }
+          - { goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Uncached for the same reason as the portal build: a published binary does not come out of a shared cache.
+          cache: false
+      - name: Build app-runner
+        shell: bash
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          COMMIT: ${{ needs.setup.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          go build -trimpath -ldflags="-s -w" -o out/app-runner ./cmd/app-runner
+          sh scripts/check-release-build.sh out/app-runner "$GOOS" "$GOARCH" "$COMMIT" app-runner
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-runner-linux-${{ matrix.goarch }}
+          path: out/app-runner
+          if-no-files-found: error
+          retention-days: 1
+
   # THE ARM64 BINARY RUNS BEFORE A TAG IS CREATED. test.yml executes only linux/amd64 (the image
   # smoke) and compiles the other five targets without running them, and the docker job below only
   # copies the arm64 binary into the image. So an arm64 binary that cannot start, from a fault in
@@ -408,12 +454,24 @@ jobs:
   # was). docker names it as well, so its own reason does not rest on the tag job's needs.
   smoke-arm64:
     name: Start the linux/arm64 binary
-    needs: [setup, build]
+    needs: [setup, build, build-runner]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     steps:
       - uses: actions/download-artifact@v8
         with: { name: report-portal-linux-arm64, path: bin }
+      # The runner cannot serve without root, Docker and an XFS root, so the smoke only proves the arm64 build
+      # loads and runs its command surface natively; the provisioning command's help is the cheapest such call.
+      - uses: actions/download-artifact@v8
+        with: { name: app-runner-linux-arm64, path: runner-bin }
+      - name: Run the arm64 app-runner command surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner="$PWD/runner-bin/app-runner"
+          chmod +x "$runner"
+          "$runner" provision-xfs-images --help | grep -q -- '--mount-checkpoint'
+          if "$runner" >/dev/null; then echo "::error::app-runner without a command must exit non-zero"; exit 1; fi
       - name: Run version and probe /healthz
         shell: bash
         env:
@@ -459,7 +517,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    needs: [setup, build, ci, tag]
+    needs: [setup, build, build-runner, ci, tag]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -470,6 +528,10 @@ jobs:
         with:
           path: artifacts
           pattern: report-portal-*
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: app-runner-*
       - name: Refuse a tag whose release is already published
         shell: bash
         env:
@@ -519,6 +581,20 @@ jobs:
               tar -C build -czf "dist/${pkg}.tar.gz" "${pkg}"
             fi
           done
+          # The app-runner archives (Linux only, doc 182 D8) sit beside the six portal archives and share the checksum
+          # file. The portal archives above are unchanged. Exactly two runner artifacts or the release is incomplete.
+          set -- artifacts/app-runner-*
+          test "$#" = 2 || { echo "expected 2 app-runner artifacts, found $#"; exit 1; }
+          for arch in amd64 arm64; do
+            pkg="app-runner_${VERSION}_linux_${arch}"
+            mkdir -p "build/${pkg}/third-party/moby-profiles" "build/${pkg}/deploy"
+            cp "artifacts/app-runner-linux-${arch}/app-runner" "build/${pkg}/"
+            chmod +x "build/${pkg}/app-runner"
+            cp LICENSE "build/${pkg}/"
+            cp deploy/app-runner/* "build/${pkg}/deploy/"
+            cp internal/apprunner/driver/seccomp/LICENSE internal/apprunner/driver/seccomp/README.md "build/${pkg}/third-party/moby-profiles/"
+            tar -C build -czf "dist/${pkg}.tar.gz" "${pkg}"
+          done
           (cd dist && sha256sum -- * > SHA256SUMS.txt)
       - name: Generate release body
         shell: bash
@@ -556,6 +632,12 @@ jobs:
           \`\`\`shell
           sha256sum -c SHA256SUMS.txt
           \`\`\`
+
+          ### App runner (Linux only)
+
+          \`app-runner_${VERSION}_linux_amd64.tar.gz\` and \`..._linux_arm64.tar.gz\` carry the runtime runner for
+          backend apps, with its systemd unit and example configuration. They are listed in the same
+          \`SHA256SUMS.txt\`. The administrator handbook describes the host it needs.
           EOF
           } > release_notes.md
       - name: Recheck the immutable tag before publication

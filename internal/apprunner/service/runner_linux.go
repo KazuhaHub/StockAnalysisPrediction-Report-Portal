@@ -51,6 +51,9 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		deployment.Fingerprint != cfg.Controller.Fingerprint || deployment.Revision < 1 || len(expectedKey) != 32 {
 		return ErrNotReady
 	}
+	if err := requireXFSRoots(logger, cfg); err != nil {
+		return err
+	}
 	rootFile, err := openRootDirectory(cfg.DataRoot)
 	if err != nil {
 		return ErrNotReady
@@ -58,6 +61,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	defer rootFile.Close()
 	root, err := data.Open(rootFile)
 	if err != nil {
+		logger.Printf("app-runner not ready: data_root did not pass the data-root checks (XFS mounted prjquota,nodev,nosuid,noexec; root-owned mode 0700; project quota enforcement on)")
 		return ErrNotReady
 	}
 	defer root.Close()
@@ -72,6 +76,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	defer checkpointFile.Close()
 	checkpointRoot, err := data.Open(checkpointFile)
 	if err != nil {
+		logger.Printf("app-runner not ready: checkpoint_root did not pass the data-root checks (XFS mounted prjquota,nodev,nosuid,noexec; root-owned mode 0700; project quota enforcement on)")
 		return ErrNotReady
 	}
 	defer checkpointRoot.Close()

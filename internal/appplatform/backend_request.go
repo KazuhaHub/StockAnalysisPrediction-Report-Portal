@@ -11,9 +11,9 @@ import (
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 )
 
-// A viewer assertion is two token parts; a public or a machine one has the visible "pub." or "mch."
-// prefix before them.
-var backendRequestAssertion = regexp.MustCompile(`^((pub|mch)\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
+// A viewer assertion is two token parts; a public, ingress or machine one has the visible "pub.",
+// "ing." or "mch." prefix before them.
+var backendRequestAssertion = regexp.MustCompile(`^((pub|ing|mch)\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
 
 const MaxBackendRequestBody = 65536
 const MaxBackendAssertion = 32768
@@ -65,6 +65,11 @@ func ValidBackendRequestData(method, path string, body []byte, assertion string)
 		if method != "GET" || len(body) != 0 || space != "public" || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/public/") {
 			return false
 		}
+	case IsIngressAssertion(assertion):
+		// An ingress assertion (doc 180) is bound to a POST of the ingress route space with a JSON body.
+		if method != "POST" || len(body) == 0 || len(body) > maxIngressBodyBytes || space != "ingress" || strings.Contains(path, "?") || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/ingress/") {
+			return false
+		}
 	case IsMachineAssertion(assertion):
 		// A machine assertion (doc 183) is the same for the machine route space.
 		if method != "GET" || len(body) != 0 || space != "machine" || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/machine/") {
@@ -90,7 +95,7 @@ func ValidBackendResponse(status int, body []byte) bool {
 	return false
 }
 
-// backendRequestSpace names the reserved route space ("public", "machine" or "") a request path falls
+// backendRequestSpace names the reserved route space ("public", "ingress", "machine" or "") a request path falls
 // in once decoded the way the relay's own validation decodes it (twice, ending with no "%"), and
 // reports whether the path is clean: valid escapes, no empty segment except a trailing one, no "." or
 // ".." segment, so that no spelling of the path can hide its space.
@@ -133,7 +138,7 @@ func pathReachesReservedSpace(path string) bool {
 		return false
 	}
 	switch kept[1] {
-	case "public", "machine", "handshake":
+	case "public", "ingress", "machine", "handshake":
 		return true
 	}
 	return false
@@ -157,7 +162,7 @@ func backendRequestSpaceStrict(path string) (string, bool) {
 		return "", false
 	}
 	// Spaces are compared without regard to case: a backend that is not Go's may route "/v1/MACHINE/x"
-	// to its machine handler. A token of the space's own kind must still use the exact lower-case
+	// to its machine handler, or "/v1/INGRESS/x" to its ingress handler. A token of the space's own kind must still use the exact lower-case
 	// spelling.
 	decoded = strings.ToLower(decoded)
 	segments := strings.Split(decoded[1:], "/")
@@ -166,7 +171,7 @@ func backendRequestSpaceStrict(path string) (string, bool) {
 			return "", false
 		}
 	}
-	for _, space := range []string{"public", "machine"} {
+	for _, space := range []string{"public", "ingress", "machine"} {
 		if decoded == "/v1/"+space || strings.HasPrefix(decoded, "/v1/"+space+"/") {
 			return space, true
 		}

@@ -371,7 +371,7 @@ jobs:
           tests=$(go test -race -list "$subset" ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
           regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
-          go test -race -count=1 -timeout=10m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
+          go test -race -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
       - name: Upload race output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -406,7 +406,10 @@ jobs:
     name: go race full (other packages)
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # internal/apprunner/journal alone takes 5m37s under -race on two cores (43s without it) and
+    # the job took 5.5-6m on runners, so the old 5m package timeout and 10m job cap sat at the
+    # edge of the measured runtime. The limits keep about twice the measured time.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       # The build cache pair go-test-checks explains, under a key of its own: no other job builds these
@@ -425,7 +428,7 @@ jobs:
       - name: Race the other packages
         run: |
           set -o pipefail
-          go list ./... | grep -v '/internal/app$' | xargs go test -race -count=1 -timeout=5m 2>&1 | tee go-race-others.txt
+          go list ./... | grep -v '/internal/app$' | xargs go test -race -count=1 -timeout=12m 2>&1 | tee go-race-others.txt
       - name: Upload race output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -446,7 +449,10 @@ jobs:
     name: go race full (${{ matrix.shard }}/4)
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Each shard job took 9.5-11.5 minutes on runners (setup included), so the old 10m test
+    # timeout fired on whichever shard ran slowest, with an unrelated test named as running.
+    # Both limits keep about twice the measured time; every test stays in the race run.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -480,7 +486,7 @@ jobs:
           tests=$(go test -race -list '^Test' ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
           regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
-          go test -race -count=1 -timeout=10m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
+          go test -race -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
       - name: Upload race output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -809,6 +815,20 @@ jobs:
             out="bin/${goos}-${goarch}/report-portal${ext}"
             GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/report-portal
             sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha"
+          done
+      # release.yml's build-runner job ships app-runner for linux/amd64 and linux/arm64 only (doc 182 D8); the same
+      # compile and provenance check run here so a break is found before a tag.
+      - name: Build and verify app-runner
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          for arch in amd64 arm64; do
+            out="bin/runner-linux-${arch}/app-runner"
+            GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/app-runner
+            sh scripts/check-release-build.sh "$out" linux "$arch" "$sha" app-runner
           done
       - name: Trim the build cache to what this run used
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'

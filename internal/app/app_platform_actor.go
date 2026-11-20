@@ -29,6 +29,10 @@ type platformActorSession struct {
 	// with (doc 183). Only the machine handlers set it; like anonymousPublic it admits no account,
 	// audience or viewer, and it must show the machine.read grant and the still active token instead.
 	anonymousMachine string
+	// anonymousIngress names the endpoint of an authenticated inbound request (doc 180). Only the
+	// ingress handler sets it; like anonymousPublic it admits no account, audience or viewer, and it
+	// must show the ingress.webhook grant and the active endpoint binding instead.
+	anonymousIngress string
 }
 
 type platformActorFacts struct {

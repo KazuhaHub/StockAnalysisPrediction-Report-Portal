@@ -169,6 +169,9 @@ def render(raw):
         "minMachineTimeoutMS": p("MachineRoute", "timeout_ms")["minimum"],
         "maxMachineTimeoutMS": p("MachineRoute", "timeout_ms")["maximum"],
         "maxMachineDescription": without_null(p("MachineRoute", "description"))["maxLength"],
+        "maxIngressRoutes": p("Ingress", "routes")["maxItems"],
+        "maxIngressBodyBytes": p("IngressRoute", "body_bytes")["maximum"],
+        "maxIngressPerMinute": p("IngressRoute", "per_endpoint_per_minute")["maximum"],
     }
     for key in ("memory_mib", "cpu_millis", "pids"):
         field = p("Resources", key)
@@ -202,6 +205,8 @@ def render(raw):
         "publicPath": p("PublicRoute", "path")["pattern"],
         "publicQueryName": without_null(p("PublicRoute", "query"))["items"]["pattern"],
         "publicDocument": without_null(p("Public", "document"))["pattern"],
+        "ingressRouteID": p("IngressRoute", "id")["pattern"],
+        "ingressPath": p("IngressRoute", "path")["pattern"],
         "machineRouteID": p("MachineRoute", "id")["pattern"],
         "machinePath": p("MachineRoute", "path")["pattern"],
         "machineQueryName": without_null(p("MachineRoute", "query"))["items"]["pattern"],

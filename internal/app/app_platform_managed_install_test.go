@@ -161,6 +161,10 @@ var platformManagedFixturePublic *appplatform.Public
 // needs "machine.read" in platformManagedFixtureOptional too).
 var platformManagedFixtureMachine *appplatform.Machine
 
+// platformManagedFixtureIngress is the ingress block the managed release fixture declares (it needs
+// "ingress.webhook" in platformManagedFixtureOptional too).
+var platformManagedFixtureIngress *appplatform.Ingress
+
 func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byte) {
 	t.Helper()
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
@@ -175,6 +179,7 @@ func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byt
 	m.Capabilities.Optional = append(m.Capabilities.Optional, platformManagedFixtureOptional...)
 	m.Public = platformManagedFixturePublic
 	m.Machine = platformManagedFixtureMachine
+	m.Ingress = platformManagedFixtureIngress
 	m.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{platform}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
 	raw, err := json.Marshal(m)
 	if err != nil {

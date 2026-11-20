@@ -119,7 +119,7 @@ async function requestForm<T>(method: string, url: string, body: FormData): Prom
 
 export const api = {
   get: <T = any>(url: string, options?: {signal?: AbortSignal}) => request<T>('GET', url, undefined, undefined, options?.signal),
-  post: <T = any>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),
+  post: <T = any>(url: string, body?: unknown, options?: {signal?: AbortSignal}) => request<T>('POST', url, body ?? {}, undefined, options?.signal),
   put: <T = any>(url: string, body?: unknown) => request<T>('PUT', url, body ?? {}),
   // PATCH for a partial update — a review records a verdict on one field of one row, and PUT would
   // claim to be replacing the whole thing.

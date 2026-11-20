@@ -89,7 +89,7 @@ func TestServiceEgressFramesBoundedBeforeAllocation(t *testing.T) {
 	}
 	for name, header := range map[string][]byte{
 		"unknown type zero": rawFrame(0x00, id, nil),
-		"unknown type 0x0a": rawFrame(0x0a, id, nil),
+		"unknown type 0x0b": rawFrame(0x0b, id, nil),
 		"unknown type 0xff": rawFrame(0xff, id, nil),
 		"reserved byte 1":   func() []byte { f := rawFrame(EgressFrameClose, id, nil); f[1] = 1; return f }(),
 		"reserved byte 3":   func() []byte { f := rawFrame(EgressFrameClose, id, nil); f[3] = 1; return f }(),

@@ -29,8 +29,9 @@ type platformBackendAccess[T platformBackendAccessIntent] struct {
 	account       platformActorAccount
 	policy, fence int64
 	activationID  string
-	// publicPolicy is the reviewed public.projection policy of an anonymous read (doc 179); empty
-	// for every access that has a session.
+	// publicPolicy is the reviewed public.projection policy of an anonymous read (doc 179), or the
+	// key of the ingress grant and endpoint binding of an authenticated inbound request (doc 180);
+	// empty for every access that has a session.
 	publicPolicy string
 	// machinePolicy names the machine.read policy and the token of an authenticated machine read
 	// (doc 183); empty for every access that has a session.
@@ -173,7 +174,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	// An anonymous public read (doc 179) has no account, audience or OU: it needs neither the OU
 	// graph lock nor a session, and it must show the public.projection grant instead.
-	anonymous := session.anonymousPublic || session.anonymousMachine != ""
+	anonymous := session.anonymousPublic || session.anonymousIngress != "" || session.anonymousMachine != ""
 	if !anonymous {
 		if err := lockOUMutation(e); err != nil {
 			return zero, err
@@ -336,7 +337,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 		if session.anonymousMachine != "" {
 			machinePolicy, err = platformReadMachineGrant(e, installationID, policy, parsed.Manifest, session.anonymousMachine, now, lock)
 		} else {
-			publicPolicy, err = platformReadPublicGrant(e, installationID, policy, parsed.Manifest, lock)
+			publicPolicy, err = platformReadAnonymousGrant(e, session, installationID, policy, parsed.Manifest, lock)
 		}
 		if err != nil {
 			return zero, fmt.Errorf("backend access public grant: %w", errAppPlatformLaunchUnavailable)
@@ -398,7 +399,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 			if err != nil || again != machinePolicy {
 				return zero, fmt.Errorf("backend access final machine grant: %w", errAppPlatformLaunchUnavailable)
 			}
-		} else if again, err = platformReadPublicGrant(e, installationID, policy, parsed.Manifest, lock); err != nil || again != publicPolicy {
+		} else if again, err = platformReadAnonymousGrant(e, session, installationID, policy, parsed.Manifest, lock); err != nil || again != publicPolicy {
 			return zero, fmt.Errorf("backend access final public grant: %w", errAppPlatformLaunchUnavailable)
 		}
 	}

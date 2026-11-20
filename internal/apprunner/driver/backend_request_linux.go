@@ -66,12 +66,15 @@ func forwardBackendRequest(ctx context.Context, socket string, uid, gid uint32, 
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	// The header follows the token kind: a public token (doc 179) can only reach the public header
-	// and a viewer token only the viewer header. ValidBackendRequestData already refused a public
-	// token on anything but a bodiless GET of /v1/public/.
+	// and a viewer token only the viewer header; an ingress token (doc 180) only its own.
+	// ValidBackendRequestData already refused a public token on anything but a bodiless GET of
+	// /v1/public/ and an ingress one on anything but a POST of /v1/ingress/.
 	header := protocol.Header
 	switch {
 	case appplatform.IsPublicAssertion(assertion):
 		header = appplatform.PublicAssertionHeader
+	case appplatform.IsIngressAssertion(assertion):
+		header = appplatform.IngressAssertionHeader
 	case appplatform.IsMachineAssertion(assertion):
 		// A machine token (doc 183) likewise reaches only its own header.
 		header = appplatform.MachineAssertionHeader

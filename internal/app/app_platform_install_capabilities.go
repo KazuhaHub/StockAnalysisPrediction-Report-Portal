@@ -39,21 +39,27 @@ func activatePlatformInstallCapabilities(e migExec, installation, operation stri
 
 // platformGrantMatches compares a stored grant bit with the reviewed selection. principals.read is
 // optional and defaults off at install; an administrator may switch it on or off afterwards
-// (doc 181 section 4), so either bit is a valid state for it when the review left it off.
+// (doc 181 section 4), so either bit is a valid state for it when the review left it off. The same
+// holds for public.projection and network.postgres (doc 178), each granted by its own review.
 func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 	if stored == boolInt(reviewed) {
 		return true
 	}
-	return (capability == "principals.read" || capability == "public.projection" || capability == "machine.read") && !reviewed && stored == 1
+	return (capability == "principals.read" || capability == "public.projection" || capability == platformCapabilityNetworkPostgres || capability == "ingress.webhook" || capability == "machine.read") && !reviewed && stored == 1
 }
 
 // platformPolicyMatches compares a stored policy with the reviewed one. public.projection is the
 // one capability whose policy an administrator chooses after install (doc 179 amendment C2): a
 // granted row may carry a validated public policy in place of the install-time "{}". An ungranted
 // row is always exactly the reviewed policy, so withdrawing resets it.
+//
+// network.postgres (doc 178) is the second: its granted row carries the validated probe policy an
+// administrator's own review wrote (platformPostgresPolicyReview), and withdrawing resets it to
+// "{}" with granted 0.
 func platformPolicyMatches(capability string, granted int, stored, reviewed string) bool {
 	return stored == reviewed ||
 		(capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored)) ||
+		(capability == platformCapabilityNetworkPostgres && granted == 1 && reviewed == "{}" && appplatform.ValidPostgresPolicy(stored)) ||
 		(capability == "machine.read" && granted == 1 && reviewed == "{}" && appplatform.ValidMachinePolicyShape(stored))
 }
 

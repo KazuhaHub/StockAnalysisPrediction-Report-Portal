@@ -9,8 +9,12 @@ import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
+import AppIngressPanel from './AppIngressPanel'
+import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
 import AppPublicProjectionPanel from './AppPublicProjectionPanel'
 import AppMachineReadPanel from './AppMachineReadPanel'
+import AppNetworkTargetsPanel from './AppNetworkTargetsPanel'
+import type { NetworkPolicyView } from '../../lib/appNetworkTargetsV2'
 
 type Audience = { type: 'user' | 'ou'; id: string; name: string }
 type Capability = { capability: string; granted: boolean; required: boolean }
@@ -38,6 +42,8 @@ type Settings = {
   display?: AppDisplay
   audience: Audience[]
   capabilities: Capability[]
+  // The reviewed network.http destinations, present while that grant is on.
+  networkPolicy?: NetworkPolicyView
   backend: { required: boolean; registered: boolean; enabled: boolean }
   data?: { id: string; state: string; format: number; quota_bytes: string; observed_bytes: string; revision: string }
   recovery: { count: number; state?: string; pending: boolean; points: RecoveryPoint[] }
@@ -238,6 +244,8 @@ export default function AppPlatformSettingsPage() {
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
   const publicProjection = settings.capabilities.find((item) => item.capability === 'public.projection' && !item.required)
   const machineRead = settings.capabilities.find((item) => item.capability === 'machine.read' && !item.required)
+  const postgresProbe = settings.capabilities.find((item) => item.capability === 'network.postgres')
+  const ingress = settings.capabilities.find((item) => item.capability === 'ingress.webhook' && !item.required)
   const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
   const changePrincipals = async (enabled: boolean) => {
     if (principalsBusy) return
@@ -452,7 +460,13 @@ export default function AppPlatformSettingsPage() {
       </Space>}
       {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
       {machineRead && <AppMachineReadPanel root={root} installation={installation} granted={machineRead.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {postgresProbe && <AppPostgresPolicyPanel root={root} installation={installation} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {ingress && <AppIngressPanel root={root} installation={installation} granted={ingress.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>
+    {settings.networkPolicy && <Card title={t('appPlatform.network.title')}>
+      <AppNetworkTargetsPanel key={settings.networkPolicy.policy_sha256} installation={installation} policyRevision={settings.policy_revision} policy={settings.networkPolicy}
+        ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />
+    </Card>}
     <Modal
       className="rp-platform-review-modal"
       open={principalsOpen}

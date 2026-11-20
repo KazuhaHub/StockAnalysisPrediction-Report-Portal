@@ -5,6 +5,11 @@ import { Alert, Button, Spin } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type BridgeBinding, type BridgePresentation, type PageActionSnapshot } from '../../lib/bridge-v2'
 import './AppFrameV2.css'
+import { errText } from '../../api/client'
+import { consumeNetworkPlan, planNetworkChange, readNetworkPolicy, type CapabilityPlan } from '../../lib/appNetworkTargetsV2'
+import type { NetworkTargetRequest, NetworkTargetsResult } from '../../lib/network-v2'
+import { networkTargetsGate, networkTargetsOpen, noteNetworkTargetsApplied, noteNetworkTargetsRefusal } from '../../lib/networkTargetsGate'
+import NetworkChangeReview from './NetworkChangeReview'
 import { createAppBackendTransport } from '../../lib/appBackendV2'
 import { createAppNetworkStreamTransport, createAppNetworkTransport } from '../../lib/appNetworkV2'
 import { createAppReportsTransport } from '../../lib/appReportsV2'
@@ -21,6 +26,11 @@ export interface AppFrameV2Props {
   backendAvailable?: boolean
   onPageChange?: (snapshot:PageActionSnapshot|null)=>void
   onDraftChange?: (dirty: boolean) => void
+  // Only an administrator may answer an app's request for network destinations; for anyone else the
+  // bridge says not_permitted without a single request. The caller relaunches the frame when the
+  // policy revision has changed.
+  canReviewNetwork?: boolean
+  onNetworkPolicyChanged?: (policyRevision?: string) => void
   onNavigate?: (path:string,replace:boolean,search:string,bypassDraft:boolean)=>void
   // Viewport height, also used as the initial document loading-cover height.
   height: number
@@ -47,7 +57,7 @@ export default function AppFrameV2(props: AppFrameV2Props) {
   const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true])
   return <FrameDocument key={identity} {...props} />
 }
-function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, onDraftChange, onNavigate, onPageChange }: AppFrameV2Props) {
+function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, canReviewNetwork, onNetworkPolicyChanged, onDraftChange, onNavigate, onPageChange }: AppFrameV2Props) {
   const { t } = useTranslation()
   const frame = useRef<HTMLIFrameElement>(null)
   const navigationObserver=useRef(onNavigate)
@@ -56,6 +66,57 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
   pageObserver.current=onPageChange
   const draftObserver = useRef(onDraftChange)
   draftObserver.current = onDraftChange
+  const policyObserver = useRef(onNetworkPolicyChanged)
+  policyObserver.current = onNetworkPolicyChanged
+  const [review, setReview] = useState<{ plan: CapabilityPlan; busy: boolean; error: string } | null>(null)
+  const reviewDone = useRef<((result: NetworkTargetsResult) => void) | null>(null)
+  // The dialog is built from the plan the server drew up for these targets, never from their text.
+  const askNetworkTargets = useCallback(async (targets: readonly NetworkTargetRequest[], signal: AbortSignal): Promise<NetworkTargetsResult> => {
+    const installation = binding.installationId
+    // Paced per installation, outside this component and the bridge session, so a reload of the
+    // iframe cannot reset it. Every path that touches the server is behind it.
+    if (networkTargetsGate(installation) !== 'ok') return { state: 'declined' }
+    const release = networkTargetsOpen(installation)
+    try {
+      const state = await readNetworkPolicy(installation, signal)
+      if (!state) { noteNetworkTargetsRefusal(installation); return { state: 'not_permitted' } }
+      const plan = await planNetworkChange(installation, state, { add: targets, remove: [] }, signal)
+      const result = await new Promise<NetworkTargetsResult>(resolve => {
+        const finish = (value: NetworkTargetsResult) => { if (reviewDone.current === finish) reviewDone.current = null; setReview(null); resolve(value) }
+        reviewDone.current = finish
+        signal.addEventListener('abort', () => { if (reviewDone.current === finish) finish({ state: 'declined' }) }, { once: true })
+        setReview({ plan, busy: false, error: '' })
+      })
+      if (result.state === 'applied') noteNetworkTargetsApplied(installation)
+      else noteNetworkTargetsRefusal(installation)
+      return result
+    } catch (failure) {
+      noteNetworkTargetsRefusal(installation)
+      throw failure
+    } finally {
+      release()
+    }
+  }, [binding.installationId])
+  const confirmReview = async () => {
+    if (!review || review.busy) return
+    const current = review
+    // This confirmation belongs to the request that is open now; if that request is gone by the time
+    // the consume returns, its result must not answer a newer one.
+    const owner = reviewDone.current
+    setReview({ ...current, busy: true, error: '' })
+    try {
+      const done = await consumeNetworkPlan(current.plan)
+      if (owner && reviewDone.current === owner) owner({ state: 'applied', policyRevision: done.policyRevision })
+      else {
+        // The plan was consumed after its request ended (aborted, or the frame reloaded): the
+        // policy revision changed all the same, so the page still needs a fresh launch.
+        noteNetworkTargetsApplied(binding.installationId)
+        policyObserver.current?.(done.policyRevision)
+      }
+    } catch (failure) {
+      if (owner && reviewDone.current === owner) setReview({ plan: current.plan, busy: false, error: errText(failure, t) })
+    }
+  }
   const session = useRef<ReturnType<typeof createBridgeHost> | null>(null)
   const assetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const live = useRef(true)
@@ -99,6 +160,8 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
       onNetworkRequest: capabilities.includes('network.http') ? createAppNetworkTransport(binding) : undefined,
+      onNetworkTargetsRequest: capabilities.includes('network.http') && canReviewNetwork ? askNetworkTargets : undefined,
+      onNetworkTargetsApplied: revision => { if (live.current && epoch.current === generation) policyObserver.current?.(revision) },
       onNetworkStreamRequest: capabilities.includes('network.stream') ? (() => {
         const streamTransport = createAppNetworkStreamTransport(binding)
         return async (request, signal, emit) => { await streamTransport(request, signal, emit) }
@@ -141,8 +204,11 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
   }, [layout, fail])
   const visible = ready && (layout === 'viewport' || documentHeight !== null)
   if (failed) return <Alert type="error" showIcon title={t('apps.v2Failed')} action={<Button className="rp-safe-primary" type="primary" onClick={() => { close(); setReady(false); setFailed(false); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
-  return <div className="portal-app-frame-v2" aria-busy={!visible} style={{ height: layout === 'document' ? documentHeight ?? height : height, background: presentation.theme.colorBgLayout, color: presentation.theme.colorText, colorScheme: presentation.theme.dark ? 'dark' : 'light' }}>
+  return <>
+  <div className="portal-app-frame-v2" aria-busy={!visible} style={{ height: layout === 'document' ? documentHeight ?? height : height, background: presentation.theme.colorBgLayout, color: presentation.theme.colorText, colorScheme: presentation.theme.dark ? 'dark' : 'light' }}>
     <iframe key={attempt} ref={frame} src={source} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={loaded} aria-hidden={visible ? undefined : true} tabIndex={visible ? 0 : -1} style={{ visibility: visible ? 'visible' : 'hidden', border: 0, background: presentation.theme.colorBgLayout, colorScheme: presentation.theme.dark ? 'dark' : 'light' }} />
     {!visible && <div className="portal-app-frame-v2-cover" role="status"><Spin aria-hidden="true" /><span>{t('apps.v2Loading')}</span></div>}
   </div>
+  <NetworkChangeReview appName={title} plan={review?.plan ?? null} busy={review?.busy ?? false} error={review?.error ?? ''} onConfirm={() => void confirmReview()} onCancel={() => reviewDone.current?.({ state: 'declined' })} />
+  </>
 }

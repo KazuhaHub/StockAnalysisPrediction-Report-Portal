@@ -108,6 +108,9 @@ func validateBackendRequestData(boot, method, path, bodyDigest, assertionDigest 
 	if appplatform.IsMachineAssertion(assertion) {
 		return validateMachineAssertionData(boot, method, path, bodyDigest, assertionDigest, body, assertion)
 	}
+	if appplatform.IsIngressAssertion(assertion) {
+		return validateIngressAssertionData(boot, method, path, bodyDigest, assertionDigest, body, assertion)
+	}
 	encoded, _, ok := strings.Cut(assertion, ".")
 	if !ok {
 		return ErrInvalidCommand
@@ -142,6 +145,22 @@ func validatePublicAssertionData(boot, method, path, bodyDigest, assertionDigest
 	claims, err := appplatform.ParsePublicClaims(assertion)
 	pathOnly, query, _ := strings.Cut(path, "?")
 	if err != nil || method != "GET" || len(body) != 0 || !strings.HasPrefix(pathOnly, "/v1/public/") || claims.BootID != boot || claims.Method != method || claims.Path != pathOnly || claims.QueryDigest != appplatform.PublicQueryDigest(query) {
+		return ErrInvalidCommand
+	}
+	bodySHA, assertionSHA := sha256.Sum256(body), sha256.Sum256([]byte(assertion))
+	if hex.EncodeToString(bodySHA[:]) != bodyDigest || hex.EncodeToString(assertionSHA[:]) != assertionDigest {
+		return ErrInvalidCommand
+	}
+	return nil
+}
+
+// validateIngressAssertionData is the same structural consistency for an ingress assertion (doc 180):
+// it names this boot, this exact path and the digest of the exact body, and the request is a POST of
+// the ingress route space. As with the other kinds this is not authentication; the app's verifier
+// remains mandatory.
+func validateIngressAssertionData(boot, method, path, bodyDigest, assertionDigest string, body []byte, assertion string) error {
+	claims, err := appplatform.ParseIngressClaims(assertion)
+	if err != nil || method != "POST" || len(body) == 0 || !strings.HasPrefix(path, "/v1/ingress/") || claims.BootID != boot || claims.Method != method || claims.Path != path || claims.BodyDigest != bodyDigest {
 		return ErrInvalidCommand
 	}
 	bodySHA, assertionSHA := sha256.Sum256(body), sha256.Sum256([]byte(assertion))

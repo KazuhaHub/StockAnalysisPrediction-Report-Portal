@@ -40,6 +40,7 @@ func TestDescriptorContractSourceAndTypes(t *testing.T) {
 		"DataMigration":     reflect.TypeFor[DataMigration](),
 		"Public":            reflect.TypeFor[Public](), "PublicRoute": reflect.TypeFor[PublicRoute](),
 		"Machine": reflect.TypeFor[Machine](), "MachineRoute": reflect.TypeFor[MachineRoute](),
+		"Ingress": reflect.TypeFor[Ingress](), "IngressRoute": reflect.TypeFor[IngressRoute](),
 	}
 	if len(types) != len(schema.Definitions) {
 		t.Fatal("named structural definitions differ")

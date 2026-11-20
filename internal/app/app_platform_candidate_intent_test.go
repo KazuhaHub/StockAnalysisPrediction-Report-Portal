@@ -104,6 +104,10 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 		// The static template had no such row; install writes one, off and with an empty policy.
 		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) SELECT installation_id,'public.projection',0,'{}',policy_revision,review_plan_id,created_ms,updated_ms FROM app_platform_capability_grants WHERE installation_id=? LIMIT 1`, lease.installationID)
 	}
+	if manifest.Ingress != nil && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='ingress.webhook'`, lease.installationID) == 0 {
+		// Likewise for the ingress capability: a row, off and with an empty policy.
+		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) SELECT installation_id,'ingress.webhook',0,'{}',policy_revision,review_plan_id,created_ms,updated_ms FROM app_platform_capability_grants WHERE installation_id=? LIMIT 1`, lease.installationID)
+	}
 	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=?,target_release_sha256=? WHERE id=?`, string(encoded), digest, release.sha256, planID)
 	mustExec(t, s.st, `UPDATE app_platform_operations SET managed=1,request_sha256=? WHERE id=?`, platformDigest(request), lease.id)
 	mustExec(t, s.st, `UPDATE app_platform_installations SET runtime_id=? WHERE id=?`, runtime.id, lease.installationID)

@@ -612,7 +612,7 @@ the text above:
 - Contract: `machine.read` (optional, needs a backend, never required) and the
   descriptor `machine` block, in the source schema and the generated Go and
   TypeScript products (`internal/appplatform/descriptor_machine.go` validates the
-  block; the optional capability list now has 14 entries).
+  block; the optional capability list now has 16 entries).
 - Formats (`internal/appplatform/machine.go`): the policy
   `portal.machine-read-policy/1-dev.1`, the query canonicalisation shared with 179
   (bounds 256 bytes per value, 1,024 in total, 16 names), the `pmr_` token
@@ -623,7 +623,7 @@ the text above:
 - Reserved route space: `ValidBackendRequestData` judges the DECODED path
   (`backendRequestSpace`: decoded twice, no `;` in either spelling, case-insensitive,
   no dot or empty segment; these refusals apply to a path that is in, or after
-  normalisation would reach, the public, machine or handshake space, and an ordinary
+  normalisation would reach, the public, ingress, machine or handshake space, and an ordinary
   viewer path keeps its spelling). A `mch.` token is valid only on a bodiless GET in the
   exact lower-case `/v1/machine/` spelling; a `pub.` token only in `/v1/public/`; a
   viewer token in neither (Q11). The runner checks claims against the request
@@ -697,6 +697,10 @@ the text above:
   cleanly; `anonymousMachine` is a second field beside its `anonymousIngress`, and
   `platformReadMachineGrant` is called from the same two places in
   `platformBackendReadTx` as its `platformReadAnonymousGrant`.
+- That merge is done: the ingress branch is on main, `backendRequestSpace` keeps this
+  branch's rule (strict spellings only where a path reaches the public, ingress,
+  machine or handshake space), so main's test that refused a semicolon on every path
+  now uses reserved-space paths, and an ordinary viewer path keeps its spelling.
 
 **Apps side (not part of this change)**
 

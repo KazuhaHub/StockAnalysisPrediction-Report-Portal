@@ -182,6 +182,8 @@ type platformPublicState struct {
 
 	clients       platformPublicLimiter
 	installations platformPublicLimiter
+	// slots caps the concurrent light authority reads.
+	slots platformAuthoritySlots
 }
 
 type platformPublicFailure struct {

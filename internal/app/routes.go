@@ -508,8 +508,13 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-tokens", s.apiPlatformMachineTokenCreate)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-tokens/{handle}/revoke", s.apiPlatformMachineTokenRevoke)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/machine-tokens/{handle}/rotate", s.apiPlatformMachineTokenRotate)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/ingress", s.apiPlatformIngressPreview)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/ingress", s.apiPlatformIngressGrant)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/capability-policy/plan", s.apiPlatformCapabilityPolicyPlan)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/capability-policy-reviews/{id}", s.apiPlatformCapabilityPolicyConsume)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/postgres-policy", s.apiPlatformPostgresPolicyPreview)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/postgres-policy/plan", s.apiPlatformPostgresPolicyPlan)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/postgres-policy/consume", s.apiPlatformPostgresPolicyConsume)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/catalogue", s.apiPlatformMarketCatalogue)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/stage", s.apiPlatformMarketStage)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/offline", s.apiPlatformMarketOffline)
@@ -563,6 +568,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.machine(mux, "GET /machine/apps/{installation}/data/{route}", s.machineAppData)
 	s.machine(mux, "GET /machine/apps/{installation}/openapi.json", s.machineOpenAPI)
 	s.machine(mux, "GET /machine/{rest...}", s.machineOther)
+	// Authenticated inbound ingress (doc 180). POST only, signed by the sender, never a session.
+	s.public(mux, "POST /ingress/apps/{installation}/{route}/{endpoint}", s.ingressRequest)
 
 	// ---- Outbound event webhooks (extension point; see docs/adr/0002-extension-architecture.md) ----
 	s.admin(mux, "GET /api/admin/webhooks", s.apiWebhooks)

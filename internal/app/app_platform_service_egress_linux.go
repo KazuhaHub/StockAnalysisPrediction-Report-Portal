@@ -22,6 +22,11 @@ func (platformServiceEgressRunner) Open(ctx context.Context, e platformRuntimeEn
 	return transport.OpenControllerServiceEgress(ctx, e.path, e.controllerUID, e.controllerGID, raw, signature, a, descriptor)
 }
 
+// QueryPostgres asks the runner whether it serves the PostgreSQL probe (doc 178).
+func (platformServiceEgressRunner) QueryPostgres(ctx context.Context, e platformRuntimeEndpoint) (transport.PostgresProbeProfile, error) {
+	return transport.QueryControllerPostgresProbe(ctx, e.path, e.controllerUID, e.controllerGID)
+}
+
 func newPlatformServiceEgressRunner() platformServiceEgressTransport {
 	return platformServiceEgressRunner{}
 }
