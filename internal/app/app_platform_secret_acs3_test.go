@@ -89,6 +89,12 @@ func testPlatformACS3BindingReview(t *testing.T, pg bool) {
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) != before {
 		t.Fatal("a refused review left a plan")
 	}
+	// An AccessKey value is never reviewed as a bearer or API-key header: it would be sent whole.
+	for _, operation := range []string{"http_bearer", "http_api_key"} {
+		if _, err := s.createPlatformSecretBindingReviewWith(admin, installation, "qwen-billing", credential.ID, operation, "", nil); err == nil {
+			t.Fatalf("an AccessKey credential was reviewed as %s", operation)
+		}
+	}
 	// An action list on another operation is refused.
 	if _, err := s.createPlatformSecretBindingReviewWith(admin, installation, "qwen-billing", credential.ID, "http_bearer", "", acs3Pairs("A@2017-12-14")); err == nil {
 		t.Fatal("actions accepted on http_bearer")

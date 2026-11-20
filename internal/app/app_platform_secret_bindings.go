@@ -249,6 +249,11 @@ func (s *Server) createPlatformSecretBindingReviewWith(session platformActorSess
 			if err := s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String); err != nil {
 				return err
 			}
+		} else if operation == "http_bearer" || operation == "http_api_key" {
+			// An AccessKey would be sent whole as a header value: refuse that pairing.
+			if s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String) == nil {
+				return errPlatformManagementInput
+			}
 		}
 		bindingID, err := platformNewUUID()
 		if err != nil {

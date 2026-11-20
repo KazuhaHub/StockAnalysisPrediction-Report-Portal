@@ -275,6 +275,11 @@ func (s *Server) apiPlatformNetworkStream(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer clear(request.body)
+	if request.signing != (appplatform.SigningRequest{}) {
+		// A stream carries no signing; never send it unsigned and without its credential.
+		jsonErrorCode(w, 400, "app_platform_invalid_request", "invalid application request")
+		return
+	}
 	streamWriter, err := newPlatformNetworkStreamWriter(w)
 	if err != nil {
 		platformDocumentFailure(w)

@@ -192,13 +192,14 @@ func acs3Target(target string) (host, path, query string, err error) {
 		return "", "", "", ErrInvalidACS3
 	}
 	path = u.EscapedPath()
-	if path == "" {
-		path = "/"
-	}
 	// The path the runner sends is u.RequestURI's: refuse a path whose encoding is
-	// not already the canonical one, so the signed bytes are the sent bytes.
+	// not already the canonical one, so the signed bytes are the sent bytes. An empty
+	// path is sent, and signed, as "/".
 	if acs3Escape(u.Path, true) != path {
 		return "", "", "", ErrInvalidACS3
+	}
+	if path == "" {
+		path = "/"
 	}
 	return u.Host, path, u.RawQuery, nil
 }
@@ -228,7 +229,8 @@ func ValidACS3AccessKeySecret(secret []byte) bool {
 	return len(secret) >= 1 && len(secret) <= ACS3MaxAccessKeySecretBytes && acs3PrintableASCII(secret)
 }
 func ValidACS3SecurityToken(token []byte) bool {
-	return len(token) <= ACS3MaxSecurityTokenBytes && acs3PrintableASCII(token)
+	// A token with an edge space would be signed trimmed and then fail the shape check.
+	return len(token) <= ACS3MaxSecurityTokenBytes && acs3PrintableASCII(token) && (len(token) == 0 || token[0] != ' ' && token[len(token)-1] != ' ')
 }
 
 func acs3Hex(sum [32]byte) string { return hex.EncodeToString(sum[:]) }

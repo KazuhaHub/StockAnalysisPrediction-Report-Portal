@@ -3,6 +3,7 @@ package appplatform
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDecodeSigningRequest(t *testing.T) {
@@ -111,4 +112,27 @@ func FuzzParseACS3Credential(f *testing.F) {
 			t.Fatal("Clear kept the values")
 		}
 	})
+}
+
+// An empty path is "/" (doc 177 section 3.3), and a token that would be trimmed when signed is refused.
+func TestACS3EmptyPathAndPaddedToken(t *testing.T) {
+	in := ACS3Input{Method: "POST", Target: "https://business.aliyuncs.com", BodySHA256: acs3SHAOf(""), Action: "QueryAccountBalance", Version: "2017-12-14",
+		Date: time.Date(2026, 11, 17, 8, 30, 15, 0, time.UTC), Nonce: strings.Repeat("ab", 16), AccessKeyID: "id"}
+	bare, err := ACS3Sign(in, []byte("secret"))
+	if err != nil {
+		t.Fatal("empty path refused:", err)
+	}
+	in.Target = "https://business.aliyuncs.com/"
+	slash, err := ACS3Sign(in, []byte("secret"))
+	if err != nil || string(ACS3HeaderValue(bare, "authorization")) != string(ACS3HeaderValue(slash, "authorization")) {
+		t.Fatal("empty path and / differ", err)
+	}
+	if !ValidACS3Target("https://host?A=b") {
+		t.Fatal("empty path with a query refused")
+	}
+	for _, token := range []string{" tok", "tok "} {
+		if ValidACS3SecurityToken([]byte(token)) {
+			t.Fatalf("padded token %q accepted", token)
+		}
+	}
 }

@@ -119,6 +119,15 @@ func testPlatformNetworkSignedIntent(t *testing.T, pg bool) {
 			t.Fatal(name, "reached the custody")
 		}
 	}
+	// A target outside the reviewed network policy is refused before the credential is opened.
+	before = platformCredentialOpenCount.Load()
+	if i, err := s.preparePlatformNetworkSigned(context.Background(), admin, installation, binding, "GET", "https://evil.example.net/v1/x", "application/json", "", "", signing, body); err == nil {
+		i.Close()
+		t.Fatal("an off-policy target was signed")
+	}
+	if platformCredentialOpenCount.Load() != before {
+		t.Fatal("an off-policy target reached the custody")
+	}
 	acs3Activate(t, s, admin, installation, credential, platformPrincipalsServiceOnly, "QueryAccountBalance@2017-12-14")
 	before = platformCredentialOpenCount.Load()
 	if i, err := prepare(signing, ""); err == nil {

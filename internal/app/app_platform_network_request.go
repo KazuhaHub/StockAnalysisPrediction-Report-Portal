@@ -216,6 +216,11 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			}
 			policySHA = policy.SHA256
 			duration = policy.Policy.Deadline
+			// A call that names a credential is judged against the reviewed policy before the
+			// credential is opened, as a background call is.
+			if (credential != "" || signed) && appplatform.ValidateHTTPPolicyTarget(policy.Policy, method, target) != nil {
+				return errAppPlatformNetworkUnavailable
+			}
 		}
 		maxLifetime := platformNetworkRequestLifetime
 		if stream {
