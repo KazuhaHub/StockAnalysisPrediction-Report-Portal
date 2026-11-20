@@ -131,6 +131,47 @@ func (p *NetworkPool) DoBackground(ctx context.Context, raw, signature, body []b
 	return p.do(ctx, raw, signature, body, a, true)
 }
 
+// AcquireBackground takes one slot of the background share and one of the pool, for background work
+// that does not run through an HTTP executor (the PostgreSQL liveness probe, doc 178). It is the
+// admission DoBackground applies, so both kinds of call draw on the same budget: a full share or a
+// full pool is ErrBusy, a pool with no background share ErrUnavailable. The caller must call the
+// returned function exactly once when its work ends.
+func (p *NetworkPool) AcquireBackground() (func(), error) {
+	if p == nil || p.slots == nil {
+		return nil, ErrDenied
+	}
+	if p.background == nil {
+		return nil, ErrUnavailable
+	}
+	select {
+	case p.background <- struct{}{}:
+	default:
+		return nil, ErrBusy
+	}
+	select {
+	case p.slots <- struct{}{}:
+	default:
+		<-p.background
+		return nil, ErrBusy
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-p.slots
+			<-p.background
+		})
+	}, nil
+}
+
+// PrivateNetworks is the runner allowlist the pool was built with and its digest.
+func (p *NetworkPool) PrivateNetworks() ([]appplatform.PrivateNetwork, string) {
+	networks := slices.Clone(p.networks)
+	for i := range networks {
+		networks[i].Ports = slices.Clone(networks[i].Ports)
+	}
+	return networks, p.networksSHA
+}
+
 func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a control.Authority, background bool) (HTTPResponse, error) {
 	var zero HTTPResponse
 	if p == nil || p.current == nil || p.slots == nil || ctx == nil {
@@ -172,8 +213,10 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 	defer verified.Clear()
 	command := verified.Command()
 	defer clear(command.CredentialValue)
+	defer command.ClearSignedHeaders()
 	view := verified.Command()
 	defer clear(view.CredentialValue)
+	defer view.ClearSignedHeaders()
 	policy, err := appplatform.ParseHTTPPolicyAny(command.PolicyRaw)
 	if err != nil {
 		return zero, ErrDenied

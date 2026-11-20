@@ -131,6 +131,55 @@ describe('AnnouncementPage', () => {
     expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '节点已恢复', enabled: true, display: 'strip' })
   })
 
+  // Variables are rendered in the preview and the list exactly as a reader would see them, with
+  // the full IANA zone; the stored text stays the template.
+  it('renders variables in the live preview and saves the template verbatim', async () => {
+    apiMock.get.mockResolvedValue({ items: [] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
+    const body = await screen.findByPlaceholderText('settings.announcementContentPlaceholder')
+    // user.type treats "{" as a key descriptor; paste puts the braces in literally.
+    await user.click(body)
+    await user.paste('Down at {{time:2026-11-20T14:00Z|Asia/Shanghai}}')
+    await waitFor(() =>
+      expect(document.querySelector('.rp-announce-item')?.textContent).toContain('2026-11-20 22:00 (Asia/Shanghai)'),
+    )
+
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ content: 'Down at {{time:2026-11-20T14:00Z|Asia/Shanghai}}' })
+  })
+
+  it('refuses to save a variable a reader could not render, naming the token', async () => {
+    apiMock.get.mockResolvedValue({ items: [] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
+    await user.click(await screen.findByPlaceholderText('settings.announcementContentPlaceholder'))
+    await user.paste('at {{time:tomorrow}}')
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+    expect(await screen.findByText('announcementAdmin.badVariable')).toBeTruthy()
+    expect(apiMock.post).not.toHaveBeenCalled()
+  })
+
+  it('inserts a variable at the cursor from the insert menu', async () => {
+    apiMock.get.mockResolvedValue({ items: [] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
+    const body = (await screen.findByPlaceholderText('settings.announcementContentPlaceholder')) as HTMLTextAreaElement
+    await user.click(body)
+    await user.paste('Welcome to ')
+    await user.click(screen.getByRole('button', { name: /announcementVars\.insert/ }))
+    await user.click(await screen.findByText('announcementVars.site'))
+    await waitFor(() => expect(body.value).toBe('Welcome to {{site}}'))
+  })
+
   // The display mode is a three-way choice now, not a popup boolean: popup-only row that never
   // appears in the band is a state the boolean could not express.
   it('saves the chosen display mode', async () => {

@@ -29,8 +29,9 @@ type platformBackendAccess[T platformBackendAccessIntent] struct {
 	account       platformActorAccount
 	policy, fence int64
 	activationID  string
-	// publicPolicy is the reviewed public.projection policy of an anonymous read (doc 179); empty
-	// for every access that has a session.
+	// publicPolicy is the reviewed public.projection policy of an anonymous read (doc 179), or the
+	// key of the ingress grant and endpoint binding of an authenticated inbound request (doc 180);
+	// empty for every access that has a session.
 	publicPolicy string
 }
 type platformManagedBackendAccess = platformBackendAccess[platformBackendDeliveryIntent]
@@ -170,7 +171,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	// An anonymous public read (doc 179) has no account, audience or OU: it needs neither the OU
 	// graph lock nor a session, and it must show the public.projection grant instead.
-	anonymous := session.anonymousPublic
+	anonymous := session.anonymousPublic || session.anonymousIngress != ""
 	if !anonymous {
 		if err := lockOUMutation(e); err != nil {
 			return zero, err
@@ -330,7 +331,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	var publicPolicy string
 	if anonymous {
 		var err error
-		if publicPolicy, err = platformReadPublicGrant(e, installationID, policy, parsed.Manifest, lock); err != nil {
+		if publicPolicy, err = platformReadAnonymousGrant(e, session, installationID, policy, parsed.Manifest, lock); err != nil {
 			return zero, fmt.Errorf("backend access public grant: %w", errAppPlatformLaunchUnavailable)
 		}
 	}
@@ -383,7 +384,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	}
 	if anonymous {
 		// A withdrawal or policy change that landed while the history was read refuses the read.
-		again, err := platformReadPublicGrant(e, installationID, policy, parsed.Manifest, lock)
+		again, err := platformReadAnonymousGrant(e, session, installationID, policy, parsed.Manifest, lock)
 		if err != nil || again != publicPolicy {
 			return zero, fmt.Errorf("backend access final public grant: %w", errAppPlatformLaunchUnavailable)
 		}

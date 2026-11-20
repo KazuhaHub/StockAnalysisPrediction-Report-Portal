@@ -96,6 +96,7 @@ func (a platformPublicAuthority) route(id string) (appplatform.PublicRoute, bool
 // readPlatformPublicLight is the one statement every anonymous request pays for.
 func (s *Server) readPlatformPublicLight(ctx context.Context, installation string) (platformPublicLight, error) {
 	var zero platformPublicLight
+	s.platformPublicLightReads.Add(1)
 	if !platformValidUUID(installation) {
 		return zero, errPlatformPublicNotFound
 	}

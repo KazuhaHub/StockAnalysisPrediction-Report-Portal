@@ -79,6 +79,7 @@ func (p *networkProvider) executeEgress(ctx context.Context, call *EgressCall, r
 	view := verified.Command()
 	id := view.RequestID
 	clear(view.CredentialValue)
+	view.ClearSignedHeaders()
 	p.mu.Lock()
 	if p.sessions[id] != nil || p.streamSessions[id] != nil {
 		p.mu.Unlock()

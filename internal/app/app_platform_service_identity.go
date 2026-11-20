@@ -24,7 +24,7 @@ type platformServiceFacts struct {
 
 func serviceResourceCapability(resource string) bool {
 	switch resource {
-	case "reports.read", "storage.files", "network.http", "notifications.publish", "events.subscribe", "tasks.schedule", "files.export", "secrets.use":
+	case "reports.read", "storage.files", "network.http", "network.postgres", "notifications.publish", "events.subscribe", "tasks.schedule", "files.export", "secrets.use":
 		return true
 	default:
 		return false
@@ -120,8 +120,10 @@ func loadPlatformServiceFactsLocked(e migExec, installation string, resources []
 			expectedGranted[capability.capability] = capability.granted
 		}
 		for _, resource := range resources {
+			// network.postgres is granted after install by its own review, so the install
+			// selection says nothing of it; its grant row is judged where it is read.
 			if !serviceResourceCapability(resource) ||
-				!expectedGranted[resource] {
+				(resource != platformCapabilityNetworkPostgres && !expectedGranted[resource]) {
 				return facts, errAppPlatformServiceUnavailable
 			}
 		}

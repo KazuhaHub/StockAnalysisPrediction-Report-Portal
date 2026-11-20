@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/broker"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
@@ -108,7 +109,7 @@ func writeAppError(w http.ResponseWriter, code string) {
 	writeAppJSON(w, broker.AppErrorStatus(code), broker.AppErrorBody(code), broker.AppErrorRetryAfter(code))
 }
 
-// ServeHTTP routes the three calls of portal.broker/1; everything else is an
+// ServeHTTP routes the calls of portal.broker/1; everything else is an
 // invalid request.
 func (in *egressInstall) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" || r.URL.Fragment != "" {
@@ -118,6 +119,8 @@ func (in *egressInstall) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/network/http":
 		in.handlePost(w, r, broker.MaxAppRequestBytes, in.network)
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/postgres/liveness":
+		in.handlePost(w, r, broker.MaxAppPostgresRequestBytes, in.postgres)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/notifications":
 		in.handlePost(w, r, broker.MaxAppNoticeBytes, in.notice)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/status":
@@ -231,6 +234,10 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 	defer clear(request.Body)
 	digest := sha256.Sum256(request.Body)
 	admitted := EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:]), Credential: request.Credential}
+	if request.Signing != (appplatform.SigningRequest{}) {
+		admitted.Credential = request.Signing.Credential
+		admitted.SigningScheme, admitted.SigningAction, admitted.SigningVersion = request.Signing.Scheme, request.Signing.Action, request.Signing.Version
+	}
 	// An input no admit frame can carry is invalid, and costs no rate token.
 	admit, err := EncodeEgressAdmit(admitted)
 	if err != nil {
@@ -245,7 +252,7 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 	defer done()
 	// Naming a binding needs a session that carries secrets.use. Portal is not
 	// asked: a session that never held the resource cannot use a credential.
-	if request.Credential != "" && !session.allows("secrets.use") {
+	if admitted.Credential != "" && !session.allows("secrets.use") {
 		writeAppError(w, broker.AppErrDenied)
 		return
 	}
@@ -320,6 +327,7 @@ func (in *egressInstall) run(ctx context.Context, session *egressSession, call *
 	defer verified.Clear()
 	command := verified.Command()
 	defer clear(command.CredentialValue)
+	defer command.ClearSignedHeaders()
 	if session.checkCommand(command, admit, body) != nil || !session.claim(command.RequestID) {
 		return zero, broker.ErrDenied
 	}
