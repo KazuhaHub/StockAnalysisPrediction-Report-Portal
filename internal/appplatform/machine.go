@@ -241,7 +241,7 @@ func ParseMachineClaims(token string) (MachineClaims, error) {
 		return zero, ErrMachineAssertion
 	}
 	again, _ := json.Marshal(c)
-	if !bytes.Equal(again, raw) || c.Version != 1 || c.Method != "GET" || c.Generation < 1 || !validMachineHandle(c.ClientID) || !ValidMachineLabel(c.ClientLabel) {
+	if !bytes.Equal(again, raw) || c.Version != 1 || c.Method != "GET" || c.Generation < 1 || !machineRouteIDPattern.MatchString(c.Route) || !machinePathPattern.MatchString(c.Path) || c.RequestID == "" || !validMachineHandle(c.ClientID) || !ValidMachineLabel(c.ClientLabel) {
 		return zero, ErrMachineAssertion
 	}
 	return c, nil
@@ -260,17 +260,14 @@ func VerifyMachineAssertion(s protocol.Signer, token, target string, now time.Ti
 	if !ok || err != nil || subtle.ConstantTimeCompare(mac, machineMAC(s.Key, encoded)) != 1 {
 		return zero, ErrMachineAssertion
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return zero, ErrMachineAssertion
-	}
-	var c MachineClaims
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
+	// The claims are decoded as strictly as the runner decodes them, then checked against what this
+	// verifier expects of its own installation and of the request it is answering.
+	c, err := ParseMachineClaims(token)
 	path, query, _ := strings.Cut(target, "?")
-	if d.Decode(&c) != nil || c.Version != 1 || c.KeyID != s.KeyID || c.Issuer != s.Issuer || c.Audience != s.Audience || c.AppID != s.AppID || c.InstanceID != s.InstanceID || c.BootID != s.BootID ||
-		c.Method != "GET" || c.Path != path || c.QueryDigest != MachineQueryDigest(query) || c.Generation < 1 || c.ExpiresAt-c.IssuedAt != int64(MachineAssertionLifetime/time.Second) ||
-		now.Unix() < c.IssuedAt-5 || now.Unix() >= c.ExpiresAt || !validMachineHandle(c.ClientID) || !ValidMachineLabel(c.ClientLabel) {
+	if err != nil || c.KeyID != s.KeyID || c.Issuer != s.Issuer || c.Audience != s.Audience || c.AppID != s.AppID || c.InstanceID != s.InstanceID || c.BootID != s.BootID ||
+		c.Installation == "" || c.Installation != strings.TrimPrefix(s.Audience, "portal.app/") ||
+		c.Path != path || c.QueryDigest != MachineQueryDigest(query) || c.ExpiresAt-c.IssuedAt != int64(MachineAssertionLifetime/time.Second) ||
+		now.Unix() < c.IssuedAt-5 || now.Unix() >= c.ExpiresAt {
 		return zero, ErrMachineAssertion
 	}
 	return c, nil

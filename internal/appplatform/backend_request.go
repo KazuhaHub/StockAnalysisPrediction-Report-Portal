@@ -95,6 +95,51 @@ func ValidBackendResponse(status int, body []byte) bool {
 // reports whether the path is clean: valid escapes, no empty segment except a trailing one, no "." or
 // ".." segment, so that no spelling of the path can hide its space.
 func backendRequestSpace(path string) (string, bool) {
+	space, clean := backendRequestSpaceStrict(path)
+	if clean || !pathReachesReservedSpace(path) {
+		// An ordinary path keeps every spelling it had before the reserved spaces existed; the
+		// strictness applies where a spelling could hide a reserved space.
+		return space, true
+	}
+	return "", false
+}
+
+// pathReachesReservedSpace reports whether any backend that normalises the path (decodes it twice,
+// ignores case, drops path parameters after ";", empty and "." segments and resolves "..") would
+// route it into a reserved space or the handshake. It errs towards yes: it decodes as far as it can.
+func pathReachesReservedSpace(path string) bool {
+	decoded, _, _ := strings.Cut(path, "?")
+	for range 2 {
+		next, err := url.PathUnescape(decoded)
+		if err != nil {
+			break
+		}
+		decoded = next
+	}
+	var kept []string
+	for _, segment := range strings.Split(strings.ToLower(decoded), "/") {
+		segment, _, _ = strings.Cut(segment, ";")
+		switch segment {
+		case "", ".":
+		case "..":
+			if len(kept) > 0 {
+				kept = kept[:len(kept)-1]
+			}
+		default:
+			kept = append(kept, segment)
+		}
+	}
+	if len(kept) < 2 || kept[0] != "v1" {
+		return false
+	}
+	switch kept[1] {
+	case "public", "machine", "handshake":
+		return true
+	}
+	return false
+}
+
+func backendRequestSpaceStrict(path string) (string, bool) {
 	decoded, _, _ := strings.Cut(path, "?")
 	for range 2 {
 		// A semicolon is a path-parameter separator to a backend that is not Go's, so it is never

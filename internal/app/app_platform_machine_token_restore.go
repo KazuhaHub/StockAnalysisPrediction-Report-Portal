@@ -35,8 +35,9 @@ func capturePlatformMachineTokens(e migExec, prior *platformRestorePrior) error 
 	return rows.Err()
 }
 
-// restorePlatformMachineTokenFloors re-applies every live revocation over the restored table and
-// returns how many live tokens the restored database does not hold.
+// restorePlatformMachineTokenFloors re-applies every live revocation, and every expiry the live token
+// had been shortened to (a rotation retires the old token that way), over the restored table. It
+// returns how many tokens that could still authorise the restored database does not hold.
 func restorePlatformMachineTokenFloors(e migExec, prior platformRestorePrior, now int64) (int, error) {
 	lost := 0
 	for _, f := range prior.machineTokens {
@@ -45,8 +46,11 @@ func restorePlatformMachineTokenFloors(e migExec, prior platformRestorePrior, no
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			if !f.revoked.Valid {
-				// Only an active token has to be recreated: a revoked one has nothing left to authorise.
-				lost++
+				// Only an active token has to be recreated: a revoked or an expired one has nothing
+				// left to authorise.
+				if f.expires > now {
+					lost++
+				}
 				continue
 			}
 			// The token is not in the backup. Its floor is kept when its installation is, and
@@ -64,7 +68,19 @@ func restorePlatformMachineTokenFloors(e migExec, prior platformRestorePrior, no
 			}
 		case err != nil:
 			return 0, err
-		case f.revoked.Valid:
+		default:
+			// The shorter of the two expiries stands: an older backup must not lengthen a token that a
+			// rotation has since retired.
+			if _, err := e.exec(`UPDATE app_platform_machine_tokens SET
+				revision=CASE WHEN expires_ms>? AND revision<? THEN ? ELSE revision END,
+				updated_ms=CASE WHEN expires_ms>? AND updated_ms<? THEN ? ELSE updated_ms END,
+				expires_ms=CASE WHEN expires_ms>? THEN ? ELSE expires_ms END WHERE id=?`,
+				f.expires, f.revision, f.revision, f.expires, now, now, f.expires, f.expires, f.id); err != nil {
+				return 0, err
+			}
+			if !f.revoked.Valid {
+				continue
+			}
 			if _, err := e.exec(`UPDATE app_platform_machine_tokens SET state='revoked',
 				revision=CASE WHEN revision<? THEN ? ELSE revision END,
 				revoked_ms=CASE WHEN revoked_ms IS NULL OR revoked_ms>? THEN ? ELSE revoked_ms END,

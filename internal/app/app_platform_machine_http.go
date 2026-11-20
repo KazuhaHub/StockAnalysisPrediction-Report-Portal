@@ -133,10 +133,16 @@ func (s *Server) flushPlatformMachineSummary(installation string) {
 }
 
 // sweepPlatformMachineExpiry writes one audit row for each token whose expiry passed in the last month
-// and has none yet. Requests check expires_ms themselves: the sweep is only for reporting, and a
+// and has none yet; a token retired by a rotation is skipped, the rotation audit having reported it. Requests check expires_ms themselves: the sweep is only for reporting, and a
 // restart repeats nothing because the audit row is the record.
 func (s *Server) sweepPlatformMachineExpiry(now time.Time) {
-	rows, err := s.st.query(`SELECT installation_id,handle,label,expires_ms FROM app_platform_machine_tokens WHERE state='active' AND expires_ms<=? AND expires_ms>? ORDER BY expires_ms LIMIT 100`, now.UnixMilli(), now.Add(-30*platformMachineDay).UnixMilli())
+	// A token that already has an expiry audit, or that a rotation retired (the rotation audit names
+	// its handle), is not read again: otherwise the same oldest rows would fill the limit for ever and
+	// newer expiries would never be reported.
+	rows, err := s.st.query(`SELECT t.installation_id,t.handle,t.label,t.expires_ms FROM app_platform_machine_tokens t
+		WHERE t.state='active' AND t.expires_ms<=? AND t.expires_ms>?
+		AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.target_id=t.installation_id AND a.action IN (?,?) AND a.detail LIKE '%"handle":"'||t.handle||'"%')
+		ORDER BY t.expires_ms LIMIT 100`, now.UnixMilli(), now.Add(-30*platformMachineDay).UnixMilli(), platformMachineTokenExpiredAudit, platformMachineTokenRotatedAudit)
 	if err != nil {
 		log.Printf("app-platform machine token expiry: %v", err)
 		return
@@ -154,11 +160,6 @@ func (s *Server) sweepPlatformMachineExpiry(now time.Time) {
 	}
 	rows.Close()
 	for _, x := range due {
-		var n int
-		pattern := `%"handle":"` + x.handle + `"%`
-		if err := s.st.queryRow(`SELECT COUNT(*) FROM audit_log WHERE action=? AND target_id=? AND detail LIKE ?`, platformMachineTokenExpiredAudit, x.installation, pattern).Scan(&n); err != nil || n > 0 {
-			continue
-		}
 		detail, _ := json.Marshal(map[string]any{"handle": x.handle, "label": x.label, "expires_ms": x.expires})
 		if _, err := s.st.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,?,'app_platform_installation',?,?,'')`, now.UTC().Format(time.RFC3339), platformMachineTokenExpiredAudit, x.installation, string(detail)); err != nil {
 			log.Printf("app-platform machine token expiry audit: %v", err)
@@ -201,30 +202,42 @@ func (s *Server) machineAuthenticate(w http.ResponseWriter, r *http.Request) (*p
 	now := time.Now()
 	source := clientIP(r, s.trustedNets)
 	// 1. The ceiling that applies before anything is looked up, so the flood that is cheapest to send
-	// is the first to be shed.
-	if !s.platformMachine.clients.allow(platformPublicClientKey(source), platformMachineSourcePerMinute, time.Minute, now) {
+	// is the first to be shed. It counts the attempts that fail to authenticate, so a source that is
+	// guessing is held to it while a valid token's traffic is governed by the token's own limit
+	// (step 4): a token's configured rate is reachable from one address.
+	sourceKey := platformPublicClientKey(source)
+	if s.platformMachine.clients.exhausted(sourceKey, platformMachineSourcePerMinute, now) {
 		platformMachineFail(w, 429, "rate_limited", 60)
 		s.recordPlatformMachine(nil, "rate_source", 0)
 		return nil, false
 	}
-	s.recordPlatformMachine(nil, "request_unauthenticated", 0)
+	reject := func(token *platformMachineToken, class string) {
+		s.platformMachine.clients.allow(sourceKey, platformMachineSourcePerMinute, time.Minute, now)
+		s.recordPlatformMachine(nil, "request_unauthenticated", 0)
+		var c *platformMachineClient
+		if token != nil {
+			c = &platformMachineClient{token: *token, source: source}
+		}
+		s.recordPlatformMachine(c, class, 0)
+	}
 	// 2. Exactly one Authorization header, exactly "Bearer pmr_<handle>_<secret>". The Cookie header
 	// is never read.
 	values := r.Header.Values("Authorization")
 	if len(values) != 1 {
 		platformMachineFail(w, 401, "unauthorized", 0)
-		s.recordPlatformMachine(nil, "unauthorized", 0)
+		reject(nil, "unauthorized")
 		return nil, false
 	}
 	handle, secret, err := appplatform.ParseMachineAuthorization(values[0])
 	if err != nil {
 		platformMachineFail(w, 401, "unauthorized", 0)
-		s.recordPlatformMachine(nil, "unauthorized", 0)
+		reject(nil, "unauthorized")
 		return nil, false
 	}
 	// 3. One indexed read, bounded in concurrency because it is reachable before authentication.
 	if !s.platformMachine.slots.acquire() {
 		platformMachineFail(w, 503, "unavailable", 1)
+		s.platformMachine.clients.allow(sourceKey, platformMachineSourcePerMinute, time.Minute, now)
 		s.recordPlatformMachine(nil, "busy", 0)
 		return nil, false
 	}
@@ -246,9 +259,9 @@ func (s *Server) machineAuthenticate(w http.ResponseWriter, r *http.Request) (*p
 		platformMachineFail(w, 401, "unauthorized", 0)
 		if token.ID != "" && reason != "unauthorized" {
 			// The secret was right, so the refusal is attributable to the token; the caller is told nothing.
-			s.recordPlatformMachine(&platformMachineClient{token: token, source: source}, reason, 0)
+			reject(&token, reason)
 		} else {
-			s.recordPlatformMachine(nil, "unauthorized", 0)
+			reject(nil, "unauthorized")
 		}
 		return nil, false
 	}

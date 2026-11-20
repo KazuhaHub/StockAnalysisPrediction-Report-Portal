@@ -1,6 +1,8 @@
 package appplatform
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -200,6 +202,58 @@ func TestBackendRequestSpacesAreExclusiveOnTheDecodedPath(t *testing.T) {
 	for _, c := range cases {
 		if ValidBackendRequestData(c.method, c.path, c.body, c.token) {
 			t.Errorf("accepted: %s", c.name)
+		}
+	}
+}
+
+// The strict spellings are refused where they could reach a reserved space, not on every path: an
+// ordinary viewer request keeps working.
+func TestOrdinaryViewerPathsKeepTheirSpellings(t *testing.T) {
+	signer, now := testPublicSigner(), time.Unix(1_800_000_000, 0)
+	viewer, _ := signer.Sign("GET", "/v1/app/x", nil, protocol.Viewer{Subject: "s", Role: "user", OUs: []string{"o"}}, now)
+	for _, path := range []string{"/v1/app/x;y=1", "/v1/app/%3bx", "/v1/app/a%252fb"} {
+		if !ValidBackendRequestData("GET", path, nil, viewer) {
+			t.Errorf("refused an ordinary path: %s", path)
+		}
+	}
+	for _, path := range []string{"/v1/%6Dachine/x", "/v1/machine;x/", "/v1/app/..;/machine/x", "/v1/app/x;/../../public/y", "/v1/app/../handshake", "/v1/./machine/x"} {
+		if ValidBackendRequestData("GET", path, nil, viewer) {
+			t.Errorf("accepted: %s", path)
+		}
+	}
+	if _, clean := backendRequestSpace("/V1/Machine;x/"); clean {
+		t.Error("an upper-case spelling with a path parameter was judged clean")
+	}
+}
+
+// The reference verifier decodes strictly and checks the installation, route and request ID: a token
+// with a valid MAC but claims no Portal would sign is refused.
+func TestVerifyMachineAssertionIsStrictAboutClaims(t *testing.T) {
+	signer, now := testPublicSigner(), time.Unix(1_800_000_000, 0)
+	good, err := SignMachineAssertion(signer, 1, "bars", "/v1/machine/bars", "", "abcdefghijkl", "Dify", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := ParseMachineClaims(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remac := func(raw []byte) string {
+		encoded := base64.RawURLEncoding.EncodeToString(raw)
+		return MachineAssertionPrefix + encoded + "." + base64.RawURLEncoding.EncodeToString(machineMAC(signer.Key, encoded))
+	}
+	marshal := func(c MachineClaims) []byte { raw, _ := json.Marshal(c); return raw }
+	if _, err := VerifyMachineAssertion(signer, remac(marshal(claims)), "/v1/machine/bars", now); err != nil {
+		t.Fatal("a re-signed canonical token was refused", err)
+	}
+	other, badRoute, noRID := claims, claims, claims
+	other.Installation = "someone-else"
+	badRoute.Route = "Bars"
+	noRID.RequestID = ""
+	spaced := append([]byte(" "), marshal(claims)...)
+	for name, token := range map[string]string{"other installation": remac(marshal(other)), "bad route": remac(marshal(badRoute)), "no request id": remac(marshal(noRID)), "non canonical": remac(spaced)} {
+		if _, err := VerifyMachineAssertion(signer, token, "/v1/machine/bars", now); err == nil {
+			t.Errorf("accepted: %s", name)
 		}
 	}
 }

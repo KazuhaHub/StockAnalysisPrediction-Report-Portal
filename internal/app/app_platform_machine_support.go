@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 // Whether the runner forwards machine assertions (doc 183 section 4.7) is asked with a separate runner
@@ -25,8 +27,9 @@ type platformMachineSupportState struct {
 	supported bool
 }
 
-// machineRunnerSupport reports whether the runner at endpoint serves machine assertions. A failure to
-// ask is "no" for a short time, not a conclusion about the runner.
+// machineRunnerSupport reports whether the runner at endpoint serves machine assertions. Only a
+// definite answer is remembered: a failure to ask (a transport error, a timeout) is "no" for that one
+// request and says nothing about the runner.
 func (s *Server) machineRunnerSupport(ctx context.Context, endpoint platformRuntimeEndpoint, now time.Time) bool {
 	s.platformMachine.mu.Lock()
 	cached := s.platformMachine.support
@@ -42,6 +45,9 @@ func (s *Server) machineRunnerSupport(ctx context.Context, endpoint platformRunt
 	defer cancel()
 	got, err := query(ctx, endpoint)
 	supported := err == nil && got.Supports()
+	if err != nil && !errors.Is(err, transport.ErrMachineSupportUnsupported) {
+		return false
+	}
 	ttl := platformMachineSupportTTL
 	if !supported {
 		ttl = platformMachineSupportFailTTL

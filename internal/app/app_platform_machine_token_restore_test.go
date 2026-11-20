@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testMachineTokenRestore(t *testing.T, pg bool) {
@@ -24,7 +25,7 @@ func testMachineTokenRestore(t *testing.T, pg bool) {
 	if err := machineTokenInsert(st, platformFixtureID(73), inst, "cccccccccccc", sha("c"), "revoked", 600, 90_000); err != nil {
 		t.Fatal(err)
 	}
-	if err := machineTokenInsert(st, platformFixtureID(74), inst, "dddddddddddd", sha("d"), "active", nil, 90_000); err != nil {
+	if err := machineTokenInsert(st, platformFixtureID(74), inst, "dddddddddddd", sha("d"), "active", nil, time.Now().Add(time.Hour).UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := st.restoreFrom(bytes.NewReader(backup), true)

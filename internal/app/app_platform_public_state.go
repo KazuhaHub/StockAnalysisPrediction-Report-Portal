@@ -80,6 +80,22 @@ func (l *platformPublicLimiter) size() int {
 	return n
 }
 
+// exhausted reports whether key has used its allowance in the current window, without using any.
+func (l *platformPublicLimiter) exhausted(key string, limit int, now time.Time) bool {
+	l.init()
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	sh := l.shards[int(h.Sum32())%len(l.shards)]
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	el := sh.recs[key]
+	if el == nil {
+		return false
+	}
+	r := el.Value.(*platformPublicRec)
+	return !now.After(r.resetAt) && r.n >= limit
+}
+
 func (l *platformPublicLimiter) allow(key string, limit int, window time.Duration, now time.Time) bool {
 	l.init()
 	h := fnv.New32a()
