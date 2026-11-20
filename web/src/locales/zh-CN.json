@@ -3616,6 +3616,8 @@
   "appCredentials.reviewBinding": "审核绑定",
   "appCredentials.confirmBinding": "确认凭据绑定",
   "appCredentials.confirmBindingBody": "应用只能通过已审核的网络策略收到这个固定请求头。",
+  "appCredentials.bindingTarget": "仅用于发往 {{origin}} 的请求",
+  "appCredentials.target": "网络目标",
   "appCredentials.approve": "批准绑定",
   "appCredentials.rotationConfirm": "轮换这个凭据？",
   "appCredentials.affected": "{{count}} 个应用绑定需要重新审核。",

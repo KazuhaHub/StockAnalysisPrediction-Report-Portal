@@ -251,7 +251,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			result.secretBinding = use
 		}
 		if credential != "" {
-			use, header, value, err := s.resolvePlatformSecretBindingCommand(e, installation, credential)
+			use, header, value, err := s.resolvePlatformSecretBindingCommand(e, installation, credential, platformBindingDestination{method: method, url: target})
 			if err != nil {
 				clear(value)
 				return errAppPlatformNetworkUnavailable
@@ -346,7 +346,7 @@ func (s *Server) withPlatformNetworkRequestCurrent(ctx context.Context, session 
 			if err != nil {
 				return errAppPlatformNetworkUnavailable
 			}
-			use, _, err := loadPlatformSecretBindingUse(e, installation, i.command.CredentialName, facts)
+			use, _, err := loadPlatformSecretBindingUse(e, installation, i.command.CredentialName, facts, platformBindingDestination{method: i.command.Method, url: i.command.URL})
 			if err != nil || use != i.secretBinding {
 				return errAppPlatformNetworkUnavailable
 			}

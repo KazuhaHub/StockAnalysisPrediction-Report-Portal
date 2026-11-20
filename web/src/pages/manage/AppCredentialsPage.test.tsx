@@ -108,6 +108,7 @@ describe('application credential settings', () => {
           credential_label: credential.label,
           operation: 'http_bearer',
           network_policy_sha256: 'b'.repeat(64),
+          network_target: 'https://api.example.com',
         },
       })
       .mockResolvedValueOnce({ ...binding, name: 'second-api' })
@@ -119,6 +120,7 @@ describe('application credential settings', () => {
     fireEvent.click(await screen.findByText('Upstream API', { selector: '.ant-select-item-option-content' }))
     await user.click(screen.getByRole('button', { name: 'appCredentials.reviewBinding' }))
     expect(await screen.findAllByText('appCredentials.confirmBinding')).toHaveLength(2)
+    expect(screen.getByText('appCredentials.bindingTarget:{"origin":"https://api.example.com"}')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'appCredentials.approve' }))
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenLastCalledWith(
@@ -218,6 +220,80 @@ describe('application credential settings', () => {
       principals: ['viewer'],
     })
     expect(screen.queryByText('appCredentials.backgroundDisclosure')).toBeNull()
+  })
+
+  it('shows the target each binding is for', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/hello/secret-bindings')
+        return { bindings: [{ ...binding, network_target: 'https://api.example.com', network_target_sha256: 'c'.repeat(64) }] }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    expect(screen.getByText('https://api.example.com')).toBeTruthy()
+  })
+
+  it('asks for the target when the grant has several and sends it', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/hello/secret-bindings')
+        return {
+          bindings: [],
+          targets: [
+            { id: 'default', origin: 'https://api.example.com' },
+            { id: 'other', origin: 'https://other.example.com' },
+          ],
+        }
+      throw new Error(`unexpected ${url}`)
+    })
+    apiMock.post.mockResolvedValueOnce({
+      installation_id: '00000000-0000-4000-8000-000000000105',
+      plan_id: '00000000-0000-4000-8000-000000000116',
+      plan_sha256: 'a'.repeat(64),
+      review: { name: 'second-api', credential_id: credential.id, credential_label: credential.label, operation: 'http_bearer', network_policy_sha256: 'b'.repeat(64), network_target: 'https://other.example.com', principals: ['viewer'] },
+    })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    await user.type(screen.getByLabelText('appCredentials.name'), 'second-api')
+    await user.click(screen.getByLabelText('appCredentials.credential'))
+    fireEvent.click(await screen.findByText('Upstream API', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByLabelText('appCredentials.target'))
+    fireEvent.click(await screen.findByText('other · https://other.example.com', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByRole('button', { name: 'appCredentials.reviewBinding' }))
+    await screen.findAllByText('appCredentials.confirmBinding')
+    expect(apiMock.post).toHaveBeenCalledWith('/api/admin/app-platform/apps/hello/secret-bindings/plan', {
+      name: 'second-api',
+      credential_id: credential.id,
+      operation: 'http_bearer',
+      principals: ['viewer'],
+      target: 'other',
+    })
+  })
+
+  it('offers no target choice when the grant has one', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/hello/secret-bindings')
+        return { bindings: [], targets: [{ id: 'default', origin: 'https://api.example.com' }] }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    expect(screen.queryByLabelText('appCredentials.target')).toBeNull()
   })
 
   it('lets the administrator change who may use an active binding', async () => {

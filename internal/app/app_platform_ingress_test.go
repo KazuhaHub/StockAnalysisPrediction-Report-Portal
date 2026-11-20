@@ -125,7 +125,7 @@ func (e *platformIngressEnv) bind(t *testing.T, name, route string, secret []byt
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := e.s.createPlatformSecretBindingReviewFull(e.actor, e.id, name, credential.ID, "ingress_hmac_sha256", "", nil, route)
+	plan, err := e.s.createPlatformSecretBindingReviewFull(e.actor, e.id, name, credential.ID, "ingress_hmac_sha256", "", "", nil, route)
 	if err != nil {
 		t.Fatal("review:", err)
 	}
@@ -653,7 +653,7 @@ func TestIngressBindingReviewAndPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 		review := func(credential, name, operation, principals, route string) error {
-			_, err := e.s.createPlatformSecretBindingReviewFull(e.actor, e.id, name, credential, operation, principals, nil, route)
+			_, err := e.s.createPlatformSecretBindingReviewFull(e.actor, e.id, name, credential, operation, principals, "", nil, route)
 			return err
 		}
 		// Not before the capability is granted.
@@ -675,7 +675,7 @@ func TestIngressBindingReviewAndPolicy(t *testing.T) {
 				t.Fatalf("%s was reviewed", name)
 			}
 		}
-		plan, err := e.s.createPlatformSecretBindingReviewFull(e.actor, e.id, "api", good.ID, "ingress_hmac_sha256", "", nil, "heartbeat")
+		plan, err := e.s.createPlatformSecretBindingReviewFull(e.actor, e.id, "api", good.ID, "ingress_hmac_sha256", "", "", nil, "heartbeat")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -694,7 +694,7 @@ func TestIngressBindingReviewAndPolicy(t *testing.T) {
 		// An endpoint is not a credential anybody can use as a header.
 		facts, err := loadPlatformSecretBindingFacts(e.s.st.poolExec(), e.id, false)
 		if err == nil {
-			if _, _, err := loadPlatformSecretBindingUseFor(e.s.st.poolExec(), e.id, "api", facts, platformPrincipalService); err == nil {
+			if _, _, err := loadPlatformSecretBindingUseFor(e.s.st.poolExec(), e.id, "api", facts, platformPrincipalService, platformBindingDestination{}); err == nil {
 				t.Fatal("an ingress binding was usable as an outbound credential")
 			}
 		}

@@ -90,7 +90,7 @@ func (s *Server) signPlatformACS3Facts(e migExec, installation, principal string
 	if !call.wellFormed() {
 		return platformSecretBindingUse{}, nil, errAppPlatformCredentialUnavailable
 	}
-	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, call.name, facts, principal)
+	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, call.name, facts, principal, platformBindingDestination{method: call.method, url: call.target})
 	if err != nil {
 		return platformSecretBindingUse{}, nil, err
 	}
