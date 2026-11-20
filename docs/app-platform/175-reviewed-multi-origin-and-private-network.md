@@ -283,6 +283,11 @@ schema change. Evidence is against `main` at the time of adoption.
     accepting 2-dev.8 (`web/src/lib/bridge-v2.ts:51`).
 12. The interim public-projection route (doc 179) moves onto this review later,
     as a follow-up.
+13. Kernel-kind bridge detection also matches a bridge that carries the host's
+    own LAN (netplan `br0`, Proxmox `vmbr0`), so on such hosts an allowlist
+    entry inside that LAN is refused at start and denied per call. This fails
+    closed by design; serving targets on the host's own bridged LAN would need
+    an explicit, separately reviewed operator opt-out, which is not provided.
 
 Per-target narrowing limits are adopted: a target may carry `request_bytes`,
 `response_bytes` or `deadline_ms`, present only when strictly lower than the

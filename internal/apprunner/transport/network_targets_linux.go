@@ -106,9 +106,11 @@ func queryNetworkTargetsOnce(parent context.Context, path string, profile endpoi
 	}
 	var header [44]byte
 	if _, err := io.ReadFull(conn, header[:]); err != nil {
-		// A runner that does not know the query reads only the eight magic bytes and
-		// closes with the nonce still unread, which the kernel reports as a reset
-		// rather than a clean end of stream.
+		// A drop before a complete reply header (nothing at all, or a partial
+		// header) is retried by the caller and only a second one is concluded
+		// unsupported. A runner that does not know the query reads only the eight
+		// magic bytes and closes with the nonce still unread, which the kernel
+		// reports as a reset rather than a clean end of stream.
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
 			return zero, errNetworkTargetsDropped
 		}
