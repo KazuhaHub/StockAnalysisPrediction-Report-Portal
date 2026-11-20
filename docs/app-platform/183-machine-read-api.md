@@ -622,7 +622,9 @@ the text above:
   (`rid` for the request ID, as written there; 179's public claims call it `jti`).
 - Reserved route space: `ValidBackendRequestData` judges the DECODED path
   (`backendRequestSpace`: decoded twice, no `;` in either spelling, case-insensitive,
-  no dot or empty segment). A `mch.` token is valid only on a bodiless GET in the
+  no dot or empty segment; these refusals apply to a path that is in, or after
+  normalisation would reach, the public, machine or handshake space, and an ordinary
+  viewer path keeps its spelling). A `mch.` token is valid only on a bodiless GET in the
   exact lower-case `/v1/machine/` spelling; a `pub.` token only in `/v1/public/`; a
   viewer token in neither (Q11). The runner checks claims against the request
   (`validateMachineAssertionData`) and the driver picks the header from the prefix.
@@ -630,13 +632,15 @@ the text above:
   (`portal.runner.machine-assertions/1-dev.1`), modelled on the network targets
   query, with one retry before a runner is concluded unsupported. Enabling is
   refused (409) and requests are 503 against a runner that does not answer; the
-  answer is remembered for 60 seconds (10 after a failure).
+  definite answer is remembered for 60 seconds (10 when it is "unsupported"); a
+  failure to ask, such as a timeout, is not remembered.
 - Table `app_platform_machine_tokens` as migration 0023, DDL exactly as section 10
   (a test compares the generated DDL with the text of that section). Restore keeps
-  every live revocation with the earlier revocation time; a revoked token whose
+  every live revocation with the earlier revocation time, and the shorter of the live
+  and the restored expiry (a rotation retires the old token by shortening it); a revoked token whose
   installation is not in the backup is skipped rather than refusing the restore;
-  the restore report and the `restore` command say how many active tokens the
-  backup does not hold.
+  the restore report and the `restore` command say how many unexpired active
+  tokens the backup does not hold.
 - Tokens (`app_platform_machine_token.go`): create, rotate (grace 0 to 7 days,
   never lengthening the predecessor), revoke, list, last-used (at most once a
   minute), sixteen active per installation, expiry 1 to 365 days (the console
@@ -646,13 +650,16 @@ the text above:
   route class `authMachine` (never a session route), a global cap of 32
   concurrent pre-authentication database reads (the token lookup and the authority
   read, answered 503 beyond it), a sharded LRU limiter per source, per token and
-  per installation, an installation concurrency counter, exclusion from the
+  per installation (the per-source ceiling counts requests that fail to authenticate;
+  a valid token is held only to its own limit, so its configured rate is reachable
+  from one address), an installation concurrency counter, exclusion from the
   request log, no CORS, no cookie read, `no-store`.
 - OpenAPI 3.0.3 document (`app_platform_machine_openapi.go`), generated from the
   descriptor and the token's effective routes, with no backend call.
 - Audit: `machine_read_enabled`, `_policy_changed`, `_disabled`,
   `machine_token_created`, `_rotated`, `_revoked`, `_expired` (a sweep every ten
-  minutes; the audit row is the record, so a restart repeats nothing),
+  minutes; the audit row is the record, so a restart repeats nothing; a token
+  a rotation retired is reported by the rotation, not as expired),
   `machine_token_source` (once per token per day, the address in `detail`), and
   `machine_read_summary` per token per 10 minutes. Requests that do not
   authenticate are counted in one shared, address-free summary row.
