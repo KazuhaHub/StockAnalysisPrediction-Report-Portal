@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -340,6 +341,35 @@ func TestProxyForwarderEndToEndAgainstTheBroker(t *testing.T) {
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Fatalf("plain HTTP through the proxy: %d", resp.StatusCode)
+		}
+	}
+}
+
+// A burst of refusals to many hosts must not be sent at once: Portal holds each report's call until it has
+// written its audit row, and a session has a bounded number of calls open, so the runner paces them and the
+// session survives.
+func TestProxyReportBurstIsPacedAndTheSessionSurvives(t *testing.T) {
+	f := newEgrFixture(t)
+	f.proxySeams()
+	p := f.open(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+	const hosts = 40
+	for i := 0; i < hosts; i++ {
+		c, refusal := f.tunnel("1", fmt.Sprintf("h%d.example.com", i), 443)
+		c.Close()
+		if refusal != proxyforwarder.RefusalHostNotReviewed {
+			t.Fatalf("%q", refusal)
+		}
+	}
+	seen := map[string]bool{}
+	deadline := time.After(30 * time.Second)
+	for len(seen) < hosts {
+		select {
+		case report := <-p.reports:
+			seen[report.Host] = true
+		case <-p.mux.Done():
+			t.Fatal("the session ended during a burst of reports")
+		case <-deadline:
+			t.Fatalf("only %d of %d refusal reports arrived", len(seen), hosts)
 		}
 	}
 }

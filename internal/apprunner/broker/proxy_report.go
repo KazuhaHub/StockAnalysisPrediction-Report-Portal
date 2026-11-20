@@ -33,7 +33,7 @@ const (
 
 	proxyRefusalInterval = time.Minute
 	proxyUsageInterval   = 10 * time.Minute
-	proxyMaxRefusalKeys  = 256
+	proxyMaxRefusalKeys  = 64
 )
 
 // ProxyHostRollup is one host's activity in one hour. BytesIn is upstream to the

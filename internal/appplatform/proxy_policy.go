@@ -28,9 +28,9 @@ const ProxyCapability = "network.proxy"
 // signed session command and compared exactly, so a change is a format revision.
 const (
 	MaxProxyHosts = 64
-	// MaxProxyPolicyBytes bounds the canonical policy: 64 entries of at most
-	// 255 bytes, the quotes and commas, and the fixed members.
-	MaxProxyPolicyBytes = 20480
+	// MaxProxyPolicyBytes bounds the canonical policy to the grant row's policy_json column. A list of
+	// the longest entries can exceed it, and is then refused as input.
+	MaxProxyPolicyBytes = 16384
 	// ProxyDailyBytesMax is the daily budget per installation, both directions.
 	// A review may lower it, never raise it.
 	ProxyDailyBytesMax int64 = 2 << 30

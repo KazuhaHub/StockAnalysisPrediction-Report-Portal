@@ -76,6 +76,28 @@ func TestProxyPolicyCanonicalRoundTrip(t *testing.T) {
 	}
 }
 
+// The stored policy must fit the grant row's policy_json column (16384 bytes): a list of 64 of the longest
+// entries is refused as input, not left to fail as a database error at consume.
+func TestProxyPolicyFitsTheGrantColumn(t *testing.T) {
+	label := func(c byte) string { return strings.Repeat(string(c), 63) }
+	var longest []string
+	for i := 0; i < MaxProxyHosts; i++ {
+		longest = append(longest, label('a')+"."+label('b')+"."+label('c')+".x"+string(rune('a'+i/26))+string(rune('a'+i%26))+strings.Repeat("d", 58))
+	}
+	for _, host := range longest {
+		if len(host) != 253 || !ValidProxyHostEntry(host) {
+			t.Fatalf("test fixture host is %d bytes, valid=%v", len(host), ValidProxyHostEntry(host))
+		}
+	}
+	if _, err := CanonicalProxyPolicy(ProxyPolicy{Hosts: longest, DailyBytes: ProxyDailyBytesMax}); err == nil {
+		t.Fatal("a policy larger than the grant column was accepted")
+	}
+	raw, err := CanonicalProxyPolicy(ProxyPolicy{Hosts: longest[:60], DailyBytes: ProxyDailyBytesMax})
+	if err != nil || len(raw) > 16384 {
+		t.Fatalf("60 of the longest entries: %d bytes, %v", len(raw), err)
+	}
+}
+
 func TestProxyPolicyMatch(t *testing.T) {
 	p := ProxyPolicy{Hosts: []string{"*.eastmoney.com", "*.push2.eastmoney.com", "qt.gtimg.cn"}, DailyBytes: ProxyDailyBytesMax}
 	for host, want := range map[string]bool{

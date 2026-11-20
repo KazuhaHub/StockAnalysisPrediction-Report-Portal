@@ -9,7 +9,7 @@ import StatusTag from '../../components/StatusTag'
 // server computed, and only a confirmed review consumes it. Withdrawal is the same flow with no hosts.
 
 const GIB = 1024 * 1024 * 1024
-const CLOSE_REASONS = ['idle', 'lifetime', 'session', 'budget', 'policy', 'sni_mismatch'] as const
+const CLOSE_REASONS = ['eof', 'idle', 'lifetime', 'session', 'budget', 'policy', 'sni_mismatch', 'error'] as const
 
 type Rollup = {
   hour: string

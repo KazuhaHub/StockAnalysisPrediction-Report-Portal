@@ -175,7 +175,10 @@ type ProxyInstall struct {
 
 	mu   sync.Mutex
 	open int
-	auth *proxyAuth
+	// pending counts the streams whose open frame is still being read. A stream that has not said what it
+	// wants holds no tunnel slot, so it is capped on its own.
+	pending int
+	auth    *proxyAuth
 
 	stats    map[int64]map[string]*proxyHostStats
 	refusals map[proxyRefusalKey]*proxyRefusalCount
@@ -209,6 +212,19 @@ func NewProxyInstall(id string, runner *ProxyRunner, limits ProxyLimits) *ProxyI
 		rate:   newBandwidth(int64(limits.Mbit)*1000*1000/8, runner.Now),
 		stats:  map[int64]map[string]*proxyHostStats{}, refusals: map[proxyRefusalKey]*proxyRefusalCount{},
 	}
+}
+
+// ProxyMaxPendingOpens bounds the streams of one installation whose open frame has not arrived yet.
+const ProxyMaxPendingOpens = 32
+
+// Inherit takes over the admission bucket and the throughput cap of the installation this one replaces, so a
+// new generation of the same installation is not given a fresh burst. The tunnels stay with the old
+// installation and end when it closes.
+func (in *ProxyInstall) Inherit(prev *ProxyInstall) {
+	if prev == nil {
+		return
+	}
+	in.bucket, in.rate = prev.bucket, prev.rate
 }
 
 // Apply makes policy the installation's authority. The same policy digest and
@@ -287,7 +303,13 @@ func (in *ProxyInstall) admit(usable func() bool) (*proxyAuth, func(), proxyforw
 		return nil, nil, proxyforwarder.RefusalBusy
 	}
 	in.mu.Lock()
-	if in.open >= in.limits.Tunnels || in.auth != auth {
+	if in.auth != auth {
+		// The authority changed between the checks: a policy change or a revocation, not a full house.
+		in.mu.Unlock()
+		in.runner.give()
+		return nil, nil, proxyforwarder.RefusalUnavailable
+	}
+	if in.open >= in.limits.Tunnels {
 		in.mu.Unlock()
 		in.runner.give()
 		return nil, nil, proxyforwarder.RefusalBusy
@@ -313,9 +335,19 @@ func (in *ProxyInstall) spent(auth *proxyAuth) bool {
 // stream is refused as not_granted when it is not. Serve closes conn.
 func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	defer conn.Close()
+	in.mu.Lock()
+	if in.pending >= ProxyMaxPendingOpens {
+		in.mu.Unlock()
+		return
+	}
+	in.pending++
+	in.mu.Unlock()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	host, port, err := proxyforwarder.ReadOpen(r, true)
 	_ = conn.SetReadDeadline(time.Time{})
+	in.mu.Lock()
+	in.pending--
+	in.mu.Unlock()
 	if err != nil {
 		return
 	}
@@ -337,6 +369,9 @@ func (in *ProxyInstall) Serve(conn net.Conn, r io.Reader, usable func() bool) {
 	}
 	ctx, cancel := context.WithCancelCause(auth.ctx)
 	defer cancel(nil)
+	// The lifetime counts from admission, so resolving, dialling and the first record are inside it.
+	lifetime := time.AfterFunc(in.limits.Lifetime, func() { cancel(errors.New(ProxyCloseLifetime)) })
+	defer lifetime.Stop()
 	// A cut authority closes the application's connection, whatever Serve is waiting on.
 	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 	// Step 3: resolve, and judge every answer. Only an allowed address may be dialled.
@@ -547,8 +582,6 @@ func (t *proxyTunnel) splice(app io.Reader) string {
 	wg.Add(2)
 	go copyDir(t.upstream, app, true)
 	go copyDir(t.conn, t.upstream, false)
-	lifetime := time.AfterFunc(in.limits.Lifetime, func() { t.fail(ProxyCloseLifetime) })
-	defer lifetime.Stop()
 	// The watchdog ends an idle tunnel; ending any tunnel closes both connections,
 	// which is what unblocks the copies.
 	stop := make(chan struct{})

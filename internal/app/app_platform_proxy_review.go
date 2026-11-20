@@ -164,9 +164,14 @@ func (s *Server) createPlatformProxyReview(ctx context.Context, session platform
 	if withdraw && req.DailyBytes != 0 || !withdraw && (req.DailyBytes < appplatform.ProxyDailyBytesMin || req.DailyBytes > appplatform.ProxyDailyBytesMax) {
 		return result, errPlatformManagementInput
 	}
-	profile, err := s.observePlatformProxy(ctx, endpoint)
-	if err != nil {
-		return result, err
+	// Withdrawing a grant is never refused for want of the runner: an old, offline or changed runner is no
+	// reason to leave a reviewed proxy on.
+	profile := transport.NewProxyProfile()
+	if !withdraw {
+		var err error
+		if profile, err = s.observePlatformProxy(ctx, endpoint); err != nil {
+			return result, err
+		}
 	}
 	err = s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
@@ -179,12 +184,15 @@ func (s *Server) createPlatformProxyReview(ctx context.Context, session platform
 		if f.policyRevision != req.PolicyRevision || platformDigest([]byte(f.stored)) != req.PreviousPolicySHA256 {
 			return errAppPlatformPlanChanged
 		}
-		if err := f.validate(e, installation); err != nil {
+		// Neither is a grant that no review backs any more: it can still be withdrawn.
+		if err := f.validate(e, installation); err != nil && !withdraw {
 			return err
 		}
 		oldHosts, oldDaily := []string{}, appplatform.ProxyDailyBytesMax
 		if f.granted {
-			oldHosts, oldDaily = f.current.Policy.Hosts, f.current.Policy.DailyBytes
+			if stored, err := appplatform.ParseProxyPolicy([]byte(f.stored)); err == nil {
+				oldHosts, oldDaily = stored.Policy.Hosts, stored.Policy.DailyBytes
+			}
 		}
 		policy := appplatform.EmptyProxyPolicyJSON
 		if withdraw {
@@ -252,11 +260,10 @@ func (s *Server) consumePlatformProxyReview(ctx context.Context, session platfor
 	if !platformValidUUID(planID) || !platformValidSHA(planSHA) {
 		return result, errPlatformManagementInput
 	}
-	profile, err := s.observePlatformProxy(ctx, endpoint)
-	if err != nil {
-		return result, err
-	}
-	err = s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	// The runner is asked before the transaction. What it says matters unless the plan withdraws the grant,
+	// which is decided from the plan itself, below.
+	profile, observeErr := s.observePlatformProxy(ctx, endpoint)
+	err := s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
 		}
@@ -300,13 +307,19 @@ func (s *Server) consumePlatformProxyReview(ctx context.Context, session platfor
 			platformDigest([]byte(f.stored)) != plan.PreviousPolicySHA256 {
 			return errAppPlatformPlanChanged
 		}
-		if err := f.validate(e, plan.InstallationID); err != nil {
+		withdrawal := plan.Policy == appplatform.EmptyProxyPolicyJSON
+		if err := f.validate(e, plan.InstallationID); err != nil && !withdrawal {
 			return err
 		}
-		// The runner is asked again outside the transaction (above); what it reports now must be what
-		// the plan was made against.
-		if plan.Runner != profile {
-			return errAppPlatformPlanChanged
+		// What the runner reports now must be what the plan was made against. A withdrawal does not wait
+		// for the runner.
+		if !withdrawal {
+			if observeErr != nil {
+				return observeErr
+			}
+			if plan.Runner != profile {
+				return errAppPlatformPlanChanged
+			}
 		}
 		now := control.nowMS
 		next := f.policyRevision + 1

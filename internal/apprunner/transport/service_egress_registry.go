@@ -99,6 +99,9 @@ type egressInstall struct {
 	server     *egressServer
 	// proxy is the installation's tunnels. Its authority follows the current session.
 	proxy *broker.ProxyInstall
+	// reportQueue holds the proxy reports not yet sent to Portal (doc 184 section 7).
+	reportMu    sync.Mutex
+	reportQueue []broker.ProxyReport
 
 	mu       sync.Mutex
 	bucket   *broker.TokenBucket
@@ -285,6 +288,10 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		}
 		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{}),
 			proxy: broker.NewProxyInstall(command.InstallationID, r.proxy, broker.DefaultProxyLimits())}
+		if replaced != nil {
+			// The admission bucket and the throughput cap belong to the installation, not the generation.
+			install.proxy.Inherit(replaced.proxy)
+		}
 		r.installs[command.InstallationID] = install
 	}
 	session.install = install
@@ -296,9 +303,10 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		previous.draining = true
 	}
 	drainNow := previous != nil && previous.inflight == 0
-	install.mu.Unlock()
-	// The session that is now current decides the proxy authority: its policy, or none.
+	// The session that is now current decides the proxy authority: its policy, or none. It is set under the
+	// installation's lock, so a session that ends meanwhile cannot revoke what this one just set.
 	install.applyProxy(session)
+	install.mu.Unlock()
 	r.live++
 	if listen {
 		r.startServer(install)
@@ -331,17 +339,15 @@ func (r *egressRegistry) detach(s *egressSession) {
 		delete(in.sessions, s)
 		r.live--
 	}
-	lost := in.current == s
-	if lost {
+	if in.current == s {
 		in.current = nil
+		// No session is current any more: Portal no longer vouches for the proxy, so every
+		// tunnel is cut. A session replaced by a newer one is not this case. It is done under
+		// the installation's lock, as the open of a replacement sets its authority.
+		in.proxy.Revoke()
 	}
 	in.mu.Unlock()
 	r.mu.Unlock()
-	if lost {
-		// No session is current any more: Portal no longer vouches for the proxy, so every
-		// tunnel is cut. A session replaced by a newer one is not this case.
-		in.proxy.Revoke()
-	}
 	if s.mux.PeerReason() == EgressCloseDisabled {
 		r.closeInstall(in, EgressCloseDisabled)
 	}

@@ -22,8 +22,10 @@ const (
 	// platformProxyRefusalInterval is the least time between two refusal rows of one installation, host and
 	// code. The runner coalesces to the same rate; Portal does not rely on it.
 	platformProxyRefusalInterval = time.Minute
-	// platformProxyRefusalKeys bounds the keys the limiter remembers.
-	platformProxyRefusalKeys = 4096
+	// platformProxyRefusalRows bounds the refusal rows of one installation in any interval, and
+	// platformProxyRefusalInstallations the installations the limiter keeps state for.
+	platformProxyRefusalRows          = 64
+	platformProxyRefusalInstallations = 1024
 )
 
 // runnerServesProxy asks the runner whether it serves the proxy with the limits this Portal carries. A runner
@@ -40,33 +42,60 @@ func (c *platformServiceEgressCoordinator) runnerServesProxy(ctx context.Context
 	return profile == transport.NewProxyProfile(), nil
 }
 
-// platformProxyRefusalLimiter keeps at most one refusal row per installation, host and code per interval.
+// platformProxyRefusalLimiter keeps at most one refusal row per installation, host and code per interval, and
+// at most platformProxyRefusalRows rows per installation in any interval, whatever the hosts: the host is text
+// the application chose, so neither its variety nor the other installations' rows may be at its mercy. Every
+// installation has its own state.
 type platformProxyRefusalLimiter struct {
-	mu   sync.Mutex
+	mu            sync.Mutex
+	installations map[string]*platformProxyRefusalState
+}
+
+type platformProxyRefusalState struct {
 	last map[string]time.Time
+	rows []time.Time
 }
 
 func (l *platformProxyRefusalLimiter) allow(installation, host, code string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.last == nil {
-		l.last = map[string]time.Time{}
+	if l.installations == nil {
+		l.installations = map[string]*platformProxyRefusalState{}
 	}
-	key := installation + "\x00" + host + "\x00" + code
-	if at, ok := l.last[key]; ok && now.Sub(at) < platformProxyRefusalInterval {
-		return false
-	}
-	if len(l.last) >= platformProxyRefusalKeys {
-		for k, at := range l.last {
-			if now.Sub(at) >= platformProxyRefusalInterval {
-				delete(l.last, k)
+	st := l.installations[installation]
+	if st == nil {
+		if len(l.installations) >= platformProxyRefusalInstallations {
+			for id, other := range l.installations {
+				if len(other.rows) == 0 || now.Sub(other.rows[len(other.rows)-1]) >= platformProxyRefusalInterval {
+					delete(l.installations, id)
+				}
+			}
+			if len(l.installations) >= platformProxyRefusalInstallations {
+				return false
 			}
 		}
-		if len(l.last) >= platformProxyRefusalKeys {
-			return false
+		st = &platformProxyRefusalState{last: map[string]time.Time{}}
+		l.installations[installation] = st
+	}
+	for len(st.rows) > 0 && now.Sub(st.rows[0]) >= platformProxyRefusalInterval {
+		st.rows = st.rows[1:]
+	}
+	key := host + "\x00" + code
+	if at, ok := st.last[key]; ok && now.Sub(at) < platformProxyRefusalInterval {
+		return false
+	}
+	if len(st.rows) >= platformProxyRefusalRows {
+		return false
+	}
+	if len(st.last) >= 2*platformProxyRefusalRows {
+		for k, at := range st.last {
+			if now.Sub(at) >= platformProxyRefusalInterval {
+				delete(st.last, k)
+			}
 		}
 	}
-	l.last[key] = now
+	st.last[key] = now
+	st.rows = append(st.rows, now)
 	return true
 }
 

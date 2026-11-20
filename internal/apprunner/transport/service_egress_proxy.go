@@ -24,6 +24,10 @@ const (
 	egressSniffTimeout = 5 * time.Second
 	// egressMaxSniffers bounds the connections whose first bytes are being read.
 	egressMaxSniffers = 64
+	// egressProxyReportsPerTick is how many reports one installation sends per sweep, and
+	// egressProxyReportQueue how many it keeps waiting; the oldest are dropped beyond that.
+	egressProxyReportsPerTick = 8
+	egressProxyReportQueue    = 512
 )
 
 // proxyPolicyOf is the parsed policy of a session that carries one, or false.
@@ -175,13 +179,29 @@ func (r *egressRegistry) flushProxyReports() {
 	r.mu.Unlock()
 	now := r.now()
 	for _, t := range targets {
-		for _, report := range t.in.proxy.Reports(now) {
+		in := t.in
+		// What is due joins the installation's queue; a few reports go out per tick. Portal holds a report's
+		// call until it has written its audit row, and a session has a bounded number of calls open, so a
+		// burst of reports must never be sent at once.
+		in.reportMu.Lock()
+		in.reportQueue = append(in.reportQueue, in.proxy.Reports(now)...)
+		if over := len(in.reportQueue) - egressProxyReportQueue; over > 0 {
+			in.reportQueue = in.reportQueue[over:]
+		}
+		batch := in.reportQueue[:min(len(in.reportQueue), egressProxyReportsPerTick)]
+		in.reportQueue = in.reportQueue[len(batch):]
+		in.reportMu.Unlock()
+		for i, report := range batch {
 			payload, err := EncodeEgressProxyReport(report)
 			if err != nil {
 				continue
 			}
 			call, err := t.session.mux.NewCall()
 			if err != nil {
+				// The session is busy or ending: keep what has not gone out for the next tick.
+				in.reportMu.Lock()
+				in.reportQueue = append(append([]broker.ProxyReport(nil), batch[i:]...), in.reportQueue...)
+				in.reportMu.Unlock()
 				break
 			}
 			_ = call.Send(EgressFrameProxyReport, payload)

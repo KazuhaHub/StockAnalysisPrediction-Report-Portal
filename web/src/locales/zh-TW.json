@@ -4046,6 +4046,8 @@
   "appPlatform.networkProxy.close.budget": "額度",
   "appPlatform.networkProxy.close.policy": "策略",
   "appPlatform.networkProxy.close.sni_mismatch": "名稱不符",
+  "appPlatform.networkProxy.close.eof": "正常關閉",
+  "appPlatform.networkProxy.close.error": "錯誤",
   "appPlatform.networkProxy.reviewTitle": "稽核代理訪問更改",
   "appPlatform.networkProxy.confirm": "確認",
   "appPlatform.networkProxy.added": "新增",

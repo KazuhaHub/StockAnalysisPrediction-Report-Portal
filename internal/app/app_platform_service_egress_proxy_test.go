@@ -312,6 +312,39 @@ func TestPlatformServiceEgressProxyReportsBecomeAuditRows(t *testing.T) {
 	}
 }
 
+func TestPlatformProxyRefusalLimiter(t *testing.T) {
+	var l platformProxyRefusalLimiter
+	now := time.Now()
+	a, b := platformFixtureID(1), platformFixtureID(2)
+	if !l.allow(a, "x.example.com", "busy", now) || l.allow(a, "x.example.com", "busy", now.Add(30*time.Second)) {
+		t.Fatal("one row per installation, host and code per minute")
+	}
+	if !l.allow(a, "x.example.com", "host_not_reviewed", now) || !l.allow(b, "x.example.com", "busy", now) {
+		t.Fatal("another code or another installation shares the key")
+	}
+	if !l.allow(a, "x.example.com", "busy", now.Add(61*time.Second)) {
+		t.Fatal("a minute later the key is free again")
+	}
+	// The host is text the application chose: one installation's variety is capped, and does not take
+	// another installation's rows with it.
+	c, d := platformFixtureID(3), platformFixtureID(4)
+	allowed := 0
+	for i := 0; i < 200; i++ {
+		if l.allow(c, "h"+string(rune('a'+i/26))+string(rune('a'+i%26))+".example.com", "busy", now) {
+			allowed++
+		}
+	}
+	if allowed != platformProxyRefusalRows {
+		t.Fatalf("%d rows for one installation in a minute, want %d", allowed, platformProxyRefusalRows)
+	}
+	if !l.allow(d, "h.example.com", "busy", now) {
+		t.Fatal("an installation's flood suppressed another installation's row")
+	}
+	if !l.allow(c, "late.example.com", "busy", now.Add(61*time.Second)) {
+		t.Fatal("the window does not slide")
+	}
+}
+
 func TestPlatformServiceEgressProxyReportsAreIgnoredWithoutTheResource(t *testing.T) {
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	f := newFakeEgressRunner()

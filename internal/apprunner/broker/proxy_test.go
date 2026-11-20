@@ -805,6 +805,104 @@ func TestProxyReportsRollupRefusalsAndUsage(t *testing.T) {
 	}
 }
 
+// A stream that has not sent its open frame holds no tunnel slot, so it is capped on its own: an application
+// that opens many connections and stalls cannot hold the runner's goroutines and descriptors.
+func TestProxyPendingOpensAreCapped(t *testing.T) {
+	e := newProxyEnv(t, nil)
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	var stalled []net.Conn
+	for i := 0; i < ProxyMaxPendingOpens; i++ {
+		client, server := tcpPair(t)
+		go e.in.Serve(server, bufio.NewReader(server), e.usable.Load)
+		// The magic and nothing more: the open frame never completes.
+		if _, err := client.Write([]byte(ProxyStreamMagic)); err != nil {
+			t.Fatal(err)
+		}
+		stalled = append(stalled, client)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		e.in.mu.Lock()
+		pending := e.in.pending
+		e.in.mu.Unlock()
+		if pending == ProxyMaxPendingOpens {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pending %d", pending)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	extra, server := tcpPair(t)
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		e.in.Serve(server, bufio.NewReader(server), e.usable.Load)
+	}()
+	select {
+	case <-served:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stream beyond the pending cap was not dropped at once")
+	}
+	waitClosed(t, extra, 2*time.Second)
+	// A well-formed stream is served again once the stalled ones are gone.
+	for _, c := range stalled {
+		c.Close()
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		e.in.mu.Lock()
+		pending := e.in.pending
+		e.in.mu.Unlock()
+		if pending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pending %d after the stalled streams closed", pending)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := e.refusalOf("evil.example.com", 443); got != proxyforwarder.RefusalHostNotReviewed {
+		t.Fatalf("after the stalled streams: %q", got)
+	}
+}
+
+// The lifetime counts from admission: a tunnel stuck resolving is cut at the lifetime, not 10 s later.
+func TestProxyLifetimeCountsFromAdmission(t *testing.T) {
+	e := newProxyEnv(t, func(l *ProxyLimits) { l.Lifetime = 200 * time.Millisecond })
+	e.clock.live = true
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	e.runner.Lookup = func(ctx context.Context, _ string) ([]netip.Addr, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	start := time.Now()
+	if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalUnavailable {
+		t.Fatalf("a resolve cut by the lifetime: %q", got)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("the lifetime did not bound the resolve: %v", elapsed)
+	}
+}
+
+// A new generation of an installation takes over the admission bucket instead of starting with a fresh burst.
+func TestProxyInstallInheritsTheBucket(t *testing.T) {
+	e := newProxyEnv(t, nil)
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	for i := 0; i < 50; i++ {
+		if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalNone {
+			t.Fatalf("open %d: %q", i, got)
+		}
+	}
+	next := NewProxyInstall(e.in.id, e.runner, DefaultProxyLimits())
+	next.Inherit(e.in)
+	e.in = next
+	e.apply(appplatform.ProxyDailyBytesMax, "qt.gtimg.cn")
+	if got := e.refusalOf("qt.gtimg.cn", 443); got != proxyforwarder.RefusalBusy {
+		t.Fatalf("a new generation got a fresh burst: %q", got)
+	}
+}
+
 func TestProxyRollupBoundsDistinctHosts(t *testing.T) {
 	e := newProxyEnv(t, nil)
 	for i := 0; i < ProxyMaxRollupHosts+10; i++ {

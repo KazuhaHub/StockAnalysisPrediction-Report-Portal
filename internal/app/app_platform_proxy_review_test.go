@@ -386,6 +386,36 @@ func testPlatformProxyConsumeRefusals(t *testing.T, pg bool) {
 			t.Fatalf("withdrawn grant still planned: %v", a.resources)
 		}
 	})
+	// Withdrawing never waits for the runner and never needs a review to back the row: an old, offline or
+	// changed runner, or a row nothing proves, is no reason to leave a proxy on.
+	for name, break_ := range map[string]func(t *testing.T, s *Server, installation string){
+		"old runner": func(t *testing.T, s *Server, _ string) { proxyRunnerOf(s).fail(transport.ErrProxyUnsupported) },
+		"unbacked row": func(t *testing.T, s *Server, installation string) {
+			other, _ := appplatform.CanonicalProxyPolicy(appplatform.ProxyPolicy{Hosts: []string{"other.example.com"}, DailyBytes: appplatform.ProxyDailyBytesMax})
+			mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_json=? WHERE installation_id=? AND capability='network.proxy'`, string(other), installation)
+		},
+	} {
+		t.Run("withdraw with "+name, func(t *testing.T) {
+			s, actor, installation := platformProxyFixture(t, pg)
+			granted(t, s, actor, installation)
+			break_(t, s, installation)
+			if name == "unbacked row" {
+				if _, err := platformProxyCreate(t, s, actor, installation, proxyHosts, 1<<30); !errors.Is(err, errPlatformCapabilityPolicyBusy) {
+					t.Fatalf("a change to an unbacked row: %v", err)
+				}
+			}
+			r, err := platformProxyCreate(t, s, actor, installation, []string{}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.consumePlatformProxyReview(context.Background(), actor, platformRuntimeEndpoint{}, r.ID, r.SHA256); err != nil {
+				t.Fatal(err)
+			}
+			if g, policy, _ := platformProxyGrantRow(t, s, installation); g != 0 || policy != "{}" {
+				t.Fatalf("after withdrawal: %d %s", g, policy)
+			}
+		})
+	}
 	t.Run("a change changes something", func(t *testing.T) {
 		s, actor, installation := platformProxyFixture(t, pg)
 		granted(t, s, actor, installation)

@@ -108,8 +108,8 @@ const (
 	egressAdmitMaxBytes  = 8192
 	egressNoticeMaxBytes = broker.MaxAppNoticeBytes
 	egressResultMaxBytes = 256
-	// egressProxyReportMaxBytes bounds a report: 64 hosts with their close counts.
-	egressProxyReportMaxBytes = 16384
+	// egressProxyReportMaxBytes bounds a report: 64 hosts of up to 253 bytes with their close counts.
+	egressProxyReportMaxBytes = 32768
 	// EgressWriteTimeout bounds one frame write. It is a per-write deadline: the
 	// connection never carries a whole-connection deadline, because a session
 	// outlives any single call.

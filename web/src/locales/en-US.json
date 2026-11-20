@@ -4046,6 +4046,8 @@
   "appPlatform.networkProxy.close.budget": "budget",
   "appPlatform.networkProxy.close.policy": "policy",
   "appPlatform.networkProxy.close.sni_mismatch": "name mismatch",
+  "appPlatform.networkProxy.close.eof": "closed normally",
+  "appPlatform.networkProxy.close.error": "error",
   "appPlatform.networkProxy.reviewTitle": "Review the proxy access change",
   "appPlatform.networkProxy.confirm": "Confirm",
   "appPlatform.networkProxy.added": "Added",
