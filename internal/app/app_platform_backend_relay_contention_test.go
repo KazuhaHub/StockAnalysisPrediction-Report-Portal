@@ -51,7 +51,7 @@ func platformRelayAdmissions(ctx context.Context, s *Server, actor platformActor
 	}
 	defer initial.Close()
 	current, err := s.withPlatformWritableBackendAccess(ctx, actor, installation, func(a platformWritableBackendAccess, seed []byte) error {
-		_, _, _, _, err := signPlatformWritableBackendRequest(a, seed, "POST", "/v1/echo", []byte(`{"value":"x"}`), "bench-boot")
+		_, _, _, _, err := signPlatformWritableBackendRequest(a, seed, "POST", "/v1/echo", []byte(`{"value":"x"}`), "bench-boot", nil)
 		return err
 	})
 	if err != nil {

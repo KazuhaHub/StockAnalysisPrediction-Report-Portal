@@ -127,6 +127,14 @@ func validManifest(m Manifest) bool {
 	if m.Backend != nil && !validBackend(*m.Backend) {
 		return false
 	}
+	// The block and the capability stand or fall together, and both need a backend.
+	declaresPublic := false
+	for _, value := range m.Capabilities.Optional {
+		declaresPublic = declaresPublic || value == "public.projection"
+	}
+	if declaresPublic != (m.Public != nil) || (m.Public != nil && (m.Backend == nil || !validPublic(*m.Public))) {
+		return false
+	}
 	if m.Data.Schema < minDescriptorDataSchema || m.Data.Schema > maxDescriptorDataSchema || m.Data.WritesOnStartup || len(m.Data.ReadableSchemas) == 0 || len(m.Data.ReadableSchemas) > maxDescriptorReadableSchemas {
 		return false
 	}
@@ -280,7 +288,9 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 	for _, value := range c.Required {
 		// principals.read is optional only (doc 181 section 3.1): an administrator enables it
 		// after reading the disclosure, so a descriptor cannot make it a condition of install.
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" {
+		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
+		// administrator's decision, never a condition of install.
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -291,7 +301,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection"} {
 		if seen[value] && !hasBackend {
 			return false
 		}
@@ -305,4 +315,34 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 	}
 	return true
+}
+
+// validPublic checks the reviewed anonymous projection block (doc 179 section 3.1). Routes are
+// sorted by id so the signed bytes have one reading; every path is a backend relay path under
+// /v1/public/, so the relay's own route rules (no handshake, no traversal) apply unchanged.
+func validPublic(p Public) bool {
+	if len(p.Routes) < 1 || len(p.Routes) > maxPublicRoutes {
+		return false
+	}
+	paths := map[string]bool{}
+	for i, route := range p.Routes {
+		if !publicRouteIDPattern.MatchString(route.ID) || (i > 0 && p.Routes[i-1].ID >= route.ID) ||
+			!publicPathPattern.MatchString(route.Path) || paths[route.Path] || !ValidBackendRequestRoute("GET", route.Path) ||
+			route.CacheSeconds < minPublicCacheSeconds || route.CacheSeconds > maxPublicCacheSeconds ||
+			route.ResponseBytes < 1 || route.ResponseBytes > maxPublicResponseBytes || len(route.Query) > maxPublicQueryNames {
+			return false
+		}
+		for _, segment := range strings.Split(strings.TrimPrefix(route.Path, "/v1/public/"), "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return false
+			}
+		}
+		paths[route.Path] = true
+		for j, name := range route.Query {
+			if !publicQueryNamePattern.MatchString(name) || (j > 0 && route.Query[j-1] >= name) {
+				return false
+			}
+		}
+	}
+	return p.Document == "" || (publicDocumentPattern.MatchString(p.Document) && safeRelativePath(p.Document) && len(p.Document) <= maxDescriptorPathBytes)
 }

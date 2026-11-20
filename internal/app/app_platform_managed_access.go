@@ -29,6 +29,9 @@ type platformBackendAccess[T platformBackendAccessIntent] struct {
 	account       platformActorAccount
 	policy, fence int64
 	activationID  string
+	// publicPolicy is the reviewed public.projection policy of an anonymous read (doc 179); empty
+	// for every access that has a session.
+	publicPolicy string
 }
 type platformManagedBackendAccess = platformBackendAccess[platformBackendDeliveryIntent]
 type platformWritableBackendAccess = platformBackendAccess[platformWritableRegistrationIntent]
@@ -165,17 +168,25 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	}
 	defer tx.Rollback()
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
-	if err := lockOUMutation(e); err != nil {
-		return zero, err
+	// An anonymous public read (doc 179) has no account, audience or OU: it needs neither the OU
+	// graph lock nor a session, and it must show the public.projection grant instead.
+	anonymous := session.anonymousPublic
+	if !anonymous {
+		if err := lockOUMutation(e); err != nil {
+			return zero, err
+		}
 	}
 	now, err := platformDatabaseNow(e)
 	if err != nil {
 		return zero, err
 	}
-	account, err := platformReadSessionAccount(e, session, now, true, false)
-	if err != nil {
-		return zero, fmt.Errorf(
-			"backend access session: %w", errAppPlatformLaunchUnavailable)
+	var account platformActorAccount
+	if !anonymous {
+		account, err = platformReadSessionAccount(e, session, now, true, false)
+		if err != nil {
+			return zero, fmt.Errorf(
+				"backend access session: %w", errAppPlatformLaunchUnavailable)
+		}
 	}
 	if err := lockPlatformPublisherTrust(e); err != nil {
 		return zero, err
@@ -222,9 +233,11 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 			"backend access installation tuple: %w",
 			errAppPlatformLaunchUnavailable)
 	}
-	if err := platformLaunchAudience(e, account, installationID); err != nil {
-		return zero, fmt.Errorf(
-			"backend access audience: %w", errAppPlatformLaunchUnavailable)
+	if !anonymous {
+		if err := platformLaunchAudience(e, account, installationID); err != nil {
+			return zero, fmt.Errorf(
+				"backend access audience: %w", errAppPlatformLaunchUnavailable)
+		}
 	}
 	var activation, release, namespace, readiness string
 	var ag, ap, format, observed int64
@@ -314,13 +327,23 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, release, epoch, policy, parsed.Manifest); err != nil {
 		return zero, fmt.Errorf("backend access capabilities: %w", err)
 	}
+	var publicPolicy string
+	if anonymous {
+		var err error
+		if publicPolicy, err = platformReadPublicGrant(e, installationID, policy, parsed.Manifest, lock); err != nil {
+			return zero, fmt.Errorf("backend access public grant: %w", errAppPlatformLaunchUnavailable)
+		}
+	}
 	finish, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, generation: generation, readiness: readiness}, runtime, seed, dek, now)
 	if err != nil {
 		return zero, fmt.Errorf("backend access history: %w", err)
 	}
-	viewer, err := s.platformViewerIdentity(e, account, installationID, appID)
-	if err != nil {
-		return zero, fmt.Errorf("backend access viewer: %w", err)
+	var viewer protocol.Viewer
+	if !anonymous {
+		viewer, err = s.platformViewerIdentity(e, account, installationID, appID)
+		if err != nil {
+			return zero, fmt.Errorf("backend access viewer: %w", err)
+		}
 	}
 	var intent T
 	var built, failed bool
@@ -342,7 +365,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 		if err := buildIntent(); err != nil {
 			return zero, err
 		}
-		if err := inTx(e, platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}, seed); err != nil {
+		if err := inTx(e, platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation, publicPolicy: publicPolicy}, seed); err != nil {
 			return zero, fmt.Errorf("backend access read: %w", err)
 		}
 	}
@@ -350,11 +373,20 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 	if err != nil {
 		return zero, err
 	}
-	current, err := platformReadSessionAccount(e, session, now, true, false)
-	if err != nil || current != account {
-		return zero, fmt.Errorf(
-			"backend access final session: %w",
-			errAppPlatformLaunchUnavailable)
+	if !anonymous {
+		current, err := platformReadSessionAccount(e, session, now, true, false)
+		if err != nil || current != account {
+			return zero, fmt.Errorf(
+				"backend access final session: %w",
+				errAppPlatformLaunchUnavailable)
+		}
+	}
+	if anonymous {
+		// A withdrawal or policy change that landed while the history was read refuses the read.
+		again, err := platformReadPublicGrant(e, installationID, policy, parsed.Manifest, lock)
+		if err != nil || again != publicPolicy {
+			return zero, fmt.Errorf("backend access final public grant: %w", errAppPlatformLaunchUnavailable)
+		}
 	}
 	finalRelease, err := platformReadStoredRelease(e, release)
 	if err != nil {
@@ -392,7 +424,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 		return zero, fmt.Errorf(
 			"backend access identity: %w", err)
 	}
-	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
+	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation, publicPolicy: publicPolicy}
 	if pure != nil {
 		platformPureStep("access-read")
 		if err := pure(result, seed); err != nil {

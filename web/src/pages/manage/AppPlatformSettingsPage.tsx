@@ -9,6 +9,7 @@ import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
+import AppPublicProjectionPanel from './AppPublicProjectionPanel'
 
 type Audience = { type: 'user' | 'ou'; id: string; name: string }
 type Capability = { capability: string; granted: boolean; required: boolean }
@@ -234,6 +235,7 @@ export default function AppPlatformSettingsPage() {
   // principals.read is optional and off after install (doc 181 section 4). An administrator enables
   // it after reading the disclosure; withdrawal needs no second step because it only removes access.
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
+  const publicProjection = settings.capabilities.find((item) => item.capability === 'public.projection' && !item.required)
   const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
   const changePrincipals = async (enabled: boolean) => {
     if (principalsBusy) return
@@ -446,6 +448,7 @@ export default function AppPlatformSettingsPage() {
           : <Button disabled={!principalsReady} onClick={() => { setPrincipalsError(''); setPrincipalsOpen(true) }}>{t('appPlatform.settings.principals.enable')}</Button>}
         {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
       </Space>}
+      {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>
     <Modal
       className="rp-platform-review-modal"

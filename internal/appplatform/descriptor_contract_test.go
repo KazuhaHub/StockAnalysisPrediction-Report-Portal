@@ -38,6 +38,7 @@ func TestDescriptorContractSourceAndTypes(t *testing.T) {
 		"Resources": reflect.TypeFor[Resources](), "BackendImage": reflect.TypeFor[BackendImage](), "ImageLayer": reflect.TypeFor[ImageLayer](), "Capabilities": reflect.TypeFor[Capabilities](),
 		"DataCompatibility": reflect.TypeFor[DataCompatibility](),
 		"DataMigration":     reflect.TypeFor[DataMigration](),
+		"Public":            reflect.TypeFor[Public](), "PublicRoute": reflect.TypeFor[PublicRoute](),
 	}
 	if len(types) != len(schema.Definitions) {
 		t.Fatal("named structural definitions differ")

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,6 +29,15 @@ func platformSignedReleaseFixture(t *testing.T, version string) (raw, signature,
 	}
 	if _, err = file.Write([]byte("<!doctype html><title>Fixture</title>")); err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range sortedFixtureNames(platformFixtureArchiveFiles) {
+		extra, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = extra.Write([]byte(platformFixtureArchiveFiles[name])); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err = w.Close(); err != nil {
 		t.Fatal(err)
@@ -401,4 +411,17 @@ func TestPlatformReleaseStagingDatabaseFullRollsBack(t *testing.T) {
 		 WHERE action='app_platform.release_staged')`) != 0 {
 		t.Fatal("database full left release, artifact or audit residue")
 	}
+}
+
+// platformFixtureArchiveFiles are extra files of the fixture frontend archive. A test sets it before
+// it builds a release and restores it afterwards.
+var platformFixtureArchiveFiles map[string]string
+
+func sortedFixtureNames(files map[string]string) []string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

@@ -50,7 +50,7 @@ func (s *Server) requestPlatformManagedBackend(ctx context.Context, session plat
 		defer initial.Close()
 		return s.requestPlatformUpdateStartBackend(
 			ctx, session, installation, nil, method, path, body,
-			endpoint, initial)
+			endpoint, initial, nil)
 	}
 	initial, err := s.preparePlatformManagedBackendAccess(ctx, session, installation)
 	if err != nil {

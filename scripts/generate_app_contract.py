@@ -158,6 +158,11 @@ def render(raw):
         "maxImageLayers": p("BackendImage", "layers")["maxItems"],
         "maxImageLayerUncompressedBytes": p("ImageLayer", "uncompressed_bytes")["maximum"],
         "maxDescriptorVersionBytes": p("Manifest", "version")["maxLength"],
+        "maxPublicRoutes": p("Public", "routes")["maxItems"],
+        "maxPublicQueryNames": without_null(p("PublicRoute", "query"))["maxItems"],
+        "minPublicCacheSeconds": p("PublicRoute", "cache_seconds")["minimum"],
+        "maxPublicCacheSeconds": p("PublicRoute", "cache_seconds")["maximum"],
+        "maxPublicResponseBytes": p("PublicRoute", "response_bytes")["maximum"],
     }
     for key in ("memory_mib", "cpu_millis", "pids"):
         field = p("Resources", key)
@@ -187,6 +192,10 @@ def render(raw):
         "range": p("Compatibility", "platform_api")["pattern"],
         "image": p("Backend", "image")["pattern"],
         "path": p("Presentation", "entry")["pattern"],
+        "publicRouteID": p("PublicRoute", "id")["pattern"],
+        "publicPath": p("PublicRoute", "path")["pattern"],
+        "publicQueryName": without_null(p("PublicRoute", "query"))["items"]["pattern"],
+        "publicDocument": without_null(p("Public", "document"))["pattern"],
     }
     for key, value in patterns.items():
         if any(char in value for char in "`\r\n"):

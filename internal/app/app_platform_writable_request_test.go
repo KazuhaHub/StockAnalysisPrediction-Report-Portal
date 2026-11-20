@@ -37,7 +37,7 @@ func TestPlatformWritableRequestSigningSQLite(t *testing.T) {
 	body := []byte(`{"role":"admin","subject":"app-controlled"}`)
 	a, err := s.withPlatformWritableBackendAccess(context.Background(), actor, lease.installationID, func(a platformWritableBackendAccess, seed []byte) error {
 		var err error
-		raw, sig, assertion, command, err = signPlatformWritableBackendRequest(a, seed, "POST", "/v1/echo", body, "fixture-boot")
+		raw, sig, assertion, command, err = signPlatformWritableBackendRequest(a, seed, "POST", "/v1/echo", body, "fixture-boot", nil)
 		return err
 	})
 	if err != nil {
