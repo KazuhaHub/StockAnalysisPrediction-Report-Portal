@@ -71,6 +71,9 @@ func platformBuildDataQuotaPlan(e migExec, installation string, target *platform
 		}
 		return zero, 0, noSource, err
 	}
+	if err := platformRefuseWhileRaiseUnsettled(e, installation); err != nil {
+		return zero, 0, noSource, err
+	}
 	allowDisabled := desired == "disabled" && phase == "disabled"
 	if runtimeID != runtime.id || epoch != runtime.controllerEpoch || policyRevision < 1 || generation < 1 || generation == math.MaxInt64 ||
 		!((desired == "enabled" && phase == "ready") || allowDisabled) {
@@ -700,13 +703,8 @@ type platformSetDataQuotaIntent struct {
 	// slot is where the Portal keeps the effect row, and admittedFence the fence it was admitted under.
 	slot          platformRaiseSlot
 	admittedFence int64
-	// priorSignedUntil is the latest expiry of any command signed for the effect before this one, and rowState
-	// and rowReceipt the row as it was read. recorded is set when this command's own window was written on the
-	// row, which is when it can be executed.
+	// priorSignedUntil is the latest expiry of any command signed for the effect before this one.
 	priorSignedUntil int64
-	rowState         string
-	rowReceipt       string
-	recorded         bool
 }
 
 // preparePlatformSetDataQuota records the effect, once, and signs the raise. A retry reuses the same effect.
@@ -779,8 +777,8 @@ func (s *Server) preparePlatformSetDataQuota(ctx context.Context, expected platf
 			time.UnixMilli(facts.now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
 			return zero, err
 		}
-		row = platformRaiseRow{exists: true, effectID: effectID, kind: "set-data-quota", digest: command.PayloadSHA256, state: "prepared", receipt: "{}", admitted: admitted, runtimeID: runtime.id, epoch: expected.controllerEpoch}
-	} else if row.kind != "set-data-quota" || row.digest != command.PayloadSHA256 || row.admitted != expected.fence || row.observed != 0 ||
+		row = platformRaiseRow{exists: true, effectID: effectID, kind: "set-data-quota", digest: command.PayloadSHA256, state: "prepared", receipt: "{}", updated: facts.now, admitted: admitted, runtimeID: runtime.id, epoch: expected.controllerEpoch}
+	} else if row.kind != "set-data-quota" || row.digest != command.PayloadSHA256 || row.admitted < 1 || row.admitted > expected.fence || row.observed != 0 ||
 		row.state != "prepared" || row.runtimeID != runtime.id || row.epoch != expected.controllerEpoch {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -913,7 +911,7 @@ func (s *Server) commitPlatformSetDataQuota(ctx context.Context, expected platfo
 	if err := applyPlatformRaise(e, platformRaiseCommitRef{
 		operation: expected.id, installation: expected.installationID, namespace: plan.DataNamespaceID, slot: platformStandaloneRaiseSlot,
 		effectID: intent.effectID, digest: intent.command.PayloadSHA256, runtimeID: runtime.id, epoch: expected.controllerEpoch,
-		admittedFence: expected.fence, observedFence: expected.fence,
+		admittedFence: intent.admittedFence, observedFence: expected.fence,
 	}, receipt, encoded, now); err != nil {
 		return zero, err
 	}

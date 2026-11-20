@@ -179,9 +179,9 @@ func (s *Server) preparePlatformUpdateRaise(ctx context.Context, expected platfo
 			time.UnixMilli(facts.now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
 			return zero, err
 		}
-		row = platformRaiseRow{exists: true, effectID: effectID, kind: "set-data-quota", digest: command.PayloadSHA256, state: "prepared", receipt: "{}",
+		row = platformRaiseRow{exists: true, effectID: effectID, kind: "set-data-quota", digest: command.PayloadSHA256, state: "prepared", receipt: "{}", updated: facts.now,
 			admitted: admitted, runtimeID: runtime.id, epoch: expected.controllerEpoch}
-	} else if row.kind != "set-data-quota" || row.digest != command.PayloadSHA256 || row.admitted != expected.fence || row.observed != 0 ||
+	} else if row.kind != "set-data-quota" || row.digest != command.PayloadSHA256 || row.admitted < 1 || row.admitted > expected.fence || row.observed != 0 ||
 		row.state != "prepared" || row.runtimeID != runtime.id || row.epoch != expected.controllerEpoch {
 		return zero, errAppPlatformStageEvidence
 	}
