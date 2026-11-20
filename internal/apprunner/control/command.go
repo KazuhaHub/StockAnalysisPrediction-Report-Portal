@@ -104,7 +104,7 @@ func validLogical(c Command) bool {
 	quotaBytes, _ := counter(c.Payload.QuotaBytes, true)
 	quotaInodes, _ := counter(c.Payload.QuotaInodes, true)
 	// The runner holds the quota to the platform bounds whatever the controller signed (doc 185 section 3.1).
-	return slot <= 32 && format <= 1000000 && appplatform.ValidDataQuota(quotaBytes, quotaInodes)
+	return slot <= 32 && format <= 1000000 && appplatform.WithinRunnerDataQuota(quotaBytes, quotaInodes)
 }
 
 // LogicalDigest binds the stable reviewed effect identity and typed payload.

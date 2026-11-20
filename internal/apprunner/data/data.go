@@ -99,6 +99,10 @@ type CheckpointRequest struct {
 // legacyMaxCheckpointEntries is the entry cap every checkpoint had before the inode quota was per installation.
 const legacyMaxCheckpointEntries = 100000
 
+// maxCheckpointEntryCap is the platform's largest inode quota (appplatform.DataQuotaMaxInodes); no
+// entry cap may exceed it, whatever a request carries.
+const maxCheckpointEntryCap = 1000000
+
 // checkpointArchiveOverheadBytes is what a checkpoint archive may hold beyond the data and its entries: the
 // manifest, the end-of-archive blocks and padding.
 const checkpointArchiveOverheadBytes = 64 << 20
@@ -125,7 +129,7 @@ func ArchiveCapFor(quotaBytes, inodeQuota int64) int64 {
 
 func entryCapOf(configured int64) int64 {
 	if configured > 0 {
-		return configured
+		return min(configured, maxCheckpointEntryCap)
 	}
 	return legacyMaxCheckpointEntries
 }

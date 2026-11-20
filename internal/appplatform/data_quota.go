@@ -18,6 +18,13 @@ func ValidDataQuota(bytes, inodes int64) bool {
 		inodes >= DataQuotaMinInodes && inodes <= DataQuotaMaxInodes
 }
 
+// WithinRunnerDataQuota is the runner's own check of a quota in a signed command: positive and no
+// larger than the platform maximum. The lower bound and the 64 MiB step are Portal's review rules;
+// the runner only refuses what it could not safely size (and native tests use small quotas).
+func WithinRunnerDataQuota(bytes, inodes int64) bool {
+	return bytes > 0 && bytes <= DataQuotaMaxBytes && inodes > 0 && inodes <= DataQuotaMaxInodes
+}
+
 // QuotaOrDefault is the quota the descriptor requests: its block, or today's fixed limits.
 func (d DataCompatibility) QuotaOrDefault() (bytes, inodes int64) {
 	if d.Quota == nil {

@@ -105,7 +105,7 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 	inodes, _ := strconv.ParseInt(p.QuotaInodes, 10, 64)
 	slot, _ := counter(c.EffectNumber, true)
 	return sourceProject <= math.MaxUint32 &&
-		archive <= maxRestoreArchiveBytes && appplatform.ValidDataQuota(quota, inodes) && slot <= 32
+		archive <= maxRestoreArchiveBytes && appplatform.WithinRunnerDataQuota(quota, inodes) && slot <= 32
 }
 
 func ImportCheckpointLogicalDigest(c ImportCheckpointCommand) (string, error) {

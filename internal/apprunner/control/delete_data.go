@@ -82,7 +82,7 @@ func validDeleteDataLogical(c DeleteDataCommand) bool {
 		formatErr == nil && format > 0 &&
 		quotaErr == nil && quota > 0 && quota%512 == 0 &&
 		inodesErr == nil && inodes > 0 &&
-		appplatform.ValidDataQuota(quota, inodes) &&
+		appplatform.WithinRunnerDataQuota(quota, inodes) &&
 		deviceErr == nil && device > 0 &&
 		inodeErr == nil && inode > 0 &&
 		writerErr == nil && writer > 0 &&

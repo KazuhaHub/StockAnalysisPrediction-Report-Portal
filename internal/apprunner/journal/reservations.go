@@ -48,7 +48,7 @@ const (
 // may take and a fully reserved volume must still hold both. It reports false for a quota outside the platform
 // bounds, so no arithmetic here can overflow.
 func NamespaceReservation(quotaBytes, inodeQuota int64) (dataBytes, checkpointBytes int64, ok bool) {
-	if !appplatform.ValidDataQuota(quotaBytes, inodeQuota) {
+	if !appplatform.WithinRunnerDataQuota(quotaBytes, inodeQuota) {
 		return 0, 0, false
 	}
 	return quotaBytes, RetainedCheckpoints * data.ArchiveCapFor(quotaBytes, inodeQuota), true
