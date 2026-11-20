@@ -121,6 +121,8 @@ type restoreSource struct {
 	checkpoint        CheckpointReceipt
 	resource          managedRemovalResource
 	raw, signature    []byte
+	// inodeQuota is the namespace's inode quota from its prepare-data receipt, zero when not known.
+	inodeQuota int64
 }
 
 func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreCommand, now int64) (restoreSource, error) {
@@ -203,6 +205,7 @@ func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreC
 	}
 	result.checkpoint = checkpoint
 	result.resource = history.resource
+	result.inodeQuota = mustDataInt(history.data.QuotaInodes)
 	var running int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources
 		WHERE data_namespace_id=? AND kind='container'
@@ -499,8 +502,9 @@ func restoreRequestFor(source restoreSource) (data.RestoreRequest, error) {
 		CheckpointID: p.CheckpointID, NamespaceID: p.NamespaceID, ReleaseSHA256: p.ReleaseSHA256,
 		ManifestSHA256: p.ManifestSHA256, ProjectID: projectID, DataFormat: mustDataInt(p.DataFormat),
 		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: mustDataInt(p.ArchiveBytes),
-		// The live project quota is the binding limit of a restore; the walk is bounded by the platform maximum.
-		MaxEntries:     appplatform.DataQuotaMaxInodes,
+		// The walk is bounded by the namespace's own inode quota; the platform maximum only stands in when the
+		// journal does not know it. The live project quota is the binding limit of a restore either way.
+		MaxEntries:     restoreEntryCap(source.inodeQuota),
 		ExpectedDevice: mustDataUint(p.Device), ExpectedNamespaceInode: mustDataUint(p.NamespaceInode),
 		WriterFence: mustDataInt(p.WriterFence),
 	}, nil
@@ -801,4 +805,11 @@ func (s *Store) ReadRestoreOrStatus(ctx context.Context, raw, signature []byte) 
 		return *again.receipt, nil
 	}
 	return *got.receipt, nil
+}
+
+func restoreEntryCap(inodeQuota int64) int64 {
+	if inodeQuota > 0 {
+		return inodeQuota
+	}
+	return appplatform.DataQuotaMaxInodes
 }

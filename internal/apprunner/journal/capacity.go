@@ -182,6 +182,10 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	}
 	diskDims := []dimension{{CapacityDisk, plan.diskBytes, usedDisk, budgets.DiskBytes}}
 	if plan.quotaBytes > 0 {
+		legacy, err := countLegacyNamespaces(ctx, tx, plan.resourceID, ownCheckpoints)
+		if err != nil {
+			return nil, err
+		}
 		// A namespace reserves its quota on the data volume and its two retained checkpoints, at the archive cap
 		// each, on the checkpoint volume, or all of it on the data volume when they share a filesystem.
 		if budgets.CheckpointBytes > 0 {
@@ -189,11 +193,15 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN resource_id LIKE 'checkpoints/%' THEN 0 ELSE disk_bytes END),0),COALESCE(SUM(CASE WHEN resource_id LIKE 'checkpoints/%' THEN disk_bytes ELSE 0 END),0) FROM runner_reservations WHERE state='held' AND resource_id<>? AND resource_id<>?`, plan.resourceID, ownCheckpoints).Scan(&usedData, &usedCheckpoint); err != nil {
 				return nil, err
 			}
+			// A legacy row holds its data and, unrecorded, its two retained checkpoints.
+			usedData += legacy * (legacyNamespaceDataBytes - NamespaceReservationBytes)
+			usedCheckpoint += legacy * legacyNamespaceCheckpointBytes
 			diskDims = []dimension{
 				{CapacityDataQuota, plan.diskBytes, usedData, budgets.DiskBytes},
 				{CapacityDataQuotaCheckpoint, plan.checkpointBytes, usedCheckpoint, budgets.CheckpointBytes},
 			}
 		} else {
+			usedDisk += legacy * (legacyNamespaceDataBytes + legacyNamespaceCheckpointBytes - NamespaceReservationBytes)
 			diskDims = []dimension{{CapacityDataQuota, plan.diskBytes + plan.checkpointBytes, usedDisk, budgets.DiskBytes}}
 		}
 	}
@@ -436,4 +444,24 @@ func enableStartSourceResource(f updateStartFacts) string {
 		return source.writable.Claim.ResourceID
 	}
 	return source.source.Claim.ResourceID
+}
+
+// A namespace reserved before the quota was per installation is one held row of three default quotas
+// (NamespaceReservationBytes) with no row for its retained checkpoints. It is read, never rewritten, as the
+// 256 MiB / 65,536 namespace it was: the data, and two checkpoints at that namespace's archive cap. A row of
+// any other size, or one with a checkpoint row, is not legacy.
+const (
+	legacyNamespaceDataBytes       = NamespaceQuotaBytes
+	legacyNamespaceCheckpointBytes = RetainedCheckpoints * 512 << 20
+)
+
+// countLegacyNamespaces counts held legacy namespace rows other than the plan's own.
+func countLegacyNamespaces(ctx context.Context, tx *sql.Tx, ownResource, ownCheckpoints string) (int64, error) {
+	var n int64
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_reservations r
+		WHERE r.state='held' AND r.kind='namespace' AND r.resource_id NOT LIKE 'checkpoints/%' AND r.disk_bytes=?
+		AND r.resource_id<>? AND r.resource_id<>?
+		AND NOT EXISTS (SELECT 1 FROM runner_reservations c WHERE c.state='held' AND c.resource_id='checkpoints/'||r.resource_id)`,
+		NamespaceReservationBytes, ownResource, ownCheckpoints).Scan(&n)
+	return n, err
 }

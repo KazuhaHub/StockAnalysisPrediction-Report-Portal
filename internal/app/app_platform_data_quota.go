@@ -131,11 +131,19 @@ func platformApprovalOfStoredPlan(p platformInstallProjection) platformQuotaAppr
 	return platformQuotaApproval{p.DataQuotaBytes, p.DataQuotaInodes}
 }
 
-// platformKeepPreUpgradeForm makes the rebuilt projection of a pre-upgrade plan match its stored bytes.
-func platformKeepPreUpgradeForm(stored platformInstallProjection, rebuilt *platformInstallProjection) {
-	if platformPreUpgradeQuota(stored) {
-		rebuilt.DataQuotaInodes, rebuilt.RequestedDataQuotaBytes, rebuilt.RequestedDataQuotaInodes = 0, 0, 0
+// platformKeepPreUpgradeForm makes the rebuilt projection of a pre-upgrade plan match its stored bytes. A
+// pre-upgrade plan is only ever the 256 MiB / 65,536 plan of a descriptor that asks for no more, so anything
+// else is refused here, at consumption, and not only at the install stage.
+func platformKeepPreUpgradeForm(stored platformInstallProjection, rebuilt *platformInstallProjection) error {
+	if !platformPreUpgradeQuota(stored) {
+		return nil
 	}
+	if stored.DataQuotaBytes != appplatform.DataQuotaDefaultBytes ||
+		rebuilt.RequestedDataQuotaBytes != appplatform.DataQuotaDefaultBytes || rebuilt.RequestedDataQuotaInodes != appplatform.DataQuotaDefaultInode {
+		return errAppPlatformPlanChanged
+	}
+	rebuilt.DataQuotaInodes, rebuilt.RequestedDataQuotaBytes, rebuilt.RequestedDataQuotaInodes = 0, 0, 0
+	return nil
 }
 
 // approvedQuota is the quota an install plan approved. A plan written before the inode fields existed

@@ -17,12 +17,16 @@ var (
 	ErrIncomplete           = errors.New("data preparation requires reconciliation")
 	ErrCheckpointUnsafe     = errors.New("data checkpoint contains unsafe or changed content")
 	ErrCheckpointIncomplete = errors.New("data checkpoint requires reconciliation")
-	ErrRestoreUnsafe        = errors.New("data restore binding is unsafe")
-	ErrRestoreIncomplete    = errors.New("data restore requires reconciliation")
-	ErrDeleteUnsafe         = errors.New("data deletion binding is unsafe")
-	ErrDeleteIncomplete     = errors.New("data deletion requires reconciliation")
-	ErrImportUnsafe         = errors.New("data checkpoint import binding is unsafe")
-	ErrImportIncomplete     = errors.New("data checkpoint import requires reconciliation")
+	// ErrCheckpointTooLarge is a namespace whose checkpoint would outgrow the archive cap. The cap sizes tar
+	// overhead at 1.5 KiB per entry, which a tree of very long paths can exceed. The refusal is definite and the
+	// partial archive is removed; nothing is lost, and raising the quota raises the cap.
+	ErrCheckpointTooLarge = errors.New("data checkpoint exceeds the archive cap of the namespace quota; raise the quota")
+	ErrRestoreUnsafe      = errors.New("data restore binding is unsafe")
+	ErrRestoreIncomplete  = errors.New("data restore requires reconciliation")
+	ErrDeleteUnsafe       = errors.New("data deletion binding is unsafe")
+	ErrDeleteIncomplete   = errors.New("data deletion requires reconciliation")
+	ErrImportUnsafe       = errors.New("data checkpoint import binding is unsafe")
+	ErrImportIncomplete   = errors.New("data checkpoint import requires reconciliation")
 	// ErrArchiveMismatch is a retained checkpoint archive that is not the file a deletion claimed: not a regular file,
 	// linked more than once, or of another size. Nothing is removed.
 	ErrArchiveMismatch = errors.New("checkpoint archive does not match the claimed file")

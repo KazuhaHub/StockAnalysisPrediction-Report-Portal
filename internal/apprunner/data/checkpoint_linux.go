@@ -111,13 +111,18 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 		return zero, ErrUnsafe
 	}
 	ok := false
+	var limited *checkpointLimitedWriter
 	defer func() {
 		if !ok {
 			_ = archive.Sync()
+			if limited != nil && limited.exceeded {
+				// Over the cap is final: no partial archive is left behind for a reconciliation to find.
+				_ = unix.Unlinkat(int(directory.Fd()), name, 0)
+			}
 		}
 		_ = archive.Close()
 	}()
-	limited := &checkpointLimitedWriter{writer: archive, limit: request.MaxArchiveBytes}
+	limited = &checkpointLimitedWriter{writer: archive, limit: request.MaxArchiveBytes}
 	hasher := newCheckpointArchiveHash()
 	tarWriter := tar.NewWriter(io.MultiWriter(limited, hasher))
 	manifest := checkpointManifest{
@@ -161,7 +166,7 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 		return zero, checkpointIncomplete(err)
 	}
 	if limited.exceeded {
-		return zero, checkpointIncomplete(ErrCheckpointUnsafe)
+		return zero, errors.Join(ErrCheckpointUnsafe, ErrCheckpointTooLarge)
 	}
 	if err := archive.Sync(); err != nil {
 		return zero, checkpointIncomplete(err)
@@ -195,6 +200,10 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 }
 
 func checkpointIncomplete(err error) error {
+	if errors.Is(err, ErrCheckpointTooLarge) {
+		// A definite refusal, not something to reconcile.
+		return err
+	}
 	return errors.Join(ErrCheckpointIncomplete, err)
 }
 
@@ -269,7 +278,7 @@ type checkpointLimitedWriter struct {
 func (w *checkpointLimitedWriter) Write(raw []byte) (int, error) {
 	if w.exceeded || int64(len(raw)) > w.limit-w.written {
 		w.exceeded = true
-		return 0, ErrCheckpointUnsafe
+		return 0, errors.Join(ErrCheckpointUnsafe, ErrCheckpointTooLarge)
 	}
 	n, err := w.writer.Write(raw)
 	w.written += int64(n)

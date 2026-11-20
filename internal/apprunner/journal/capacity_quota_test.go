@@ -79,6 +79,68 @@ func TestQuotaAdmissionOnSeparateVolumesCountsEachVolume(t *testing.T) {
 	}
 }
 
+// legacyNamespace holds a reservation as the release before this one wrote it: one row of three default
+// quotas, and no row for the retained checkpoints.
+func legacyNamespace(t *testing.T, s *Store, n int) {
+	t.Helper()
+	if _, err := s.db.Exec(`INSERT INTO runner_reservations(id,resource_id,installation_id,kind,memory_mib,cpu_millis,disk_bytes,image_bytes,state,created_ms,updated_ms) VALUES(?,?,?,'namespace',0,0,?,0,'held',1,1)`,
+		fixtureID(9900+n), fixtureID(n), fixtureID(500+n), NamespaceReservationBytes); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A namespace reserved before the upgrade still holds its two retained checkpoints, at the 512 MiB floor of the
+// cap, on the checkpoint volume. Counting the row as data only would let a separate volume be over-committed.
+func TestLegacyNamespaceRowsStillHoldTheirCheckpoints(t *testing.T) {
+	// 7 legacy namespaces hold 7 GiB of checkpoints; a checkpoint volume of 7.5 GiB cannot take another default.
+	s := capacityStore(t, CapacityBudgets{MemoryMiB: 1 << 20, CPUMillis: 1 << 20, DiskBytes: 100 * gib, CheckpointBytes: 7*gib + 512<<20, ImageStoreBytes: 1 << 40, RunningBackends: 8})
+	for n := 1; n <= 7; n++ {
+		legacyNamespace(t, s, n)
+	}
+	refusal := admitPlan(t, s, quotaPlan(t, s, 20, 256<<20, 65536))
+	if refusal == nil || refusal.dimension != CapacityDataQuotaCheckpoint || refusal.remaining != 512<<20 {
+		t.Fatalf("over-commit of the checkpoint volume: %+v", refusal)
+	}
+	// The data volume counts each legacy row as its 256 MiB of data, not as the whole row.
+	data := capacityStore(t, CapacityBudgets{MemoryMiB: 1 << 20, CPUMillis: 1 << 20, DiskBytes: 7*(256<<20) + 256<<20, CheckpointBytes: 100 * gib, ImageStoreBytes: 1 << 40, RunningBackends: 8})
+	for n := 1; n <= 7; n++ {
+		legacyNamespace(t, data, n)
+	}
+	if refusal := admitPlan(t, data, quotaPlan(t, data, 20, 256<<20, 65536)); refusal != nil {
+		t.Fatalf("the data volume was over-counted: %+v", refusal)
+	}
+}
+
+// On a shared volume a legacy row counts as a new one would: the quota and two caps.
+func TestLegacyNamespaceRowOnASharedVolumeCountsTheCaps(t *testing.T) {
+	// One legacy namespace is 1280 MiB. A 2 GiB budget leaves 768 MiB, so a default (1280 MiB) is refused.
+	s := capacityStore(t, CapacityBudgets{MemoryMiB: 1 << 20, CPUMillis: 1 << 20, DiskBytes: 2 * gib, ImageStoreBytes: 1 << 40, RunningBackends: 8})
+	legacyNamespace(t, s, 1)
+	refusal := admitPlan(t, s, quotaPlan(t, s, 2, 256<<20, 65536))
+	if refusal == nil || refusal.dimension != CapacityDataQuota || refusal.remaining != 768<<20 {
+		t.Fatalf("shared volume: %+v", refusal)
+	}
+}
+
+// Once the namespace is admitted again it holds a data row and a checkpoint row, and is counted once.
+func TestReadmittedLegacyNamespaceIsCountedOnce(t *testing.T) {
+	s := capacityStore(t, CapacityBudgets{MemoryMiB: 1 << 20, CPUMillis: 1 << 20, DiskBytes: 100 * gib, CheckpointBytes: 2 * gib, ImageStoreBytes: 1 << 40, RunningBackends: 8})
+	legacyNamespace(t, s, 1)
+	if refusal := admitPlan(t, s, quotaPlan(t, s, 1, 256<<20, 65536)); refusal != nil {
+		t.Fatalf("re-admission refused: %+v", refusal)
+	}
+	if heldCount(t, s) != 2 {
+		t.Fatalf("held rows = %d", heldCount(t, s))
+	}
+	// 1 GiB of the 2 GiB checkpoint volume is held once, so exactly one more default fits and a second does not.
+	if refusal := admitPlan(t, s, quotaPlan(t, s, 2, 256<<20, 65536)); refusal != nil {
+		t.Fatalf("second namespace refused, the first was counted twice: %+v", refusal)
+	}
+	if refusal := admitPlan(t, s, quotaPlan(t, s, 3, 256<<20, 65536)); refusal == nil || refusal.dimension != CapacityDataQuotaCheckpoint || refusal.remaining != 0 {
+		t.Fatalf("third namespace: %+v", refusal)
+	}
+}
+
 // A raise replaces the namespace's own reservation instead of counting twice, and releasing one
 // releases both rows.
 func TestQuotaRaiseReplacesTheNamespaceReservation(t *testing.T) {

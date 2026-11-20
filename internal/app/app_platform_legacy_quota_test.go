@@ -47,7 +47,9 @@ func TestRebuiltProjectionOfAPreUpgradePlanMatchesIt(t *testing.T) {
 	if err := platformApplyInstallQuota(&rebuilt, rebuilt.Format, manifest, approval); err != nil {
 		t.Fatal(err)
 	}
-	platformKeepPreUpgradeForm(stored, &rebuilt)
+	if err := platformKeepPreUpgradeForm(stored, &rebuilt); err != nil {
+		t.Fatal(err)
+	}
 	if mustJSON(t, rebuilt) != mustJSON(t, stored) {
 		t.Fatalf("rebuilt %s, stored %s", mustJSON(t, rebuilt), mustJSON(t, stored))
 	}
@@ -60,8 +62,34 @@ func TestRebuiltProjectionOfAPreUpgradePlanMatchesIt(t *testing.T) {
 	if err := platformApplyInstallQuota(&again, again.Format, manifest, platformApprovalOfStoredPlan(current)); err != nil {
 		t.Fatal(err)
 	}
-	platformKeepPreUpgradeForm(current, &again)
+	if err := platformKeepPreUpgradeForm(current, &again); err != nil {
+		t.Fatal(err)
+	}
 	if mustJSON(t, again) != mustJSON(t, current) || current.DataQuotaInodes != 65536 {
 		t.Fatalf("a current plan changed: %s vs %s", mustJSON(t, again), mustJSON(t, current))
+	}
+}
+
+// A pre-upgrade plan is only the 256 MiB plan. Consuming one whose byte quota is anything else, or for a
+// descriptor that now requests more, is refused there as well as at the install stage.
+func TestPreUpgradePlanWithAnotherQuotaIsRefusedAtConsume(t *testing.T) {
+	for name, c := range map[string]struct {
+		bytes    int64
+		manifest appplatform.Manifest
+	}{
+		"512 MiB for a default descriptor": {512 << 20, quotaManifest(nil)},
+		"512 MiB for a 3 GiB request":      {512 << 20, quotaManifest(&appplatform.DataQuota{Bytes: 3 << 30, Inodes: 100000})},
+		"256 MiB for a 3 GiB request":      {256 << 20, quotaManifest(&appplatform.DataQuota{Bytes: 3 << 30, Inodes: 100000})},
+	} {
+		stored := legacyPlan()
+		stored.DataQuotaBytes = c.bytes
+		rebuilt := platformInstallProjection{Format: stored.Format}
+		err := platformApplyInstallQuota(&rebuilt, rebuilt.Format, c.manifest, platformApprovalOfStoredPlan(stored))
+		if err == nil {
+			err = platformKeepPreUpgradeForm(stored, &rebuilt)
+		}
+		if err == nil {
+			t.Fatalf("%s: consume would have accepted it", name)
+		}
 	}
 }

@@ -43,3 +43,26 @@ func TestPrepareDataQuotaIsCheckedAgainstThePlatformBounds(t *testing.T) {
 		}
 	}
 }
+
+// A deletion names the namespace's quota too; the runner holds that to the platform bounds as well.
+func TestDeleteDataQuotaIsCheckedAgainstThePlatformBounds(t *testing.T) {
+	for name, c := range map[string]struct {
+		bytes, inodes string
+		ok            bool
+	}{
+		"default":           {"268435456", "65536", true},
+		"maximum":           {"17179869184", "1000000", true},
+		"too few inodes":    {"268435456", "65535", false},
+		"too many inodes":   {"268435456", "1000001", false},
+		"bytes below":       {"134217728", "65536", false},
+		"bytes above":       {"17246978048", "65536", false},
+		"bytes off grid":    {"268435968", "65536", false},
+		"overflowing inode": {"268435456", "9223372036854775807", false},
+	} {
+		command, _, _, _ := deleteDataFixture(t)
+		command.Payload.QuotaBytes, command.Payload.QuotaInodes = c.bytes, c.inodes
+		if _, err := DeleteDataLogicalDigest(command); (err == nil) != c.ok {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+	}
+}

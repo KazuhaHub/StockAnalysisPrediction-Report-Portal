@@ -342,7 +342,9 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format, platformApprovalOfStoredPlan(storedProjection)); err != nil {
 			return err
 		}
-		platformKeepPreUpgradeForm(storedProjection, &projection)
+		if err := platformKeepPreUpgradeForm(storedProjection, &projection); err != nil {
+			return err
+		}
 		if err := validatePlatformInstallAudience(e, storedProjection.Audience, control.nowMS); err != nil {
 			return err
 		}

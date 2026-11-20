@@ -2,6 +2,7 @@ package data
 
 import (
 	"archive/tar"
+	"errors"
 	"io"
 	"math"
 	"strings"
@@ -55,6 +56,33 @@ func TestArchiveCapHoldsLongChineseNames(t *testing.T) {
 	}
 	if int64(written) > ArchiveCapFor(256<<20, entries)-256<<20 {
 		t.Fatal("the cap does not cover the headers of the entries it allows")
+	}
+}
+
+// 1.5 KiB per entry is a sizing rule, not a bound: a 4,000-byte path needs about 5 KiB of PAX header. A tree
+// of such paths can outgrow the cap, and its checkpoint is then refused whole, with a clear error and no
+// archive of it written beyond the cap. Raising the quota raises the cap.
+func TestPathologicallyDeepPathsAreRefusedCleanly(t *testing.T) {
+	var sink countingWriter
+	limited := &checkpointLimitedWriter{writer: &sink, limit: 200 << 10}
+	w := tar.NewWriter(limited)
+	var refused error
+	for i := 0; i < 100 && refused == nil; i++ {
+		name := strings.Repeat("数据/", 600) + string(rune('a'+i%26)) // about 4,000 bytes of path
+		refused = w.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0640, Format: tar.FormatPAX})
+	}
+	if refused == nil {
+		t.Fatal("100 deep paths fit a 200 KiB cap")
+	}
+	err := checkpointIncomplete(refused)
+	if !errors.Is(err, ErrCheckpointTooLarge) || !errors.Is(err, ErrCheckpointUnsafe) || errors.Is(err, ErrCheckpointIncomplete) {
+		t.Fatalf("a cap overrun must be a definite refusal that says so, not a reconciliation: %v", err)
+	}
+	if int64(sink) > limited.limit {
+		t.Fatalf("%d bytes written past a %d byte cap", int64(sink), limited.limit)
+	}
+	if !strings.Contains(ErrCheckpointTooLarge.Error(), "raise the quota") {
+		t.Fatal("the error does not say what to do")
 	}
 }
 
