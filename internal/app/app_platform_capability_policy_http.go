@@ -162,10 +162,45 @@ type platformCapabilityDiffTarget struct {
 	Allowlist *appplatform.PrivateNetwork `json:"allowlist"`
 }
 
+type platformCapabilityLimits struct {
+	RequestBytes  int64 `json:"request_bytes"`
+	ResponseBytes int64 `json:"response_bytes"`
+	DeadlineMS    int64 `json:"deadline_ms"`
+	Concurrency   int   `json:"concurrency"`
+}
+
+type platformCapabilityNarrowing struct {
+	ID  string                   `json:"id"`
+	Old platformCapabilityLimits `json:"old"`
+	New platformCapabilityLimits `json:"new"`
+}
+
+func platformCapabilitySharedLimits(p appplatform.HTTPPolicyV2) platformCapabilityLimits {
+	return platformCapabilityLimits{RequestBytes: p.RequestBytes, ResponseBytes: p.ResponseBytes, DeadlineMS: p.Deadline.Milliseconds(), Concurrency: p.Concurrency}
+}
+
+// platformCapabilityEffectiveLimits is what a target is held to: its own bound
+// where it narrows the shared one, the shared bound otherwise.
+func platformCapabilityEffectiveLimits(p appplatform.HTTPPolicyV2, t appplatform.HTTPTarget) platformCapabilityLimits {
+	l := platformCapabilitySharedLimits(p)
+	if t.RequestBytes != 0 && t.RequestBytes < l.RequestBytes {
+		l.RequestBytes = t.RequestBytes
+	}
+	if t.ResponseBytes != 0 && t.ResponseBytes < l.ResponseBytes {
+		l.ResponseBytes = t.ResponseBytes
+	}
+	if ms := t.Deadline.Milliseconds(); ms != 0 && ms < l.DeadlineMS {
+		l.DeadlineMS = ms
+	}
+	return l
+}
+
 // platformCapabilityDiff is the server-computed difference the administrator confirms: the
 // targets the plan adds with their class and the allowlist entry that admits them, the targets it
-// removes, and the bindings the consume will pause.
-func (s *Server) platformCapabilityDiff(session platformActorSession, plan platformCapabilityPolicyPlan) (map[string]any, error) {
+// removes, the shared bounds and the per-target limits it changes, the allowlist digest it binds
+// and the bindings the consume will pause. It reads what the plan's own transaction read.
+func platformCapabilityDiff(result platformCapabilityPolicyResult) (map[string]any, error) {
+	plan := result.Plan
 	policy, err := appplatform.ParseHTTPPolicyV2([]byte(plan.Runtime.NetworkPolicy))
 	if err != nil {
 		return nil, errPlatformCapabilityPolicy
@@ -184,36 +219,24 @@ func (s *Server) platformCapabilityDiff(session platformActorSession, plan platf
 		}
 		added = append(added, item)
 	}
-	targets := map[string]bool{}
+	narrowed := []platformCapabilityNarrowing{}
 	for _, t := range policy.Policy.Targets {
-		sum, err := appplatform.HTTPTargetSHA256(t)
-		if err != nil {
-			return nil, errPlatformCapabilityPolicy
-		}
-		targets[sum] = true
-	}
-	paused := []string{}
-	err = s.withAppPlatformActorRead(session, func(e migExec, _ platformActorFacts, _ platformActorControl) error {
-		rows, err := e.query(`SELECT name,policy_json FROM app_platform_secret_bindings WHERE installation_id=? AND state='active' AND operation IN ('http_bearer','http_api_key') ORDER BY name`, plan.InstallationID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var name, raw string
-			if err := rows.Scan(&name, &raw); err != nil {
-				return err
+		for _, old := range result.Previous.Targets {
+			if old.ID != t.ID {
+				continue
 			}
-			if platformCapabilityBindingPauses(raw, targets) {
-				paused = append(paused, name)
+			before, after := platformCapabilityEffectiveLimits(result.Previous, old), platformCapabilityEffectiveLimits(policy.Policy, t)
+			if before != after {
+				narrowed = append(narrowed, platformCapabilityNarrowing{ID: t.ID, Old: before, New: after})
 			}
 		}
-		return rows.Err()
-	})
-	if err != nil {
-		return nil, err
 	}
-	return map[string]any{"added": added, "removed": plan.TargetsRemoved, "paused_bindings": paused}, nil
+	return map[string]any{
+		"added": added, "removed": plan.TargetsRemoved, "paused_bindings": platformNonNilStrings(result.Paused),
+		"bounds":    map[string]any{"old": platformCapabilitySharedLimits(result.Previous), "new": platformCapabilitySharedLimits(policy.Policy)},
+		"narrowing": narrowed,
+		"allowlist": map[string]any{"old_sha256": result.PreviousNetworksSHA256, "new_sha256": plan.PrivateNetworksSHA256},
+	}, nil
 }
 
 func (s *Server) apiPlatformCapabilityPolicyPlan(w http.ResponseWriter, r *http.Request, user string) {
@@ -242,7 +265,7 @@ func (s *Server) apiPlatformCapabilityPolicyPlan(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	diff, err := s.platformCapabilityDiff(session, result.Plan)
+	diff, err := platformCapabilityDiff(result)
 	if err != nil {
 		platformManagementError(w, err)
 		return

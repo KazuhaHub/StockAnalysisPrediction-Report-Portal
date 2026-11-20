@@ -108,21 +108,21 @@ func testPlatformCapabilityCreateRefusals(t *testing.T, pg bool) {
 		{name: "rename by reusing an id", add: []appplatform.HTTPTarget{platformTestTarget("default", "https://other.example.com", "public", []string{"/v2"}, []string{"GET"})}, want: errPlatformManagementInput},
 		{name: "rename by moving an origin", add: []appplatform.HTTPTarget{extra, platformTestTarget("renamed", "https://api.example.com", "public", []string{"/v1"}, []string{"GET"})}, rm: []string{"default"}, want: errPlatformManagementInput},
 		{name: "duplicate origin", add: []appplatform.HTTPTarget{platformTestTarget("again", "https://api.example.com", "public", []string{"/v9"}, []string{"GET"})}, want: errPlatformManagementInput},
-		{name: "private target without allowlist", add: []appplatform.HTTPTarget{private}, want: errAppPlatformInstallUnavailable},
+		{name: "private target without allowlist", add: []appplatform.HTTPTarget{private}, want: errPlatformPrivateTargetNotAllowed},
 		{name: "private literal outside the allowlist", setup: func(t *testing.T, _ *Server, _ platformActorSession, _ string, r *platformCapabilityRunner) {
 			targets, err := transport.NewNetworkTargets([]appplatform.PrivateNetwork{{Prefix: "10.30.0.0/24", Ports: []int{8443}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			r.set(func(o *platformCapabilityObservation) { o.Targets = targets })
-		}, add: []appplatform.HTTPTarget{private}, want: errAppPlatformInstallUnavailable},
+		}, add: []appplatform.HTTPTarget{private}, want: errPlatformPrivateTargetNotAllowed},
 		{name: "private literal on a port the allowlist lacks", setup: func(t *testing.T, _ *Server, _ platformActorSession, _ string, r *platformCapabilityRunner) {
 			targets, err := transport.NewNetworkTargets([]appplatform.PrivateNetwork{{Prefix: "10.20.0.0/24", Ports: []int{443}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			r.set(func(o *platformCapabilityObservation) { o.Targets = targets })
-		}, add: []appplatform.HTTPTarget{private}, want: errAppPlatformInstallUnavailable},
+		}, add: []appplatform.HTTPTarget{private}, want: errPlatformPrivateTargetNotAllowed},
 		{name: "too many added targets", add: func() []appplatform.HTTPTarget {
 			var list []appplatform.HTTPTarget
 			for i := 0; i < 17; i++ {

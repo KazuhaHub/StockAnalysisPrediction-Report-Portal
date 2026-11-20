@@ -202,6 +202,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 503, "app_platform_runtime_unavailable"
 	case errors.Is(err, errAppPlatformControlPaused):
 		status, code = 503, "app_platform_control_paused"
+	case errors.Is(err, errPlatformPrivateTargetNotAllowed):
+		status, code = 409, "app_platform_private_target_not_allowed"
 	case errors.Is(err, errPlatformCapabilityPolicyBusy):
 		status, code = 409, "app_platform_installation_not_ready"
 	case errors.Is(err, transport.ErrNetworkTargetsUnsupported):

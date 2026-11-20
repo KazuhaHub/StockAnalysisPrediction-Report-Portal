@@ -8,12 +8,12 @@ const platformDigestFeedBinding = "digest-feed"
 // reviewed business configuration to existing installation-scoped state, so
 // uninstall and credential lifecycle handling stay identical to other bindings.
 func platformRequiredSetupBindings(appID string) []string {
-	switch appID {
-	case "scheduled-digest":
-		return []string{platformDigestFeedBinding}
-	default:
-		return nil
-	}
+	return platformSetupRequirements[appID]
+}
+
+// platformSetupRequirements maps an application to the setup bindings it needs.
+var platformSetupRequirements = map[string][]string{
+	"scheduled-digest": {platformDigestFeedBinding},
 }
 
 func platformRequiredSetupBinding(appID, name string) bool {

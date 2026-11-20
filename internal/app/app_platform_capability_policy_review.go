@@ -16,6 +16,10 @@ import (
 
 var errPlatformCapabilityPolicyBusy = errors.New("installation is not ready for a capability policy change")
 
+// errPlatformPrivateTargetNotAllowed says a private target of the policy is not
+// admitted by the runner's observed private-network allowlist.
+var errPlatformPrivateTargetNotAllowed = errors.New("a private target is not admitted by the runner allowlist")
+
 // platformCapabilityObservation is what a review reads from the runner, as plain
 // data: the identity it registered, its managed and network profiles and the
 // PRNT0001 answer (the operator's private-network allowlist).
@@ -69,8 +73,10 @@ type platformCapabilityRequest struct {
 // platformMergeCapabilityPolicy applies a change to the current policy. It
 // refuses a rename (an added id that already exists, or an added origin that a
 // removed target had), a change that changes nothing, and the removal of the last
-// target; the merged policy must be a valid v2 policy.
-func platformMergeCapabilityPolicy(current appplatform.HTTPPolicyV2, req platformCapabilityRequest) (appplatform.HTTPPolicyV2, []appplatform.HTTPTarget, []appplatform.HTTPTarget, error) {
+// target; the merged policy must be a valid v2 policy. A change that changes
+// nothing is accepted only as a rebind: the policy is kept and the review binds it
+// to the runner's new allowlist digest.
+func platformMergeCapabilityPolicy(current appplatform.HTTPPolicyV2, req platformCapabilityRequest, rebind bool) (appplatform.HTTPPolicyV2, []appplatform.HTTPTarget, []appplatform.HTTPTarget, error) {
 	var zero appplatform.HTTPPolicyV2
 	bad := errPlatformManagementInput
 	if len(req.Add) > platformCapabilityTargetsMax || len(req.Remove) > appplatform.MaxHTTPPolicyTargets {
@@ -120,7 +126,7 @@ func platformMergeCapabilityPolicy(current appplatform.HTTPPolicyV2, req platfor
 	if req.Bounds.Concurrency != 0 {
 		merged.Concurrency = req.Bounds.Concurrency
 	}
-	if len(req.Add) == 0 && len(req.Remove) == 0 && merged.RequestBytes == current.RequestBytes && merged.ResponseBytes == current.ResponseBytes && merged.Deadline == current.Deadline && merged.Concurrency == current.Concurrency {
+	if !rebind && len(req.Add) == 0 && len(req.Remove) == 0 && merged.RequestBytes == current.RequestBytes && merged.ResponseBytes == current.ResponseBytes && merged.Deadline == current.Deadline && merged.Concurrency == current.Concurrency {
 		return zero, nil, nil, bad
 	}
 	normalized, err := appplatform.NormalizeHTTPPolicyV2(merged)
@@ -166,16 +172,18 @@ func platformAllowlistEntry(networks []appplatform.PrivateNetwork, policy apppla
 	return zero, false
 }
 
-func platformCheckCapabilityPrivate(networks []appplatform.PrivateNetwork, policy appplatform.HTTPPolicyV2, added []appplatform.HTTPTarget) error {
-	for _, t := range added {
+// platformCheckCapabilityPrivate checks every private target of the policy, the
+// retained ones as well as the added ones, against the observed allowlist.
+func platformCheckCapabilityPrivate(networks []appplatform.PrivateNetwork, policy appplatform.HTTPPolicyV2) error {
+	for _, t := range policy.Targets {
 		if t.Network != appplatform.HTTPNetworkPrivate {
 			continue
 		}
 		if len(networks) == 0 {
-			return errAppPlatformInstallUnavailable
+			return errPlatformPrivateTargetNotAllowed
 		}
 		if _, ok := platformAllowlistEntry(networks, policy, t); !ok {
-			return errAppPlatformInstallUnavailable
+			return errPlatformPrivateTargetNotAllowed
 		}
 	}
 	return nil
@@ -273,6 +281,12 @@ type platformCapabilityPolicyResult struct {
 	ID, SHA256, JSON string
 	ExpiresMS        int64
 	Plan             platformCapabilityPolicyPlan
+	// Previous is the policy the plan replaces, Paused the bindings its consume pauses and
+	// PreviousNetworksSHA256 the allowlist digest the replaced policy was bound to, all read
+	// in the plan's own transaction.
+	Previous               appplatform.HTTPPolicyV2
+	Paused                 []string
+	PreviousNetworksSHA256 string
 }
 
 func (s *Server) createPlatformCapabilityPolicyReview(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint, installation string, req platformCapabilityRequest) (platformCapabilityPolicyResult, error) {
@@ -299,11 +313,19 @@ func (s *Server) createPlatformCapabilityPolicyReview(ctx context.Context, sessi
 		if !samePlatformManagedRuntime(obs.Runtime, f.runtime) || !obs.Network.WritableBackend {
 			return errAppPlatformRuntimeConflict
 		}
-		merged, added, removed, err := platformMergeCapabilityPolicy(f.current.Policy, req)
+		// A policy with a private target is bound to the allowlist digest its last review
+		// saw; when the runner's allowlist has changed since, the review may change nothing
+		// else and only bind the same policy to the new digest.
+		bound := ""
+		if latest, err := loadPlatformLatestCapabilityPlan(e, installation); err == nil && latest.id == f.grant.review {
+			bound = latest.plan.PrivateNetworksSHA256
+		}
+		rebind := f.current.Policy.HasPrivate() && bound != obs.Targets.PrivateNetworksSHA256
+		merged, added, removed, err := platformMergeCapabilityPolicy(f.current.Policy, req, rebind)
 		if err != nil {
 			return err
 		}
-		if err := platformCheckCapabilityPrivate(obs.Targets.PrivateNetworks, merged, added); err != nil {
+		if err := platformCheckCapabilityPrivate(obs.Targets.PrivateNetworks, merged); err != nil {
 			return err
 		}
 		rawPolicy, err := appplatform.CanonicalHTTPPolicyV2(merged)
@@ -359,7 +381,19 @@ func (s *Server) createPlatformCapabilityPolicyReview(ctx context.Context, sessi
 			f.epoch, actor.scope, actor.username, actor.created, actor.generation, actor.authorityFingerprint, digest, string(raw), expires, control.nowMS, control.nowMS); err != nil {
 			return err
 		}
-		result = platformCapabilityPolicyResult{ID: planID, SHA256: digest, JSON: string(raw), ExpiresMS: expires, Plan: plan}
+		newTargets, err := platformCapabilityTargetDigests(merged)
+		if err != nil {
+			return errPlatformManagementInput
+		}
+		paused, err := platformCapabilityPausedBindings(e, installation, newTargets)
+		if err != nil {
+			return err
+		}
+		names := make([]string, 0, len(paused))
+		for _, b := range paused {
+			names = append(names, b.name)
+		}
+		result = platformCapabilityPolicyResult{ID: planID, SHA256: digest, JSON: string(raw), ExpiresMS: expires, Plan: plan, Previous: f.current.Policy, Paused: names, PreviousNetworksSHA256: bound}
 		_, err = platformRefreshActor(e, session, actor, control)
 		return err
 	})
@@ -386,6 +420,55 @@ func platformCapabilityBindingPauses(policyJSON string, newTargets map[string]bo
 		return true
 	}
 	return !newTargets[probe.NetworkTargetSHA256]
+}
+
+// platformCapabilityTargetDigests is the set of target digests of a policy.
+func platformCapabilityTargetDigests(policy appplatform.HTTPPolicyV2) (map[string]bool, error) {
+	digests := map[string]bool{}
+	for _, t := range policy.Targets {
+		sum, err := appplatform.HTTPTargetSHA256(t)
+		if err != nil {
+			return nil, err
+		}
+		digests[sum] = true
+	}
+	return digests, nil
+}
+
+type platformPausedBinding struct {
+	id, name string
+	revision int64
+}
+
+// platformCapabilityPausedBindings lists the active HTTP bindings a review that
+// leaves the given targets pauses.
+func platformCapabilityPausedBindings(e migExec, installation string, newTargets map[string]bool) ([]platformPausedBinding, error) {
+	rows, err := e.query(`SELECT id,name,policy_json,revision FROM app_platform_secret_bindings WHERE installation_id=? AND state='active' AND operation IN ('http_bearer','http_api_key') ORDER BY name`, installation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pause []platformPausedBinding
+	for rows.Next() {
+		var b platformPausedBinding
+		var policy string
+		if err := rows.Scan(&b.id, &b.name, &policy, &b.revision); err != nil {
+			return nil, err
+		}
+		if platformCapabilityBindingPauses(policy, newTargets) {
+			pause = append(pause, b)
+		}
+	}
+	return pause, rows.Err()
+}
+
+// platformCapabilityAuditTargets names the targets of a change by id and origin.
+func platformCapabilityAuditTargets(targets []platformCapabilityTarget) []map[string]string {
+	result := make([]map[string]string, 0, len(targets))
+	for _, t := range targets {
+		result = append(result, map[string]string{"id": t.ID, "origin": t.Origin})
+	}
+	return result
 }
 
 type platformCapabilityPolicyChange struct {
@@ -456,8 +539,11 @@ func (s *Server) consumePlatformCapabilityPolicyReview(ctx context.Context, sess
 			return errAppPlatformPlanChanged
 		}
 		newPolicy, err := appplatform.ParseHTTPPolicyV2([]byte(rt.NetworkPolicy))
-		if err != nil || newPolicy.Policy.HasPrivate() && len(plan.PrivateNetworks) == 0 {
+		if err != nil {
 			return errAppPlatformPlanChanged
+		}
+		if err := platformCheckCapabilityPrivate(obs.Targets.PrivateNetworks, newPolicy.Policy); err != nil {
+			return err
 		}
 		now := control.nowMS
 		next := f.policyRevision + 1
@@ -488,36 +574,11 @@ func (s *Server) consumePlatformCapabilityPolicyReview(ctx context.Context, sess
 		if _, err := e.exec(`UPDATE app_platform_review_plans SET expires_ms=?,updated_ms=? WHERE installation_id=? AND consumed_ms IS NULL AND id<>? AND expires_ms>?`, now, now, plan.InstallationID, planID, now); err != nil {
 			return err
 		}
-		newTargets := map[string]bool{}
-		for _, t := range newPolicy.Policy.Targets {
-			sum, err := appplatform.HTTPTargetSHA256(t)
-			if err != nil {
-				return errAppPlatformPlanChanged
-			}
-			newTargets[sum] = true
-		}
-		type pausedBinding struct {
-			id, name string
-			revision int64
-		}
-		var pause []pausedBinding
-		rows, err := e.query(`SELECT id,name,policy_json,revision FROM app_platform_secret_bindings WHERE installation_id=? AND state='active' AND operation IN ('http_bearer','http_api_key') ORDER BY name`, plan.InstallationID)
+		newTargets, err := platformCapabilityTargetDigests(newPolicy.Policy)
 		if err != nil {
-			return err
+			return errAppPlatformPlanChanged
 		}
-		for rows.Next() {
-			var b pausedBinding
-			var policy string
-			if err := rows.Scan(&b.id, &b.name, &policy, &b.revision); err != nil {
-				rows.Close()
-				return err
-			}
-			if platformCapabilityBindingPauses(policy, newTargets) {
-				pause = append(pause, b)
-			}
-		}
-		err = rows.Err()
-		rows.Close()
+		pause, err := platformCapabilityPausedBindings(e, plan.InstallationID, newTargets)
 		if err != nil {
 			return err
 		}
@@ -529,6 +590,11 @@ func (s *Server) consumePlatformCapabilityPolicyReview(ctx context.Context, sess
 			}
 			result.Paused = append(result.Paused, b.name)
 		}
+		// Every binding that stays active (setup bindings and kept ones) moves to the new policy
+		// revision with the installation, so none of them counts as missing afterwards.
+		if _, err := e.exec(`UPDATE app_platform_secret_bindings SET policy_revision=?,updated_ms=? WHERE installation_id=? AND state='active' AND policy_revision=?`, next, now, plan.InstallationID, f.policyRevision); err != nil {
+			return err
+		}
 		changed, err = e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND plan_sha256=? AND expires_ms>?`, now, now, planID, planSHA, now)
 		if err := platformObjectCAS(changed, err); err != nil {
 			return errAppPlatformPlanChanged
@@ -536,7 +602,12 @@ func (s *Server) consumePlatformCapabilityPolicyReview(ctx context.Context, sess
 		if err := platformApplySetupPhase(e, plan.InstallationID, now); err != nil {
 			return err
 		}
-		detail, err := json.Marshal(map[string]any{"capability": platformCapabilityNetworkHTTP, "policy_revision": next, "added": len(plan.TargetsAdded), "removed": len(plan.TargetsRemoved), "paused_bindings": len(result.Paused)})
+		detail, err := json.Marshal(map[string]any{
+			"capability": platformCapabilityNetworkHTTP, "plan_id": planID, "policy_revision": next,
+			"previous_policy_sha256": plan.PreviousPolicySHA256, "policy_sha256": platformDigest([]byte(rt.NetworkPolicy)),
+			"added": platformCapabilityAuditTargets(plan.TargetsAdded), "removed": platformCapabilityAuditTargets(plan.TargetsRemoved),
+			"private_networks_sha256": plan.PrivateNetworksSHA256, "paused_bindings": result.Paused,
+		})
 		if err != nil {
 			return err
 		}
