@@ -138,9 +138,9 @@ func canonicalPlatformSecretBindingPolicy(p platformSecretBindingPolicy) ([]byte
 			return nil, errAppPlatformCredentialUnavailable
 		}
 	case "acs3_hmac_sha256":
-		// Always the v2 spelling: only v2 carries the action list, and a viewer-only binding is then
-		// written with the viewer as its one principal.
-		if !platformValidSHA(p.networkPolicySHA256) || p.networkTargetSHA256 != "" {
+		// Always the v2 spelling with whole-policy scope: only v2 carries the action list, and a
+		// viewer-only binding is then written with the viewer as its one principal.
+		if p.networkTargetSHA256 != "" || !platformValidSHA(p.networkPolicySHA256) {
 			return nil, errAppPlatformCredentialUnavailable
 		}
 		if spelling, ok := platformACS3Spelling(platformACS3ActionList(p.acs3)); !ok || spelling != p.acs3 {

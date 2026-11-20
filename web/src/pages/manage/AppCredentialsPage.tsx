@@ -45,9 +45,9 @@ interface Binding {
   policy_revision: number
   revision: number
   principals?: Principal[]
+  acs3_actions?: Acs3Action[]
   network_target?: string
   network_target_sha256?: string
-  acs3_actions?: Acs3Action[]
 }
 
 interface TargetChoice {
@@ -60,6 +60,8 @@ interface Acs3Action {
   action: string
   version: string
 }
+
+const isHttpOperation = (operation?: string) => operation === 'http_bearer' || operation === 'http_api_key'
 
 const acs3Label = (item: Acs3Action) => `${item.action} · ${item.version}`
 
@@ -84,8 +86,8 @@ interface BindingForm {
   credential_id: string
   operation: string
   use: Use
-  target?: string
   acs3_actions?: Acs3Action[]
+  target?: string
 }
 
 // What a credential is made of: one secret value, or an Alibaba Cloud AccessKey (doc 177).
@@ -141,8 +143,8 @@ interface BindingPlan {
     credential_label: string
     operation: string
     network_policy_sha256: string
-    network_target?: string
     network_origin?: string
+    network_target?: string
     principals?: Principal[]
     acs3_actions?: Acs3Action[]
   }
@@ -341,15 +343,14 @@ export default function AppCredentialsPage() {
       } else if (values.operation !== 'raw_read') {
         request.principals = principalsForUse(values.use ?? 'viewer')
       }
-      // A grant with several targets needs the one the binding is for named.
-      if (values.operation !== 'raw_read' && values.operation !== 'acs3_hmac_sha256' && values.operation !== 'pg_password' && targets.length > 1 && values.target) {
-        request.target = values.target
-      }
       if (values.operation === 'acs3_hmac_sha256') {
         request.acs3_actions = acs3Sorted(
           (values.acs3_actions ?? []).map((item) => ({ action: item.action?.trim() ?? '', version: item.version?.trim() ?? '' })),
         )
       }
+      // A grant with several targets needs the one the binding is for named (an HTTP binding only:
+      // a signed-request binding covers the whole network policy).
+      if (isHttpOperation(values.operation) && targets.length > 1 && values.target) request.target = values.target
       const plan = await api.post<BindingPlan>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings/plan`,
         request,
@@ -364,12 +365,13 @@ export default function AppCredentialsPage() {
               <Typography.Text type="secondary">
                 {t(`appCredentials.operation.${plan.review.operation}`)} · {plan.review.network_policy_sha256.slice(0, 12)}
               </Typography.Text>
-              {plan.review.network_target && (
+              {plan.review.network_target ? (
                 <Typography.Text>
                   {t('appCredentials.bindingTarget', { origin: plan.review.network_target })}
                 </Typography.Text>
+              ) : (
+                plan.review.network_origin && <Typography.Text code>{plan.review.network_origin}</Typography.Text>
               )}
-              {plan.review.network_origin && <Typography.Text code>{plan.review.network_origin}</Typography.Text>}
               {plan.review.acs3_actions?.map((item) => (
                 <Typography.Text key={acs3Label(item)}>{acs3Label(item)}</Typography.Text>
               ))}
@@ -443,8 +445,8 @@ export default function AppCredentialsPage() {
             credential_id: '',
             operation: appKey === 'scheduled-digest' ? 'raw_read' : 'http_bearer',
             use: 'viewer',
-            target: undefined,
             acs3_actions: undefined,
+            target: undefined,
           },
     )
     setBindingOpen(true)
@@ -497,11 +499,6 @@ export default function AppCredentialsPage() {
       render: (operation: string) => t(`appCredentials.operation.${operation}`),
     },
     {
-      title: t('appCredentials.target'),
-      key: 'target',
-      render: (_: unknown, binding: Binding) => binding.network_target ?? null,
-    },
-    {
       title: t('appCredentials.acs3Actions'),
       key: 'acs3_actions',
       render: (_: unknown, binding: Binding) =>
@@ -512,6 +509,11 @@ export default function AppCredentialsPage() {
             ))}
           </Space>
         ) : null,
+    },
+    {
+      title: t('appCredentials.target'),
+      key: 'target',
+      render: (_: unknown, binding: Binding) => binding.network_target ?? null,
     },
     {
       title: t('appCredentials.usedBy'),
@@ -695,13 +697,6 @@ export default function AppCredentialsPage() {
               ]}
             />
           </Form.Item>
-          {bindingOperation !== 'raw_read' && bindingOperation !== 'acs3_hmac_sha256' && bindingOperation !== 'pg_password' && targets.length > 1 && (
-            <Form.Item name="target" label={t('appCredentials.target')} rules={[{ required: true }]}>
-              <Select
-                options={targets.map((choice) => ({ value: choice.id, label: `${choice.id} · ${choice.origin}` }))}
-              />
-            </Form.Item>
-          )}
           {bindingOperation === 'pg_password' && (
             <Form.Item name="target" label={t('appCredentials.pgTarget')} rules={[{ required: true }]}>
               <Select
@@ -747,6 +742,13 @@ export default function AppCredentialsPage() {
                   </Space>
                 )}
               </Form.List>
+            </Form.Item>
+          )}
+          {isHttpOperation(bindingOperation) && targets.length > 1 && (
+            <Form.Item name="target" label={t('appCredentials.target')} rules={[{ required: true }]}>
+              <Select
+                options={targets.map((choice) => ({ value: choice.id, label: `${choice.id} · ${choice.origin}` }))}
+              />
             </Form.Item>
           )}
           {bindingOperation !== 'raw_read' && bindingOperation !== 'pg_password' && (

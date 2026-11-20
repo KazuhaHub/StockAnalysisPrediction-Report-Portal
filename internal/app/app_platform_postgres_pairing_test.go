@@ -38,7 +38,7 @@ func testPlatformPostgresCredentialPairing(t *testing.T, pg bool) {
 	// The reviews refuse it before a plan exists.
 	before := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`)
 	for _, operation := range []string{"http_bearer", "http_api_key"} {
-		if _, err := s.createPlatformSecretBindingReviewFull(admin, installation, "role-as-header", role.ID, operation, "", "", nil); err == nil {
+		if _, err := s.createPlatformSecretBindingReviewScoped(admin, installation, "role-as-header", role.ID, operation, "", "", nil); err == nil {
 			t.Errorf("%s review accepted a PostgreSQL role", operation)
 		}
 	}

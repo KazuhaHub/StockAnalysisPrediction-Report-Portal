@@ -189,8 +189,9 @@ type platformSecretBindingPlanRequest struct {
 // platformSecretBindingPlanFields reads a binding review request: name,
 // credential_id and operation, and optionally principals, a sorted list of
 // "viewer" and "service" (absent means the viewer only), target, the id of
-// the network target the binding is for (absent means the policy's only target),
-// and, for an acs3_hmac_sha256 binding, acs3_actions: the (action, version) pairs it may sign.
+// the network target the binding is for (absent means the policy's only target;
+// an HTTP binding only), and, for an
+// acs3_hmac_sha256 binding, acs3_actions: the (action, version) pairs it may sign.
 func platformSecretBindingPlanFields(w http.ResponseWriter, r *http.Request) (platformSecretBindingPlanRequest, error) {
 	var zero, out platformSecretBindingPlanRequest
 	raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
@@ -265,11 +266,15 @@ func (s *Server) platformBindingNetworkOrigin(session platformActorSession, inst
 		if err := e.queryRow(`SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http' AND granted=1`, installation).Scan(&raw); err != nil {
 			return err
 		}
-		policy, err := appplatform.ParseHTTPPolicy([]byte(raw))
+		policy, err := appplatform.ParseHTTPPolicyAny([]byte(raw))
 		if err != nil {
 			return err
 		}
-		origin = policy.Policy.Origin
+		origins := make([]string, 0, len(policy.Policy.Targets))
+		for _, t := range policy.Policy.Targets {
+			origins = append(origins, t.Origin)
+		}
+		origin = strings.Join(origins, ", ")
 		return nil
 	})
 	return origin
@@ -277,7 +282,7 @@ func (s *Server) platformBindingNetworkOrigin(session platformActorSession, inst
 
 // platformSecretBindingReviewResponse is the review a plan response shows.
 func platformSecretBindingReviewResponse(review platformSecretBindingReview, principals, origin string) map[string]any {
-	out := map[string]any{"network_origin": origin, "name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "principals": platformSecretBindingPrincipalList(principals)}
+	out := map[string]any{"network_origin": origin, "name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "network_target": review.NetworkTarget, "network_target_sha256": review.NetworkTargetSHA256, "principals": platformSecretBindingPrincipalList(principals)}
 	if len(review.ACS3Actions) > 0 {
 		out["acs3_actions"] = review.ACS3Actions
 	}
@@ -298,7 +303,7 @@ func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, err)
 		return
 	}
-	plan, err := s.createPlatformSecretBindingReviewFull(actor, r.PathValue("installation"), request.name, request.credential, request.operation, request.principals, request.target, request.acs3)
+	plan, err := s.createPlatformSecretBindingReviewScoped(actor, r.PathValue("installation"), request.name, request.credential, request.operation, request.principals, request.target, request.acs3)
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -441,7 +446,7 @@ func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	plan, err := s.createPlatformSecretBindingReviewFull(actor, installation, request.name, request.credential, request.operation, request.principals, request.target, request.acs3)
+	plan, err := s.createPlatformSecretBindingReviewScoped(actor, installation, request.name, request.credential, request.operation, request.principals, request.target, request.acs3)
 	if err != nil {
 		platformManagementError(w, err)
 		return

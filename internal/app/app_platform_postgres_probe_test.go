@@ -127,7 +127,7 @@ func platformPostgresFixture(t *testing.T, pg, bind bool) (*Server, platformActo
 		if err != nil {
 			t.Fatal("credential:", err)
 		}
-		plan, err := s.createPlatformSecretBindingReviewFull(admin, lease.installationID, "orders-probe", credential.ID, "pg_password", platformPrincipalsServiceOnly, "orders", nil)
+		plan, err := s.createPlatformSecretBindingReviewScoped(admin, lease.installationID, "orders-probe", credential.ID, "pg_password", platformPrincipalsServiceOnly, "orders", nil)
 		if err != nil {
 			t.Fatal("binding review:", err)
 		}
@@ -262,15 +262,15 @@ func testPlatformPostgresBindingReviewAndUse(t *testing.T, pg bool) {
 	// Reviews that must be refused: a viewer binding, an unknown target, a value that is no role.
 	for name, review := range map[string]func() error{
 		"viewer principal": func() error {
-			_, err := s.createPlatformSecretBindingReviewFull(admin, installation, "other-probe", credential, "pg_password", "", "orders", nil)
+			_, err := s.createPlatformSecretBindingReviewScoped(admin, installation, "other-probe", credential, "pg_password", "", "orders", nil)
 			return err
 		},
 		"both principals": func() error {
-			_, err := s.createPlatformSecretBindingReviewFull(admin, installation, "other-probe", credential, "pg_password", platformPrincipalsBoth, "orders", nil)
+			_, err := s.createPlatformSecretBindingReviewScoped(admin, installation, "other-probe", credential, "pg_password", platformPrincipalsBoth, "orders", nil)
 			return err
 		},
 		"unknown target": func() error {
-			_, err := s.createPlatformSecretBindingReviewFull(admin, installation, "other-probe", credential, "pg_password", platformPrincipalsServiceOnly, "nope", nil)
+			_, err := s.createPlatformSecretBindingReviewScoped(admin, installation, "other-probe", credential, "pg_password", platformPrincipalsServiceOnly, "nope", nil)
 			return err
 		},
 		"a plain secret": func() error {
@@ -278,7 +278,7 @@ func testPlatformPostgresBindingReviewAndUse(t *testing.T, pg bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = s.createPlatformSecretBindingReviewFull(admin, installation, "other-probe", plain.ID, "pg_password", platformPrincipalsServiceOnly, "orders", nil)
+			_, err = s.createPlatformSecretBindingReviewScoped(admin, installation, "other-probe", plain.ID, "pg_password", platformPrincipalsServiceOnly, "orders", nil)
 			return err
 		},
 	} {

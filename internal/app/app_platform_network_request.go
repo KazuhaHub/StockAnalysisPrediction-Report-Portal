@@ -225,7 +225,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			// The target decides the limits (a target may only narrow the shared ones), and a URL no
 			// target admits is denied before anything is signed.
 			selected, err := policy.Policy.Select(method, target)
-			if err != nil || int64(len(body)) > selected.RequestBytes || (credential != "" && selected.Scheme != "https") {
+			if err != nil || int64(len(body)) > selected.RequestBytes || ((credential != "" || signed) && selected.Scheme != "https") {
 				return errAppPlatformNetworkUnavailable
 			}
 			policySHA = policy.SHA256

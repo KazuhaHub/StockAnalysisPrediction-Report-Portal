@@ -147,6 +147,10 @@ func testPlatformACS3SignInForeground(t *testing.T, pg bool) {
 	platformACS3Now, platformACS3Nonce = func() time.Time { return acs3FixtureNow }, func() (string, error) { return acs3FixtureNonce, nil }
 	t.Cleanup(func() { platformACS3Now, platformACS3Nonce = time.Now, platformACS3RandomNonce })
 	s, admin, installation, credential := acs3Fixture(t, pg, acs3FixtureToken)
+	// The call's method and URL must be ones the grant selects: let the grant take POST too.
+	post := platformTargetDefault()
+	post.Methods = []string{"GET", "POST"}
+	platformTargetSetGrant(t, s, installation, platformTargetV2(t, post))
 	acs3Activate(t, s, admin, installation, credential, platformPrincipalsBoth, "QueryAccountBalance@2017-12-14")
 	e := s.st.poolExec()
 	body := []byte(`{"x":1}`)
@@ -222,7 +226,7 @@ func testPlatformACS3SignInForeground(t *testing.T, pg bool) {
 	}
 	denied("a bearer binding asked to sign", platformPrincipalViewer, func(c *platformACS3Call) { c.name = "bearer-api" })
 	acs3Activate(t, s, admin, installation, credential, platformPrincipalsBoth, "QueryAccountBalance@2017-12-14")
-	if _, _, value, err := s.resolvePlatformSecretBindingCommand(e, installation, "qwen-billing", platformBindingDestination{}); err == nil {
+	if _, _, value, err := s.resolvePlatformSecretBindingCommand(e, installation, "qwen-billing", platformBindingDestination{method: "GET", url: "https://api.example.com/v1/x"}); err == nil {
 		clear(value)
 		t.Fatal("an ACS3 binding was placed as a plain header")
 	}
