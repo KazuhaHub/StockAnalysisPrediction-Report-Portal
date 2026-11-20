@@ -537,6 +537,7 @@ jobs:
           sh scripts/channel_targets_test.sh
           sh scripts/tag_release_test.sh
           sh scripts/release_derive_test.sh
+          sh scripts/proxy_pin_probe_test.sh
       - name: E2E harness tests
         run: python3 -B -m unittest discover -s scripts -p '*_test.py'
 
