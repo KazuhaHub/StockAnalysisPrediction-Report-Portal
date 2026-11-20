@@ -138,7 +138,7 @@ func normalizePostgresTarget(t PostgresTarget) (PostgresTarget, error) {
 }
 
 func encodePostgresTarget(t PostgresTarget) ([]byte, error) {
-	raw, err := json.Marshal(postgresTargetWire{ID: t.ID, Host: t.Host, Port: t.Port, Database: t.Database, Network: t.Network, CAPEM: t.CAPEM})
+	raw, err := json.Marshal(postgresTargetWire(t))
 	if err != nil {
 		return nil, ErrInvalidPostgresPolicy
 	}
@@ -215,7 +215,7 @@ var shaHexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 func encodePostgresPolicy(p PostgresPolicy) ([]byte, error) {
 	wires := make([]postgresTargetWire, 0, len(p.Targets))
 	for _, t := range p.Targets {
-		wires = append(wires, postgresTargetWire{ID: t.ID, Host: t.Host, Port: t.Port, Database: t.Database, Network: t.Network, CAPEM: t.CAPEM})
+		wires = append(wires, postgresTargetWire(t))
 	}
 	raw, err := json.Marshal(postgresPolicyWire{Format: PostgresPolicyFormat, Targets: wires, DeadlineMS: p.Deadline.Milliseconds(), Concurrency: p.Concurrency, PrivateNetworksSHA256: p.PrivateNetworksSHA256})
 	if err != nil || len(raw) > MaxPostgresPolicyBytes {
@@ -257,7 +257,7 @@ func ParsePostgresPolicy(raw []byte) (ParsedPostgresPolicy, error) {
 	}
 	policy := PostgresPolicy{Deadline: time.Duration(w.DeadlineMS) * time.Millisecond, Concurrency: w.Concurrency, PrivateNetworksSHA256: w.PrivateNetworksSHA256}
 	for _, t := range w.Targets {
-		policy.Targets = append(policy.Targets, PostgresTarget{ID: t.ID, Host: t.Host, Port: t.Port, Database: t.Database, Network: t.Network, CAPEM: t.CAPEM})
+		policy.Targets = append(policy.Targets, PostgresTarget(t))
 	}
 	p, err := NormalizePostgresPolicy(policy)
 	if err != nil {
