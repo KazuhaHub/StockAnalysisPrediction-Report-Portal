@@ -142,13 +142,9 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 	return loadPlatformSecretBindingFactsKind(e, installation, lock, allowNoNetwork, false)
 }
 
-// loadPlatformIngressBindingFacts is the facts of an ingress_hmac_sha256 binding (doc 180): the
-// installation is ready, and the ingress.webhook capability, not secrets.use, is granted. There is no
+// loadPlatformSecretBindingFactsKind is the facts of a binding. An ingress binding (doc 180) is judged
+// with the installation ready and the ingress.webhook capability, not secrets.use, granted, and has no
 // network policy to bind.
-func loadPlatformIngressBindingFacts(e migExec, installation string, lock bool) (platformSecretBindingFacts, error) {
-	return loadPlatformSecretBindingFactsKind(e, installation, lock, false, true)
-}
-
 func loadPlatformSecretBindingFactsKind(e migExec, installation string, lock, allowNoNetwork, ingress bool) (platformSecretBindingFacts, error) {
 	var f platformSecretBindingFacts
 	lockSQL := ""
