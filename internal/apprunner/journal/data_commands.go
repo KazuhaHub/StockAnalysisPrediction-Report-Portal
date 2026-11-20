@@ -302,7 +302,7 @@ type SetDataQuotaNative func(ctx context.Context, request data.QuotaRaiseRequest
 func quotaRaiseRequestFor(c control.SetDataQuotaCommand) data.QuotaRaiseRequest {
 	p := c.Payload
 	return data.QuotaRaiseRequest{
-		NamespaceID: p.NamespaceID, ProjectID: uint32(mustDataInt(p.ProjectID)),
+		NamespaceID: p.NamespaceID, ProjectID: mustDataProjectID(p.ProjectID),
 		OldBytes: mustDataInt(p.OldBytes), OldInodes: mustDataInt(p.OldInodes),
 		NewBytes: mustDataInt(p.NewBytes), NewInodes: mustDataInt(p.NewInodes),
 		ExpectedDevice: mustDataUint(p.Device), ExpectedNamespaceInode: mustDataUint(p.NamespaceInode),
@@ -528,7 +528,7 @@ type ImportDataNative func(ctx context.Context, request data.ImportDataRequest) 
 func importDataRequestFor(c control.ImportDataCommand) data.ImportDataRequest {
 	p := c.Payload
 	return data.ImportDataRequest{
-		NamespaceID: p.NamespaceID, ProjectID: uint32(mustDataInt(p.ProjectID)), ArchiveSHA256: p.ArchiveSHA256,
+		NamespaceID: p.NamespaceID, ProjectID: mustDataProjectID(p.ProjectID), ArchiveSHA256: p.ArchiveSHA256,
 		ArchiveBytes: mustDataInt(p.ArchiveBytes), Entries: mustDataInt(p.ArchiveEntries), Bytes: mustDataInt(p.ContentBytes),
 		QuotaBytes: mustDataInt(p.QuotaBytes), QuotaInodes: mustDataInt(p.QuotaInodes), DataFormat: mustDataInt(p.DataFormat),
 		MaxArchiveBytes: mustDataInt(p.ArchiveBytes), ExpectedDevice: mustDataUint(p.Device),
