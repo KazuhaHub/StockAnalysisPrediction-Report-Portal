@@ -11,8 +11,9 @@ import (
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 )
 
-// A viewer assertion is two token parts; a public one has the visible "pub." prefix before them.
-var backendRequestAssertion = regexp.MustCompile(`^((pub|ing)\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
+// A viewer assertion is two token parts; a public, ingress or machine one has the visible "pub.",
+// "ing." or "mch." prefix before them.
+var backendRequestAssertion = regexp.MustCompile(`^((pub|ing|mch)\.)?[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
 
 const MaxBackendRequestBody = 65536
 const MaxBackendAssertion = 32768
@@ -69,6 +70,11 @@ func ValidBackendRequestData(method, path string, body []byte, assertion string)
 		if method != "POST" || len(body) == 0 || len(body) > maxIngressBodyBytes || space != "ingress" || strings.Contains(path, "?") || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/ingress/") {
 			return false
 		}
+	case IsMachineAssertion(assertion):
+		// A machine assertion (doc 183) is the same for the machine route space.
+		if method != "GET" || len(body) != 0 || space != "machine" || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/machine/") {
+			return false
+		}
 	case space != "":
 		// A viewer token never reaches a reserved space.
 		return false
@@ -89,11 +95,56 @@ func ValidBackendResponse(status int, body []byte) bool {
 	return false
 }
 
-// backendRequestSpace names the reserved route space ("public", "ingress" or "") a request path falls
+// backendRequestSpace names the reserved route space ("public", "ingress", "machine" or "") a request path falls
 // in once decoded the way the relay's own validation decodes it (twice, ending with no "%"), and
 // reports whether the path is clean: valid escapes, no empty segment except a trailing one, no "." or
 // ".." segment, so that no spelling of the path can hide its space.
 func backendRequestSpace(path string) (string, bool) {
+	space, clean := backendRequestSpaceStrict(path)
+	if clean || !pathReachesReservedSpace(path) {
+		// An ordinary path keeps every spelling it had before the reserved spaces existed; the
+		// strictness applies where a spelling could hide a reserved space.
+		return space, true
+	}
+	return "", false
+}
+
+// pathReachesReservedSpace reports whether any backend that normalises the path (decodes it twice,
+// ignores case, drops path parameters after ";", empty and "." segments and resolves "..") would
+// route it into a reserved space or the handshake. It errs towards yes: it decodes as far as it can.
+func pathReachesReservedSpace(path string) bool {
+	decoded, _, _ := strings.Cut(path, "?")
+	for range 2 {
+		next, err := url.PathUnescape(decoded)
+		if err != nil {
+			break
+		}
+		decoded = next
+	}
+	var kept []string
+	for _, segment := range strings.Split(strings.ToLower(decoded), "/") {
+		segment, _, _ = strings.Cut(segment, ";")
+		switch segment {
+		case "", ".":
+		case "..":
+			if len(kept) > 0 {
+				kept = kept[:len(kept)-1]
+			}
+		default:
+			kept = append(kept, segment)
+		}
+	}
+	if len(kept) < 2 || kept[0] != "v1" {
+		return false
+	}
+	switch kept[1] {
+	case "public", "ingress", "machine", "handshake":
+		return true
+	}
+	return false
+}
+
+func backendRequestSpaceStrict(path string) (string, bool) {
 	decoded, _, _ := strings.Cut(path, "?")
 	for range 2 {
 		// A semicolon is a path-parameter separator to a backend that is not Go's, so it is never
@@ -110,8 +161,9 @@ func backendRequestSpace(path string) (string, bool) {
 	if !strings.HasPrefix(decoded, "/") || strings.Contains(decoded, ";") {
 		return "", false
 	}
-	// Spaces are compared without regard to case: a backend that is not Go's may route "/v1/INGRESS/x" to
-	// its ingress handler. A token of the space's own kind must still use the exact lower-case spelling.
+	// Spaces are compared without regard to case: a backend that is not Go's may route "/v1/MACHINE/x"
+	// to its machine handler, or "/v1/INGRESS/x" to its ingress handler. A token of the space's own kind must still use the exact lower-case
+	// spelling.
 	decoded = strings.ToLower(decoded)
 	segments := strings.Split(decoded[1:], "/")
 	for i, segment := range segments {
@@ -119,7 +171,7 @@ func backendRequestSpace(path string) (string, bool) {
 			return "", false
 		}
 	}
-	for _, space := range []string{"public", "ingress"} {
+	for _, space := range []string{"public", "ingress", "machine"} {
 		if decoded == "/v1/"+space || strings.HasPrefix(decoded, "/v1/"+space+"/") {
 			return space, true
 		}

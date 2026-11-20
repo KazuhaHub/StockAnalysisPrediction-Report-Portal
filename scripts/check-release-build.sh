@@ -3,14 +3,15 @@
 # source commit, clean worktree, CGO setting, and main package. Mutable release notes and maturity
 # are deliberately absent because GitHub Release is their sole authority.
 set -eu
-[ "$#" = 4 ] || { printf '%s\n' 'usage: check-release-build.sh BINARY GOOS GOARCH COMMIT' >&2; exit 1; }
+{ [ "$#" = 4 ] || [ "$#" = 5 ]; } || { printf '%s\n' 'usage: check-release-build.sh BINARY GOOS GOARCH COMMIT [COMMAND]' >&2; exit 1; }
 binary=$1
 goos=$2
 goarch=$3
 commit=$4
+command=${5:-report-portal}
 compiler=$(go env GOVERSION)
 root=$(unset CDPATH; cd -- "$(dirname -- "$0")/.." && pwd)
-expected_path=$(cd "$root" && go list -m)/cmd/report-portal
+expected_path=$(cd "$root" && go list -m)/cmd/${command}
 info=$(go version -m "$binary")
 printf '%s\n' "$info" | awk -v compiler="$compiler" -v goos="$goos" -v goarch="$goarch" \
     -v commit="$commit" -v path="$expected_path" '

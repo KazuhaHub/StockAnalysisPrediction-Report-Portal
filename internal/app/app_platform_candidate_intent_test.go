@@ -97,6 +97,9 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 	planID := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, lease.id)
 	digest := platformDigest(encoded)
 	request, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, digest})
+	if manifest.Machine != nil && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='machine.read'`, lease.installationID) == 0 {
+		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) SELECT installation_id,'machine.read',0,'{}',policy_revision,review_plan_id,created_ms,updated_ms FROM app_platform_capability_grants WHERE installation_id=? LIMIT 1`, lease.installationID)
+	}
 	if manifest.Public != nil && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='public.projection'`, lease.installationID) == 0 {
 		// The static template had no such row; install writes one, off and with an empty policy.
 		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) SELECT installation_id,'public.projection',0,'{}',policy_revision,review_plan_id,created_ms,updated_ms FROM app_platform_capability_grants WHERE installation_id=? LIMIT 1`, lease.installationID)

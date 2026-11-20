@@ -47,7 +47,7 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 	}
 	// network.proxy is off at install and an administrator's proxy review turns it on (doc 184), so a
 	// granted row is a valid state for it as well.
-	return (capability == "principals.read" || capability == "public.projection" || capability == platformCapabilityNetworkPostgres || capability == "ingress.webhook" || capability == appplatform.ProxyCapability) && !reviewed && stored == 1
+	return (capability == "principals.read" || capability == "public.projection" || capability == platformCapabilityNetworkPostgres || capability == "ingress.webhook" || capability == "machine.read" || capability == appplatform.ProxyCapability) && !reviewed && stored == 1
 }
 
 // platformPolicyMatches compares a stored policy with the reviewed one. public.projection is the
@@ -64,7 +64,8 @@ func platformPolicyMatches(capability string, granted int, stored, reviewed stri
 	}
 	return stored == reviewed ||
 		(capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored)) ||
-		(capability == platformCapabilityNetworkPostgres && granted == 1 && reviewed == "{}" && appplatform.ValidPostgresPolicy(stored))
+		(capability == platformCapabilityNetworkPostgres && granted == 1 && reviewed == "{}" && appplatform.ValidPostgresPolicy(stored)) ||
+		(capability == "machine.read" && granted == 1 && reviewed == "{}" && appplatform.ValidMachinePolicyShape(stored))
 }
 
 // platformNetworkRowAccepted is the row test of one capability: the reviewed selection, or, for a

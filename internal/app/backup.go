@@ -353,6 +353,9 @@ type RestoreReport struct {
 	Total    int64
 	Replaced int64
 	Applied  bool
+	// MachineTokensLost counts the machine tokens of the replaced database that the restored one does
+	// not hold (doc 183 section 6.5): they were created after the backup and must be recreated.
+	MachineTokensLost int
 }
 
 // Restore loads a dump into the configured database, replacing everything in it.
@@ -517,6 +520,9 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 		return nil, err
 	}
 	rep.Applied = true
+	if prior.appPlatform != nil && prior.appPlatform.machineLost != nil {
+		rep.MachineTokensLost = *prior.appPlatform.machineLost
+	}
 	return rep, nil
 }
 

@@ -152,6 +152,17 @@ describe('application installation settings', () => {
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.public\./ })).toBeNull()
     })
 
+    it('offers machine access only for an optional machine.read capability', async () => {
+      apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: false }] } : { bindings: [] })
+      mount()
+      expect(await screen.findByRole('button', { name: 'appPlatform.settings.machine.enable' })).toBeTruthy()
+      cleanup()
+      apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: true }] } : { bindings: [] })
+      mount()
+      await screen.findByText('notes')
+      expect(screen.queryByRole('button', { name: /appPlatform\.settings\.machine\./ })).toBeNull()
+    })
+
     it('shows the PostgreSQL probe panel only when the capability exists and the preview declares it', async () => {
       const preview = { policy_revision: '1', declared: true, granted: false, ready: true, previous_policy_sha256: '', targets: [], deadline_ms: 10000, concurrency: 1, private_networks_sha256: '', disclosure: 'd' }
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/postgres-policy') ? preview : url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'network.postgres', granted: false, required: false }] } : { bindings: [] })

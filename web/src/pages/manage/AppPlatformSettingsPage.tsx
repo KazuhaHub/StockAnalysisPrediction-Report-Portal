@@ -13,6 +13,7 @@ import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
 import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
 import AppPublicProjectionPanel from './AppPublicProjectionPanel'
+import AppMachineReadPanel from './AppMachineReadPanel'
 import AppNetworkTargetsPanel from './AppNetworkTargetsPanel'
 import type { NetworkPolicyView } from '../../lib/appNetworkTargetsV2'
 
@@ -244,6 +245,7 @@ export default function AppPlatformSettingsPage() {
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
   const publicProjection = settings.capabilities.find((item) => item.capability === 'public.projection' && !item.required)
   const networkProxy = settings.capabilities.find((item) => item.capability === 'network.proxy' && !item.required)
+  const machineRead = settings.capabilities.find((item) => item.capability === 'machine.read' && !item.required)
   const postgresProbe = settings.capabilities.find((item) => item.capability === 'network.postgres')
   const ingress = settings.capabilities.find((item) => item.capability === 'ingress.webhook' && !item.required)
   const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
@@ -460,6 +462,7 @@ export default function AppPlatformSettingsPage() {
       </Space>}
       {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
       {networkProxy && <AppNetworkProxyPanel root={root} installation={installation} granted={networkProxy.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {machineRead && <AppMachineReadPanel root={root} installation={installation} granted={machineRead.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
       {postgresProbe && <AppPostgresPolicyPanel root={root} installation={installation} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
       {ingress && <AppIngressPanel root={root} installation={installation} granted={ingress.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>

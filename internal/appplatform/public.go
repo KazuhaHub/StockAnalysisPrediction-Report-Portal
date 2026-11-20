@@ -106,11 +106,22 @@ func ParsePublicPolicy(raw string, declared Public) (PublicPolicy, error) {
 // sorted, re-encoded form that keys the cache and is forwarded. Anything unusual is refused rather
 // than normalised: undeclared or repeated names, empty names, controls, non-ASCII, oversize values.
 func CanonicalPublicQuery(declared []string, raw string) (string, error) {
+	out, err := canonicalQuery(declared, raw, MaxPublicQueryRaw, MaxPublicQueryValue, MaxPublicQueryTotal)
+	if err != nil {
+		return "", ErrPublicQuery
+	}
+	return out, nil
+}
+
+var errQuery = errors.New("invalid query")
+
+// canonicalQuery is the rule both read APIs share; only the bounds differ.
+func canonicalQuery(declared []string, raw string, maxRaw, maxValue, maxTotal int) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	if len(raw) > MaxPublicQueryRaw || strings.IndexFunc(raw, func(r rune) bool { return r < 0x21 || r > 0x7e || r == '#' }) >= 0 {
-		return "", ErrPublicQuery
+	if len(raw) > maxRaw || strings.IndexFunc(raw, func(r rune) bool { return r < 0x21 || r > 0x7e || r == '#' }) >= 0 {
+		return "", errQuery
 	}
 	type pair struct{ name, value string }
 	var pairs []pair
@@ -118,17 +129,17 @@ func CanonicalPublicQuery(declared []string, raw string) (string, error) {
 	for _, part := range strings.Split(raw, "&") {
 		name, value, ok := strings.Cut(part, "=")
 		if !ok || name == "" || !slices.Contains(declared, name) || slices.ContainsFunc(pairs, func(p pair) bool { return p.name == name }) {
-			return "", ErrPublicQuery
+			return "", errQuery
 		}
 		decoded, err := url.QueryUnescape(value)
-		if err != nil || len(decoded) > MaxPublicQueryValue || strings.IndexFunc(decoded, func(r rune) bool { return r < 0x20 || r > 0x7e }) >= 0 {
-			return "", ErrPublicQuery
+		if err != nil || len(decoded) > maxValue || strings.IndexFunc(decoded, func(r rune) bool { return r < 0x20 || r > 0x7e }) >= 0 {
+			return "", errQuery
 		}
 		total += len(name) + len(decoded)
 		pairs = append(pairs, pair{name, decoded})
 	}
-	if total > MaxPublicQueryTotal {
-		return "", ErrPublicQuery
+	if total > maxTotal {
+		return "", errQuery
 	}
 	slices.SortFunc(pairs, func(a, b pair) int { return strings.Compare(a.name, b.name) })
 	var out strings.Builder

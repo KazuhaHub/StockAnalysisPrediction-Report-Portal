@@ -62,12 +62,48 @@ func TestBackendRequestSpacesAreJudgedOnTheDecodedPath(t *testing.T) {
 	}
 }
 
-// A semicolon is never part of a backend request path: some backends treat it as a path parameter
-// separator, so it could hide a reserved segment.
+// A semicolon is never part of a path that reaches a reserved space: some backends treat it as a path
+// parameter separator, so it could hide a reserved segment. An ordinary viewer path keeps its spelling
+// (TestOrdinaryViewerPathsKeepTheirSpellings).
 func TestBackendRequestPathsRefuseSemicolons(t *testing.T) {
-	for _, path := range []string{"/v1/notes;a=b", "/v1/notes/x;y", "/v1/no%3btes", "/v1/notes;/x"} {
+	for _, path := range []string{"/v1/ingress;a=b", "/v1/ingress/x;y", "/v1/%69ngress%3bx/y", "/v1/notes;/../ingress/x", "/v1/public;x/y", "/v1/machine;x/y"} {
 		if ValidBackendRequestData("GET", path, nil, "abc.def") {
 			t.Fatalf("accepted %s", path)
 		}
+	}
+}
+
+// Each special assertion is valid only in its own space, a viewer assertion in none of the three, and
+// the ingress space is as strict as the public and machine ones about how a path is spelled.
+func TestReservedSpaceAssertionMatrix(t *testing.T) {
+	signer, now := testPublicSigner(), time.Unix(1_800_000_000, 0)
+	body := []byte(`{"a":1}`)
+	ing, _ := SignIngressAssertion(signer, 1, "heartbeat", "api", "/v1/ingress/heartbeat", now, "3f9c0000000000000000", body, now)
+	pub, _ := SignPublicAssertion(signer, 1, "status", "/v1/public/status", "", now)
+	mch, _ := SignMachineAssertion(signer, 1, "bars", "/v1/machine/bars", "", "abcdefghijkl", "Dify", now)
+	const viewer = "abc.def"
+	spaces := map[string]string{"ingress": "/v1/ingress/x", "public": "/v1/public/x", "machine": "/v1/machine/x"}
+	tokens := map[string]string{"ingress": ing, "public": pub, "machine": mch}
+	for space, path := range spaces {
+		for kind, token := range tokens {
+			method, payload := "GET", []byte(nil)
+			if kind == "ingress" {
+				method, payload = "POST", body
+			}
+			if got := ValidBackendRequestData(method, path, payload, token); got != (kind == space) {
+				t.Errorf("%s token on the %s space: accepted=%v", kind, space, got)
+			}
+		}
+		if ValidBackendRequestData("GET", path, nil, viewer) || ValidBackendRequestData("POST", path, body, viewer) {
+			t.Errorf("viewer token accepted on the %s space", space)
+		}
+	}
+	for _, path := range []string{"/v1/%69ngress/x", "/v1/INGRESS/x", "/v1/app/../ingress/x", "/v1/ingress;x/y", "/v1/app/x;/../../ingress/y"} {
+		if ValidBackendRequestData("POST", path, body, viewer) || ValidBackendRequestData("POST", path, body, ing) {
+			t.Errorf("accepted %s", path)
+		}
+	}
+	if !ValidBackendRequestData("GET", "/v1/app/x;y=1", nil, viewer) {
+		t.Error("an ordinary viewer path lost its spelling")
 	}
 }

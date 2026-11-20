@@ -142,6 +142,13 @@ func validManifest(m Manifest) bool {
 	if declaresIngress != (m.Ingress != nil) || (m.Ingress != nil && (m.Backend == nil || !validIngress(*m.Ingress))) {
 		return false
 	}
+	declaresMachine := false
+	for _, value := range m.Capabilities.Optional {
+		declaresMachine = declaresMachine || value == "machine.read"
+	}
+	if declaresMachine != (m.Machine != nil) || (m.Machine != nil && (m.Backend == nil || !validMachine(*m.Machine))) {
+		return false
+	}
 	// Likewise the suggested proxy hosts (doc 184): the block and the capability stand or fall together,
 	// and both need a backend. The block grants nothing; it pre-fills the administrator's review.
 	declaresProxy := false
@@ -307,9 +314,9 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
 		// administrator's decision, never a condition of install. network.postgres (doc 178) is
 		// optional only for the same reason: a database probe is granted by its own review, and so is
-		// ingress.webhook (doc 180). network.proxy (doc 184) is too: reaching hosts through a tunnel is
-		// an administrator's decision.
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" || value == "ingress.webhook" || value == ProxyCapability {
+		// ingress.webhook (doc 180), machine.read (doc 183) and network.proxy (doc 184) are optional
+		// only too: each is an administrator's decision, never a condition of install.
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "network.postgres" || value == "ingress.webhook" || value == "machine.read" || value == ProxyCapability {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -320,7 +327,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres", "ingress.webhook", ProxyCapability} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "network.postgres", "ingress.webhook", "machine.read", ProxyCapability} {
 		if seen[value] && !hasBackend {
 			return false
 		}

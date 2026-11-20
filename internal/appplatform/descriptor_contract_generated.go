@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "262432eb25a39fb2eb8e7da2b6233e3c5af3395729dc542038b80b17ca87029f"
+const descriptorContractSHA256 = "526bc46afe0a5b20f0f4100dee86ead14a699323c43499336bbc1133e0bddd86"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -17,6 +17,7 @@ type Manifest struct {
 	Capabilities  Capabilities      `json:"capabilities"`
 	Public        *Public           `json:"public,omitempty"`
 	Ingress       *Ingress          `json:"ingress,omitempty"`
+	Machine       *Machine          `json:"machine,omitempty"`
 	NetworkProxy  *NetworkProxy     `json:"network_proxy,omitempty"`
 	Data          DataCompatibility `json:"data"`
 }
@@ -121,6 +122,17 @@ type IngressRoute struct {
 	BodyBytes            int    `json:"body_bytes"`
 	PerEndpointPerMinute int    `json:"per_endpoint_per_minute"`
 }
+type Machine struct {
+	Routes []MachineRoute `json:"routes"`
+}
+type MachineRoute struct {
+	ID            string   `json:"id"`
+	Path          string   `json:"path"`
+	Query         []string `json:"query,omitempty"`
+	ResponseBytes int      `json:"response_bytes"`
+	TimeoutMS     int      `json:"timeout_ms"`
+	Description   string   `json:"description,omitempty"`
+}
 
 const MaxDescriptorBytes = 131072
 const MaxAppNameCharacters = 80
@@ -151,6 +163,12 @@ const maxPublicQueryNames = 8
 const minPublicCacheSeconds = 1
 const maxPublicCacheSeconds = 300
 const maxPublicResponseBytes = 1048576
+const maxMachineRoutes = 32
+const maxMachineQueryNames = 16
+const maxMachineResponseBytes = 1048576
+const minMachineTimeoutMS = 100
+const maxMachineTimeoutMS = 30000
+const maxMachineDescription = 200
 const maxIngressRoutes = 4
 const maxIngressBodyBytes = 4096
 const maxIngressPerMinute = 60
@@ -180,7 +198,10 @@ var publicQueryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 var publicDocumentPattern = regexp.MustCompile(`^public/[A-Za-z0-9._/-]+$`)
 var ingressRouteIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 var ingressPathPattern = regexp.MustCompile(`^/v1/ingress/[A-Za-z0-9._/-]+$`)
-var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "network.postgres": true, "ingress.webhook": true, "network.proxy": true}
+var machineRouteIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+var machinePathPattern = regexp.MustCompile(`^/v1/machine/[A-Za-z0-9._/-]+$`)
+var machineQueryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "network.postgres": true, "ingress.webhook": true, "machine.read": true, "network.proxy": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
 var descriptorDisplayIcons = map[string]bool{"appstore": true, "file-text": true, "dashboard": true, "calendar": true, "bar-chart": true, "cloud": true, "tool": true, "experiment": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}

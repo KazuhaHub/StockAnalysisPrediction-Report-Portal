@@ -53,8 +53,8 @@ func TestDescriptorSchemaListsPrincipalsReadAsOptionalOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Only the optional list names it (doc 181 section 3.1); required keeps eleven entries and
-	// optional has sixteen (public.projection, doc 179; network.postgres, doc 178; ingress.webhook, doc 180; network.proxy, doc 184).
-	if strings.Count(string(raw), `"principals.read"`) != 1 || strings.Count(string(raw), `"maxItems": 16`) < 1 || strings.Count(string(raw), `"maxItems": 11`) < 1 {
+	// optional has seventeen (public.projection, doc 179; network.postgres, doc 178; ingress.webhook, doc 180; machine.read, doc 183; network.proxy, doc 184).
+	if strings.Count(string(raw), `"principals.read"`) != 1 || strings.Count(string(raw), `"maxItems": 17`) < 1 || strings.Count(string(raw), `"maxItems": 11`) < 1 {
 		t.Fatal("principals.read must be in the optional list only")
 	}
 }

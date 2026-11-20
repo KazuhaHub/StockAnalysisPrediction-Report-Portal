@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "262432eb25a39fb2eb8e7da2b6233e3c5af3395729dc542038b80b17ca87029f";
+export const DESCRIPTOR_SCHEMA_SHA256 = "526bc46afe0a5b20f0f4100dee86ead14a699323c43499336bbc1133e0bddd86";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -12,6 +12,7 @@ export interface Descriptor {
  capabilities?: Capabilities | null;
  public?: Public | null;
  ingress?: Ingress | null;
+ machine?: Machine | null;
  network_proxy?: NetworkProxy | null;
  data: DataCompatibility;
 }
@@ -62,7 +63,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "network.postgres" | "ingress.webhook" | "network.proxy")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "network.postgres" | "ingress.webhook" | "machine.read" | "network.proxy")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -116,6 +117,17 @@ export interface IngressRoute {
  body_bytes: number;
  per_endpoint_per_minute: number;
 }
+export interface Machine {
+ routes: (MachineRoute)[];
+}
+export interface MachineRoute {
+ id: string;
+ path: string;
+ query?: (string)[] | null;
+ response_bytes: number;
+ timeout_ms: number;
+ description?: string | null;
+}
 export const DESCRIPTOR_LIMITS = {
   "MaxDescriptorBytes": 131072,
   "MaxAppNameCharacters": 80,
@@ -146,6 +158,12 @@ export const DESCRIPTOR_LIMITS = {
   "minPublicCacheSeconds": 1,
   "maxPublicCacheSeconds": 300,
   "maxPublicResponseBytes": 1048576,
+  "maxMachineRoutes": 32,
+  "maxMachineQueryNames": 16,
+  "maxMachineResponseBytes": 1048576,
+  "minMachineTimeoutMS": 100,
+  "maxMachineTimeoutMS": 30000,
+  "maxMachineDescription": 200,
   "maxIngressRoutes": 4,
   "maxIngressBodyBytes": 4096,
   "maxIngressPerMinute": 60,
@@ -177,7 +195,10 @@ export const DESCRIPTOR_PATTERNS = {
   "publicQueryName": "^[a-z][a-z0-9_]{0,31}$",
   "publicDocument": "^public/[A-Za-z0-9._/-]+$",
   "ingressRouteID": "^[a-z][a-z0-9-]{0,31}$",
-  "ingressPath": "^/v1/ingress/[A-Za-z0-9._/-]+$"
+  "ingressPath": "^/v1/ingress/[A-Za-z0-9._/-]+$",
+  "machineRouteID": "^[a-z][a-z0-9-]{0,31}$",
+  "machinePath": "^/v1/machine/[A-Za-z0-9._/-]+$",
+  "machineQueryName": "^[a-z][a-z0-9_]{0,31}$"
 } as const;
 export const DESCRIPTOR_CAPABILITIES = [
   "reports.read",
@@ -195,6 +216,7 @@ export const DESCRIPTOR_CAPABILITIES = [
   "public.projection",
   "network.postgres",
   "ingress.webhook",
+  "machine.read",
   "network.proxy"
 ] as const;
 export const DESCRIPTOR_LOCALES = [
@@ -233,6 +255,7 @@ export const DESCRIPTOR_FIELDS = {
     "capabilities",
     "public",
     "ingress",
+    "machine",
     "network_proxy",
     "data"
   ],
@@ -336,5 +359,16 @@ export const DESCRIPTOR_FIELDS = {
     "path",
     "body_bytes",
     "per_endpoint_per_minute"
+  ],
+  "Machine": [
+    "routes"
+  ],
+  "MachineRoute": [
+    "id",
+    "path",
+    "query",
+    "response_bytes",
+    "timeout_ms",
+    "description"
   ]
 } as const;
