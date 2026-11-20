@@ -8,6 +8,7 @@ import { usePrefs } from '../../prefs'
 import { appDisplayText } from '../../lib/appDisplayV2'
 import type { PlatformRelease } from '../../api/appPlatform'
 import AppPlatformMarketPanel from './AppPlatformMarketPanel'
+import { formatBytes } from './AppNetworkProxyPanel'
 
 type Audience = { type: 'user'; username: string } | { type: 'ou'; group_id: string }
 type Release = PlatformRelease
@@ -31,6 +32,20 @@ type UpdateReview = {
   target_capabilities: string[]
   declared_data_schema: string
   grants_sha256: string
+  // The quota the update raises before the new release starts (doc 185 section 3.2). All fields are decimal strings.
+  data_quota?: {
+    current_bytes: string
+    current_inodes: string
+    requested_bytes: string
+    requested_inodes: string
+    new_bytes: string
+    new_inodes: string
+    raise_applied: boolean
+    capacity: 'fits' | 'short'
+    capacity_dimension?: string
+    capacity_requested?: string
+    capacity_remaining?: string
+  }
 }
 type UninstallReview = {
   action: 'uninstall'
@@ -268,6 +283,8 @@ export default function AppPlatformInstallPanel() {
   const enableReview = review?.review.action === 'enable' ? review.review : null
   const uninstallReview = review?.review.action === 'uninstall' ? review.review : null
   const disableReview = review?.review.action === 'disable' ? review.review : null
+  const quotaRaise = updateReview?.data_quota
+  const quotaShort = quotaRaise?.capacity === 'short'
   const updateDiff = updateReview ? (() => {
     const previous = updateReview.previous_capabilities ?? []
     const target = updateReview.target_capabilities ?? []
@@ -351,7 +368,7 @@ export default function AppPlatformInstallPanel() {
     ]} />
     </div>
     {releaseCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('release')}>{t('appPlatform.moreReleases')}</Button>}
-    <Modal className="rp-platform-review-modal" open={!!review && !intent} title={t(lifecycleTitle)} confirmLoading={busy} okText={t(lifecycleOK)} cancelText={t('appPlatform.cancel')} okButtonProps={{ danger: review?.review.action === 'uninstall', disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
+    <Modal className="rp-platform-review-modal" open={!!review && !intent} title={t(lifecycleTitle)} confirmLoading={busy} okText={t(lifecycleOK)} cancelText={t('appPlatform.cancel')} okButtonProps={{ danger: review?.review.action === 'uninstall', disabled: expired || quotaShort }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
       {review && <div ref={reviewFocus} role="document" tabIndex={0} className="rp-platform-review rp-platform-review-scroll"><Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
         { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'disable' ? 'appPlatform.disable' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : review.review.action === 'enable' ? 'appPlatform.enable' : 'appPlatform.install') },
         { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, reviewRelease?.display, lang).name} · ${reviewRelease?.version ?? ''}` },
@@ -368,6 +385,18 @@ export default function AppPlatformInstallPanel() {
           ...(backgroundCredentials ? [{ key: 'backgroundCredentials', label: t('appPlatform.backgroundCredentials'), children: t('appPlatform.backgroundCredentialsNote') }] : []),
           ...(updateDiff ? [{ key: 'permissionChanges', label: t('appPlatform.permissionDiffLabel'), children: t('appPlatform.permissionDiff', { added: permissionList(updateDiff.added), removed: permissionList(updateDiff.removed) }) }] : []),
         ]),
+        ...(quotaRaise ? [{
+          key: 'dataQuota', label: t('appPlatform.updateQuota'), children: <Space orientation="vertical" size={4}>
+            <span>{t('appPlatform.updateQuotaRaise', {
+              currentBytes: formatBytes(Number(quotaRaise.current_bytes)), newBytes: formatBytes(Number(quotaRaise.new_bytes)),
+              currentInodes: new Intl.NumberFormat(lang).format(BigInt(quotaRaise.current_inodes)), newInodes: new Intl.NumberFormat(lang).format(BigInt(quotaRaise.new_inodes)),
+            })}</span>
+            <Typography.Text type="secondary">{t('appPlatform.updateQuotaHint')}</Typography.Text>
+            {quotaShort && <Alert type="error" showIcon data-testid="update-quota-short" title={t('appPlatform.settings.raiseQuotaShort', {
+              dimension: quotaRaise.capacity_dimension ?? '—', requested: quotaRaise.capacity_requested ?? '—', remaining: quotaRaise.capacity_remaining ?? '—',
+            })} />}
+          </Space>,
+        }] : []),
         { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : disableReview ? t('appPlatform.disableDataRetained') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : enableReview ? t('appPlatform.enableDataRetained') : t('appPlatform.noData') },
       ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : disableReview ? 'appPlatform.disableConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : enableReview ? 'appPlatform.enableConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>}
     </Modal>

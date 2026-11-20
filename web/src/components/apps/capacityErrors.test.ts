@@ -30,6 +30,12 @@ describe('capacity failure messages', () => {
       expect(parseAppStatus({ ...base, timeline: [{ at: '2026-11-04T12:00:00Z', event: 'failed', error_code: code }] })).not.toBeNull()
     }
     expect(parseAppStatus({ ...base, error_code: 'data_quota_capacity' })).toEqual({ ...base, error_code: 'data_quota_capacity' })
+    // An update's raise that failed for good, or whose answer is not known yet, shows under its own code.
+    for (const code of ['data_quota_unavailable', 'data_quota_recovery_required']) {
+      expect(parseAppStatus({ ...base, error_code: code })).toEqual({ ...base, error_code: code })
+      for (const bundle of [en, zhCN, zhTW] as Array<Record<string, string>>) expect(bundle[`err.${code}`], code).toBeTruthy()
+    }
+    for (const bundle of [en, zhCN, zhTW] as Array<Record<string, string>>) expect(bundle['err.app_platform_quota_raise_unsettled']).toBeTruthy()
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted_swap' })).toBeNull()
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted' })).toBeNull()
   })

@@ -388,6 +388,60 @@ describe('application installation confirmation', () => {
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(1)
   })
 
+  // Doc 185 section 3.2: an update that raises the data quota says so before it is confirmed, and one the runner's
+  // capacity cannot hold cannot be confirmed.
+  describe('an update that raises the data quota', () => {
+    const installedRelease = {
+      release_sha256: release,
+      app_id: 'notes',
+      publisher_id: 'publisher',
+      version: '1.1.0',
+      trust_revision: '1',
+      installable: false,
+      reason: 'already_installed',
+      installation_id: operation,
+      current_release_sha256: 'c'.repeat(64),
+      updateable: true,
+    }
+    const quotaReview = (quota: Record<string, unknown>) => {
+      const result = updateReview()
+      Object.assign(result.review, { data_quota: {
+        current_bytes: '268435456', current_inodes: '65536', requested_bytes: '1073741824', requested_inodes: '100000',
+        new_bytes: '1073741824', new_inodes: '100000', raise_applied: true, capacity: 'fits', ...quota,
+      } })
+      return result
+    }
+    const open = async (result: ReturnType<typeof updateReview>) => {
+      mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [installedRelease], next_cursor: '' } : { items: [], next_cursor: '' }))
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? result : { operation_id: operation }))
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewUpdate' }))
+      await screen.findByText('appPlatform.permissionDiff')
+      return user
+    }
+
+    it('shows the raise and says it stays raised after a rollback', async () => {
+      await open(quotaReview({}))
+      expect(screen.getByText('appPlatform.updateQuota')).toBeTruthy()
+      expect(screen.getByText('appPlatform.updateQuotaRaise')).toBeTruthy()
+      expect(screen.getByText('appPlatform.updateQuotaHint')).toBeTruthy()
+      expect(screen.queryByTestId('update-quota-short')).toBeNull()
+      expect((screen.getByRole('button', { name: 'appPlatform.confirmUpdate' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('names the shortfall and cannot be confirmed when the runner is short', async () => {
+      await open(quotaReview({ capacity: 'short', capacity_dimension: 'data_quota', capacity_requested: '6442450944', capacity_remaining: '1073741824' }))
+      expect(screen.getByTestId('update-quota-short')).toBeTruthy()
+      expect((screen.getByRole('button', { name: 'appPlatform.confirmUpdate' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('shows nothing about a quota for an update that raises none', async () => {
+      await open(updateReview())
+      expect(screen.queryByText('appPlatform.updateQuota')).toBeNull()
+    })
+  })
+
   it('treats legacy null update capability lists as empty', async () => {
     const installedRelease = {
       release_sha256: release,

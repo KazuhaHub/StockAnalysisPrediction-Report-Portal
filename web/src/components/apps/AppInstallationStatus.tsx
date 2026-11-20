@@ -43,6 +43,8 @@ const errors = new Set([
   'capacity_exhausted_cpu',
   'capacity_exhausted_disk',
   'data_quota_capacity',
+  'data_quota_unavailable',
+  'data_quota_recovery_required',
   'data_import_archive_missing',
   'data_import_archive_invalid',
   'data_import_too_large',
