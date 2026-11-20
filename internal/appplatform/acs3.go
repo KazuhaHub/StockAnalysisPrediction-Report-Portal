@@ -459,3 +459,78 @@ func DecodeSigningRequest(raw []byte) (SigningRequest, error) {
 func (r SigningRequest) Valid() bool {
 	return ValidCredentialBindingName(r.Credential) && r.Scheme == ACS3Scheme && ValidACS3Action(r.Action) && ValidACS3Version(r.Version)
 }
+
+// ACS3Credential is the credential value of an acs3_hmac_sha256 binding (doc 177 section 3.1). The
+// secret and the token are byte slices so the holder can wipe them.
+type ACS3Credential struct {
+	AccessKeyID                    string
+	AccessKeySecret, SecurityToken []byte
+}
+
+// Clear wipes the secret and the token.
+func (c *ACS3Credential) Clear() {
+	clear(c.AccessKeySecret)
+	clear(c.SecurityToken)
+	c.AccessKeySecret, c.SecurityToken = nil, nil
+}
+
+// ParseACS3Credential reads and validates the credential JSON:
+// {"access_key_id","access_key_secret","security_token"}. security_token is optional (empty means
+// absent). An unknown, duplicate, differently-cased, null or non-string member, trailing data or an
+// out-of-bounds value is refused. Nothing of the input is echoed in the error.
+func ParseACS3Credential(raw []byte) (ACS3Credential, error) {
+	var zero ACS3Credential
+	if len(raw) == 0 || len(raw) > 8192 || !utf8.Valid(raw) {
+		return zero, ErrInvalidACS3
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return zero, ErrInvalidACS3
+	}
+	fields := map[string][]byte{}
+	wipe := func() {
+		for _, v := range fields {
+			clear(v)
+		}
+	}
+	for d.More() {
+		token, err := d.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			wipe()
+			return zero, ErrInvalidACS3
+		}
+		if _, duplicate := fields[key]; duplicate || (key != "access_key_id" && key != "access_key_secret" && key != "security_token") {
+			wipe()
+			return zero, ErrInvalidACS3
+		}
+		var value json.RawMessage
+		if d.Decode(&value) != nil || len(value) == 0 || value[0] != '"' {
+			wipe()
+			return zero, ErrInvalidACS3
+		}
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			wipe()
+			return zero, ErrInvalidACS3
+		}
+		fields[key] = []byte(text)
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		wipe()
+		return zero, ErrInvalidACS3
+	}
+	if _, err := d.Token(); err != io.EOF {
+		wipe()
+		return zero, ErrInvalidACS3
+	}
+	if !ValidACS3AccessKeyID(fields["access_key_id"]) || !ValidACS3AccessKeySecret(fields["access_key_secret"]) || !ValidACS3SecurityToken(fields["security_token"]) {
+		wipe()
+		return zero, ErrInvalidACS3
+	}
+	out := ACS3Credential{AccessKeyID: string(fields["access_key_id"]), AccessKeySecret: fields["access_key_secret"], SecurityToken: fields["security_token"]}
+	if len(out.SecurityToken) == 0 {
+		out.SecurityToken = nil
+	}
+	return out, nil
+}
