@@ -462,7 +462,31 @@ func loadPlatformRetentionPins(e migExec) (platformRetentionPins, error) {
 	if err := pinCheckpointDeletions(e, pins); err != nil {
 		return pins, err
 	}
+	if err := pinAppliedQuotaRaises(e, pins); err != nil {
+		return pins, err
+	}
 	return pins, nil
+}
+
+// pinAppliedQuotaRaises keeps every operation that holds an applied set-data-quota effect, whatever its action
+// (a reviewed raise, or an update that raised the quota). The Portal derives the quota chain of a namespace from
+// those effects' receipts (doc 185 section 3.4): a link that retention deleted would break the chain, and with it
+// every loader that proves the namespace row against it. The pin is unconditional because the chain is read for
+// the whole life of the installation.
+func pinAppliedQuotaRaises(e migExec, pins platformRetentionPins) error {
+	rows, err := e.query(`SELECT DISTINCT operation_id FROM app_platform_operation_effects WHERE kind='set-data-quota' AND state='applied'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var op string
+		if err := rows.Scan(&op); err != nil {
+			return err
+		}
+		pins.ops[op] = true
+	}
+	return rows.Err()
 }
 
 // pinCheckpointDeletions keeps the operations that host a recorded checkpoint deletion (pin 9). The effect rows are the

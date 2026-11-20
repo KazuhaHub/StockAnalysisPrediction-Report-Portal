@@ -879,6 +879,35 @@ func TestPlatformRetentionKeepsOperationsOfALaterGenerationOnALiveInstallation(t
 	})
 }
 
+// An applied set-data-quota effect is a link of the namespace's quota chain, which every loader derives from the
+// effects' receipts. Retention must never delete the operation that holds one, even when a later operation of its
+// action has completed: the chain would break and the installation would stop working.
+func TestPlatformRetentionKeepsOperationsHoldingAnAppliedQuotaRaise(t *testing.T) {
+	bothDrivers(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		live := f.liveInstallation(3)
+		firstRaise, _ := f.operation(live, "set_data_quota", "complete", retNow-150*retDay, 2)
+		f.effectAt(firstRaise, "prepare_data", 1, "set-data-quota", "applied", "{}")
+		secondRaise, _ := f.operation(live, "set_data_quota", "complete", retNow-140*retDay, 2)
+		f.effectAt(secondRaise, "prepare_data", 1, "set-data-quota", "applied", "{}")
+		raisedUpdate, _ := f.operation(live, "update", "complete", retNow-160*retDay, 2)
+		f.effectAt(raisedUpdate, "migrate", 4, "set-data-quota", "applied", "{}")
+		f.operation(live, "update", "complete", retNow-120*retDay, 3)
+		revertedRaise, _ := f.operation(live, "set_data_quota", "complete", retNow-145*retDay, 2)
+		f.effectAt(revertedRaise, "prepare_data", 1, "set-data-quota", "reverted", "{}")
+		f.operation(live, "set_data_quota", "complete", retNow-130*retDay, 3)
+		f.sweep(retNow)
+		for name, op := range map[string]string{"first raise": firstRaise, "second raise": secondRaise, "update raise": raisedUpdate} {
+			if !f.exists("operations", op) {
+				t.Errorf("the %s holds an applied quota raise and was removed", name)
+			}
+		}
+		if f.exists("operations", revertedRaise) {
+			t.Error("an operation whose raise was reverted holds no link and should be swept")
+		}
+	})
+}
+
 // The period counts from the moment the operation was resolved: a later recovery reconcile updates updated_ms and
 // leaves completed_ms where it was.
 func TestPlatformRetentionCountsFromTheLatestOfCompletedAndUpdated(t *testing.T) {
