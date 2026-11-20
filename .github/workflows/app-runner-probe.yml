@@ -29,18 +29,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Runs natively on amd64 and on arm64 (doc 182 phase P2, decision D9: native arm64 evidence before Apple
-  # Silicon guests are supported). The explicit name keeps the amd64 check's name unchanged.
+  # Silicon guests are supported); the arm64 copy is the inspect-disposable-daemon-arm64 job.
   inspect-disposable-daemon:
-    name: inspect-disposable-daemon${{ matrix.suffix }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: ubuntu-24.04, suffix: '' }
-          - { runner: ubuntu-24.04-arm, suffix: '-arm64' }
-    steps:
+    steps: &inspect_steps
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
@@ -416,6 +409,14 @@ jobs:
           go test -p 2 -race -c -o "$portal_binary" ./internal/app
           chmod 0500 "$portal_binary"
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_RUNTIME_CONFIRM_ACCEPTANCE=1 "$portal_binary" -test.v -test.timeout=90s -test.run='^TestPlatformRuntimeEndpointAcceptance$'
+
+  # The same steps natively on arm64. A separate job rather than a runner matrix: runs-on stays a literal
+  # GitHub-hosted label (capacity_soak_test.WorkflowHostGuardTests).
+  inspect-disposable-daemon-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps: *inspect_steps
+
   # Doc 182 section 3.2 / phases P0-P1: the provisioning command on an ext4 outer filesystem. A small ext4 image
   # stands in for the host's ext4 /data (mkfs -m 0, so it can really be filled), the command makes two preallocated
   # loop-mounted XFS images on it, and the evidence is: the runner's own data-root checks pass (the command
@@ -424,16 +425,9 @@ jobs:
   # limit. The doc 28 workload table itself stays in app-project-quota-probe.yml. The power-cut test needs a VM
   # and is not run here.
   provision-xfs-images:
-    name: provision-xfs-images${{ matrix.suffix }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { runner: ubuntu-24.04, suffix: '' }
-          - { runner: ubuntu-24.04-arm, suffix: '-arm64' }
-    steps:
+    steps: &provision_steps
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
@@ -501,6 +495,8 @@ jobs:
           echo "::group::foreign content is refused before anything is made"
           sudo -n install -d -m 0700 "$portal/junk"
           sudo -n touch "$portal/junk/keep"
+          # The log belongs to the job user, so the redirect deliberately runs without sudo.
+          # shellcheck disable=SC2024
           if sudo -n "$runner" provision-xfs-images \
               --data-image "$portal/data.img" --data-size 2G \
               --checkpoint-image "$portal/checkpoint.img" --checkpoint-size 2G \
@@ -574,6 +570,14 @@ jobs:
           test "$(grep -c 'attached image' "$logs/reattach.log")" = 2
           sudo -n xfs_quota -x -c 'report -p -b -N' "$data_mount" | awk '$1 == "#4242" { found = 1; exit ($4 != 8192) } END { exit !found }'
           echo "::endgroup::"
+
+  # The same steps natively on arm64. A separate job rather than a runner matrix: runs-on stays a literal
+  # GitHub-hosted label (capacity_soak_test.WorkflowHostGuardTests).
+  provision-xfs-images-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps: *provision_steps
+
   # Doc 182 phase P2 / decision D9: the doc 28, 46 and 49 native workload (project quota, root identity, journal
   # and transport on an owned XFS loop volume) executed natively on arm64. The amd64 evidence is
   # app-project-quota-probe.yml, whose browser and image-delivery fixtures are amd64-only and are not repeated
