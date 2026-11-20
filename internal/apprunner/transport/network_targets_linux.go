@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"syscall"
+	"time"
 )
 
 // handleNetworkTargets answers the capability query. A runner built without a
@@ -42,6 +43,12 @@ func (s *Server) handleNetworkTargets(ctx context.Context, conn *net.UnixConn) {
 // means it does not answer (an older runner closes the connection at the unknown
 // query) or answered something other than the closed format: no v2 policy may be
 // granted against it. Any other error is a failure to ask.
+//
+// A clean close or reset before any reply byte is how an old runner answers, but
+// a busy or restarting new runner can look the same on one connection. So the
+// query is repeated once on a fresh connection after networkTargetsRetryDelay,
+// and only a second such close is concluded unsupported. A malformed or wrong
+// reply is a protocol answer and is not retried.
 func QueryControllerNetworkTargets(ctx context.Context, path string, uid, gid uint32) (NetworkTargets, error) {
 	if ctx == nil || !validController(uid, gid) || uint32(os.Geteuid()) != uid {
 		return NetworkTargets{}, ErrUnsafeEndpoint
@@ -49,7 +56,29 @@ func QueryControllerNetworkTargets(ctx context.Context, path string, uid, gid ui
 	return queryNetworkTargets(ctx, path, controllerProfile(gid))
 }
 
+// networkTargetsRetryDelay separates the two attempts; tests shorten it.
+var networkTargetsRetryDelay = 200 * time.Millisecond
+
+var errNetworkTargetsDropped = errors.New("network targets query dropped before any reply")
+
 func queryNetworkTargets(parent context.Context, path string, profile endpointProfile) (NetworkTargets, error) {
+	got, err := queryNetworkTargetsOnce(parent, path, profile)
+	if !errors.Is(err, errNetworkTargetsDropped) {
+		return got, err
+	}
+	select {
+	case <-time.After(networkTargetsRetryDelay):
+	case <-parent.Done():
+		return NetworkTargets{}, ErrRefused
+	}
+	got, err = queryNetworkTargetsOnce(parent, path, profile)
+	if errors.Is(err, errNetworkTargetsDropped) {
+		return NetworkTargets{}, ErrNetworkTargetsUnsupported
+	}
+	return got, err
+}
+
+func queryNetworkTargetsOnce(parent context.Context, path string, profile endpointProfile) (NetworkTargets, error) {
 	var zero NetworkTargets
 	if parent == nil || parent.Err() != nil {
 		return zero, ErrRefused
@@ -81,7 +110,7 @@ func queryNetworkTargets(parent context.Context, path string, profile endpointPr
 		// closes with the nonce still unread, which the kernel reports as a reset
 		// rather than a clean end of stream.
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
-			return zero, ErrNetworkTargetsUnsupported
+			return zero, errNetworkTargetsDropped
 		}
 		return zero, fmt.Errorf("%w: %w", ErrRefused, err)
 	}
