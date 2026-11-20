@@ -40,7 +40,7 @@ interface Binding {
   credential_id: string
   credential_label: string
   credential_value_revision: number
-  operation: 'http_bearer' | 'http_api_key' | 'raw_read' | 'acs3_hmac_sha256'
+  operation: 'http_bearer' | 'http_api_key' | 'raw_read' | 'acs3_hmac_sha256' | 'pg_password'
   state: 'active' | 'revoked' | 'review_required'
   policy_revision: number
   revision: number
@@ -89,7 +89,7 @@ interface BindingForm {
 }
 
 // What a credential is made of: one secret value, or an Alibaba Cloud AccessKey (doc 177).
-type CredentialKind = 'secret' | 'acs3'
+type CredentialKind = 'secret' | 'acs3' | 'postgres'
 
 interface CredentialFormValues {
   label?: string
@@ -98,6 +98,8 @@ interface CredentialFormValues {
   access_key_id?: string
   access_key_secret?: string
   security_token?: string
+  pg_username?: string
+  pg_password?: string
 }
 
 // The AccessKey credential value: canonical JSON of its parts, sent once like any other value.
@@ -107,6 +109,20 @@ const acs3CredentialValue = (values: CredentialFormValues): string =>
     access_key_secret: values.access_key_secret ?? '',
     security_token: values.security_token ?? '',
   })
+
+// The PostgreSQL login credential value (doc 178): canonical JSON of username and password.
+const postgresCredentialValue = (values: CredentialFormValues): string =>
+  JSON.stringify({
+    username: values.pg_username ?? '',
+    password: values.pg_password ?? '',
+  })
+
+const credentialValue = (values: CredentialFormValues): string =>
+  values.kind === 'acs3'
+    ? acs3CredentialValue(values)
+    : values.kind === 'postgres'
+      ? postgresCredentialValue(values)
+      : (values.value ?? '')
 
 interface CredentialReview {
   direct: boolean
@@ -152,6 +168,7 @@ export default function AppCredentialsPage() {
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [bindings, setBindings] = useState<Binding[]>([])
   const [targets, setTargets] = useState<TargetChoice[]>([])
+  const [postgresTargets, setPostgresTargets] = useState<TargetChoice[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [credentialOpen, setCredentialOpen] = useState(false)
@@ -162,6 +179,13 @@ export default function AppCredentialsPage() {
   const [bindingForm] = Form.useForm<BindingForm>()
   const bindingOperation = Form.useWatch('operation', bindingForm)
   const credentialKind = Form.useWatch('kind', credentialForm) ?? 'secret'
+
+  // A PostgreSQL binding with one reviewed target needs no choice: the form picks it.
+  useEffect(() => {
+    if (bindingOperation === 'pg_password' && postgresTargets.length === 1 && !bindingForm.getFieldValue('target')) {
+      bindingForm.setFieldValue('target', postgresTargets[0].id)
+    }
+  }, [bindingOperation, postgresTargets, bindingForm])
 
   const load = async () => {
     if (!appKey) return
@@ -179,12 +203,13 @@ export default function AppCredentialsPage() {
         if (!page.next_after || page.next_after === after || all.length >= 256) break
         after = page.next_after
       }
-      const current = await api.get<{ bindings: Binding[]; targets?: TargetChoice[] }>(
+      const current = await api.get<{ bindings: Binding[]; targets?: TargetChoice[]; postgres_targets?: TargetChoice[] }>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings`,
       )
       setCredentials(all)
       setBindings(current.bindings ?? [])
       setTargets(current.targets ?? [])
+      setPostgresTargets(current.postgres_targets ?? [])
       setError('')
     } catch (cause) {
       setError(errText(cause, t))
@@ -206,7 +231,7 @@ export default function AppCredentialsPage() {
 
   const finishCredential = async (values: CredentialFormValues) => {
     try {
-      const value = values.kind === 'acs3' ? acs3CredentialValue(values) : (values.value ?? '')
+      const value = credentialValue(values)
       if (!credentialTarget) {
         await api.post('/api/admin/app-platform/credentials', {
           label: values.label ?? '',
@@ -309,9 +334,15 @@ export default function AppCredentialsPage() {
         credential_id: values.credential_id,
         operation: values.operation,
       }
-      if (values.operation !== 'raw_read') request.principals = principalsForUse(values.use ?? 'viewer')
+      if (values.operation === 'pg_password') {
+        // A PostgreSQL binding is for background work only, and always names its target.
+        request.principals = ['service']
+        request.target = values.target ?? (postgresTargets.length === 1 ? postgresTargets[0].id : '')
+      } else if (values.operation !== 'raw_read') {
+        request.principals = principalsForUse(values.use ?? 'viewer')
+      }
       // A grant with several targets needs the one the binding is for named.
-      if (values.operation !== 'raw_read' && values.operation !== 'acs3_hmac_sha256' && targets.length > 1 && values.target) {
+      if (values.operation !== 'raw_read' && values.operation !== 'acs3_hmac_sha256' && values.operation !== 'pg_password' && targets.length > 1 && values.target) {
         request.target = values.target
       }
       if (values.operation === 'acs3_hmac_sha256') {
@@ -344,6 +375,9 @@ export default function AppCredentialsPage() {
               ))}
               {plan.review.operation === 'acs3_hmac_sha256' && (
                 <Alert type="info" showIcon title={t('appCredentials.acs3Disclosure')} />
+              )}
+              {plan.review.operation === 'pg_password' && (
+                <Alert type="info" showIcon title={t('appCredentials.pgDisclosure')} />
               )}
               <Typography.Text>
                 {t(`appCredentials.principals.${principalsToUse(plan.review.principals)}`)}
@@ -401,7 +435,7 @@ export default function AppCredentialsPage() {
             credential_id: binding.credential_id,
             operation: binding.operation,
             use: principalsToUse(binding.principals),
-            target: targets.find((choice) => choice.origin === binding.network_target)?.id,
+            target: (binding.operation === 'pg_password' ? postgresTargets : targets).find((choice) => choice.origin === binding.network_target)?.id,
             acs3_actions: binding.acs3_actions?.length ? binding.acs3_actions : undefined,
           }
         : {
@@ -575,7 +609,7 @@ export default function AppCredentialsPage() {
           )}
           <Form.Item name="kind" label={t('appCredentials.kind')} initialValue="secret">
             <Select
-              options={(['secret', 'acs3'] as CredentialKind[]).map((kind) => ({
+              options={(['secret', 'acs3', 'postgres'] as CredentialKind[]).map((kind) => ({
                 value: kind,
                 label: t(`appCredentials.kind.${kind}`),
               }))}
@@ -601,6 +635,20 @@ export default function AppCredentialsPage() {
                 rules={[{ max: 4096, pattern: /^[\x20-\x7e]*$/ }]}
               >
                 <Input.Password autoComplete="new-password" />
+              </Form.Item>
+            </>
+          ) : credentialKind === 'postgres' ? (
+            <>
+              <Form.Item name="pg_username" label={t('appCredentials.pgUsername')} rules={[{ required: true, max: 63, pattern: /^[\x20-\x7e]+$/ }]}>
+                <Input autoComplete="off" />
+              </Form.Item>
+              <Form.Item
+                name="pg_password"
+                label={t('appCredentials.pgPassword')}
+                extra={t('appCredentials.valueHint')}
+                rules={[{ required: true, max: 1024, pattern: /^[\x20-\x7e]+$/ }]}
+              >
+                <Input.Password autoComplete="off" />
               </Form.Item>
             </>
           ) : (
@@ -643,13 +691,21 @@ export default function AppCredentialsPage() {
                 { value: 'http_bearer', label: t('appCredentials.operation.http_bearer') },
                 { value: 'http_api_key', label: t('appCredentials.operation.http_api_key') },
                 { value: 'acs3_hmac_sha256', label: t('appCredentials.operation.acs3_hmac_sha256') },
+                { value: 'pg_password', label: t('appCredentials.operation.pg_password') },
               ]}
             />
           </Form.Item>
-          {bindingOperation !== 'raw_read' && bindingOperation !== 'acs3_hmac_sha256' && targets.length > 1 && (
+          {bindingOperation !== 'raw_read' && bindingOperation !== 'acs3_hmac_sha256' && bindingOperation !== 'pg_password' && targets.length > 1 && (
             <Form.Item name="target" label={t('appCredentials.target')} rules={[{ required: true }]}>
               <Select
                 options={targets.map((choice) => ({ value: choice.id, label: `${choice.id} · ${choice.origin}` }))}
+              />
+            </Form.Item>
+          )}
+          {bindingOperation === 'pg_password' && (
+            <Form.Item name="target" label={t('appCredentials.pgTarget')} rules={[{ required: true }]}>
+              <Select
+                options={postgresTargets.map((choice) => ({ value: choice.id, label: `${choice.id} · ${choice.origin}` }))}
               />
             </Form.Item>
           )}
@@ -693,7 +749,7 @@ export default function AppCredentialsPage() {
               </Form.List>
             </Form.Item>
           )}
-          {bindingOperation !== 'raw_read' && (
+          {bindingOperation !== 'raw_read' && bindingOperation !== 'pg_password' && (
             <Form.Item
               name="use"
               label={t('appCredentials.principals')}
