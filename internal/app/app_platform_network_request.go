@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -27,6 +28,10 @@ type platformNetworkGrant struct {
 	review  string
 	profile transport.NetworkRuntimeProfile
 	stream  bool
+	// privateNetworksSHA is the runner allowlist digest the consumed capability review
+	// checked a private target against. It is empty for every grant an install or an
+	// update made, whose policy has no private target.
+	privateNetworksSHA string
 }
 type platformNetworkRequestIntent struct {
 	access         platformWritableBackendAccess
@@ -96,6 +101,9 @@ func loadPlatformNetworkGrantForIntent(e migExec, installation string, t platfor
 		AND o.controller_epoch=p.controller_epoch`,
 		installation, capability, t.policy, release).
 		Scan(&g.policy, &g.review, &raw, &digest, &action); err != nil {
+		if errors.Is(err, sql.ErrNoRows) && capability == platformCapabilityNetworkHTTP {
+			return loadPlatformCapabilityNetworkGrant(e, installation, t)
+		}
 		return g, errAppPlatformNetworkUnavailable
 	}
 	if len(raw) > 65536 || !platformValidUUID(g.review) || platformDigest([]byte(raw)) != digest {
@@ -199,7 +207,7 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			policySHA = policy.SHA256
 			duration = policy.Policy.Duration
 		} else {
-			policy, err := appplatform.ParseHTTPPolicy([]byte(grant.policy))
+			policy, err := appplatform.ParseHTTPPolicyAny([]byte(grant.policy))
 			if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
 				return errAppPlatformNetworkUnavailable
 			}
