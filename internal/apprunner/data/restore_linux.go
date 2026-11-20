@@ -95,7 +95,7 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 		return zero, errors.Join(ErrRestoreIncomplete, err)
 	}
 	count := 0
-	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count); err != nil {
+	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count, int(request.entryCap())); err != nil {
 		return incomplete(fmt.Errorf("clear namespace: %w", err))
 	}
 	if err := namespace.Sync(); err != nil {
@@ -229,7 +229,7 @@ func restoreArchiveEntries(ctx context.Context, archive *os.File, request Restor
 			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) ||
 			header.Uid < 0 || header.Gid < 0 ||
 			!checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) ||
-			len(entries) >= maxCheckpointEntries {
+			int64(len(entries)) >= request.entryCap() {
 			return nil, ErrRestoreUnsafe
 		}
 		if header.Typeflag == tar.TypeDir {
@@ -291,7 +291,7 @@ func validRestorePath(name string) bool {
 	return true
 }
 
-func restoreClearNamespace(ctx context.Context, parent *os.File, device uint64, depth int, count *int) error {
+func restoreClearNamespace(ctx context.Context, parent *os.File, device uint64, depth int, count *int, limit int) error {
 	if depth > maxCheckpointDepth {
 		return ErrRestoreUnsafe
 	}
@@ -305,7 +305,7 @@ func restoreClearNamespace(ctx context.Context, parent *os.File, device uint64, 
 			return err
 		}
 		if entry.Name() == "" || entry.Name() == "." || entry.Name() == ".." ||
-			strings.ContainsAny(entry.Name(), "/\x00\r\n") || *count >= maxCheckpointEntries {
+			strings.ContainsAny(entry.Name(), "/\x00\r\n") || *count >= limit {
 			return ErrRestoreUnsafe
 		}
 		var stat unix.Stat_t
@@ -335,7 +335,7 @@ func restoreClearNamespace(ctx context.Context, parent *os.File, device uint64, 
 			folder.Close()
 			return ErrRestoreUnsafe
 		}
-		err = restoreClearNamespace(ctx, folder, device, depth+1, count)
+		err = restoreClearNamespace(ctx, folder, device, depth+1, count, limit)
 		closeErr := folder.Close()
 		if err != nil {
 			return err
@@ -542,17 +542,17 @@ func restoreSyncNamespace(ctx context.Context, namespace *os.File, device uint64
 
 func restoreReadNamespace(ctx context.Context, namespace *os.File, device uint64, request RestoreRequest) ([]restoreEntry, error) {
 	result := make([]restoreEntry, 0)
-	if err := restoreReadEntries(ctx, namespace, device, request.MaxArchiveBytes, "", 1, &result); err != nil {
+	if err := restoreReadEntries(ctx, namespace, device, request.MaxArchiveBytes, int(request.entryCap()), "", 1, &result); err != nil {
 		return nil, err
 	}
-	if len(result) > maxCheckpointEntries {
+	if int64(len(result)) > request.entryCap() {
 		return nil, ErrRestoreUnsafe
 	}
 	return result, nil
 }
 
-func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, maxArchiveBytes int64, prefix string, depth int, result *[]restoreEntry) error {
-	if depth > maxCheckpointDepth || len(*result) >= maxCheckpointEntries {
+func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, maxArchiveBytes int64, maxEntries int, prefix string, depth int, result *[]restoreEntry) error {
+	if depth > maxCheckpointDepth || len(*result) >= maxEntries {
 		return ErrRestoreUnsafe
 	}
 	entries, err := restoreReadDir(parent)
@@ -593,7 +593,7 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 			if folder == nil {
 				return ErrRestoreUnsafe
 			}
-			err = restoreReadEntries(ctx, folder, device, maxArchiveBytes, relative, depth+1, result)
+			err = restoreReadEntries(ctx, folder, device, maxArchiveBytes, maxEntries, relative, depth+1, result)
 			if closeErr := folder.Close(); err == nil {
 				err = closeErr
 			}

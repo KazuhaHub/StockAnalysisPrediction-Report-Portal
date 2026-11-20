@@ -37,7 +37,7 @@ func TestImportCheckpointRefusedLeavesNoRowAndReplays(t *testing.T) {
 	}
 	_, _, err := store.beginImportCheckpoint(context.Background(), raw, sig, importDataPin)
 	var refusal *CapacityRefusalError
-	if !errors.As(err, &refusal) || refusal.Receipt.Dimension != CapacityDisk {
+	if !errors.As(err, &refusal) || refusal.Receipt.Dimension != CapacityDataQuota {
 		t.Fatalf("err = %v", err)
 	}
 	if scalar(t, store.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+command.Payload.NamespaceID+`'`) != 0 || scalar(t, store.db, `SELECT COUNT(*) FROM runner_reservations`) != 0 {

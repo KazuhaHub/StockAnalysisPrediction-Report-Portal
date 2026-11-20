@@ -215,7 +215,7 @@ func TestVerifyImportCheckpointEffectBoundAndPayloadLimits(t *testing.T) {
 		"effect 33":                  func(c *ImportCheckpointCommand) { c.EffectNumber = "33" },
 		"effect zero":                func(c *ImportCheckpointCommand) { c.EffectNumber = "0" },
 		"nil grant":                  func(c *ImportCheckpointCommand) { c.Payload.GrantID = "00000000-0000-0000-0000-000000000000" },
-		"archive over bound":         func(c *ImportCheckpointCommand) { c.Payload.ArchiveBytes = "536870913" },
+		"archive over bound":         func(c *ImportCheckpointCommand) { c.Payload.ArchiveBytes = "17246978049" },
 		"archive zero":               func(c *ImportCheckpointCommand) { c.Payload.ArchiveBytes = "0" },
 		"source project over 32 bit": func(c *ImportCheckpointCommand) { c.Payload.SourceProjectID = "4294967296" },
 		"quota unaligned":            func(c *ImportCheckpointCommand) { c.Payload.QuotaBytes = "1000" },

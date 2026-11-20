@@ -21,7 +21,7 @@ const DeleteCheckpointKind = "delete-checkpoint"
 const MinDeleteCheckpointEffectNumber = 2
 
 // MaxDeleteCheckpointArchiveBytes bounds the archive size a deletion may name: the checkpoint size limit.
-const MaxDeleteCheckpointArchiveBytes = 512 << 20
+const MaxDeleteCheckpointArchiveBytes = MaxCheckpointArchiveBytes
 
 // DeleteCheckpointPayload names the one retained checkpoint a runner retires. Every field but RecoverySetID is a
 // fact the runner compares with its own checkpoint row, so a deletion signed for one checkpoint cannot retire

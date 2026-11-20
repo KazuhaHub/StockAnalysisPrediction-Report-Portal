@@ -191,6 +191,20 @@ func TestExampleConfigDeclaresTheDefaultCapacity(t *testing.T) {
 	}
 }
 
+func TestDeriveBudgetsCarriesTheCheckpointVolumeBudgetOnlyWhenSeparate(t *testing.T) {
+	defaults := (*CapacityConfig)(nil).Resolve()
+	host := HostFacts{MemoryBytes: 16 * gib, CPUs: 4, VolumeBytes: 16 * gib}
+	shared, err := DeriveBudgets(defaults, host)
+	if err != nil || shared.CheckpointBytes != 0 {
+		t.Fatalf("shared volume budgets %+v %v", shared, err)
+	}
+	host.CheckpointSeparate, host.CheckpointVolumeBytes = true, 12*gib
+	separate, err := DeriveBudgets(defaults, host)
+	if err != nil || separate.CheckpointBytes != 12*gib {
+		t.Fatalf("separate volume budgets %+v %v", separate, err)
+	}
+}
+
 func TestDeriveBudgetsChecksASeparateCheckpointVolume(t *testing.T) {
 	defaults := (*CapacityConfig)(nil).Resolve()
 	host := HostFacts{MemoryBytes: 16 * gib, CPUs: 4, VolumeBytes: 16 * gib}

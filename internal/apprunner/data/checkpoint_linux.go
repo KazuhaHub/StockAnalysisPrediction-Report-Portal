@@ -27,7 +27,6 @@ const (
 	checkpointDirectory     = ".portal-checkpoints"
 	checkpointManifestEntry = ".portal-checkpoint-manifest.json"
 	checkpointFormat        = "portal.runner.data-checkpoint/1-dev.1"
-	maxCheckpointEntries    = 100000
 	maxCheckpointDepth      = 64
 	maxCheckpointNameBytes  = 255
 )
@@ -289,7 +288,7 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 	if err := w.ctx.Err(); err != nil {
 		return checkpointIncomplete(err)
 	}
-	if depth > maxCheckpointDepth || w.entries >= maxCheckpointEntries || name == "" || name == "." || name == ".." || len(name) > maxCheckpointNameBytes || len(relative) > 4096 || !utf8.ValidString(name) || strings.ContainsAny(name, "/\x00\r\n") || relative == checkpointManifestEntry {
+	if depth > maxCheckpointDepth || w.entries >= w.request.entryCap() || name == "" || name == "." || name == ".." || len(name) > maxCheckpointNameBytes || len(relative) > 4096 || !utf8.ValidString(name) || strings.ContainsAny(name, "/\x00\r\n") || relative == checkpointManifestEntry {
 		return ErrCheckpointUnsafe
 	}
 	var before unix.Stat_t
@@ -488,7 +487,7 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		}
 		if err != nil || header.Name == "" || header.Name == checkpointManifestEntry || seen[header.Name] || header.Name < last ||
 			header.Name == "." || header.Name == ".." || strings.HasPrefix(header.Name, "/") || strings.Contains(header.Name, "\\") || path.Clean(strings.TrimSuffix(header.Name, "/")) != strings.TrimSuffix(header.Name, "/") ||
-			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || entries >= maxCheckpointEntries {
+			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || entries >= request.entryCap() {
 			return zero, fmt.Errorf("%w: verify checkpoint entry path", ErrCheckpointUnsafe)
 		}
 		if header.Typeflag == tar.TypeDir {

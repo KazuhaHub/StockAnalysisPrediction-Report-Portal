@@ -54,7 +54,7 @@ func TestNamespaceReservationRefusedLeavesNoRow(t *testing.T) {
 	}
 	_, err := s.ReservePrepareData(context.Background(), raw, sig)
 	var refusal *CapacityRefusalError
-	if !errors.As(err, &refusal) || refusal.Receipt.Dimension != CapacityDisk || refusal.Receipt.Remaining != "805306367" {
+	if !errors.As(err, &refusal) || refusal.Receipt.Dimension != CapacityDataQuota || refusal.Receipt.Remaining != "805306367" {
 		t.Fatalf("err = %v", err)
 	}
 	if scalar(t, s.db, `SELECT COUNT(*) FROM runner_resources`) != 0 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_reservations`) != 0 {

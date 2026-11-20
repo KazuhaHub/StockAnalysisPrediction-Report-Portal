@@ -85,9 +85,38 @@ type CheckpointRequest struct {
 	ProjectID                                uint32
 	DataFormat                               int64
 	MaxArchiveBytes                          int64
-	ExpectedDevice, ExpectedNamespaceInode   uint64
-	WriterFence                              int64
+	// MaxEntries is the most entries a checkpoint may hold: the namespace's inode quota (doc 185 section 4).
+	// Zero keeps legacyMaxCheckpointEntries.
+	MaxEntries                             int64
+	ExpectedDevice, ExpectedNamespaceInode uint64
+	WriterFence                            int64
 }
+
+// legacyMaxCheckpointEntries is the entry cap every checkpoint had before the inode quota was per installation.
+const legacyMaxCheckpointEntries = 100000
+
+// checkpointArchiveOverheadBytes is what a checkpoint archive may hold beyond the data itself: tar headers,
+// padding and the manifest.
+const checkpointArchiveOverheadBytes = 64 << 20
+
+// ArchiveCapForQuota is the largest archive a namespace of the given quota may checkpoint: the quota plus a
+// fixed allowance for tar overhead (doc 185 section 4). A missing quota has no cap.
+func ArchiveCapForQuota(quotaBytes int64) int64 {
+	if quotaBytes <= 0 {
+		return 0
+	}
+	return quotaBytes + checkpointArchiveOverheadBytes
+}
+
+func entryCapOf(configured int64) int64 {
+	if configured > 0 {
+		return configured
+	}
+	return legacyMaxCheckpointEntries
+}
+
+func (r CheckpointRequest) entryCap() int64 { return entryCapOf(r.MaxEntries) }
+func (r RestoreRequest) entryCap() int64    { return entryCapOf(r.MaxEntries) }
 
 func (r CheckpointRequest) valid() bool {
 	return namespaceID.MatchString(r.CheckpointID) && namespaceID.MatchString(r.NamespaceID) && r.ProjectID > 0 && r.DataFormat > 0 && r.MaxArchiveBytes > 0 && r.ExpectedDevice > 0 && r.ExpectedNamespaceInode > 0 && r.WriterFence > 0 && sha256Value(r.ReleaseSHA256)
@@ -129,6 +158,7 @@ type RestoreRequest struct {
 	CheckpointID, NamespaceID, ReleaseSHA256, ManifestSHA256 string
 	ProjectID                                                uint32
 	DataFormat, ArchiveBytes, MaxArchiveBytes                int64
+	MaxEntries                                               int64
 	ExpectedDevice, ExpectedNamespaceInode                   uint64
 	WriterFence                                              int64
 }

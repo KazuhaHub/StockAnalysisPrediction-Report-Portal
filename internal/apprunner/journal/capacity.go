@@ -15,9 +15,12 @@ import (
 // CapacityBudgets are the absolute ceilings the runner admits reservations
 // against (doc 171). The service derives them from host facts at startup.
 type CapacityBudgets struct {
-	MemoryMiB       int64
-	CPUMillis       int64
-	DiskBytes       int64
+	MemoryMiB int64
+	CPUMillis int64
+	DiskBytes int64
+	// CheckpointBytes is the budget of the checkpoint volume when it is another filesystem than the data
+	// volume. Zero means they share one, and a namespace's data and checkpoints all count against DiskBytes.
+	CheckpointBytes int64
 	ImageStoreBytes int64
 	RunningBackends int64
 	// ReservedCPUs and AppCPUs are the CPU lists app containers may not and may run on, in the kernel's list
@@ -32,11 +35,15 @@ func (b CapacityBudgets) valid() bool {
 
 // The dimensions a capacity refusal names.
 const (
-	CapacityMemory          = "memory"
-	CapacityCPU             = "cpu"
-	CapacityDisk            = "disk"
-	CapacityImageStore      = "image_store"
-	CapacityRunningBackends = "running_backends"
+	CapacityMemory = "memory"
+	CapacityCPU    = "cpu"
+	CapacityDisk   = "disk"
+	// CapacityDataQuota is a namespace whose quota, with its retained checkpoints, does not fit the disk
+	// budget; CapacityDataQuotaCheckpoint is the same when only the separate checkpoint volume is short.
+	CapacityDataQuota           = "data_quota"
+	CapacityDataQuotaCheckpoint = "data_quota_checkpoint"
+	CapacityImageStore          = "image_store"
+	CapacityRunningBackends     = "running_backends"
 )
 
 // CapacityExhaustedOutcome is the typed outcome of a refusal.
@@ -74,6 +81,8 @@ func (s *Store) CapacityBudgets() (CapacityBudgets, bool) {
 type capacityPlan struct {
 	kind, resourceID, installationID            string
 	memoryMiB, cpuMillis, diskBytes, imageBytes int64
+	// quotaBytes is the namespace quota a namespace plan reserves for. diskBytes is then its whole reservation.
+	quotaBytes int64
 	// transferFrom names the stopped source backend an enable or repair start replaces. The native start removes
 	// that container before it creates the target, so admission does not count the source next to the target. The
 	// source's row stays held until the settlement that proves its absence releases it.
@@ -156,16 +165,36 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	if plan.kind == reservationBackend {
 		backends = 1
 	}
-	for _, d := range []struct {
+	type dimension struct {
 		dimension               string
 		requested, used, budget int64
-	}{
+	}
+	diskDims := []dimension{{CapacityDisk, plan.diskBytes, usedDisk, budgets.DiskBytes}}
+	if plan.quotaBytes > 0 {
+		// A namespace reserves its quota on the data volume and two retained checkpoints of at most the
+		// quota on the checkpoint volume, or all three on the data volume when they share a filesystem.
+		// Every held reservation row stores three quotas, so the volumes' shares are a third and two thirds.
+		if budgets.CheckpointBytes > 0 {
+			var usedData, usedCheckpoint int64
+			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(disk_bytes/3),0),COALESCE(SUM(disk_bytes/3*2),0) FROM runner_reservations WHERE state='held' AND resource_id<>?`, plan.resourceID).Scan(&usedData, &usedCheckpoint); err != nil {
+				return nil, err
+			}
+			diskDims = []dimension{
+				{CapacityDataQuota, plan.quotaBytes, usedData, budgets.DiskBytes},
+				{CapacityDataQuotaCheckpoint, plan.diskBytes - plan.quotaBytes, usedCheckpoint, budgets.CheckpointBytes},
+			}
+		} else {
+			diskDims[0].dimension = CapacityDataQuota
+		}
+	}
+	dimensions := []dimension{
 		{CapacityMemory, plan.memoryMiB, usedMem, budgets.MemoryMiB},
 		{CapacityCPU, plan.cpuMillis, usedCPU, budgets.CPUMillis},
-		{CapacityDisk, plan.diskBytes, usedDisk, budgets.DiskBytes},
-		{CapacityImageStore, plan.imageBytes, usedImage, budgets.ImageStoreBytes},
-		{CapacityRunningBackends, backends, usedBackends, budgets.RunningBackends},
-	} {
+	}
+	dimensions = append(dimensions, diskDims...)
+	dimensions = append(dimensions, dimension{CapacityImageStore, plan.imageBytes, usedImage, budgets.ImageStoreBytes},
+		dimension{CapacityRunningBackends, backends, usedBackends, budgets.RunningBackends})
+	for _, d := range dimensions {
 		if d.requested > 0 && d.used+d.requested > d.budget {
 			return &capacityRefusal{dimension: d.dimension, requested: d.requested, remaining: max(d.budget-d.used, 0)}, nil
 		}
@@ -219,12 +248,16 @@ func (s *Store) backendPlan(ctx context.Context, kind, resourceID, installationI
 	return capacityPlan{kind: kind, resourceID: resourceID, installationID: installationID, memoryMiB: int64(r.MemoryMiB), cpuMillis: int64(r.CPUMillis)}, true, nil
 }
 
-// namespacePlan builds the reservation of one managed data namespace.
-func (s *Store) namespacePlan(resourceID, installationID string) (capacityPlan, bool) {
+// namespacePlan builds the reservation of one managed data namespace of the given quota. A quota the command
+// does not carry reserves the default every namespace had before the quota became per installation.
+func (s *Store) namespacePlan(resourceID, installationID string, quotaBytes int64) (capacityPlan, bool) {
 	if _, ok := s.CapacityBudgets(); !ok {
 		return capacityPlan{}, false
 	}
-	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: NamespaceReservationBytes}, true
+	if quotaBytes <= 0 {
+		quotaBytes = NamespaceQuotaBytes
+	}
+	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: NamespaceReservationFor(quotaBytes), quotaBytes: quotaBytes}, true
 }
 
 // lookupCapacityRefusal finds the refusal a capacity refusal stored for this command, or nil.

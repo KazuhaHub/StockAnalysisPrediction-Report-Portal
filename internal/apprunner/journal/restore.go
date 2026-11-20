@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 )
@@ -497,7 +498,9 @@ func restoreRequestFor(source restoreSource) (data.RestoreRequest, error) {
 	return data.RestoreRequest{
 		CheckpointID: p.CheckpointID, NamespaceID: p.NamespaceID, ReleaseSHA256: p.ReleaseSHA256,
 		ManifestSHA256: p.ManifestSHA256, ProjectID: projectID, DataFormat: mustDataInt(p.DataFormat),
-		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: maxCheckpointArchiveBytes,
+		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: mustDataInt(p.ArchiveBytes),
+		// The live project quota is the binding limit of a restore; the walk is bounded by the platform maximum.
+		MaxEntries:     appplatform.DataQuotaMaxInodes,
 		ExpectedDevice: mustDataUint(p.Device), ExpectedNamespaceInode: mustDataUint(p.NamespaceInode),
 		WriterFence: mustDataInt(p.WriterFence),
 	}, nil

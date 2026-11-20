@@ -42,6 +42,7 @@ const errors = new Set([
   'capacity_exhausted_memory',
   'capacity_exhausted_cpu',
   'capacity_exhausted_disk',
+  'data_quota_capacity',
   'capacity_exhausted_image_store',
   'capacity_exhausted_running_backends',
 ])

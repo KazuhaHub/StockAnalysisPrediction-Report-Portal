@@ -17,7 +17,7 @@ const UpdateStartFormat = "portal.runner.data-update-start-command/1-dev.1"
 const updateStartSignaturePurpose = "portal.app/runner-data-update-start-command/v1"
 const updateStartReadPurpose = "portal.app/runner-data-update-start-read/v1"
 const updateStartEffectPurpose = "portal.app/runner-data-update-start-effect/v1"
-const maxUpdateStartArchiveBytes int64 = 512 << 20
+const maxUpdateStartArchiveBytes = MaxCheckpointArchiveBytes
 
 // CommandClockSkewMS is extra margin the controller adds when it concludes that no command it signed can still be
 // accepted. The runner enforces no skew tolerance: it compares a command only with its own clock, refuses one issued

@@ -32,13 +32,18 @@ const (
 	backfillImageBytes       = int64(4) << 30
 )
 
-// Disk a managed namespace reserves: its 256 MiB quota plus two retained recovery
-// checkpoints of at most 256 MiB each (doc 167 section 4).
+// Disk a managed namespace reserves: its quota plus two retained recovery checkpoints of at most the quota
+// each (doc 167 section 4, doc 185 section 3.3). NamespaceQuotaBytes is the default quota every namespace had
+// before the quota became per installation, and NamespaceReservationBytes what it reserves.
 const (
 	NamespaceQuotaBytes       = int64(256) << 20
 	RetainedCheckpoints       = 2
 	NamespaceReservationBytes = NamespaceQuotaBytes * (1 + RetainedCheckpoints)
 )
+
+// NamespaceReservationFor is the disk one namespace of the given quota reserves: the data and the retained
+// checkpoints, three quotas. A reservation row stores this total, so the quota is a third of it.
+func NamespaceReservationFor(quotaBytes int64) int64 { return quotaBytes * (1 + RetainedCheckpoints) }
 
 // imageResourceID is the reservation identity of a loaded image: one per config digest, however many
 // installations use it.
