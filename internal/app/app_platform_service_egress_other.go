@@ -21,6 +21,10 @@ func (platformServiceEgressRunner) Open(context.Context, platformRuntimeEndpoint
 	return nil, transport.ErrServiceEgressUnsupported
 }
 
+func (platformServiceEgressRunner) QueryPostgres(context.Context, platformRuntimeEndpoint) (transport.PostgresProbeProfile, error) {
+	return transport.PostgresProbeProfile{}, transport.ErrPostgresProbeUnsupported
+}
+
 func newPlatformServiceEgressRunner() platformServiceEgressTransport {
 	return platformServiceEgressRunner{}
 }

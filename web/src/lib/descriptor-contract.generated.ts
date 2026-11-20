@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "d4063347e1f7c4eab17f58fec76680f922c54908f18bf97607b8c33401d57d7c";
+export const DESCRIPTOR_SCHEMA_SHA256 = "7dd64ddd38e381279dcb16d06036a18b7cbf8cc81631b0494c992aaa15b38f32";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -61,7 +61,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "ingress.webhook")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "network.postgres" | "ingress.webhook")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -188,6 +188,7 @@ export const DESCRIPTOR_CAPABILITIES = [
   "files.export",
   "principals.read",
   "public.projection",
+  "network.postgres",
   "ingress.webhook"
 ] as const;
 export const DESCRIPTOR_LOCALES = [

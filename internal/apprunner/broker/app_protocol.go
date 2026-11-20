@@ -97,6 +97,50 @@ func DecodeAppHTTPRequest(raw []byte) (AppHTTPRequest, error) {
 	return out, nil
 }
 
+// MaxAppPostgresRequestBytes bounds one PostgreSQL liveness request body.
+const MaxAppPostgresRequestBytes = 1024
+
+// AppPostgresRequest is a decoded POST /v1/postgres/liveness body (doc 178): the reviewed target and
+// the binding to use, both only names. RequestID is only for the application's own correlation.
+type AppPostgresRequest struct{ RequestID, Target, Credential string }
+
+// DecodeAppPostgresRequest accepts exactly requestId, target and credential, each a JSON string,
+// with no duplicate, unknown, differently-cased or null member.
+func DecodeAppPostgresRequest(raw []byte) (AppPostgresRequest, error) {
+	fields, err := decodeAppObject(raw, MaxAppPostgresRequestBytes, "requestId", "target", "credential")
+	if err != nil || len(fields) != 3 {
+		return AppPostgresRequest{}, ErrAppInvalid
+	}
+	out := AppPostgresRequest{RequestID: fields["requestId"], Target: fields["target"], Credential: fields["credential"]}
+	if !validAppRequestID(out.RequestID) || !appplatform.ValidPostgresTargetID(out.Target) || !appplatform.ValidCredentialBindingName(out.Credential) {
+		return AppPostgresRequest{}, ErrAppInvalid
+	}
+	return out, nil
+}
+
+// AppPostgresErrorFor maps a probe error to an application error code. Unlike AppErrorFor it has no
+// uncertain: the check has no external effect, so whatever is not a denial or a spent budget is
+// unavailable.
+func AppPostgresErrorFor(err error) string {
+	switch {
+	case errors.Is(err, ErrDenied):
+		return AppErrDenied
+	case errors.Is(err, ErrBusy):
+		return AppErrBusy
+	default:
+		return AppErrUnavailable
+	}
+}
+
+// AppPostgresSuccessBody encodes a finished check: its outcome class and its latency.
+func AppPostgresSuccessBody(outcome string, latencyMS int64) []byte {
+	name, _ := json.Marshal(outcome)
+	out := append([]byte(`{"outcome":`), name...)
+	out = append(out, `,"latencyMs":`...)
+	out = strconv.AppendInt(out, latencyMS, 10)
+	return append(out, '}')
+}
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

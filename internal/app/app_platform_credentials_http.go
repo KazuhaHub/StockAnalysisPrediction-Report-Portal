@@ -212,7 +212,7 @@ func platformSecretBindingPlanFields(w http.ResponseWriter, r *http.Request) (pl
 	credential, credentialErr := platformManagementString(fields, "credential_id")
 	operation, operationErr := platformManagementString(fields, "operation")
 	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) ||
-		(operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256" && operation != "ingress_hmac_sha256") {
+		(operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256" && operation != "pg_password" && operation != "ingress_hmac_sha256") {
 		return zero, errPlatformManagementInput
 	}
 	if hasTarget {
@@ -295,6 +295,9 @@ func platformSecretBindingReviewResponse(review platformSecretBindingReview, pri
 	out := map[string]any{"network_origin": origin, "name": review.Name, "credential_id": review.CredentialID, "credential_label": review.CredentialLabel, "operation": review.Operation, "network_policy_sha256": review.NetworkPolicySHA256, "network_target": review.NetworkTarget, "network_target_sha256": review.NetworkTargetSHA256, "principals": platformSecretBindingPrincipalList(principals)}
 	if len(review.ACS3Actions) > 0 {
 		out["acs3_actions"] = review.ACS3Actions
+	}
+	if review.NetworkTargetSHA256 != "" {
+		out["network_target"], out["network_target_sha256"] = review.NetworkTarget, review.NetworkTargetSHA256
 	}
 	if review.Operation == "ingress_hmac_sha256" {
 		// The sender's URL and what it signs, never a secret: the administrator entered the value and
@@ -435,7 +438,12 @@ func (s *Server) apiPlatformAppSecretBindingList(w http.ResponseWriter, r *http.
 		platformManagementError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"installation_id": installation, "bindings": items, "targets": targets})
+	postgresTargets, err := s.listPlatformPostgresBindingTargets(actor, installation)
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"installation_id": installation, "bindings": items, "targets": targets, "postgres_targets": postgresTargets})
 }
 
 func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.Request, user string) {

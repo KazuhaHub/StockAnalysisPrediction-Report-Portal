@@ -54,6 +54,8 @@ type networkProvider struct {
 	// targets is what the runner advertises to the network targets query: the
 	// policy formats it serves and the operator's private-network allowlist.
 	targets NetworkTargets
+	// postgres is the PostgreSQL liveness probe (doc 178), drawing on the pool's background share.
+	postgres *broker.PostgresProbe
 }
 
 // ManagedControllerOption configures trusted runner state of the managed
@@ -132,6 +134,9 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int, optio
 	}
 	p.pool = pool
 	p.background = pool
+	if p.postgres, err = broker.NewPostgresProbe(pool); err != nil {
+		return nil, err
+	}
 	stream, err := broker.NewNetworkStreamPool(active, entries, current)
 	if err != nil {
 		return nil, err

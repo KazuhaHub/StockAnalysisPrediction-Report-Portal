@@ -462,10 +462,11 @@
                   "files.export",
                   "principals.read",
                   "public.projection",
+                  "network.postgres",
                   "ingress.webhook"
                 ]
               },
-              "maxItems": 14,
+              "maxItems": 15,
               "uniqueItems": true
             },
             {

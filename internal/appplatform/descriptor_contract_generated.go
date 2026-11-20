@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "d4063347e1f7c4eab17f58fec76680f922c54908f18bf97607b8c33401d57d7c"
+const descriptorContractSHA256 = "7dd64ddd38e381279dcb16d06036a18b7cbf8cc81631b0494c992aaa15b38f32"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -175,7 +175,7 @@ var publicQueryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 var publicDocumentPattern = regexp.MustCompile(`^public/[A-Za-z0-9._/-]+$`)
 var ingressRouteIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 var ingressPathPattern = regexp.MustCompile(`^/v1/ingress/[A-Za-z0-9._/-]+$`)
-var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "ingress.webhook": true}
+var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true, "network.postgres": true, "ingress.webhook": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
 var descriptorDisplayIcons = map[string]bool{"appstore": true, "file-text": true, "dashboard": true, "calendar": true, "bar-chart": true, "cloud": true, "tool": true, "experiment": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}
