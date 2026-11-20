@@ -75,6 +75,19 @@
           "x-go-omitempty": true,
           "description": "Optional reviewed anonymous read-only projection (doc 179). Requires a backend and the optional public.projection capability."
         },
+        "ingress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ingress"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Optional authenticated inbound routes (doc 180). Requires a backend and the optional ingress.webhook capability."
+        },
         "data": {
           "$ref": "#/$defs/DataCompatibility"
         }
@@ -448,10 +461,11 @@
                   "background.run",
                   "files.export",
                   "principals.read",
-                  "public.projection"
+                  "public.projection",
+                  "ingress.webhook"
                 ]
               },
-              "maxItems": 13,
+              "maxItems": 14,
               "uniqueItems": true
             },
             {
@@ -904,6 +918,57 @@
         "path",
         "cache_seconds",
         "response_bytes"
+      ]
+    },
+    "Ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IngressRoute"
+          },
+          "minItems": 1,
+          "maxItems": 4,
+          "description": "Sorted by id; ids unique; paths unique."
+        }
+      },
+      "required": [
+        "routes"
+      ]
+    },
+    "IngressRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 14,
+          "maxLength": 257,
+          "pattern": "^/v1/ingress/[A-Za-z0-9._/-]+$",
+          "description": "Fixed backend path under /v1/ingress/, valid for the backend relay."
+        },
+        "body_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "per_endpoint_per_minute": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "body_bytes",
+        "per_endpoint_per_minute"
       ]
     }
   }

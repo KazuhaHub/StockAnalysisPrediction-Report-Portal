@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "11aecc401573053b720b6fce70cdc61335e0517c39b6a32ec49625e7af836030";
+export const DESCRIPTOR_SCHEMA_SHA256 = "d4063347e1f7c4eab17f58fec76680f922c54908f18bf97607b8c33401d57d7c";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -11,6 +11,7 @@ export interface Descriptor {
  backend?: Backend | null;
  capabilities?: Capabilities | null;
  public?: Public | null;
+ ingress?: Ingress | null;
  data: DataCompatibility;
 }
 export interface Compatibility {
@@ -60,7 +61,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read" | "public.projection" | "ingress.webhook")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -102,6 +103,15 @@ export interface PublicRoute {
  cache_seconds: number;
  response_bytes: number;
 }
+export interface Ingress {
+ routes: (IngressRoute)[];
+}
+export interface IngressRoute {
+ id: string;
+ path: string;
+ body_bytes: number;
+ per_endpoint_per_minute: number;
+}
 export const DESCRIPTOR_LIMITS = {
   "MaxDescriptorBytes": 131072,
   "MaxAppNameCharacters": 80,
@@ -131,6 +141,9 @@ export const DESCRIPTOR_LIMITS = {
   "minPublicCacheSeconds": 1,
   "maxPublicCacheSeconds": 300,
   "maxPublicResponseBytes": 1048576,
+  "maxIngressRoutes": 4,
+  "maxIngressBodyBytes": 4096,
+  "maxIngressPerMinute": 60,
   "minBackendMemoryMiB": 16,
   "maxBackendMemoryMiB": 4096,
   "minBackendCPUMillis": 25,
@@ -157,7 +170,9 @@ export const DESCRIPTOR_PATTERNS = {
   "publicRouteID": "^[a-z][a-z0-9-]{0,31}$",
   "publicPath": "^/v1/public/[A-Za-z0-9._/-]+$",
   "publicQueryName": "^[a-z][a-z0-9_]{0,31}$",
-  "publicDocument": "^public/[A-Za-z0-9._/-]+$"
+  "publicDocument": "^public/[A-Za-z0-9._/-]+$",
+  "ingressRouteID": "^[a-z][a-z0-9-]{0,31}$",
+  "ingressPath": "^/v1/ingress/[A-Za-z0-9._/-]+$"
 } as const;
 export const DESCRIPTOR_CAPABILITIES = [
   "reports.read",
@@ -172,7 +187,8 @@ export const DESCRIPTOR_CAPABILITIES = [
   "background.run",
   "files.export",
   "principals.read",
-  "public.projection"
+  "public.projection",
+  "ingress.webhook"
 ] as const;
 export const DESCRIPTOR_LOCALES = [
   "en-US",
@@ -209,6 +225,7 @@ export const DESCRIPTOR_FIELDS = {
     "backend",
     "capabilities",
     "public",
+    "ingress",
     "data"
   ],
   "Compatibility": [
@@ -299,5 +316,14 @@ export const DESCRIPTOR_FIELDS = {
     "query",
     "cache_seconds",
     "response_bytes"
+  ],
+  "Ingress": [
+    "routes"
+  ],
+  "IngressRoute": [
+    "id",
+    "path",
+    "body_bytes",
+    "per_endpoint_per_minute"
   ]
 } as const;

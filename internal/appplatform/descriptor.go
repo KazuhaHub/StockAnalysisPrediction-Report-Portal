@@ -135,6 +135,13 @@ func validManifest(m Manifest) bool {
 	if declaresPublic != (m.Public != nil) || (m.Public != nil && (m.Backend == nil || !validPublic(*m.Public))) {
 		return false
 	}
+	declaresIngress := false
+	for _, value := range m.Capabilities.Optional {
+		declaresIngress = declaresIngress || value == "ingress.webhook"
+	}
+	if declaresIngress != (m.Ingress != nil) || (m.Ingress != nil && (m.Backend == nil || !validIngress(*m.Ingress))) {
+		return false
+	}
 	if m.Data.Schema < minDescriptorDataSchema || m.Data.Schema > maxDescriptorDataSchema || m.Data.WritesOnStartup || len(m.Data.ReadableSchemas) == 0 || len(m.Data.ReadableSchemas) > maxDescriptorReadableSchemas {
 		return false
 	}
@@ -290,7 +297,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		// after reading the disclosure, so a descriptor cannot make it a condition of install.
 		// public.projection is optional only too (doc 179 section 4): anonymous exposure is an
 		// administrator's decision, never a condition of install.
-		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" {
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" || value == "public.projection" || value == "ingress.webhook" {
 			return false
 		}
 		seen[value], required[value] = true, true
@@ -301,7 +308,7 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		}
 		seen[value] = true
 	}
-	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection"} {
+	for _, value := range []string{"tasks.schedule", "events.subscribe", "background.run", "public.projection", "ingress.webhook"} {
 		if seen[value] && !hasBackend {
 			return false
 		}
@@ -313,6 +320,29 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 		if required[value] && !required["background.run"] {
 			return false
 		}
+	}
+	return true
+}
+
+// validIngress checks the authenticated inbound block (doc 180 section 3.1). Routes are sorted by id
+// so the signed bytes have one reading; every path is a backend relay path under /v1/ingress/.
+func validIngress(in Ingress) bool {
+	if len(in.Routes) < 1 || len(in.Routes) > maxIngressRoutes {
+		return false
+	}
+	paths := map[string]bool{}
+	for i, route := range in.Routes {
+		if !ingressRouteIDPattern.MatchString(route.ID) || (i > 0 && in.Routes[i-1].ID >= route.ID) ||
+			!ingressPathPattern.MatchString(route.Path) || paths[route.Path] || !ValidBackendRequestRoute("POST", route.Path) ||
+			route.BodyBytes < 1 || route.BodyBytes > maxIngressBodyBytes || route.PerEndpointPerMinute < 1 || route.PerEndpointPerMinute > maxIngressPerMinute {
+			return false
+		}
+		for _, segment := range strings.Split(strings.TrimPrefix(route.Path, "/v1/ingress/"), "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return false
+			}
+		}
+		paths[route.Path] = true
 	}
 	return true
 }

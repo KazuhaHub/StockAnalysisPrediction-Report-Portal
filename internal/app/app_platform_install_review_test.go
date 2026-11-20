@@ -25,8 +25,8 @@ func platformInstallFixture(t *testing.T, pg bool) (*Server, platformActorSessio
 	manifest.Capabilities.Required = []string{}
 	for _, name := range platformManagedFixtureOptional {
 		// This is the static install template: a public projection needs a backend, so only the
-		// managed release the later steps substitute declares it.
-		if name != "public.projection" {
+		// managed release the later steps substitute declares it (an ingress capability likewise).
+		if name != "public.projection" && name != "ingress.webhook" {
 			manifest.Capabilities.Optional = append(manifest.Capabilities.Optional, name)
 		}
 	}
