@@ -1928,6 +1928,20 @@ test("credential binding name crosses only with secrets.use and no credential va
  expect(dispatch.mock.calls[0][0]).toMatchObject({credential:"upstream-api"});
  expect(JSON.stringify(dispatch.mock.calls[0][0])).not.toContain("secret-value");
 });
+test("a signing request crosses only with secrets.use, as a name and a reviewed action, and never on a stream",async()=>{
+ const signing={credential:"qwen-billing",scheme:"acs3" as const,action:"QueryAccountBalance",version:"2017-12-14"};
+ const dispatch=vi.fn(async(_request:unknown)=>({status:200,contentType:"application/json",bodyBase64:"e30="}));
+ const without=await networkPair(dispatch);
+ await expect(without.client.requestNetwork({...networkRequest(),signing})).rejects.toMatchObject({code:"unsupported"});
+ expect(dispatch).not.toHaveBeenCalled();
+ const withUse=await networkPair(dispatch,true,["secrets.use"]);
+ await expect(withUse.client.requestNetwork({...networkRequest(),signing})).resolves.toEqual({status:200,contentType:"application/json",bodyBase64:"e30="});
+ expect(dispatch.mock.calls[0][0]).toMatchObject({signing});
+ const stream=vi.fn(async()=>{});
+ const streams=await networkStreamPair(stream,true,["secrets.use"]);
+ await expect(streams.client.requestNetworkStream({...networkRequest(),signing})).rejects.toMatchObject({code:"unsupported"});
+ expect(stream).not.toHaveBeenCalled();
+});
 test("network and own-backend channels keep independent request identities and results",async()=>{
  vi.stubGlobal("MessageChannel",NodeMessageChannel);
  const w=windows();

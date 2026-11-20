@@ -20,6 +20,14 @@ export interface NetworkRequest {
   readonly contentType: string;
   readonly bodyBase64: string;
   readonly credential?: string;
+  /** Ask Portal to sign the call (doc 177). Names a reviewed binding and the API action and version; never a key. */
+  readonly signing?: NetworkSigning;
+}
+export interface NetworkSigning {
+  readonly credential: string;
+  readonly scheme: "acs3";
+  readonly action: string;
+  readonly version: string;
 }
 export interface NetworkResponse {
   readonly status: number;
@@ -65,13 +73,20 @@ export function decodeNetworkBody(value: string): Uint8Array {
   for (let i=0;i<decoded.length;i++) bytes[i]=decoded.charCodeAt(i);
   return bytes;
 }
+function parseNetworkSigning(value: unknown): NetworkSigning | null {
+  if (!exact(value,["credential","scheme","action","version"]) || typeof value.credential !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(value.credential) || value.scheme !== "acs3" ||
+    typeof value.action !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(value.action) || typeof value.version !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value.version)) return null;
+  return Object.freeze({credential:value.credential,scheme:"acs3" as const,action:value.action,version:value.version});
+}
 export function parseNetworkRequest(value: unknown): NetworkRequest | null {
-  if ((!exact(value,["method","url","accept","contentType","bodyBase64"]) && !exact(value,["method","url","accept","contentType","bodyBase64","credential"])) || typeof value.method !== "string" || !["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"].includes(value.method) || typeof value.url !== "string" || new TextEncoder().encode(value.url).length>4096 || /[\x00-\x20\x7f\\#]/.test(value.url) || !header(value.accept) || !header(value.contentType) || binary(value.bodyBase64,NETWORK_REQUEST_MAX_BYTES) === null) return null;
+  if ((!exact(value,["method","url","accept","contentType","bodyBase64"]) && !exact(value,["method","url","accept","contentType","bodyBase64","credential"]) && !exact(value,["method","url","accept","contentType","bodyBase64","signing"])) || typeof value.method !== "string" || !["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"].includes(value.method) || typeof value.url !== "string" || new TextEncoder().encode(value.url).length>4096 || /[\x00-\x20\x7f\\#]/.test(value.url) || !header(value.accept) || !header(value.contentType) || binary(value.bodyBase64,NETWORK_REQUEST_MAX_BYTES) === null) return null;
   if ("credential" in value && (typeof value.credential !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(value.credential))) return null;
+  const signing = "signing" in value ? parseNetworkSigning(value.signing) : undefined;
+  if (signing === null) return null;
   try {
     const url = new URL(value.url);
     if (url.protocol!=="https:" || url.username || url.password || !url.hostname || !value.url.startsWith("https://")) return null;
-    return Object.freeze({method:value.method,url:value.url,accept:value.accept,contentType:value.contentType,bodyBase64:value.bodyBase64 as string,...("credential" in value?{credential:value.credential as string}:{})});
+    return Object.freeze({method:value.method,url:value.url,accept:value.accept,contentType:value.contentType,bodyBase64:value.bodyBase64 as string,...("credential" in value?{credential:value.credential as string}:{}),...(signing?{signing}:{})});
   } catch { return null; }
 }
 export function parseNetworkResponse(value: unknown): NetworkResponse | null {
