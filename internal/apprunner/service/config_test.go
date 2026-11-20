@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -61,7 +62,7 @@ func TestConfigStrictAndBounded(t *testing.T) {
 	cfg := configFixture(dir)
 	writePrivate(t, path, cfg)
 	loaded, err := LoadConfig(path)
-	if err != nil || loaded != cfg {
+	if err != nil || !reflect.DeepEqual(loaded, cfg) {
 		t.Fatalf("load valid config: %+v %v", loaded, err)
 	}
 	for name, raw := range map[string]string{

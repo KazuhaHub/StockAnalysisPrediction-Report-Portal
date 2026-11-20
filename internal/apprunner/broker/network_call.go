@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
@@ -49,8 +48,9 @@ func NewNetworkCall(h *HTTP, raw, signature, body []byte, a control.Authority, c
 		return nil, ErrDenied
 	}
 	command := verified.Command()
-	selected, err := appplatform.CanonicalHTTPPolicy(h.policy)
-	if err != nil || !bytes.Equal(selected, command.PolicyRaw) {
+	// The executor serves exactly the bytes it was built from, so a command with
+	// a policy that differs in any way (even a narrower limit) is refused.
+	if len(h.raw) == 0 || !bytes.Equal(h.raw, command.PolicyRaw) || !h.allowlistMatches(command.PrivateNetworksSHA256) {
 		clear(command.CredentialValue)
 		command.ClearSignedHeaders()
 		return nil, ErrDenied
