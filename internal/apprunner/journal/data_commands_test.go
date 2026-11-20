@@ -27,6 +27,13 @@ func dataCommandAuthority() (control.Authority, ed25519.PrivateKey) {
 // quotaRaise builds a signed raise over the fixture's namespace from the given old limits.
 func quotaRaise(t *testing.T, f checkpointFixture, n int, oldBytes, oldInodes, newBytes, newInodes int64) (control.SetDataQuotaCommand, []byte, []byte) {
 	t.Helper()
+	return quotaRaiseUnder(t, f, fixtureID(7000+n), fixtureID(7100+n), oldBytes, oldInodes, newBytes, newInodes)
+}
+
+// quotaRaiseUnder is quotaRaise under the given operation and effect, so a raise can belong to an operation that is
+// also an update with a checkpoint of its own.
+func quotaRaiseUnder(t *testing.T, f checkpointFixture, operationID, effectID string, oldBytes, oldInodes, newBytes, newInodes int64) (control.SetDataQuotaCommand, []byte, []byte) {
+	t.Helper()
 	authority, key := dataCommandAuthority()
 	now := time.Now().UTC().UnixMilli()
 	cp := f.command.Payload
@@ -36,9 +43,9 @@ func quotaRaise(t *testing.T, f checkpointFixture, n int, oldBytes, oldInodes, n
 	}
 	command := control.SetDataQuotaCommand{CommandHeader: control.CommandHeader{
 		Format: control.SetDataQuotaFormat, DeploymentID: f.command.DeploymentID, ControllerEpoch: f.command.ControllerEpoch,
-		ControlRevision: "3", InstallationID: f.command.InstallationID, OperationID: fixtureID(7000 + n),
+		ControlRevision: "3", InstallationID: f.command.InstallationID, OperationID: operationID,
 		TargetGeneration: f.command.TargetGeneration, Stage: control.SetDataQuotaStage, EffectNumber: "1",
-		EffectID: fixtureID(7100 + n), Kind: control.SetDataQuotaKind, InstallationFence: strconv.FormatInt(fence, 10),
+		EffectID: effectID, Kind: control.SetDataQuotaKind, InstallationFence: strconv.FormatInt(fence, 10),
 	}, Payload: control.SetDataQuotaPayload{
 		NamespaceID: cp.NamespaceID, ReleaseSHA256: cp.ReleaseSHA256, DataFormat: cp.DataFormat, WriterFence: cp.WriterFence,
 		ProjectID: cp.ProjectID, NamespaceInode: cp.NamespaceInode, Device: cp.Device,

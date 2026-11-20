@@ -209,6 +209,41 @@ func TestSettleMovesRecoveryRequiredToFailed(t *testing.T) {
 	}
 }
 
+// A raise of the data quota whose effect had no verdict ends recovery_required and is converged later: it completes
+// when the runner's receipt shows the raise applied, and fails when the runner's answer shows it never will. Both
+// results are states the model restores.
+func TestSetDataQuotaConvergesOutOfRecoveryRequired(t *testing.T) {
+	stages := operationStages(ActionSetDataQuota, true)
+	op, _ := NewOperation(ActionSetDataQuota, true, 3)
+	var err error
+	for _, stage := range stages[1 : len(stages)-1] {
+		if op, err = op.Advance(op.Snapshot().Revision, stage); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unsettled, err := op.Fail(op.Snapshot().Revision, EffectsUnknown)
+	if err != nil || unsettled.Snapshot().Stage != StageRecoveryRequired {
+		t.Fatal(unsettled.Snapshot(), err)
+	}
+	done, err := unsettled.Recover(unsettled.Snapshot().Revision)
+	if err != nil || done.Snapshot().Stage != StageComplete {
+		t.Fatalf("recover: %+v %v", done.Snapshot(), err)
+	}
+	if _, err := OperationFromSnapshot(done.Snapshot()); err != nil {
+		t.Fatal("the recovered snapshot is not a model state", err)
+	}
+	failed, err := unsettled.Settle(unsettled.Snapshot().Revision)
+	if err != nil || failed.Snapshot().Stage != StageFailed {
+		t.Fatalf("settle: %+v %v", failed.Snapshot(), err)
+	}
+	if _, err := OperationFromSnapshot(failed.Snapshot()); err != nil {
+		t.Fatal("the settled snapshot is not a model state", err)
+	}
+	if _, err := done.Recover(done.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("a completed raise was recovered again")
+	}
+}
+
 // An operation that ended recovery_required completes, one revision later, when evidence shows its last
 // effect was applied after all. It must be a state the model restores, so an operation that failed
 // before it could have done any work (queued) is refused.
@@ -309,8 +344,8 @@ func TestReopenContinuesAfterTheFailedStage(t *testing.T) {
 // failure one revision later, a completion one revision later) belong to the restore actions whose
 // recovery paths write them. An ordinary action's loader refuses them, and so do the transitions.
 func TestRecoveryStatesAreRestoredOnlyForTheActionsThatWriteThem(t *testing.T) {
-	recovery := map[Action]bool{ActionRestoreImport: true, ActionRestore: true}
-	for _, action := range []Action{ActionInstall, ActionUpdate, ActionDisable, ActionEnable, ActionRepair, ActionUninstall, ActionDeleteData, ActionRestore, ActionRestoreImport} {
+	recovery := map[Action]bool{ActionRestoreImport: true, ActionRestore: true, ActionSetDataQuota: true}
+	for _, action := range []Action{ActionInstall, ActionUpdate, ActionDisable, ActionEnable, ActionRepair, ActionUninstall, ActionDeleteData, ActionRestore, ActionRestoreImport, ActionSetDataQuota} {
 		for _, managed := range []bool{false, true} {
 			stages := operationStages(action, managed)
 			if len(stages) == 0 {
