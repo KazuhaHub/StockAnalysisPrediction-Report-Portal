@@ -115,6 +115,9 @@ type checkpointSource struct {
 	resource    managedRemovalResource
 	raw         []byte
 	signature   []byte
+	// quotaBytes and quotaInodes are the namespace's current limits: the last link of its quota chain. The install's
+	// receipt in data keeps the limits the namespace was created with, because its digest is rebuilt from them.
+	quotaBytes, quotaInodes string
 }
 
 func checkpointSourceRoot(source checkpointSource) (string, string, bool) {
@@ -409,6 +412,15 @@ func loadCheckpointSource(ctx context.Context, tx *sql.Tx, c control.CheckpointC
 }
 
 func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions ...string) (checkpointSource, error) {
+	source, err := loadCheckpointSourceChain(ctx, tx, c, now, excludeEffect, additionalExclusions...)
+	if err != nil {
+		return source, err
+	}
+	source.quotaBytes, source.quotaInodes, err = currentQuota(ctx, tx, source.data.Claim.ResourceID, source.data.QuotaBytes, source.data.QuotaInodes)
+	return source, err
+}
+
+func loadCheckpointSourceChain(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions ...string) (checkpointSource, error) {
 	var result checkpointSource
 	result.command = c
 	var startRaw, startOperation, startKind, startState, storedPayload string
@@ -755,7 +767,7 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 		DataFormat: mustDataInt(source.command.Payload.DataFormat),
 		// The archive may hold the quota, the tar overhead of every entry it may hold and a fixed allowance, and no
 		// more entries than the inode quota.
-		MaxArchiveBytes: data.ArchiveCapFor(mustDataInt(source.data.QuotaBytes), mustDataInt(source.data.QuotaInodes)), MaxEntries: mustDataInt(source.data.QuotaInodes),
+		MaxArchiveBytes: data.ArchiveCapFor(mustDataInt(source.quotaBytes), mustDataInt(source.quotaInodes)), MaxEntries: mustDataInt(source.quotaInodes),
 		ExpectedDevice: mustDataUint(source.command.Payload.Device), ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
 		WriterFence: mustDataInt(source.command.Payload.WriterFence),
 	}

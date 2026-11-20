@@ -205,7 +205,7 @@ func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreC
 	}
 	result.checkpoint = checkpoint
 	result.resource = history.resource
-	result.inodeQuota = mustDataInt(history.data.QuotaInodes)
+	result.inodeQuota = mustDataInt(history.quotaInodes)
 	var running int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources
 		WHERE data_namespace_id=? AND kind='container'

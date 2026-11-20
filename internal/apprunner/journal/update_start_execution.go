@@ -439,7 +439,11 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		receipt := f.source.source.data
 		dataRoot = markerRoot(receipt.Claim)
 		dataNamespaceInode, dataDevice, dataProject = receipt.NamespaceInode, receipt.Device, receipt.ProjectID
-		dataQuotaBytes, dataQuotaInodes = receipt.QuotaBytes, receipt.QuotaInodes
+		// The namespace's current limits: the install's, or the last raise that followed them.
+		dataQuotaBytes, dataQuotaInodes = f.source.source.quotaBytes, f.source.source.quotaInodes
+		if dataQuotaBytes == "" {
+			dataQuotaBytes, dataQuotaInodes = receipt.QuotaBytes, receipt.QuotaInodes
+		}
 	}
 	if c.Payload.RootFilesystemUUID != dataRoot.FilesystemUUID || dataRoot.Inode != rootInode {
 		return zero, fmt.Errorf("%w: update-start data root",

@@ -270,7 +270,7 @@ type MigrateDataStatus struct {
 
 func validMigrateStatus(s MigrateDataStatus) bool {
 	if s.Format != migrateStatusFormat || !dataSHA(s.PayloadSHA256) ||
-		!((s.Stage == "migrate" && (s.Kind == "migrate-data" || s.Kind == "discard-migration")) || (s.Stage == "restore_data" && s.Kind == "restore")) ||
+		!((s.Stage == "migrate" && (s.Kind == "migrate-data" || s.Kind == "discard-migration")) || (s.Stage == "restore_data" && (s.Kind == "restore" || s.Kind == "import-data")) || (s.Stage == "prepare_data" && s.Kind == "set-data-quota")) ||
 		(s.State != "pending" && s.State != "orphaned" && s.State != "absent") ||
 		!dataNumber(s.TargetGeneration, true) || !dataNumber(s.EffectNumber, true) || !dataNumber(s.ObservedMS, true) {
 		return false
