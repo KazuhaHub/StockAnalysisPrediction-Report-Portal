@@ -4146,7 +4146,7 @@
   "appPlatform.updateQuota": "資料配額",
   "appPlatform.updateQuotaRaise": "{{currentBytes}} → {{newBytes}}，inode {{currentInodes}} → {{newInodes}}",
   "appPlatform.updateQuotaHint": "核准此更新會在新版本啟動前提高資料配額。即使更新被復原，配額仍保持提高後的值，因為配額只能提高。",
-  "err.app_platform_quota_raise_unsettled": "更新的資料配額提升仍在結算中。運行器回覆後再選擇。",
+  "err.app_platform_quota_raise_unsettled": "此應用的資料配額提升仍在結算中。運行器回覆後再選擇。",
   "err.data_quota_unavailable": "運行器無法提高此應用的資料配額，未做任何變更。請復原此次更新。",
   "err.data_quota_recovery_required": "運行器對資料配額提升的回覆尚不明確。系統會自動結算，請稍後再查看。",
   "err.capacity_exhausted_image_store": "運行器的映像儲存已滿。沒有任何安裝在使用的映像，要等參照它們的應用版本被移除後才會回收。管理員可以調高映像儲存的容量上限。",

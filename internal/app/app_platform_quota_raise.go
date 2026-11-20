@@ -151,7 +151,7 @@ const platformRaiseAbsentReceipt = `{"state":"absent"}`
 // platformRaiseRow is the Portal's row of a raise as read from the database.
 type platformRaiseRow struct {
 	effectID, kind, digest, runtimeID, epoch, state, receipt string
-	admitted, observed                                       int64
+	admitted, observed, updated                              int64
 	exists                                                   bool
 }
 
@@ -162,9 +162,9 @@ func loadPlatformRaiseRow(e migExec, operation string, slot platformRaiseSlot, f
 	}
 	var r platformRaiseRow
 	var runtime sql.NullString
-	err := e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json
+	err := e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,updated_ms
 		FROM app_platform_operation_effects WHERE operation_id=? AND stage=? AND effect_number=?`+lock, operation, slot.stage, slot.number).
-		Scan(&r.effectID, &r.kind, &r.digest, &runtime, &r.epoch, &r.admitted, &r.observed, &r.state, &r.receipt)
+		Scan(&r.effectID, &r.kind, &r.digest, &runtime, &r.epoch, &r.admitted, &r.observed, &r.state, &r.receipt, &r.updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return platformRaiseRow{}, nil
 	}
@@ -176,9 +176,17 @@ func loadPlatformRaiseRow(e migExec, operation string, slot platformRaiseSlot, f
 }
 
 // signedUntil is the latest expiry of any command signed for the row, from its pending receipt.
+// platformRaiseLegacyLifetimeMS is the longest a raise command was valid when no window was recorded on its row.
+const platformRaiseLegacyLifetimeMS = 25000
+
 func (r platformRaiseRow) signedUntil() (int64, bool) {
 	if r.state != "prepared" && r.state != "unknown" {
 		return 0, false
+	}
+	if r.receipt == "{}" && r.exists {
+		// A row written before windows were recorded: its commands were signed for at most platformRaiseLegacyLifetimeMS
+		// after the row was last written, and an absence is not final before then.
+		return r.updated + platformRaiseLegacyLifetimeMS, true
 	}
 	return platformImportSignedUntil(r.receipt)
 }
@@ -207,7 +215,7 @@ func platformSignRaise(e migExec, seed []byte, runtime platformRuntimeRegistrati
 	defer clear(key)
 	intent := platformSetDataQuotaIntent{
 		effectID: row.effectID, runtime: runtime, authority: authority, command: command, descriptor: bytes.Clone(descriptor),
-		slot: slot, admittedFence: row.admitted, priorSignedUntil: prior, rowState: row.state, rowReceipt: row.receipt, recorded: record,
+		slot: slot, admittedFence: row.admitted, priorSignedUntil: prior,
 	}
 	var err error
 	if intent.raw, intent.signature, err = control.SignSetDataQuota(command, key, authority, issued); err != nil {
@@ -234,6 +242,22 @@ func platformRaiseWindow(now, leaseUntil int64) (issued, expires int64, err erro
 		return 0, 0, errAppPlatformLeaseConflict
 	}
 	return issued, expires, nil
+}
+
+// platformRefuseWhileRaiseUnsettled refuses an admission for an installation that holds a raise with no verdict on an
+// operation that already ended. The runner refuses the checkpoint, the start and the restore of such an installation
+// until the same command finishes the raise, and the convergence runs only for an installation that is not mid-update,
+// so an update admitted meanwhile would end recovery_required and the raise could never converge.
+func platformRefuseWhileRaiseUnsettled(e migExec, installation string) error {
+	var open int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
+		WHERE o.installation_id=? AND f.kind='set-data-quota' AND f.state IN ('prepared','unknown') AND o.completed_ms IS NOT NULL`, installation).Scan(&open); err != nil {
+		return err
+	}
+	if open != 0 {
+		return errAppPlatformQuotaRaiseUnsettled
+	}
+	return nil
 }
 
 // platformRaiseCommitRef names the row a receipt settles.

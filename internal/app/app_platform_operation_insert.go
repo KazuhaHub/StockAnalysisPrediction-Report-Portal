@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"strings"
 )
 
@@ -31,6 +32,12 @@ func insertPlatformOperation(e migExec, row platformOperationRow) error {
 	}
 	if platformStartsBackend(row.Action) {
 		if err := platformRefuseWhileLoadUnsettled(e, row.InstallationID); err != nil {
+			return err
+		}
+	}
+	// A raise with no verdict blocks, at the runner, everything that starts a backend and every other raise.
+	if platformStartsBackend(row.Action) || row.Action == string(appplatform.ActionSetDataQuota) {
+		if err := platformRefuseWhileRaiseUnsettled(e, row.InstallationID); err != nil {
 			return err
 		}
 	}

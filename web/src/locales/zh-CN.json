@@ -4146,7 +4146,7 @@
   "appPlatform.updateQuota": "数据配额",
   "appPlatform.updateQuotaRaise": "{{currentBytes}} → {{newBytes}}，inode {{currentInodes}} → {{newInodes}}",
   "appPlatform.updateQuotaHint": "批准此更新会在新版本启动前提高数据配额。即使更新被回滚，配额仍保持提高后的值，因为配额只能提高。",
-  "err.app_platform_quota_raise_unsettled": "更新的数据配额提升仍在结算中。运行器给出答复后再选择。",
+  "err.app_platform_quota_raise_unsettled": "此应用的数据配额提升仍在结算中。运行器给出答复后再选择。",
   "err.data_quota_unavailable": "运行器无法提高此应用的数据配额，未做任何更改。请回滚此次更新。",
   "err.data_quota_recovery_required": "运行器对数据配额提升的答复尚不明确。系统会自动结算，请稍后再查看。",
   "err.capacity_exhausted_image_store": "运行器的镜像存储已满。没有任何安装在使用的镜像，要等引用它们的应用版本被移除后才会回收。管理员可以调高镜像存储的容量上限。",

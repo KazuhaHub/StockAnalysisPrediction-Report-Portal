@@ -696,6 +696,9 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 					policy < 1 || policy == math.MaxInt64 {
 					return errAppPlatformPlanChanged
 				}
+				if err := platformRefuseWhileRaiseUnsettled(e, installation); err != nil {
+					return err
+				}
 				if recovers != "" {
 					if err := requirePlatformRetrySource(e, installation, recovers); err != nil {
 						return err
