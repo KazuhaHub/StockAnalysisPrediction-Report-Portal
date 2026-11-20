@@ -24,7 +24,7 @@ type platformServiceFacts struct {
 
 func serviceResourceCapability(resource string) bool {
 	switch resource {
-	case "reports.read", "storage.files", "network.http", "notifications.publish", "events.subscribe", "tasks.schedule", "files.export", "secrets.use":
+	case "reports.read", "storage.files", "network.http", "notifications.publish", "events.subscribe", "tasks.schedule", "files.export", "secrets.use", appplatform.ProxyCapability:
 		return true
 	default:
 		return false
@@ -120,8 +120,10 @@ func loadPlatformServiceFactsLocked(e migExec, installation string, resources []
 			expectedGranted[capability.capability] = capability.granted
 		}
 		for _, resource := range resources {
+			// network.proxy is off in every install selection: an administrator's proxy review turns
+			// it on afterwards (doc 184), and loadPlatformProxyGrant proves that review.
 			if !serviceResourceCapability(resource) ||
-				!expectedGranted[resource] {
+				!expectedGranted[resource] && resource != appplatform.ProxyCapability {
 				return facts, errAppPlatformServiceUnavailable
 			}
 		}

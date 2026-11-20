@@ -31,6 +31,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -83,6 +84,9 @@ type Server struct {
 	// platformObserveCapability is the runner seam of the capability policy review: the managed and
 	// network profiles and the PRNT0001 answer, as plain data. nil selects the local socket.
 	platformObserveCapability func(context.Context, platformActorSession, platformRuntimeEndpoint) (platformCapabilityObservation, error)
+	// platformObserveProxy is the runner seam of the proxy review: the PRPX0001 answer. nil selects the
+	// local socket.
+	platformObserveProxy func(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error)
 
 	// platformImageDir overrides the directory the managed image stores live under; empty selects the data
 	// directory next to the database. platformImageRunner is the runner seam of the blob channel and the

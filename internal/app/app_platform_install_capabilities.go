@@ -44,7 +44,9 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 	if stored == boolInt(reviewed) {
 		return true
 	}
-	return (capability == "principals.read" || capability == "public.projection") && !reviewed && stored == 1
+	// network.proxy is off at install and an administrator's proxy review turns it on (doc 184), so a
+	// granted row is a valid state for it as well.
+	return (capability == "principals.read" || capability == "public.projection" || capability == appplatform.ProxyCapability) && !reviewed && stored == 1
 }
 
 // platformPolicyMatches compares a stored policy with the reviewed one. public.projection is the
@@ -52,6 +54,9 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 // granted row may carry a validated public policy in place of the install-time "{}". An ungranted
 // row is always exactly the reviewed policy, so withdrawing resets it.
 func platformPolicyMatches(capability string, granted int, stored, reviewed string) bool {
+	if capability == appplatform.ProxyCapability && granted == 1 && reviewed == appplatform.EmptyProxyPolicyJSON && appplatform.ValidProxyPolicyShape(stored) {
+		return true
+	}
 	return stored == reviewed || (capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored))
 }
 

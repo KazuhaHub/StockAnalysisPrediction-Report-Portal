@@ -28,6 +28,9 @@ import (
 const (
 	platformServiceEgressNetwork = "network.http"
 	platformServiceEgressNotice  = "notifications.publish"
+	// platformServiceEgressProxy is the reviewed forward proxy (doc 184). It rides the session like the
+	// other resources and carries the reviewed policy in the signed command.
+	platformServiceEgressProxy = appplatform.ProxyCapability
 	// platformServiceEgressSecrets lets a call of the session name one reviewed
 	// credential binding (doc 176). It is planned only beside network.http.
 	platformServiceEgressSecrets = "secrets.use"
@@ -58,6 +61,8 @@ type platformServiceEgressPin struct {
 	resources                                                       string
 	review, policySHA                                               string
 	concurrency                                                     int
+	// proxy is the digest of the reviewed proxy policy, or "". A change of it is drift.
+	proxy string
 }
 
 // platformServiceEgressAuthority is one current reading. It is private, never
@@ -74,7 +79,9 @@ type platformServiceEgressAuthority struct {
 	policy       appplatform.ParsedHTTPPolicyAny
 	concurrency  int
 	identity     appplatform.ServiceIdentityGrant
-	history      *platformServiceBackendHistory
+	// proxy is the reviewed proxy policy the session carries, when network.proxy is a resource.
+	proxy   *appplatform.ParsedProxyPolicy
+	history *platformServiceBackendHistory
 	// binding is the service binding a credential call resolved to, and
 	// credentialName its name. credentialHeader and credentialValue are set only
 	// when the load was asked to open the value (an admit); the value is cleared
@@ -104,7 +111,11 @@ func (a *platformServiceEgressAuthority) Close() {
 }
 
 func (a platformServiceEgressAuthority) pin() platformServiceEgressPin {
-	return platformServiceEgressPin{
+	proxy := ""
+	if a.proxy != nil {
+		proxy = a.proxy.SHA256
+	}
+	return platformServiceEgressPin{proxy: proxy,
 		installation: a.installation, appID: a.facts.appID,
 		generation: a.facts.generation, policyRevision: a.facts.policyRevision,
 		release: a.facts.release, epoch: a.facts.epoch,
@@ -171,7 +182,7 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		}
 	}
 	for _, resource := range resources {
-		if resource != platformServiceEgressNetwork && resource != platformServiceEgressNotice && resource != platformServiceEgressSecrets {
+		if resource != platformServiceEgressNetwork && resource != platformServiceEgressNotice && resource != platformServiceEgressSecrets && resource != platformServiceEgressProxy {
 			return zero, errPlatformServiceEgressUnavailable
 		}
 	}
@@ -206,7 +217,7 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 	if discover {
 		rows, err := e.query(`SELECT capability FROM app_platform_capability_grants
 			WHERE installation_id=? AND granted=1
-			AND capability IN ('network.http','notifications.publish','secrets.use')
+			AND capability IN ('network.http','network.proxy','notifications.publish','secrets.use')
 			ORDER BY capability`, installation)
 		if err != nil {
 			return zero, errPlatformServiceEgressUnavailable
@@ -279,6 +290,24 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 			clear(result.credentialValue)
 		}
 	}()
+	if slices.Contains(resources, platformServiceEgressProxy) {
+		// The proxy policy is the administrator's review, proved against the latest consumed proxy plan. In
+		// discovery a grant no review backs is simply not a resource; a session that asked for it by name
+		// fails, which the coordinator treats as drift.
+		proxy, err := loadPlatformProxyGrant(e, installation, tuple.policy, facts.release, facts.epoch)
+		switch {
+		case err == nil:
+			result.proxy = &proxy
+		case discover:
+			resources = slices.DeleteFunc(resources, func(r string) bool { return r == platformServiceEgressProxy })
+			result.resources = resources
+			if len(resources) == 0 {
+				return zero, errPlatformServiceEgressUnavailable
+			}
+		default:
+			return zero, errPlatformServiceEgressUnavailable
+		}
+	}
 	if slices.Contains(resources, platformServiceEgressNetwork) {
 		grant, err := loadPlatformNetworkGrantForIntent(e, installation, platformNetworkGrantTarget{
 			release: facts.release, generation: tuple.generation, policy: tuple.policy, runtime: runtime,
@@ -437,8 +466,17 @@ func (a platformServiceEgressAuthority) signServiceEgressSession(sessionID strin
 		return nil, nil, 0, errPlatformServiceEgressExpiring
 	}
 	r := a.runtime
+	format := control.ServiceEgressSessionFormat
+	var proxy *control.ServiceEgressProxy
+	if slices.Contains(a.resources, platformServiceEgressProxy) {
+		if a.proxy == nil {
+			return nil, nil, 0, errPlatformServiceEgressUnavailable
+		}
+		block := control.NewServiceEgressProxy(a.proxy.Raw)
+		format, proxy = control.ServiceEgressSessionProxyFormat, &block
+	}
 	command := control.ServiceEgressSessionCommand{
-		Format: control.ServiceEgressSessionFormat, DeploymentID: r.deploymentID,
+		Format: format, Proxy: proxy, DeploymentID: r.deploymentID,
 		ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10),
 		SessionID: sessionID, InstallationID: a.installation,
 		Generation: a.facts.generation, PolicyRevision: a.facts.policyRevision,

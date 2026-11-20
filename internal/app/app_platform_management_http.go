@@ -206,7 +206,7 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_private_target_not_allowed"
 	case errors.Is(err, errPlatformCapabilityPolicyBusy):
 		status, code = 409, "app_platform_installation_not_ready"
-	case errors.Is(err, transport.ErrNetworkTargetsUnsupported):
+	case errors.Is(err, transport.ErrNetworkTargetsUnsupported), errors.Is(err, transport.ErrProxyUnsupported):
 		status, code = 409, "app_platform_runner_unsupported"
 	case errors.Is(err, errPlatformOperationMissing):
 		status, code = 404, "app_platform_operation_missing"
