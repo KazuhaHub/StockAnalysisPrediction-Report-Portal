@@ -135,3 +135,11 @@ test('an unavailable app exposes a keyboard-operable retry and never mounts exec
  expect(frames).toHaveLength(1)
  expect(screen.queryByText(/private failure/)).toBeNull()
 })
+test('a changed network policy relaunches the frame from a fresh launch, and only an administrator may review',async()=>{
+ render(page());await screen.findByTestId('v2-frame')
+ expect(frames[frames.length-1].canReviewNetwork).toBe(false)
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,binding:{...binding,policyRevision:'2'},source:response.source.replace('/1/','/2/')}),{status:200})))
+ act(()=>frames[frames.length-1].onNetworkPolicyChanged('2'))
+ await waitFor(()=>expect(frames[frames.length-1].binding.policyRevision).toBe('2'))
+ expect(fetch).toHaveBeenCalledTimes(1)
+})
