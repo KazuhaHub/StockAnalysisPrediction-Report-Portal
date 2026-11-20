@@ -141,22 +141,8 @@ func parseHTTPTargetOrigin(origin, network string) (httpTargetOrigin, bool) {
 		return zero, false
 	}
 	host := u.Hostname()
-	var literal netip.Addr
-	switch network {
-	case HTTPNetworkPublic:
-		if !validHTTPPolicyHost(host) {
-			return zero, false
-		}
-	case HTTPNetworkPrivate:
-		if addr, err := netip.ParseAddr(host); err == nil {
-			if addr.Zone() != "" || addr.String() != host || addr.Is4In6() || AlwaysDenied(addr) || !nonPublicAddress(addr) {
-				return zero, false
-			}
-			literal = addr
-		} else if !validHTTPPolicyHost(host) {
-			return zero, false
-		}
-	default:
+	literal, ok := validNetworkTargetHost(host, network)
+	if !ok {
 		return zero, false
 	}
 	spelled := host
@@ -176,6 +162,27 @@ func parseHTTPTargetOrigin(origin, network string) (httpTargetOrigin, bool) {
 		return zero, false
 	}
 	return httpTargetOrigin{scheme: scheme, host: host, port: uint16(port), literal: literal}, true
+}
+
+// validNetworkTargetHost judges a host spelling for a network class, for every
+// capability that names reviewed destinations. A public target is a DNS name. A
+// private target is a DNS name or an IP literal inside the non-public ranges in
+// its one canonical spelling (never an always-denied or zoned address). literal
+// is valid only for an IP literal.
+func validNetworkTargetHost(host, network string) (literal netip.Addr, ok bool) {
+	switch network {
+	case HTTPNetworkPublic:
+		return netip.Addr{}, validHTTPPolicyHost(host)
+	case HTTPNetworkPrivate:
+		if addr, err := netip.ParseAddr(host); err == nil {
+			if addr.Zone() != "" || addr.String() != host || addr.Is4In6() || AlwaysDenied(addr) || !nonPublicAddress(addr) {
+				return netip.Addr{}, false
+			}
+			return addr, true
+		}
+		return netip.Addr{}, validHTTPPolicyHost(host)
+	}
+	return netip.Addr{}, false
 }
 
 func validHTTPTargetPaths(paths []string) bool {

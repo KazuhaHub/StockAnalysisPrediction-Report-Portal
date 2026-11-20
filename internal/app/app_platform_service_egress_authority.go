@@ -57,7 +57,9 @@ type platformServiceEgressPin struct {
 	controlRevision, fence                                          int64
 	resources                                                       string
 	review, policySHA                                               string
-	concurrency                                                     int
+	// postgresSHA is the digest of the granted network.postgres policy (doc 178), empty without it.
+	postgresSHA string
+	concurrency int
 }
 
 // platformServiceEgressAuthority is one current reading. It is private, never
@@ -86,6 +88,15 @@ type platformServiceEgressAuthority struct {
 	// signedHeaders are the ACS3 headers Portal computed at an admit that asked for a signed call
 	// (doc 177), in place of a credential header and value. They are wiped by Close.
 	signedHeaders []appplatform.SignedHeader
+	// postgres is the granted network.postgres policy and postgresRaw its exact bytes (doc 178),
+	// read when the session carries that resource. pgTarget and pgTargetSHA are the target a
+	// probe call resolved to, and pgUsername and pgPassword the role opened for it at an admit;
+	// both are wiped by Close.
+	postgres               appplatform.ParsedPostgresPolicy
+	postgresRaw            string
+	pgTarget               appplatform.PostgresTarget
+	pgTargetSHA            string
+	pgUsername, pgPassword []byte
 }
 
 func (a *platformServiceEgressAuthority) Close() {
@@ -93,6 +104,8 @@ func (a *platformServiceEgressAuthority) Close() {
 		return
 	}
 	clear(a.credentialValue)
+	clear(a.pgUsername)
+	clear(a.pgPassword)
 	for _, h := range a.signedHeaders {
 		clear(h.Value)
 	}
@@ -113,6 +126,7 @@ func (a platformServiceEgressAuthority) pin() platformServiceEgressPin {
 		controlRevision: a.runtime.controlRevision, fence: a.tuple.fence,
 		resources: strings.Join(a.resources, ","),
 		review:    a.grant.review, policySHA: a.policy.SHA256,
+		postgresSHA: a.postgres.SHA256,
 		concurrency: a.concurrency,
 	}
 }
@@ -137,6 +151,9 @@ type platformServiceEgressLoad struct {
 	// any value is opened; decrypt then opens it (an admit; a check does not).
 	credential string
 	decrypt    bool
+	// postgresTarget names the PostgreSQL target a probe call is for (doc 178). It needs
+	// network.postgres and secrets.use in the session, and credential names the binding.
+	postgresTarget string
 	// admit, when set with a credential, is judged against the reviewed policy
 	// before the binding is resolved or opened.
 	admit *transport.EgressAdmit
@@ -171,12 +188,15 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		}
 	}
 	for _, resource := range resources {
-		if resource != platformServiceEgressNetwork && resource != platformServiceEgressNotice && resource != platformServiceEgressSecrets {
+		if resource != platformServiceEgressNetwork && resource != platformServiceEgressNotice && resource != platformServiceEgressSecrets && resource != platformServiceEgressPostgres {
 			return zero, errPlatformServiceEgressUnavailable
 		}
 	}
-	if slices.Contains(resources, platformServiceEgressSecrets) && !slices.Contains(resources, platformServiceEgressNetwork) {
+	if slices.Contains(resources, platformServiceEgressSecrets) && !slices.Contains(resources, platformServiceEgressNetwork) && !slices.Contains(resources, platformServiceEgressPostgres) {
 		return zero, errPlatformServiceEgressUnavailable
+	}
+	if o.postgresTarget != "" && (o.credential == "" || !appplatform.ValidPostgresTargetID(o.postgresTarget) || !slices.Contains(resources, platformServiceEgressPostgres) || discover) {
+		return zero, errPlatformServiceEgressDenied
 	}
 	if o.credential != "" && (!slices.Contains(resources, platformServiceEgressSecrets) || !platformSecretBindingNamePattern.MatchString(o.credential) || discover) {
 		return zero, errPlatformServiceEgressDenied
@@ -206,7 +226,7 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 	if discover {
 		rows, err := e.query(`SELECT capability FROM app_platform_capability_grants
 			WHERE installation_id=? AND granted=1
-			AND capability IN ('network.http','notifications.publish','secrets.use')
+			AND capability IN ('network.http','network.postgres','notifications.publish','secrets.use')
 			ORDER BY capability`, installation)
 		if err != nil {
 			return zero, errPlatformServiceEgressUnavailable
@@ -221,8 +241,8 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		}
 		err = rows.Err()
 		rows.Close()
-		// secrets.use is only ever planned beside network.http.
-		if !slices.Contains(resources, platformServiceEgressNetwork) {
+		// secrets.use is only ever planned beside network.http or network.postgres.
+		if !slices.Contains(resources, platformServiceEgressNetwork) && !slices.Contains(resources, platformServiceEgressPostgres) {
 			resources = slices.DeleteFunc(resources, func(r string) bool { return r == platformServiceEgressSecrets })
 		}
 		if err != nil || len(resources) == 0 {
@@ -277,6 +297,8 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 	defer func() {
 		if failed {
 			clear(result.credentialValue)
+			clear(result.pgUsername)
+			clear(result.pgPassword)
 		}
 	}()
 	if slices.Contains(resources, platformServiceEgressNetwork) {
@@ -301,7 +323,18 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		}
 		result.grant, result.policy, result.concurrency = grant, parsed, parsed.Policy.Concurrency
 	}
-	if o.credential != "" {
+	if slices.Contains(resources, platformServiceEgressPostgres) {
+		// A session that carries the resource needs the grant to still be there: a withdrawn or
+		// invalid one fails the load, which the coordinator reads as drift and closes the session.
+		if err := loadPlatformServiceEgressPostgresGrant(e, installation, tuple.policy, &result); err != nil {
+			return zero, err
+		}
+	}
+	if o.postgresTarget != "" {
+		if err := s.loadPlatformServiceEgressPostgres(e, installation, o, &result); err != nil {
+			return zero, err
+		}
+	} else if o.credential != "" {
 		if err := s.loadPlatformServiceEgressCredential(e, installation, o, &result); err != nil {
 			return zero, err
 		}

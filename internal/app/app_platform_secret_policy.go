@@ -41,6 +41,9 @@ type platformSecretBindingPolicy struct {
 	// acs3 is the reviewed list of API actions an acs3_hmac_sha256 binding may sign, as sorted,
 	// unique "Action@Version" items joined by commas (doc 177); empty for every other operation.
 	acs3 string
+	// ingressRoute is the descriptor route an ingress_hmac_sha256 binding authenticates (doc 180);
+	// empty for every other operation. An ingress policy has no network target and no principals.
+	ingressRoute string
 }
 type platformSecretBindingPolicyWire struct {
 	Format              string `json:"format"`
@@ -53,6 +56,14 @@ type platformSecretBindingPolicyWireV2 struct {
 	NetworkPolicySHA256 string                  `json:"network_policy_sha256"`
 	Principals          []string                `json:"principals"`
 	ACS3                *platformACS3PolicyWire `json:"acs3,omitempty"`
+}
+
+// platformSecretBindingPolicyWireIngress is the v2 spelling of an ingress binding: the route in place of a
+// network target, and no principals (doc 180 section 3.2).
+type platformSecretBindingPolicyWireIngress struct {
+	Format       string `json:"format"`
+	Operation    string `json:"operation"`
+	IngressRoute string `json:"ingress_route"`
 }
 
 // platformACS3Action is one (action, version) pair of an ACS3 binding's reviewed policy.
@@ -131,7 +142,15 @@ func canonicalPlatformSecretBindingPolicy(p platformSecretBindingPolicy) ([]byte
 	if !validPlatformSecretBindingPrincipals(p.principals) {
 		return nil, errAppPlatformCredentialUnavailable
 	}
+	if p.ingressRoute != "" && p.operation != "ingress_hmac_sha256" {
+		return nil, errAppPlatformCredentialUnavailable
+	}
 	switch p.operation {
+	case "ingress_hmac_sha256":
+		if p.networkPolicySHA256 != "" || p.principals != "" || p.acs3 != "" || !appplatform.ValidIngressRouteID(p.ingressRoute) {
+			return nil, errAppPlatformCredentialUnavailable
+		}
+		return json.Marshal(platformSecretBindingPolicyWireIngress{platformSecretBindingPolicyFormatV2, p.operation, p.ingressRoute})
 	case "http_bearer", "http_api_key":
 		// Exactly one scope: the whole policy (older formats) or one target.
 		if (p.networkTargetSHA256 == "") == (p.networkPolicySHA256 == "") || !platformValidSHA(p.networkPolicySHA256+p.networkTargetSHA256) || p.acs3 != "" {
@@ -148,6 +167,12 @@ func canonicalPlatformSecretBindingPolicy(p platformSecretBindingPolicy) ([]byte
 		}
 		return json.Marshal(platformSecretBindingPolicyWireV2{platformSecretBindingPolicyFormatV2, p.operation, p.networkPolicySHA256,
 			platformSecretBindingPrincipalList(p.principals), &platformACS3PolicyWire{platformACS3ActionList(p.acs3)}})
+	case "pg_password":
+		// Doc 178 amendment C4: always the target-scoped v3 spelling, for one reviewed PostgreSQL
+		// target, and for the service only (a foreground request never reaches a database).
+		if !platformValidSHA(p.networkTargetSHA256) || p.networkPolicySHA256 != "" || p.acs3 != "" || p.principals != platformPrincipalsServiceOnly {
+			return nil, errAppPlatformCredentialUnavailable
+		}
 	case "raw_read":
 		if p.networkPolicySHA256 != "" || p.networkTargetSHA256 != "" || p.principals != "" || p.acs3 != "" {
 			return nil, errAppPlatformCredentialUnavailable
@@ -190,6 +215,17 @@ func parsePlatformSecretBindingPolicy(raw []byte) (platformSecretBindingPolicy, 
 		}
 		p = platformSecretBindingPolicy{operation: w.Operation, networkPolicySHA256: w.NetworkPolicySHA256}
 	case platformSecretBindingPolicyFormatV2:
+		var probe struct {
+			Operation string `json:"operation"`
+		}
+		if json.Unmarshal(raw, &probe) == nil && probe.Operation == "ingress_hmac_sha256" {
+			var w platformSecretBindingPolicyWireIngress
+			if d.Decode(&w) != nil {
+				return zero, errAppPlatformCredentialUnavailable
+			}
+			p = platformSecretBindingPolicy{operation: w.Operation, ingressRoute: w.IngressRoute}
+			break
+		}
 		var w platformSecretBindingPolicyWireV2
 		if d.Decode(&w) != nil {
 			return zero, errAppPlatformCredentialUnavailable

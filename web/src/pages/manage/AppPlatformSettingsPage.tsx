@@ -9,6 +9,8 @@ import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
+import AppIngressPanel from './AppIngressPanel'
+import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
 import AppPublicProjectionPanel from './AppPublicProjectionPanel'
 import AppNetworkTargetsPanel from './AppNetworkTargetsPanel'
 import type { NetworkPolicyView } from '../../lib/appNetworkTargetsV2'
@@ -240,6 +242,8 @@ export default function AppPlatformSettingsPage() {
   // it after reading the disclosure; withdrawal needs no second step because it only removes access.
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
   const publicProjection = settings.capabilities.find((item) => item.capability === 'public.projection' && !item.required)
+  const postgresProbe = settings.capabilities.find((item) => item.capability === 'network.postgres')
+  const ingress = settings.capabilities.find((item) => item.capability === 'ingress.webhook' && !item.required)
   const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
   const changePrincipals = async (enabled: boolean) => {
     if (principalsBusy) return
@@ -453,6 +457,8 @@ export default function AppPlatformSettingsPage() {
         {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
       </Space>}
       {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {postgresProbe && <AppPostgresPolicyPanel root={root} installation={installation} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {ingress && <AppIngressPanel root={root} installation={installation} granted={ingress.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
     </Card>
     {settings.networkPolicy && <Card title={t('appPlatform.network.title')}>
       <AppNetworkTargetsPanel key={settings.networkPolicy.policy_sha256} installation={installation} policyRevision={settings.policy_revision} policy={settings.networkPolicy}

@@ -89,6 +89,9 @@ type platformSecretBindingReview struct {
 	// ACS3Actions is the (action, version) allowlist of an acs3_hmac_sha256 binding (doc 177),
 	// sorted and unique; absent for every other operation.
 	ACS3Actions []platformACS3Action `json:"acs3_actions,omitempty"`
+	// IngressRoute is the descriptor route an ingress_hmac_sha256 binding authenticates (doc 180);
+	// absent for every other operation.
+	IngressRoute string `json:"ingress_route,omitempty"`
 }
 
 type platformSecretBindingReviewResult struct {
@@ -113,6 +116,10 @@ type platformSecretBindingMetadata struct {
 	Principals []string `json:"principals"`
 	// ACS3Actions is what an acs3_hmac_sha256 binding may sign, as the reviewed policy says.
 	ACS3Actions []platformACS3Action `json:"acs3_actions,omitempty"`
+	// IngressRoute is the route an ingress_hmac_sha256 binding authenticates, and Ingress what its
+	// endpoint has heard since the last summary window opened (doc 180 section 5).
+	IngressRoute string                   `json:"ingress_route,omitempty"`
+	Ingress      *platformIngressCounters `json:"ingress,omitempty"`
 	// NetworkTargetSHA256 and NetworkTarget (its origin) say which network target
 	// a target binding is for. Both are absent on a whole-policy binding.
 	NetworkTargetSHA256 string `json:"network_target_sha256,omitempty"`
@@ -127,6 +134,9 @@ type platformSecretBindingFacts struct {
 	// networkPolicyRaw is the grant's policy bytes. It is what the digest above
 	// is of, so it is left out when facts are compared with a review's.
 	networkPolicyRaw string
+	// postgresPolicyRaw is the network.postgres grant's policy bytes (doc 178), empty when that
+	// capability is not granted. Like networkPolicyRaw it is left out when facts are compared.
+	postgresPolicyRaw string
 }
 
 type platformSecretBindingExisting struct {
@@ -145,10 +155,13 @@ type platformSecretBindingUse struct {
 }
 
 func loadPlatformSecretBindingFacts(e migExec, installation string, lock bool) (platformSecretBindingFacts, error) {
-	return loadPlatformSecretBindingFactsMode(e, installation, lock, false)
+	return loadPlatformSecretBindingFactsKind(e, installation, lock, false, false)
 }
 
-func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, allowNoNetwork bool) (platformSecretBindingFacts, error) {
+// loadPlatformSecretBindingFactsKind is the facts of a binding. An ingress binding (doc 180) is judged
+// with the installation ready and the ingress.webhook capability, not secrets.use, granted, and has no
+// network policy to bind. The network.postgres policy (doc 178) is loaded whenever it is granted.
+func loadPlatformSecretBindingFactsKind(e migExec, installation string, lock, allowNoNetwork, ingress bool) (platformSecretBindingFacts, error) {
 	var f platformSecretBindingFacts
 	lockSQL := ""
 	if lock && e.s.driver == "postgres" {
@@ -161,7 +174,7 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 		return f, errAppPlatformCredentialUnavailable
 	}
 	if !platformValidUUID(installation) || !platformDirectoryAppID.MatchString(f.appID) || !platformDirectoryAppID.MatchString(f.publisherID) || !platformValidUUID(f.controllerEpoch) || !runtime.Valid || f.generation < 1 || f.installationRevision < 1 || f.policyRevision < 1 ||
-		(phase != "ready" && (phase != "setup_required" || len(platformRequiredSetupBindings(f.appID)) == 0)) {
+		(phase != "ready" && (ingress || phase != "setup_required" || len(platformRequiredSetupBindings(f.appID)) == 0)) {
 		return f, errAppPlatformCredentialUnavailable
 	}
 	if err := e.queryRow(`SELECT revision FROM app_platform_publishers WHERE id=?`, f.publisherID).Scan(&f.trustRevision); err != nil || f.trustRevision < 1 {
@@ -171,9 +184,16 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 		return f, errAppPlatformCredentialUnavailable
 	}
 	var networkRaw, networkReview string
-	err := e.queryRow(`SELECT g.policy_json,g.review_plan_id FROM app_platform_capability_grants g JOIN app_platform_review_plans p ON p.id=g.review_plan_id WHERE g.installation_id=? AND g.capability='network.http' AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL`, installation, f.policyRevision).
-		Scan(&networkRaw, &networkReview)
+	var err error
+	if ingress {
+		err = sql.ErrNoRows
+	} else {
+		err = e.queryRow(`SELECT g.policy_json,g.review_plan_id FROM app_platform_capability_grants g JOIN app_platform_review_plans p ON p.id=g.review_plan_id WHERE g.installation_id=? AND g.capability='network.http' AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL`, installation, f.policyRevision).
+			Scan(&networkRaw, &networkReview)
+	}
 	switch {
+	case ingress:
+		f.networkPolicySHA = ""
 	case err == nil:
 		network, parseErr := appplatform.ParseHTTPPolicyAny([]byte(networkRaw))
 		if parseErr != nil || !platformValidUUID(networkReview) {
@@ -185,10 +205,23 @@ func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, al
 	default:
 		return f, errAppPlatformCredentialUnavailable
 	}
+	var postgresRaw string
+	switch err := e.queryRow(`SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.postgres' AND granted=1 AND policy_revision=?`, installation, f.policyRevision).Scan(&postgresRaw); {
+	case err == nil:
+		if appplatform.ValidPostgresPolicy(postgresRaw) {
+			f.postgresPolicyRaw = postgresRaw
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return f, errAppPlatformCredentialUnavailable
+	}
 	var secretsGrant, currentEpoch, restorePaused string
-	if err := e.queryRow(`SELECT COALESCE((SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='secrets.use' AND granted=1 AND policy_revision=?),0),
+	grantCapability := "secrets.use"
+	if ingress {
+		grantCapability = "ingress.webhook"
+	}
+	if err := e.queryRow(`SELECT COALESCE((SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability=? AND granted=1 AND policy_revision=?),0),
 		COALESCE((SELECT v FROM meta WHERE k='app_platform_controller_epoch'),''),
-		COALESCE((SELECT v FROM meta WHERE k='app_platform_restore_paused'),'')`, installation, f.policyRevision).Scan(&secretsGrant, &currentEpoch, &restorePaused); err != nil {
+		COALESCE((SELECT v FROM meta WHERE k='app_platform_restore_paused'),'')`, installation, grantCapability, f.policyRevision).Scan(&secretsGrant, &currentEpoch, &restorePaused); err != nil {
 		return f, errAppPlatformCredentialUnavailable
 	}
 	if secretsGrant != "1" || currentEpoch != f.controllerEpoch || restorePaused != "0" {
@@ -209,7 +242,10 @@ func platformSecretBindingPolicyWith(operation, networkPolicySHA, principals, ac
 // its URL selects in the grant's policy is what a target binding is judged
 // against. The zero value names no destination: a target binding is then only
 // checked to still be a target of the policy.
-type platformBindingDestination struct{ method, url string }
+//
+// postgresTargetSHA names the PostgreSQL target a pg_password binding is used for (doc 178): the
+// digest of the canonical target the call selected. It and url are never both set.
+type platformBindingDestination struct{ method, url, postgresTargetSHA string }
 
 // platformSecretBindingTargets is the grant's network policy, read as targets.
 func platformSecretBindingTargets(facts platformSecretBindingFacts) (appplatform.HTTPPolicyV2, error) {
@@ -332,25 +368,51 @@ func (s *Server) createPlatformSecretBindingReviewWith(session platformActorSess
 }
 
 func (s *Server) createPlatformSecretBindingReviewScoped(session platformActorSession, installation, name, credentialID, operation, principals, target string, acs3 []platformACS3Action) (platformSecretBindingReviewResult, error) {
+	return s.createPlatformSecretBindingReviewFull(session, installation, name, credentialID, operation, principals, target, acs3, "")
+}
+
+// createPlatformSecretBindingReviewFull is that review for every operation. An ingress_hmac_sha256
+// binding (doc 180) names the descriptor route it authenticates in place of a network target, has no
+// principals, and its credential must be a secret of the length the signature takes (32 to 256 bytes);
+// the administrator entered the value, Portal never generates or shows one.
+func (s *Server) createPlatformSecretBindingReviewFull(session platformActorSession, installation, name, credentialID, operation, principals, target string, acs3 []platformACS3Action, ingressRoute string) (platformSecretBindingReviewResult, error) {
 	var result platformSecretBindingReviewResult
-	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256") ||
-		!validPlatformSecretBindingPrincipals(principals) || (operation == "raw_read" && principals != "") || !platformACS3ListFits(operation, acs3) ||
-		((operation == "raw_read" || operation == "acs3_hmac_sha256") && target != "") || (target != "" && !platformTargetIDPattern.MatchString(target)) {
+	ingress := operation == "ingress_hmac_sha256"
+	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read" && operation != "acs3_hmac_sha256" && operation != "pg_password" && !ingress) ||
+		!validPlatformSecretBindingPrincipals(principals) || ((operation == "raw_read" || ingress) && principals != "") || (operation == "pg_password" && principals != platformPrincipalsServiceOnly) || !platformACS3ListFits(operation, acs3) ||
+		(ingress != (ingressRoute != "")) || (ingress && !appplatform.ValidIngressRouteID(ingressRoute)) ||
+		((operation == "raw_read" || operation == "acs3_hmac_sha256" || ingress) && target != "") || (target != "" && !platformTargetIDPattern.MatchString(target)) {
 		return result, errPlatformManagementInput
 	}
 	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
 		}
-		allowNoNetwork := operation == "raw_read"
-		facts, err := loadPlatformSecretBindingFactsMode(
-			e, installation, true, allowNoNetwork)
+		allowNoNetwork := operation == "raw_read" || operation == "pg_password"
+		facts, err := loadPlatformSecretBindingFactsKind(
+			e, installation, true, allowNoNetwork, ingress)
 		if err != nil {
 			return err
 		}
-		if allowNoNetwork &&
+		if ingress && !platformIngressRouteDeclared(e, facts.releaseSHA, ingressRoute) {
+			return errPlatformManagementInput
+		}
+		if operation == "raw_read" &&
 			!platformRequiredSetupBinding(facts.appID, name) {
 			return errPlatformManagementInput
+		}
+		// The target is judged before the credential is looked at, so a refused target (a plain-http
+		// one, an unknown one) never reaches the custody.
+		var targetSHA, targetLabel string
+		switch operation {
+		case "http_bearer", "http_api_key":
+			if targetSHA, targetLabel, err = platformSecretBindingReviewTarget(facts, target); err != nil {
+				return err
+			}
+		case "pg_password":
+			if targetSHA, targetLabel, err = platformPostgresReviewTarget(facts, target); err != nil {
+				return err
+			}
 		}
 		var label, credentialState string
 		var credentialRevision, valueRevision int64
@@ -358,15 +420,12 @@ func (s *Server) createPlatformSecretBindingReviewScoped(session platformActorSe
 		if err := e.queryRow(`SELECT label,state,revision,value_revision,sealed_value FROM app_platform_credentials WHERE id=?`, credentialID).Scan(&label, &credentialState, &credentialRevision, &valueRevision, &sealed); err != nil || credentialState != "active" || credentialRevision < 1 || valueRevision < 1 {
 			return errAppPlatformCredentialUnavailable
 		}
-		// The target is judged before the value is looked at: a plain-http or unknown target is
-		// refused without the credential being opened.
-		var targetSHA, targetOrigin string
-		if operation == "http_bearer" || operation == "http_api_key" {
-			if targetSHA, targetOrigin, err = platformSecretBindingReviewTarget(facts, target); err != nil {
+		if ingress {
+			// The value must be a shared secret of the size the signature takes before anything is reviewed.
+			if err := s.checkPlatformIngressCredentialValue(credentialID, valueRevision, sealed.String); err != nil {
 				return err
 			}
-		}
-		if operation == "acs3_hmac_sha256" {
+		} else if operation == "acs3_hmac_sha256" {
 			// The value must be an AccessKey (and optional token) before anything is reviewed.
 			if err := s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String); err != nil {
 				return err
@@ -376,6 +435,10 @@ func (s *Server) createPlatformSecretBindingReviewScoped(session platformActorSe
 			if s.checkPlatformACS3CredentialValue(credentialID, valueRevision, sealed.String) == nil {
 				return errPlatformManagementInput
 			}
+		}
+		// A database role is bound only as pg_password, and pg_password needs one.
+		if err := s.checkPlatformCredentialPairing(operation, credentialID, valueRevision, sealed.String); err != nil {
+			return err
 		}
 		bindingID, err := platformNewUUID()
 		if err != nil {
@@ -405,13 +468,18 @@ func (s *Server) createPlatformSecretBindingReviewScoped(session platformActorSe
 			Name: name, CredentialID: credentialID, CredentialLabel: label, CredentialRevision: credentialRevision, CredentialValueRevision: valueRevision,
 			Operation: operation, NetworkPolicySHA256: facts.networkPolicySHA, ActorAuthority: actor.authorityFingerprint,
 		}
+		plan.NetworkTargetSHA256, plan.NetworkTarget = targetSHA, targetLabel
+		if operation == "pg_password" {
+			// Not scoped to the HTTP policy: only to the one PostgreSQL target it names.
+			plan.NetworkPolicySHA256 = ""
+		}
 		if principals != "" {
 			plan.Principals = platformSecretBindingPrincipalList(principals)
 		}
 		if operation == "acs3_hmac_sha256" {
 			plan.ACS3Actions = slices.Clone(acs3)
 		}
-		plan.NetworkTargetSHA256, plan.NetworkTarget = targetSHA, targetOrigin
+		plan.IngressRoute = ingressRoute
 		raw, err := json.Marshal(plan)
 		if err != nil || len(raw) > 65536 {
 			return errAppPlatformCredentialUnavailable
@@ -445,7 +513,7 @@ func parsePlatformSecretBindingReview(raw string) (platformSecretBindingReview, 
 		return plan, errAppPlatformCredentialUnavailable
 	}
 	canonical, err := json.Marshal(plan)
-	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read" && plan.Operation != "acs3_hmac_sha256") || !platformACS3ListFits(plan.Operation, plan.ACS3Actions) || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation != "raw_read" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformPlanPrincipalsValid(plan) || !platformPlanTargetValid(plan) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
+	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read" && plan.Operation != "acs3_hmac_sha256" && plan.Operation != "pg_password" && plan.Operation != "ingress_hmac_sha256") || !platformIngressPlanShape(plan) || !platformACS3ListFits(plan.Operation, plan.ACS3Actions) || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation == "pg_password" && plan.NetworkPolicySHA256 != "") || (plan.Operation != "raw_read" && plan.Operation != "pg_password" && plan.Operation != "ingress_hmac_sha256" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformPlanPrincipalsValid(plan) || !platformPlanTargetValid(plan) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
 		return platformSecretBindingReview{}, errAppPlatformCredentialUnavailable
 	}
 	return plan, nil
@@ -457,12 +525,15 @@ func platformPlanTargetValid(plan platformSecretBindingReview) bool {
 	if plan.NetworkTargetSHA256 == "" && plan.NetworkTarget == "" {
 		return true
 	}
+	if plan.Operation == "pg_password" {
+		return platformValidSHA(plan.NetworkTargetSHA256) && len(plan.NetworkTarget) <= 512 && strings.HasPrefix(plan.NetworkTarget, "postgres://")
+	}
 	return (plan.Operation == "http_bearer" || plan.Operation == "http_api_key") && platformValidSHA(plan.NetworkTargetSHA256) && len(plan.NetworkTarget) <= 512 && strings.HasPrefix(plan.NetworkTarget, "https://")
 }
 
 func platformPlanPrincipalsValid(plan platformSecretBindingReview) bool {
 	principals, ok := platformSecretBindingPrincipalsOfPlan(plan.Principals)
-	return ok && (plan.Operation != "raw_read" || principals == "")
+	return ok && (plan.Operation != "raw_read" || principals == "") && (plan.Operation != "pg_password" || principals == platformPrincipalsServiceOnly)
 }
 
 func (s *Server) consumePlatformSecretBindingReview(session platformActorSession, planID, planSHA string) (platformSecretBindingMetadata, error) {
@@ -507,10 +578,14 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			return errAppPlatformPlanChanged
 		}
 		planFacts := platformSecretBindingFacts{appID: plan.AppID, publisherID: plan.PublisherID, generation: plan.Generation, installationRevision: plan.InstallationRevision, policyRevision: plan.PolicyRevision, trustRevision: plan.TrustRevision, controllerEpoch: plan.ControllerEpoch, releaseSHA: plan.ReleaseSHA256, networkPolicySHA: plan.NetworkPolicySHA256}
-		current, err := loadPlatformSecretBindingFactsMode(
-			e, plan.InstallationID, true, plan.Operation == "raw_read")
-		networkRaw := current.networkPolicyRaw
-		current.networkPolicyRaw = ""
+		current, err := loadPlatformSecretBindingFactsKind(
+			e, plan.InstallationID, true, plan.Operation == "raw_read" || plan.Operation == "pg_password", plan.Operation == "ingress_hmac_sha256")
+		networkRaw, postgresRaw := current.networkPolicyRaw, current.postgresPolicyRaw
+		current.networkPolicyRaw, current.postgresPolicyRaw = "", ""
+		if plan.Operation == "pg_password" {
+			// A pg_password binding is not tied to the HTTP policy, whatever it is now.
+			current.networkPolicySHA = ""
+		}
 		if err != nil || current != planFacts {
 			return errAppPlatformPlanChanged
 		}
@@ -523,17 +598,45 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 		acs3Spelling, _ := platformACS3Spelling(plan.ACS3Actions)
 		// A review that names a target writes the target scope, if the target is
 		// still one the grant has; any other writes the whole-policy scope.
-		bindingScope := platformSecretBindingPolicy{operation: plan.Operation, networkPolicySHA256: plan.NetworkPolicySHA256, principals: principals, acs3: acs3Spelling}
-		if plan.NetworkTargetSHA256 != "" {
+		bindingScope := platformSecretBindingPolicy{operation: plan.Operation, networkPolicySHA256: plan.NetworkPolicySHA256, principals: principals, acs3: acs3Spelling, ingressRoute: plan.IngressRoute}
+		if plan.Operation == "pg_password" {
+			current.postgresPolicyRaw = postgresRaw
+			if !platformPostgresTargetPresent(current, plan.NetworkTargetSHA256) {
+				return errAppPlatformPlanChanged
+			}
+			bindingScope.networkPolicySHA256, bindingScope.networkTargetSHA256 = "", plan.NetworkTargetSHA256
+		} else if plan.NetworkTargetSHA256 != "" {
 			current.networkPolicyRaw = networkRaw
 			if platformSecretBindingTargetPresent(current, plan.NetworkTargetSHA256) != nil {
 				return errAppPlatformPlanChanged
 			}
 			bindingScope.networkPolicySHA256, bindingScope.networkTargetSHA256 = "", plan.NetworkTargetSHA256
 		}
+		bindingScope.acs3, _ = platformACS3Spelling(plan.ACS3Actions)
 		policy, err := canonicalPlatformSecretBindingPolicy(bindingScope)
 		if err != nil {
 			return err
+		}
+		if plan.Operation == "ingress_hmac_sha256" {
+			// The route must still be one the active release declares, and the value must still be a secret the
+			// signature takes, at the revision the plan carries.
+			var sealed sql.NullString
+			if err := e.queryRow(`SELECT sealed_value FROM app_platform_credentials WHERE id=?`, plan.CredentialID).Scan(&sealed); err != nil ||
+				!platformIngressRouteDeclared(e, plan.ReleaseSHA256, plan.IngressRoute) ||
+				s.checkPlatformIngressCredentialValue(plan.CredentialID, plan.CredentialValueRevision, sealed.String) != nil {
+				return errAppPlatformPlanChanged
+			}
+		}
+		{
+			// A database role is bound only as pg_password and pg_password needs one; this holds for the
+			// ingress and every other operation too.
+			var sealed sql.NullString
+			if err := e.queryRow(`SELECT sealed_value FROM app_platform_credentials WHERE id=?`, plan.CredentialID).Scan(&sealed); err != nil {
+				return errAppPlatformPlanChanged
+			}
+			if err := s.checkPlatformCredentialPairing(plan.Operation, plan.CredentialID, plan.CredentialValueRevision, sealed.String); err != nil {
+				return errAppPlatformPlanChanged
+			}
 		}
 		if plan.Operation == "acs3_hmac_sha256" {
 			// The value is validated again at commit: the plan is a statement about the credential
@@ -555,13 +658,17 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			if _, err := e.exec(`INSERT INTO app_platform_secret_bindings(id,installation_id,name,credential_id,credential_value_revision,operation,state,policy_json,policy_revision,review_plan_id,revision,created_ms,updated_ms,revoked_ms) VALUES(?,?,?,?,?,?,'active',?,?,?,1,?,?,NULL)`, plan.BindingID, plan.InstallationID, plan.Name, plan.CredentialID, plan.CredentialValueRevision, plan.Operation, string(policy), plan.PolicyRevision, planID, now, now); err != nil {
 				return err
 			}
-			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals), ACS3Actions: slices.Clone(plan.ACS3Actions)}
+			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals), ACS3Actions: slices.Clone(plan.ACS3Actions), IngressRoute: plan.IngressRoute}
 		} else {
 			changed, err := e.exec(`UPDATE app_platform_secret_bindings SET credential_id=?,credential_value_revision=?,operation=?,state='active',policy_json=?,policy_revision=?,review_plan_id=?,revision=revision+1,updated_ms=?,revoked_ms=NULL WHERE id=? AND installation_id=? AND name=? AND revision=? AND state IN ('active','review_required')`, plan.CredentialID, plan.CredentialValueRevision, plan.Operation, string(policy), plan.PolicyRevision, planID, now, plan.BindingID, plan.InstallationID, plan.Name, plan.BindingRevision)
 			if err := platformObjectCAS(changed, err); err != nil {
 				return errAppPlatformPlanChanged
 			}
-			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: plan.BindingRevision + 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals), ACS3Actions: slices.Clone(plan.ACS3Actions)}
+			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: plan.BindingRevision + 1, CreatedMS: now, UpdatedMS: now, Principals: platformSecretBindingPrincipalList(principals), ACS3Actions: slices.Clone(plan.ACS3Actions), IngressRoute: plan.IngressRoute}
+		}
+		if plan.Operation == "ingress_hmac_sha256" {
+			// An endpoint is no principal's credential: nobody may use it as a header.
+			result.Principals = []string{}
 		}
 		if err := platformApplySetupPhase(
 			e, plan.InstallationID, now); err != nil {
@@ -576,8 +683,9 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			Revision                           int64
 			Principals                         []string
 			Actions                            []platformACS3Action `json:"Actions,omitempty"`
+			Route                              string               `json:"Route,omitempty"`
 			NetworkTargetSHA256, NetworkTarget string               `json:",omitempty"`
-		}{plan.Name, plan.Operation, result.Revision, result.Principals, plan.ACS3Actions, plan.NetworkTargetSHA256, plan.NetworkTarget})
+		}{plan.Name, plan.Operation, result.Revision, result.Principals, plan.ACS3Actions, plan.IngressRoute, plan.NetworkTargetSHA256, plan.NetworkTarget})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.secret_binding_active','app_platform_secret_binding',?,?,'')`, time.UnixMilli(now).UTC().Format(time.RFC3339), actor.username, actor.ouID, result.ID, string(detail)); err != nil {
 			return err
 		}
@@ -610,6 +718,12 @@ func (s *Server) listPlatformSecretBindings(session platformActorSession, instal
 			if policy, err := parsePlatformSecretBindingPolicy([]byte(policyRaw)); err == nil {
 				m.Principals = platformSecretBindingPrincipalList(policy.principals)
 				m.ACS3Actions = platformACS3ActionList(policy.acs3)
+				if policy.operation == "ingress_hmac_sha256" {
+					// An endpoint is not a principal's credential: nobody may use it as a header.
+					m.Principals = []string{}
+					m.IngressRoute = policy.ingressRoute
+					m.Ingress = s.platformIngress.counters(installation, m.Name)
+				}
 				m.NetworkTargetSHA256 = policy.networkTargetSHA256
 			}
 			result = append(result, m)
@@ -712,11 +826,20 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	policy, err := parsePlatformSecretBindingPolicy([]byte(policyRaw))
-	if err != nil || !policy.allows(principal) || policy.operation != use.operation || (use.operation != "http_bearer" && use.operation != "http_api_key" && use.operation != "acs3_hmac_sha256") {
+	if err != nil || !policy.allows(principal) || policy.operation != use.operation || (use.operation != "http_bearer" && use.operation != "http_api_key" && use.operation != "acs3_hmac_sha256" && use.operation != "pg_password") {
+		return use, "", errAppPlatformCredentialUnavailable
+	}
+	// A pg_password binding is used only for a PostgreSQL target and every other binding only for
+	// an HTTP request.
+	if (use.operation == "pg_password") != (dest.postgresTargetSHA != "") || dest.postgresTargetSHA != "" && dest.url != "" {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	wholePolicy := policy.networkTargetSHA256 == ""
-	if wholePolicy {
+	if use.operation == "pg_password" {
+		if wholePolicy || policy.networkTargetSHA256 != dest.postgresTargetSHA || !platformPostgresTargetPresent(facts, policy.networkTargetSHA256) {
+			return use, "", errAppPlatformCredentialUnavailable
+		}
+	} else if wholePolicy {
 		if use.policyRevision != facts.policyRevision || validatePlatformHTTPSecretBindingPolicy([]byte(policyRaw), use.operation, facts.networkPolicySHA) != nil {
 			return use, "", errAppPlatformCredentialUnavailable
 		}
@@ -731,6 +854,8 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 		use.header = "X-API-Key"
 	case "acs3_hmac_sha256":
 		// No fixed header: the call is signed (signPlatformACS3).
+	case "pg_password":
+		// No header either: the runner takes the role from the signed probe command.
 	default:
 		return use, "", errAppPlatformCredentialUnavailable
 	}
