@@ -56,6 +56,11 @@ func TestForwardBackendRequestRefusesEncodedAndDotSegmentSpaces(t *testing.T) {
 		"ingress, escaped segment":   func() error { return call("POST", "/v1/ingress/heart%62eat", body, "ing.a.b") },
 		"public, encoded":            func() error { return call("GET", "/v1/%70ublic/status", nil, "pub.a.b") },
 		"public, dot segment":        func() error { return call("GET", "/v1/public/../public/status", nil, "pub.a.b") },
+		"viewer, upper-case ingress": func() error { return call("POST", "/v1/INGRESS/heartbeat", body, "a.b") },
+		"viewer, semicolon":          func() error { return call("POST", "/v1/ingress;x/heartbeat", body, "a.b") },
+		"viewer, upper-case public":  func() error { return call("GET", "/v1/PUBLIC/status", nil, "a.b") },
+		"ingress, upper-case":        func() error { return call("POST", "/v1/INGRESS/heartbeat", body, "ing.a.b") },
+		"public, upper-case":         func() error { return call("GET", "/v1/Public/status", nil, "pub.a.b") },
 		"public on the ingress path": func() error { return call("GET", "/v1/%69ngress/heartbeat", nil, "pub.a.b") },
 	} {
 		if run() == nil {

@@ -61,12 +61,12 @@ func ValidBackendRequestData(method, path string, body []byte, assertion string)
 	case IsPublicAssertion(assertion):
 		// A public assertion (doc 179) is read-only and bound to the public route space, in its one
 		// canonical spelling; the runner refuses anything else before it picks the public header.
-		if method != "GET" || len(body) != 0 || space != "public" || strings.Contains(pathOnly, "%") {
+		if method != "GET" || len(body) != 0 || space != "public" || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/public/") {
 			return false
 		}
 	case IsIngressAssertion(assertion):
 		// An ingress assertion (doc 180) is bound to a POST of the ingress route space with a JSON body.
-		if method != "POST" || len(body) == 0 || len(body) > maxIngressBodyBytes || space != "ingress" || strings.Contains(path, "?") || strings.Contains(pathOnly, "%") {
+		if method != "POST" || len(body) == 0 || len(body) > maxIngressBodyBytes || space != "ingress" || strings.Contains(path, "?") || strings.Contains(pathOnly, "%") || !strings.HasPrefix(pathOnly, "/v1/ingress/") {
 			return false
 		}
 	case space != "":
@@ -96,15 +96,23 @@ func ValidBackendResponse(status int, body []byte) bool {
 func backendRequestSpace(path string) (string, bool) {
 	decoded, _, _ := strings.Cut(path, "?")
 	for range 2 {
+		// A semicolon is a path-parameter separator to a backend that is not Go's, so it is never
+		// accepted, in either spelling (it is looked for before and after each decoding).
+		if strings.Contains(decoded, ";") {
+			return "", false
+		}
 		next, err := url.PathUnescape(decoded)
 		if err != nil {
 			return "", false
 		}
 		decoded = next
 	}
-	if !strings.HasPrefix(decoded, "/") {
+	if !strings.HasPrefix(decoded, "/") || strings.Contains(decoded, ";") {
 		return "", false
 	}
+	// Spaces are compared without regard to case: a backend that is not Go's may route "/v1/INGRESS/x" to
+	// its ingress handler. A token of the space's own kind must still use the exact lower-case spelling.
+	decoded = strings.ToLower(decoded)
 	segments := strings.Split(decoded[1:], "/")
 	for i, segment := range segments {
 		if segment == "." || segment == ".." || (segment == "" && i != len(segments)-1) {
