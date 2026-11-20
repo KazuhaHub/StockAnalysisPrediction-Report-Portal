@@ -23,7 +23,13 @@ func platformInstallFixture(t *testing.T, pg bool) (*Server, platformActorSessio
 	}
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{}
-	manifest.Capabilities.Optional = append(manifest.Capabilities.Optional, platformManagedFixtureOptional...)
+	for _, name := range platformManagedFixtureOptional {
+		// This is the static install template: a public projection needs a backend, so only the
+		// managed release the later steps substitute declares it.
+		if name != "public.projection" {
+			manifest.Capabilities.Optional = append(manifest.Capabilities.Optional, name)
+		}
+	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)

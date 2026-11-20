@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "f24a7c8a0e71b27f162b88a65d1665515a6f5b989c681197c6b9df77d74ddf76"
+const descriptorContractSHA256 = "11aecc401573053b720b6fce70cdc61335e0517c39b6a32ec49625e7af836030"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -15,6 +15,7 @@ type Manifest struct {
 	Frontend      Artifact          `json:"frontend"`
 	Backend       *Backend          `json:"backend,omitempty"`
 	Capabilities  Capabilities      `json:"capabilities"`
+	Public        *Public           `json:"public,omitempty"`
 	Data          DataCompatibility `json:"data"`
 }
 type Compatibility struct {
@@ -95,6 +96,17 @@ type RouteQuery struct {
 	Max      *int     `json:"max,omitempty"`
 	Values   []string `json:"values,omitempty"`
 }
+type Public struct {
+	Routes   []PublicRoute `json:"routes"`
+	Document string        `json:"document,omitempty"`
+}
+type PublicRoute struct {
+	ID            string   `json:"id"`
+	Path          string   `json:"path"`
+	Query         []string `json:"query,omitempty"`
+	CacheSeconds  int      `json:"cache_seconds"`
+	ResponseBytes int      `json:"response_bytes"`
+}
 
 const MaxDescriptorBytes = 131072
 const MaxAppNameCharacters = 80
@@ -119,6 +131,11 @@ const maxBackendImagePlatforms = 2
 const maxImageLayers = 32
 const maxImageLayerUncompressedBytes = 1073741824
 const maxDescriptorVersionBytes = 128
+const maxPublicRoutes = 8
+const maxPublicQueryNames = 8
+const minPublicCacheSeconds = 1
+const maxPublicCacheSeconds = 300
+const maxPublicResponseBytes = 1048576
 const minBackendMemoryMiB = 16
 const maxBackendMemoryMiB = 4096
 const minBackendCPUMillis = 25
@@ -139,7 +156,11 @@ var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[
 var rangePattern = regexp.MustCompile(`^[0-9A-Za-z.*+<>=~^| -]{1,96}$`)
 var imagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$`)
 var pathPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true}
+var publicRouteIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+var publicPathPattern = regexp.MustCompile(`^/v1/public/[A-Za-z0-9._/-]+$`)
+var publicQueryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+var publicDocumentPattern = regexp.MustCompile(`^public/[A-Za-z0-9._/-]+$`)
+var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true, "principals.read": true, "public.projection": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
 var descriptorDisplayIcons = map[string]bool{"appstore": true, "file-text": true, "dashboard": true, "calendar": true, "bar-chart": true, "cloud": true, "tool": true, "experiment": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}

@@ -44,7 +44,15 @@ func platformGrantMatches(capability string, stored int, reviewed bool) bool {
 	if stored == boolInt(reviewed) {
 		return true
 	}
-	return capability == "principals.read" && !reviewed && stored == 1
+	return (capability == "principals.read" || capability == "public.projection") && !reviewed && stored == 1
+}
+
+// platformPolicyMatches compares a stored policy with the reviewed one. public.projection is the
+// one capability whose policy an administrator chooses after install (doc 179 amendment C2): a
+// granted row may carry a validated public policy in place of the install-time "{}". An ungranted
+// row is always exactly the reviewed policy, so withdrawing resets it.
+func platformPolicyMatches(capability string, granted int, stored, reviewed string) bool {
+	return stored == reviewed || (capability == "public.projection" && granted == 1 && reviewed == "{}" && appplatform.ValidPublicPolicyShape(stored))
 }
 
 type platformSelectedCapability struct {
@@ -173,7 +181,7 @@ func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expect
 		if err := rows.Scan(&name, &granted, &restriction, &revision, &review); err != nil {
 			return err
 		}
-		if index >= len(expected) || expected[index].capability != name || !platformGrantMatches(name, granted, active && expected[index].granted) || restriction != expected[index].policy || revision != policy || review != planID {
+		if index >= len(expected) || expected[index].capability != name || !platformGrantMatches(name, granted, active && expected[index].granted) || !platformPolicyMatches(name, granted, restriction, expected[index].policy) || revision != policy || review != planID {
 			return fail
 		}
 		index++
@@ -211,7 +219,7 @@ func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expect
 		if index >= len(expected) ||
 			expected[index].capability != name ||
 			!platformGrantMatches(name, granted, expected[index].granted) ||
-			restriction != expected[index].policy ||
+			!platformPolicyMatches(name, granted, restriction, expected[index].policy) ||
 			revision != policy || !platformValidUUID(review) {
 			return fail
 		}

@@ -8,7 +8,7 @@ test.each(['../index.html','./index.html','nested//index.html','%69ndex.html','i
 test('invalid display cannot pass the launch metadata boundary',()=>{expect(parseAppLaunchV2({...fixture(),display:{icon:'https://evil.invalid/icon',texts:[]}},id)).toBeNull()})
 test('backend availability is a boolean hint with no effect on platform capabilities',()=>{expect(parseAppLaunchV2({...fixture(),backendAvailable:true},id)).toMatchObject({backendAvailable:true,capabilities:[]});expect(parseAppLaunchV2({...fixture(),backendAvailable:'true'},id)).toBeNull()})
 test('launch admits only the reviewed capabilities backed by host transports',()=>{
- const capabilities=['network.http','notifications.publish','principals.read','reports.read','secrets.use','storage.files']
+ const capabilities=['network.http','notifications.publish','principals.read','public.projection','reports.read','secrets.use','storage.files']
  expect(parseAppLaunchV2({...fixture(),capabilities},id)).toMatchObject({capabilities})
  for(const capabilities of [['network.http','network.http'],['secrets.read'],['unknown.capability']]){
   expect(parseAppLaunchV2({...fixture(),capabilities},id)).toBeNull()

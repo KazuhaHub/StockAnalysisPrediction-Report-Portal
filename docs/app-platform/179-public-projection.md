@@ -1,6 +1,6 @@
 # Proposal: anonymous reviewed public projection
 
-Status: accepted 2026-11-17; implementation pending. No dependency on 174–178.
+Status: accepted 2026-11-17; implementation in progress (see "Amendments adopted 2026-11-17"). No dependency on 174–178.
 Index and order: doc [174](174-background-broker-egress.md).
 
 ## 1. Problem and evidence
@@ -181,3 +181,41 @@ The owner decided every question below on 2026-11-17.
 2. A separate public hostname. Decided: allowed as deployment configuration
    later; the CSP sandbox already removes same-origin authority.
 3. Allow `POST` for public forms. Decided: no; this capability is read-only.
+
+### Amendments adopted 2026-11-17
+
+The owner adopted these corrections on 2026-11-17, after the implementation
+review found the first draft disagreed with the code. They replace the matching
+text above. There is still no schema change.
+
+1. C1: there is no new `portal.app-public-request/1-dev.1` runner command and no
+   `actor_scope`. The relay commands (`WritableBackendRequestCommand`,
+   `UpdateStartBackendRequestCommand`) carry no actor scope, and the runner only
+   forwards a token whose digest the signed command binds. Portal signs a separate
+   public assertion instead: `pub.` + `<claims>.<mac>`, MAC domain
+   `rp-extension-public-v1`, claims `installation`, `generation`, `route`, `path`,
+   `query_sha256`, `iat`, `exp`, and no subject, role or OU. The runner picks the
+   header from the prefix, `X-Portal-Public-Assertion` for `pub.` tokens and
+   `X-Portal-Assertion` otherwise, so a viewer token can never take the public
+   path or the reverse. The relay is the existing session-less variant of the
+   backend access read: it needs the grant row, an enabled and ready installation,
+   no restore pause and the current release, and derives no account, audience or
+   viewer.
+2. C2: the grant row of `public.projection` may carry a validated policy when
+   granted; an ungranted row keeps `{}`. The install, retained-row and launch
+   snapshot checks accept exactly that, and the launch and document capability
+   lists include the capability.
+3. C3: until the doc 175 capability policy review exists, the consent flow is an
+   interim administrator route, modelled on `principals-read`:
+   `GET /api/admin/app-platform/installations/{installation}/public-projection`
+   returns the disclosure text, public URL, route list and a digest;
+   `POST` of the same path takes `{enabled, policyRevision, routes, document,
+   clientPerMinute, backendPerSecond, disclosureSha256}`, must echo the preview
+   digest, and is refused with 409 unless the installation is enabled and ready
+   with no unfinished operation. It is audited (`app_platform.public_projection_enabled`,
+   `_policy_changed`, `_disabled`). Disabling empties the cache at once.
+4. C4: the public document is served by a session-less verified-asset reader
+   limited to `public/` of the active frontend artifact.
+5. The grant row, the descriptor `public` block and the `/public/apps/` URL
+   space are contracts needing sign-off; the Apps side verifies the public
+   assertion and ships the page (see the paired Apps change).
