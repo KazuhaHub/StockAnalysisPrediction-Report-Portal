@@ -44,6 +44,8 @@ func TestParseACS3Credential(t *testing.T) {
 		"empty token":     `{"access_key_id":"LTAIabc","access_key_secret":"s3cr3t","security_token":""}`,
 		"token absent":    `{"access_key_id":"LTAIabc","access_key_secret":"s3cr3t"}`,
 		"escaped secret":  `{"access_key_id":"a","access_key_secret":"q\"w\\e"}`,
+		"whitespace":      " {\n\t\"access_key_id\" : \"a\" ,\r\"access_key_secret\":\"s\" }\n",
+		"unicode escape":  `{"access_key_id":"a","access_key_secret":"\u0041\u007e"}`,
 		"longest members": `{"access_key_id":"` + strings.Repeat("i", 128) + `","access_key_secret":"` + strings.Repeat("s", 256) + `","security_token":"` + strings.Repeat("t", 4096) + `"}`,
 	}
 	for name, raw := range good {
@@ -59,6 +61,9 @@ func TestParseACS3Credential(t *testing.T) {
 	c, _ := ParseACS3Credential([]byte(good["escaped secret"]))
 	if string(c.AccessKeySecret) != `q"w\e` {
 		t.Fatalf("secret decoded as %q", c.AccessKeySecret)
+	}
+	if u, _ := ParseACS3Credential([]byte(good["unicode escape"])); string(u.AccessKeySecret) != "A~" {
+		t.Fatalf("unicode escapes decoded as %q", u.AccessKeySecret)
 	}
 	for name, raw := range map[string]string{
 		"empty":             ``,
@@ -87,4 +92,23 @@ func TestParseACS3Credential(t *testing.T) {
 			t.Errorf("%s: accepted %+v", name, c)
 		}
 	}
+}
+
+// Whatever the input, a parsed credential is within the bounds of section 3.1 and is wiped by Clear.
+func FuzzParseACS3Credential(f *testing.F) {
+	f.Add([]byte(`{"access_key_id":"a","access_key_secret":"s","security_token":"t"}`))
+	f.Add([]byte(`{"access_key_id":"a","access_key_secret":"q\"A"}`))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		c, err := ParseACS3Credential(raw)
+		if err != nil {
+			return
+		}
+		if !ValidACS3AccessKeyID([]byte(c.AccessKeyID)) || !ValidACS3AccessKeySecret(c.AccessKeySecret) || !ValidACS3SecurityToken(c.SecurityToken) {
+			t.Fatalf("out-of-bounds credential accepted: %q", raw)
+		}
+		c.Clear()
+		if c.AccessKeySecret != nil || c.SecurityToken != nil {
+			t.Fatal("Clear kept the values")
+		}
+	})
 }

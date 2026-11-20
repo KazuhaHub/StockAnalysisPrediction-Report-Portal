@@ -478,13 +478,13 @@ func (c *ACS3Credential) Clear() {
 // {"access_key_id","access_key_secret","security_token"}. security_token is optional (empty means
 // absent). An unknown, duplicate, differently-cased, null or non-string member, trailing data or an
 // out-of-bounds value is refused. Nothing of the input is echoed in the error.
+//
+// The values are decoded by hand, straight from raw into fresh byte slices, so that the secret and
+// the token never exist as Go strings (which cannot be wiped) and the caller's wipe of raw and of
+// the returned slices covers every copy.
 func ParseACS3Credential(raw []byte) (ACS3Credential, error) {
 	var zero ACS3Credential
 	if len(raw) == 0 || len(raw) > 8192 || !utf8.Valid(raw) {
-		return zero, ErrInvalidACS3
-	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	if token, err := d.Token(); err != nil || token != json.Delim('{') {
 		return zero, ErrInvalidACS3
 	}
 	fields := map[string][]byte{}
@@ -493,44 +493,132 @@ func ParseACS3Credential(raw []byte) (ACS3Credential, error) {
 			clear(v)
 		}
 	}
-	for d.More() {
-		token, err := d.Token()
-		key, ok := token.(string)
-		if err != nil || !ok {
-			wipe()
-			return zero, ErrInvalidACS3
-		}
-		if _, duplicate := fields[key]; duplicate || (key != "access_key_id" && key != "access_key_secret" && key != "security_token") {
-			wipe()
-			return zero, ErrInvalidACS3
-		}
-		var value json.RawMessage
-		if d.Decode(&value) != nil || len(value) == 0 || value[0] != '"' {
-			wipe()
-			return zero, ErrInvalidACS3
-		}
-		var text string
-		if json.Unmarshal(value, &text) != nil {
-			wipe()
-			return zero, ErrInvalidACS3
-		}
-		fields[key] = []byte(text)
-	}
-	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+	fail := func() (ACS3Credential, error) {
 		wipe()
 		return zero, ErrInvalidACS3
 	}
-	if _, err := d.Token(); err != io.EOF {
-		wipe()
-		return zero, ErrInvalidACS3
+	i := 0
+	space := func() {
+		for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r') {
+			i++
+		}
+	}
+	space()
+	if i >= len(raw) || raw[i] != '{' {
+		return fail()
+	}
+	i++
+	for first := true; ; first = false {
+		space()
+		if i < len(raw) && raw[i] == '}' && first {
+			return fail() // no members
+		}
+		if !first {
+			if i >= len(raw) || raw[i] != ',' {
+				break
+			}
+			i++
+			space()
+		}
+		key, next, ok := acs3JSONString(raw, i)
+		if !ok {
+			return fail()
+		}
+		i = next
+		name := string(key)
+		clear(key)
+		if _, duplicate := fields[name]; duplicate || (name != "access_key_id" && name != "access_key_secret" && name != "security_token") {
+			return fail()
+		}
+		space()
+		if i >= len(raw) || raw[i] != ':' {
+			return fail()
+		}
+		i++
+		space()
+		value, next, ok := acs3JSONString(raw, i)
+		if !ok {
+			return fail()
+		}
+		fields[name] = value
+		i = next
+	}
+	space()
+	if i >= len(raw) || raw[i] != '}' {
+		return fail()
+	}
+	i++
+	space()
+	if i != len(raw) {
+		return fail()
 	}
 	if !ValidACS3AccessKeyID(fields["access_key_id"]) || !ValidACS3AccessKeySecret(fields["access_key_secret"]) || !ValidACS3SecurityToken(fields["security_token"]) {
-		wipe()
-		return zero, ErrInvalidACS3
+		return fail()
 	}
 	out := ACS3Credential{AccessKeyID: string(fields["access_key_id"]), AccessKeySecret: fields["access_key_secret"], SecurityToken: fields["security_token"]}
+	clear(fields["access_key_id"])
 	if len(out.SecurityToken) == 0 {
 		out.SecurityToken = nil
 	}
 	return out, nil
+}
+
+// acs3JSONString decodes the JSON string starting at raw[i] into a fresh slice, and returns where it
+// ends. Only what a credential value can hold is accepted: printable ASCII, with the escapes \" \\
+// \/ and \u00XX for a printable character. Anything else (a control character, another escape, a
+// non-ASCII character) refuses.
+func acs3JSONString(raw []byte, i int) (value []byte, next int, ok bool) {
+	if i >= len(raw) || raw[i] != '"' {
+		return nil, 0, false
+	}
+	out := make([]byte, 0, 32)
+	fail := func() ([]byte, int, bool) {
+		clear(out)
+		return nil, 0, false
+	}
+	for i++; i < len(raw); i++ {
+		c := raw[i]
+		switch {
+		case c == '"':
+			return out, i + 1, true
+		case c == '\\':
+			i++
+			if i >= len(raw) {
+				return fail()
+			}
+			switch raw[i] {
+			case '"', '\\', '/':
+				out = append(out, raw[i])
+			case 'u':
+				if i+4 >= len(raw) {
+					return fail()
+				}
+				var r int
+				for _, h := range raw[i+1 : i+5] {
+					switch {
+					case h >= '0' && h <= '9':
+						r = r<<4 | int(h-'0')
+					case h >= 'a' && h <= 'f':
+						r = r<<4 | int(h-'a'+10)
+					case h >= 'A' && h <= 'F':
+						r = r<<4 | int(h-'A'+10)
+					default:
+						return fail()
+					}
+				}
+				if r < 0x20 || r > 0x7e {
+					return fail()
+				}
+				out = append(out, byte(r))
+				i += 4
+			default:
+				return fail()
+			}
+		case c < 0x20 || c > 0x7e:
+			return fail()
+		default:
+			out = append(out, c)
+		}
+	}
+	return fail()
 }
