@@ -9,9 +9,13 @@ import {
   parseNetworkStreamEnd,
   parseNetworkStreamError,
   parseNetworkStreamStart,
+  parseNetworkTargets,
   type AppNetworkFailure,
   type NetworkRequest,
   type NetworkResponse,
+  type NetworkTargetRequest,
+  type NetworkTargetsResult,
+  type NetworkTargetsState,
 } from "./network-v2";
 export {
   AppNetworkError,
@@ -20,6 +24,9 @@ export {
   type NetworkRequest,
   type NetworkResponse,
   type NetworkStreamEnd,
+  type NetworkTargetRequest,
+  type NetworkTargetsResult,
+  type NetworkTargetsState,
 } from "./network-v2";
 import {
   createPageActions,
@@ -48,7 +55,13 @@ export interface BridgeNavigationOptions {
   readonly replace?: boolean;
   readonly query?: RouteQueryValues;
 }
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.8";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.9";
+// The host still completes the handshake with an app that only speaks this one; it just
+// has no network.targets messages.
+export const BRIDGE_PROTOCOL_PREVIOUS = "portal.app.bridge/2-dev.8";
+const BRIDGE_PROTOCOLS: readonly string[] = [BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_PREVIOUS];
+export const BRIDGE_TARGETS_BACKOFF_MS = 10_000;
+const TARGETS_DIALOG_MS = 300_000;
 export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
@@ -989,6 +1002,14 @@ export interface BridgeHostOptions extends BaseOptions {
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
   onNetworkRequest?: (request: NetworkRequest, signal: AbortSignal) => Promise<NetworkResponse>;
+  // Asks the viewer to add destinations. The callback owns the trusted dialog and must build it from
+  // the server's review, never from the request's text; the bridge only gates and paces it.
+  onNetworkTargetsRequest?: (
+    targets: readonly NetworkTargetRequest[],
+    signal: AbortSignal,
+  ) => Promise<NetworkTargetsResult>;
+  // Called once the applied answer has been posted, so the host can relaunch the frame.
+  onNetworkTargetsApplied?: (policyRevision?: string) => void;
   onNetworkStreamRequest?: (
     request: NetworkRequest,
     signal: AbortSignal,
@@ -1298,6 +1319,12 @@ export function createBridgeHost(
     announced = false;
   let lastRequest = 0n;
   let lastNetworkRequest = 0n;
+  let lastTargetsRequest = 0n;
+  let targetsPending: { abort: AbortController; timer: ReturnType<typeof setTimeout> } | undefined;
+  let targetsDeclinedAt = -Infinity;
+  // The opening challenge goes out before any hello, so it names the older protocol: every app
+  // accepts it there. The hello then settles the protocol of the session itself.
+  let negotiated = BRIDGE_PROTOCOL_PREVIOUS;
   let lastNetworkStreamRequest = 0n;
   let reportIssued = 0n;
   let objectIssued = 0n;
@@ -1442,6 +1469,11 @@ export function createBridgeHost(
       request.abort.abort();
     }
     networkRequests.clear();
+    if (targetsPending) {
+      clearTimeout(targetsPending.timer);
+      targetsPending.abort.abort();
+      targetsPending = undefined;
+    }
     for (const request of networkStreamRequests.values()) {
       clearTimeout(request.timer);
       request.closed = true;
@@ -2438,6 +2470,91 @@ export function createBridgeHost(
     if (
       data &&
       typeof data === "object" &&
+      data.type === "network.targets.request" &&
+      negotiated === BRIDGE_PROTOCOL
+    ) {
+      if (!exact(data, ["type", ...envelopeKeys, "id", "targets"])) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.id) || !announced || BigInt(data.id) <= lastTargetsRequest) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.id;
+      lastTargetsRequest = BigInt(id);
+      const targets = parseNetworkTargets(data.targets);
+      if (!targets) {
+        fail("protocol_error");
+        return;
+      }
+      const answer = (value: NetworkTargetsResult) => {
+        if (terminal() || !port || !currentEnvelope) return false;
+        try {
+          port.postMessage({
+            type: "network.targets.result",
+            ...currentEnvelope,
+            id,
+            // Not "policyRevision": the envelope already carries the binding's under that name.
+            state: value.state,
+            ...(value.state === "applied" && value.policyRevision !== undefined
+              ? { appliedPolicyRevision: value.policyRevision }
+              : {}),
+          });
+          return true;
+        } catch {
+          fail("transport_error");
+          return false;
+        }
+      };
+      // Nothing is fetched for an app, or a viewer, that may not ask.
+      if (!options.onNetworkTargetsRequest || !granted?.includes("network.http")) {
+        answer({ state: "not_permitted" });
+        return;
+      }
+      if (targetsPending || Date.now() - targetsDeclinedAt < BRIDGE_TARGETS_BACKOFF_MS) {
+        answer({ state: "declined" });
+        return;
+      }
+      const controller = new AbortController();
+      const pending = {
+        abort: controller,
+        timer: setTimeout(() => controller.abort(), TARGETS_DIALOG_MS),
+      };
+      targetsPending = pending;
+      Promise.resolve()
+        .then(() => options.onNetworkTargetsRequest!(targets, controller.signal))
+        .then(
+          (value) => value,
+          () => ({ state: "declined" }) as NetworkTargetsResult,
+        )
+        .then((value) => {
+          if (targetsPending !== pending) return;
+          clearTimeout(pending.timer);
+          targetsPending = undefined;
+          const state: NetworkTargetsState =
+            value && (value.state === "applied" || value.state === "not_permitted")
+              ? value.state
+              : "declined";
+          if (state === "declined") targetsDeclinedAt = Date.now();
+          const policyRevision =
+            state === "applied" && isString(value.policyRevision) && decimal(value.policyRevision)
+              ? value.policyRevision
+              : undefined;
+          if (answer({ state, policyRevision }) && state === "applied") {
+            try {
+              options.onNetworkTargetsApplied?.(policyRevision);
+            } catch {
+              // The answer is already out; a failed relaunch hook cannot undo it.
+            }
+          }
+        });
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
       (data.type === "network.request" || data.type === "network.cancel")
     ) {
       const cancel = data.type === "network.cancel";
@@ -2683,7 +2800,7 @@ export function createBridgeHost(
     challenges++;
     try {
       frameWindow.postMessage(
-        { type: "app:challenge", protocol: BRIDGE_PROTOCOL, hostNonce },
+        { type: "app:challenge", protocol: negotiated, hostNonce },
         "*",
       );
     } catch {
@@ -2719,7 +2836,7 @@ export function createBridgeHost(
         (value) => isString(value) && /^[A-Za-z0-9/.-]{1,64}$/.test(value),
       ) ||
       new Set(data.protocols).size !== data.protocols.length ||
-      !data.protocols.includes(BRIDGE_PROTOCOL)
+      !BRIDGE_PROTOCOLS.some((value) => (data.protocols as string[]).includes(value))
     )
       return;
     if (
@@ -2727,6 +2844,11 @@ export function createBridgeHost(
       !nonce(data.hostNonce)
     )
       return;
+    // The newest protocol both sides speak. The challenge and the envelope carry it, so an app
+    // that only knows 2-dev.8 sees exactly what it expects.
+    negotiated = BRIDGE_PROTOCOLS.find((value) =>
+      (data.protocols as string[]).includes(value),
+    )!;
     if (data.hostNonce !== hostNonce) {
       challenge();
       return;
@@ -2744,7 +2866,7 @@ export function createBridgeHost(
       port = channel.port1;
       outbound = channel.port2;
       currentEnvelope = {
-        protocol: BRIDGE_PROTOCOL,
+        protocol: negotiated,
         ...binding!,
         hostNonce,
         childNonce: data.childNonce,
@@ -2829,6 +2951,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
   requestNetwork(request: NetworkRequest, signal?: AbortSignal): Promise<NetworkResponse>;
+  requestNetworkTargets(targets: readonly NetworkTargetRequest[], signal?: AbortSignal): Promise<NetworkTargetsResult>;
   requestNetworkStream(
     request: NetworkRequest,
     options?: BridgeNetworkStreamOptions,
@@ -2975,6 +3098,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   }
   let issued = 0n;
   let networkIssued = 0n;
+  let targetsIssued = 0n;
   let networkStreamIssued = 0n;
   let reportIssued = 0n;
   let objectIssued = 0n;
@@ -2992,6 +3116,14 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     string,
     {
       resolve: (value: NetworkResponse) => void;
+      reject: (error: AppNetworkError) => void;
+      dispose: () => void;
+    }
+  >();
+  const targetsRequests = new Map<
+    string,
+    {
+      resolve: (value: NetworkTargetsResult) => void;
       reject: (error: AppNetworkError) => void;
       dispose: () => void;
     }
@@ -3081,6 +3213,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new AppNetworkError("uncertain"));
     }
     networkRequests.clear();
+    for (const request of targetsRequests.values()) {
+      request.dispose();
+      request.reject(new AppNetworkError("uncertain"));
+    }
+    targetsRequests.clear();
     for (const request of networkStreamRequests.values()) {
       request.dispose();
       request.reject(new AppNetworkError("uncertain"));
@@ -3723,6 +3860,35 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         .catch(() => rejectNetworkStream(pending, requestId));
       return;
     }
+    if (data && typeof data === "object" && data.type === "network.targets.result") {
+      const bare = exact(data, ["type", ...envelopeKeys, "id", "state"]);
+      const revised = exact(data, ["type", ...envelopeKeys, "id", "state", "appliedPolicyRevision"]);
+      if (!bare && !revised) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (
+        !decimal(data.id) ||
+        BigInt(data.id) > targetsIssued ||
+        !["applied", "declined", "not_permitted"].includes(data.state as string) ||
+        (revised && (data.state !== "applied" || !decimal(data.appliedPolicyRevision)))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = targetsRequests.get(data.id);
+      if (!pending) return;
+      targetsRequests.delete(data.id);
+      pending.dispose();
+      pending.resolve(
+        Object.freeze({
+          state: data.state as NetworkTargetsState,
+          ...(revised ? { policyRevision: data.appliedPolicyRevision as string } : {}),
+        }),
+      );
+      return;
+    }
     if (data && typeof data === "object" && data.type === "network.result") {
       const response = exact(data, [
         "type",
@@ -3840,7 +4006,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     if (data && typeof data === "object" && data.type === "app:challenge") {
       if (
         !exact(data, ["type", "protocol", "hostNonce"]) ||
-        data.protocol !== BRIDGE_PROTOCOL ||
+        !BRIDGE_PROTOCOLS.includes(data.protocol as string) ||
         !nonce(data.hostNonce) ||
         event.ports.length
       ) {
@@ -3878,6 +4044,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         retireRequests();
         issued = 0n;
         networkIssued = 0n;
+        targetsIssued = 0n;
         networkStreamIssued = 0n;
         reportIssued = 0n;
         objectIssued = 0n;
@@ -3925,7 +4092,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         "capabilities",
         "backend",
       ]) ||
-      data.protocol !== BRIDGE_PROTOCOL ||
+      !BRIDGE_PROTOCOLS.includes(data.protocol as string) ||
       !nonce(data.hostNonce) ||
       !nonce(data.channelNonce) ||
       data.revision !== "1" ||
@@ -3980,7 +4147,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       parentWindow.postMessage(
         {
           type: "app:hello",
-          protocols: [BRIDGE_PROTOCOL],
+          // Both, so a new SDK still works against a Portal that only speaks 2-dev.8.
+          protocols: [BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_PREVIOUS],
           childNonce,
           ...(expectedHostNonce === undefined
             ? {}
@@ -4221,6 +4389,53 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
             ...envelope,
             requestId: id,
             request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestNetworkTargets(
+      value: readonly NetworkTargetRequest[],
+      signal?: AbortSignal,
+    ): Promise<NetworkTargetsResult> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new AppNetworkError("not_ready"));
+      if (
+        !context.capabilities.includes("network.http") ||
+        envelope.protocol !== BRIDGE_PROTOCOL
+      )
+        return Promise.reject(new AppNetworkError("unsupported"));
+      const targets = parseNetworkTargets(value);
+      if (!targets)
+        return Promise.reject(new AppNetworkError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new AppNetworkError("not_ready"));
+      if (targetsRequests.size >= 1 || targetsIssued === MAX_REVISION)
+        return Promise.reject(new AppNetworkError("busy"));
+      const id = (++targetsIssued).toString();
+      return new Promise((resolve, reject) => {
+        const settle = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", abandon);
+        };
+        // The host owns the dialog; abandoning only stops this side waiting for the answer.
+        const abandon = () => {
+          const active = targetsRequests.get(id);
+          if (!active) return;
+          targetsRequests.delete(id);
+          active.dispose();
+          reject(new AppNetworkError("uncertain"));
+        };
+        const timeout = setTimeout(abandon, TARGETS_DIALOG_MS + 10_000);
+        targetsRequests.set(id, { resolve, reject, dispose: settle });
+        signal?.addEventListener("abort", abandon, { once: true });
+        try {
+          port!.postMessage({
+            type: "network.targets.request",
+            ...envelope,
+            id,
+            targets,
           });
         } catch {
           fail("transport_error");

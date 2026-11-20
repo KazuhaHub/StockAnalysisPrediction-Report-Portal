@@ -3,6 +3,7 @@ import { Alert, Button, Spin, theme } from 'antd'
 import { useNavigate, useParams, useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
+import { useIsAdmin } from '../auth'
 import { api } from '../api/client'
 import { parseRouteSearch } from '../lib/route-query-v2'
 import { parseBridgePresentation } from '../lib/bridge-v2'
@@ -25,6 +26,7 @@ function LaunchPage({ installation }: { installation: string }) {
   const location = useLocation()
   const { lang, dark } = usePrefs()
   const { token } = theme.useToken()
+  const admin = useIsAdmin()
   const [launch, setLaunch] = useState<AppLaunchV2 | null>(null)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -102,7 +104,9 @@ function LaunchPage({ installation }: { installation: string }) {
       ) : (
         <div ref={panel} style={{ flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
-            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onPageChange={setPage} onDraftChange={setDirty} onNavigate={(target, replace, search, bypassDraft) => {
+            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} canReviewNetwork={admin}
+            // The policy revision is part of the document URL, so a changed policy needs a fresh launch.
+            onNetworkPolicyChanged={() => { setLaunch(null); setAttempt(value => value + 1) }} onPageChange={setPage} onDraftChange={setDirty} onNavigate={(target, replace, search, bypassDraft) => {
               const destination=launch.routes.find(route=>route.path===target)
               if ((blocker.state !== 'unblocked' && !bypassDraft) || !destination || !parseRouteSearch(destination.query??[],search)) return
               if (bypassDraft) allowDraftNavigation.current = true
