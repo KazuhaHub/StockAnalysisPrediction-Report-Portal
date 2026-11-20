@@ -220,7 +220,12 @@ export default function AnnouncementPage() {
   }
 
   const submit = async () => {
-    const v = await form.validateFields()
+    let v: FormValues
+    try {
+      v = await form.validateFields()
+    } catch {
+      return // antd draws the field errors; a rejected click must not surface as an unhandled rejection
+    }
     const [from, to] = v.window ?? [null, null]
     const payload = {
       enabled: v.enabled === true,
