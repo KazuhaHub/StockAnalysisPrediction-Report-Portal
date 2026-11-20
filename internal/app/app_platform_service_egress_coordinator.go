@@ -509,11 +509,11 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 	// record counts one finished call. A call that named a binding is also counted
 	// against that binding, but only once the binding resolved to a reviewed one:
 	// a name the application made up is counted as unresolved, never by name.
-	resolved := ""
+	resolved, resolvedAction := "", ""
 	record := func(class byte, bytesOut int, bytesIn uint32) {
 		c.audit.recordCall(installation, l.state.sessionID, c.now(), class, origin, bytesOut, bytesIn)
 		if admit.Credential != "" {
-			c.audit.recordBinding(installation, l.state.sessionID, c.now(), resolved, class)
+			c.audit.recordBinding(installation, l.state.sessionID, c.now(), resolved, resolvedAction, class)
 		}
 	}
 	load, cancel := context.WithTimeout(ctx, platformServiceEgressAdmitLoadTimeout)
@@ -534,12 +534,17 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 	binding := a.binding
 	if binding.id != "" {
 		resolved = admit.Credential
+		if admit.SigningScheme != "" {
+			// The binding resolved, so the policy listed exactly this pair.
+			resolvedAction = admit.SigningAction + "@" + admit.SigningVersion
+		}
 	}
 	command, raw, signature, err := a.signServiceEgressCommand(l.state.sessionID, admit, time.Now().UnixMilli(), l.state.expiresMS)
 	a.Close()
 	// The signed command is the one place the value lives in Portal outside the
 	// transaction; it is wiped when the call ends.
 	defer clear(command.CredentialValue)
+	defer command.ClearSignedHeaders()
 	defer clear(raw)
 	if err != nil {
 		code, class := transport.EgressRefusalUnavailable, transport.EgressOutcomeUnavailable
@@ -563,6 +568,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 	clear(frame)
 	clear(raw)
 	clear(command.CredentialValue)
+	command.ClearSignedHeaders()
 	if sent != nil {
 		return
 	}
