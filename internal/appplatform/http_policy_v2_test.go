@@ -100,7 +100,7 @@ func TestParseHTTPPolicyStillRefusesV2(t *testing.T) {
 func TestHTTPPolicyV2RefusesAmbiguousBytes(t *testing.T) {
 	cases := map[string]string{
 		"whitespace":        strings.Replace(v2Canonical, `"targets":`, `"targets": `, 1),
-		"unsorted":          strings.Replace(strings.Replace(strings.Replace(v2Canonical, "dify-prod", "zzz", 1), `"lan-api"`, `"aaa"`, 1), "zzz", "dify-prod", 0),
+		"unsorted":          strings.Replace(strings.Replace(v2Canonical, "dify-prod", "zzz", 1), `"lan-api"`, `"aaa"`, 1),
 		"unknown key":       strings.Replace(v2Canonical, `"concurrency":4}`, `"concurrency":4,"extra":1}`, 1),
 		"duplicate key":     strings.Replace(v2Canonical, `"concurrency":4}`, `"concurrency":4,"concurrency":4}`, 1),
 		"target extra key":  strings.Replace(v2Canonical, `"network":"public"`, `"network":"public","tls":false`, 1),
