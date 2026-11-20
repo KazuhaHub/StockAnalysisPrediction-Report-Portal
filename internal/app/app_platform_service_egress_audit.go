@@ -88,6 +88,10 @@ type platformServiceEgressWindow struct {
 	// resolved to a reviewed one, by binding name and outcome class. Names are
 	// reviewed binding names, never values; at most platformSecretBindingLimit.
 	bindings map[string]map[string]int
+	// actions counts, per resolved binding, the calls that signed a reviewed ACS3 action (doc
+	// 177), by "Action@Version". A pair is recorded only once the binding's policy listed it, so a
+	// pair the application made up is never recorded.
+	actions map[string]map[string]int
 	// unresolved counts, by outcome class, the calls that named a binding that did
 	// not resolve (unknown, revoked, awaiting review, not for the service, or for
 	// another target). The application chose that name, so it is not recorded.
@@ -187,8 +191,8 @@ func (a *platformServiceEgressAggregator) recordCall(installation, session strin
 
 // recordBinding counts one finished call that named a credential binding:
 // against the binding if it resolved (binding is its reviewed name), else as
-// unresolved.
-func (a *platformServiceEgressAggregator) recordBinding(installation, session string, now time.Time, binding string, class byte) {
+// unresolved. action is the reviewed "Action@Version" a signed call used, or "".
+func (a *platformServiceEgressAggregator) recordBinding(installation, session string, now time.Time, binding, action string, class byte) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	w := a.window(installation, session, now)
@@ -216,6 +220,17 @@ func (a *platformServiceEgressAggregator) recordBinding(installation, session st
 		w.bindings[binding] = map[string]int{}
 	}
 	w.bindings[binding][name]++
+	if action != "" {
+		if w.actions == nil {
+			w.actions = map[string]map[string]int{}
+		}
+		if w.actions[binding] == nil {
+			w.actions[binding] = map[string]int{}
+		}
+		if _, known := w.actions[binding][action]; known || len(w.actions[binding]) < platformACS3MaxActions {
+			w.actions[binding][action]++
+		}
+	}
 }
 
 func (a *platformServiceEgressAggregator) recordNotice(installation, session string, now time.Time) {
@@ -286,6 +301,7 @@ func (a *platformServiceEgressAggregator) due(now time.Time, flush bool) []platf
 				Binding  string         `json:"binding"`
 				Count    int            `json:"count"`
 				Outcomes map[string]int `json:"outcomes"`
+				Actions  map[string]int `json:"actions,omitempty"`
 			}
 			used := make([]bindingCount, 0, len(w.bindings))
 			for name, outcomes := range w.bindings {
@@ -293,7 +309,7 @@ func (a *platformServiceEgressAggregator) due(now time.Time, flush bool) []platf
 				for _, n := range outcomes {
 					total += n
 				}
-				used = append(used, bindingCount{name, total, outcomes})
+				used = append(used, bindingCount{name, total, outcomes, w.actions[name]})
 			}
 			slices.SortFunc(used, func(x, y bindingCount) int { return strings.Compare(x.Binding, y.Binding) })
 			summary["bindings"] = used

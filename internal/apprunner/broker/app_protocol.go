@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strconv"
 	"unicode/utf8"
 
@@ -54,6 +55,9 @@ type AppHTTPRequest struct {
 	// Credential is the name of a reviewed credential binding, or "". It is only
 	// a name: Portal decides whether the binding may be used and places the value.
 	Credential string
+	// Signing asks for a signed call (doc 177), mutually exclusive with Credential. It is zero when
+	// absent. Like Credential it names a binding only; Portal computes the signature.
+	Signing appplatform.SigningRequest
 }
 
 // DecodeAppHTTPRequest accepts exactly the six fields requestId, method, url,
@@ -64,10 +68,17 @@ type AppHTTPRequest struct {
 // is returned.
 func DecodeAppHTTPRequest(raw []byte) (AppHTTPRequest, error) {
 	var zero, out AppHTTPRequest
-	fields, err := decodeAppObject(raw, MaxAppRequestBytes, "requestId", "method", "url", "accept", "contentType", "bodyBase64", "credential")
+	fields, err := decodeAppObjectWith(raw, MaxAppRequestBytes, []string{"signing"}, "requestId", "method", "url", "accept", "contentType", "bodyBase64", "credential", "signing")
 	_, named := fields["credential"]
-	if err != nil || len(fields) != 6+boolToInt(named) {
+	rawSigning, signed := fields["signing"]
+	if err != nil || len(fields) != 6+boolToInt(named)+boolToInt(signed) || named && signed {
 		return zero, ErrAppInvalid
+	}
+	if signed {
+		out.Signing, err = appplatform.DecodeSigningRequest([]byte(rawSigning))
+		if err != nil {
+			return zero, ErrAppInvalid
+		}
 	}
 	if named {
 		out.Credential = fields["credential"]
@@ -141,6 +152,12 @@ func (n AppNotice) JSON() []byte {
 // named in allowed, refusing duplicates (exact, case-sensitive), nulls,
 // non-string values, trailing data, invalid UTF-8 and anything over limit bytes.
 func decodeAppObject(raw []byte, limit int, allowed ...string) (map[string]string, error) {
+	return decodeAppObjectWith(raw, limit, nil, allowed...)
+}
+
+// decodeAppObjectWith is decodeAppObject where the members named in objects are JSON objects, returned
+// as their raw text for the caller to decode strictly.
+func decodeAppObjectWith(raw []byte, limit int, objects []string, allowed ...string) (map[string]string, error) {
 	if len(raw) == 0 || len(raw) > limit || !utf8.Valid(raw) {
 		return nil, ErrAppInvalid
 	}
@@ -167,6 +184,10 @@ func decodeAppObject(raw []byte, limit int, allowed ...string) (map[string]strin
 			return nil, ErrAppInvalid
 		}
 		var text string
+		if len(value) > 0 && value[0] == '{' && slices.Contains(objects, key) {
+			out[key] = string(value)
+			continue
+		}
 		if len(value) == 0 || value[0] != '"' || json.Unmarshal(value, &text) != nil {
 			return nil, ErrAppInvalid
 		}

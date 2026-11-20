@@ -83,6 +83,9 @@ type platformServiceEgressAuthority struct {
 	credentialName   string
 	credentialHeader string
 	credentialValue  []byte
+	// signedHeaders are the ACS3 headers Portal computed at an admit that asked for a signed call
+	// (doc 177), in place of a credential header and value. They are wiped by Close.
+	signedHeaders []appplatform.SignedHeader
 }
 
 func (a *platformServiceEgressAuthority) Close() {
@@ -90,6 +93,9 @@ func (a *platformServiceEgressAuthority) Close() {
 		return
 	}
 	clear(a.credentialValue)
+	for _, h := range a.signedHeaders {
+		clear(h.Value)
+	}
 	clear(a.controlSeed)
 	if a.history != nil {
 		a.history.Close()
@@ -365,6 +371,20 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	if o.decrypt && dest.url == "" {
 		return errPlatformServiceEgressDenied
 	}
+	if o.decrypt && o.admit != nil && o.admit.SigningScheme != "" {
+		// A signed call (doc 177): the binding must be an ACS3 one whose reviewed policy lists this
+		// action and version, all judged before the credential is opened; then Portal signs the exact
+		// request the admit described and keeps only the headers.
+		use, headers, err := s.signPlatformACS3Facts(e, installation, platformPrincipalService, platformACS3Call{
+			name: o.credential, action: o.admit.SigningAction, version: o.admit.SigningVersion,
+			method: o.admit.Method, target: o.admit.URL, contentType: o.admit.ContentType, bodySHA256: o.admit.BodySHA256,
+		}, facts)
+		if err != nil {
+			return platformServiceEgressCredentialError(err)
+		}
+		result.binding, result.credentialName, result.signedHeaders = use, o.credential, headers
+		return nil
+	}
 	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, o.credential, facts, platformPrincipalService, dest)
 	if err != nil {
 		return platformServiceEgressCredentialError(err)
@@ -372,6 +392,10 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	result.binding, result.credentialName = use, o.credential
 	if !o.decrypt {
 		return nil
+	}
+	if use.header == "" {
+		// A signing binding named without a signing request: nothing to place, and nothing opened.
+		return errPlatformServiceEgressDenied
 	}
 	plain, err := s.openPlatformCredentialValue(use.credentialID, use.credentialValueRevision, sealed)
 	if err != nil {
@@ -466,10 +490,18 @@ func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID strin
 		privateSHA = a.grant.privateNetworksSHA
 	}
 	// A call carries a credential only when its admit named exactly the binding
-	// this authority resolved and opened.
+	// this authority resolved and opened; a signed call carries Portal's headers instead.
+	signed := admit.SigningScheme != ""
 	if (admit.Credential != "") != (a.credentialName != "") || admit.Credential != a.credentialName ||
-		(admit.Credential != "" && (len(a.credentialValue) == 0 || a.credentialHeader == "")) {
+		(admit.Credential != "" && !signed && (len(a.credentialValue) == 0 || a.credentialHeader == "")) ||
+		(signed && (len(a.signedHeaders) == 0 || len(a.credentialValue) != 0 || a.credentialHeader != "")) ||
+		(!signed && len(a.signedHeaders) != 0) {
 		return zero, nil, nil, errPlatformServiceEgressUnavailable
+	}
+	if signed {
+		if action, version := appplatform.ACS3ActionOf(a.signedHeaders); action != admit.SigningAction || version != admit.SigningVersion || admit.SigningScheme != appplatform.ACS3Scheme {
+			return zero, nil, nil, errPlatformServiceEgressUnavailable
+		}
 	}
 	id, err := platformNewUUID()
 	if err != nil {
@@ -488,11 +520,16 @@ func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID strin
 		CredentialName: a.credentialName, CredentialHeader: a.credentialHeader, CredentialValue: bytes.Clone(a.credentialValue),
 		IssuedMS: strconv.FormatInt(nowMS, 10), ExpiresMS: strconv.FormatInt(nowMS+platformServiceEgressRequestMS, 10),
 	}
+	if signed {
+		c.SigningScheme = admit.SigningScheme
+		c.SetSignedHeaders(cloneSignedHeaders(a.signedHeaders))
+	}
 	key := ed25519.NewKeyFromSeed(a.controlSeed)
 	defer clear(key)
 	raw, signature, err := control.SignNetworkHTTPRequest(c, key, a.authority, nowMS)
 	if err != nil {
 		clear(c.CredentialValue)
+		c.ClearSignedHeaders()
 		return zero, nil, nil, errPlatformServiceEgressDenied
 	}
 	return c, raw, signature, nil
@@ -563,7 +600,7 @@ func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformSe
 	ctx, cancel := context.WithTimeout(ctx, platformServiceEgressCheckBudget)
 	defer cancel()
 	command, binding := call.command, call.binding
-	if !call.consistent || (command.CredentialName != "") != (binding.id != "") {
+	if !call.consistent || (command.CredentialName != "") != (binding.id != "") || call.signed != (binding.operation == "acs3_hmac_sha256") {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
 	a, err := s.loadServiceEgressForSessionLoad(ctx, state, platformServiceEgressLoad{
@@ -588,7 +625,8 @@ func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformSe
 		command.InstallationID != a.installation ||
 		command.ActorScope != platformServiceEgressActorScope(state.sessionID) ||
 		command.ReviewPlanID != a.grant.review || command.PolicySHA256 != a.policy.SHA256 ||
-		a.binding != binding || command.CredentialHeader != binding.header || (binding.id == "") != (call.credentialHeader == "") ||
+		a.binding != binding || command.CredentialHeader != binding.header || (binding.id == "") != (call.credentialHeader == "" && !call.signed) ||
+		(call.signed && !platformACS3CommandAllowed(command, a.binding)) ||
 		command.Generation != a.facts.generation || command.PolicyRevision != a.facts.policyRevision ||
 		command.ReleaseSHA256 != a.facts.release ||
 		control.ValidateNetworkHTTPRequestMetadata(checked, a.authority, now) != nil {
@@ -616,6 +654,9 @@ type platformServiceEgressCall struct {
 	binding platformSecretBindingUse
 	// credentialHeader is the header the value was placed in, or "".
 	credentialHeader string
+	// signed is whether the command carries Portal-computed ACS3 headers (doc 177). The command
+	// then keeps stand-ins of the right shape for the Authorization value and the security token.
+	signed bool
 	// consistent is whether the command's fields are exactly the signed bytes.
 	consistent bool
 }
@@ -626,10 +667,32 @@ func newPlatformServiceEgressCall(command control.NetworkHTTPRequestCommand, raw
 	kept := command
 	kept.PolicyRaw = bytes.Clone(command.PolicyRaw)
 	kept.CredentialValue = nil
+	signed := command.SigningScheme != ""
+	kept.SignedHeaderNames, kept.SignedHeaderValues = nil, nil
+	if headers, ok := command.SignedHeaderList(); signed && ok {
+		// The checks need the shape of the headers, never the signature or the token.
+		kept.SetSignedHeaders(appplatform.ACS3StandInHeaders(headers))
+	}
 	again, err := marshalPlatformServiceEgressCommand(command)
 	consistent := err == nil && bytes.Equal(again, raw)
 	clear(again)
-	return platformServiceEgressCall{command: kept, sha: platformDigest(raw), binding: binding, credentialHeader: command.CredentialHeader, consistent: consistent}
+	return platformServiceEgressCall{command: kept, sha: platformDigest(raw), binding: binding, credentialHeader: command.CredentialHeader, signed: signed, consistent: consistent}
+}
+
+// platformACS3CommandAllowed is whether the action and version a signed command carries are still
+// listed by the binding's reviewed policy.
+func platformACS3CommandAllowed(c control.NetworkHTTPRequestCommand, binding platformSecretBindingUse) bool {
+	headers, ok := c.SignedHeaderList()
+	action, version := appplatform.ACS3ActionOf(headers)
+	return ok && binding.operation == "acs3_hmac_sha256" && slices.Contains(strings.Split(binding.acs3, ","), action+"@"+version)
+}
+
+func cloneSignedHeaders(headers []appplatform.SignedHeader) []appplatform.SignedHeader {
+	out := make([]appplatform.SignedHeader, len(headers))
+	for i, h := range headers {
+		out[i] = appplatform.SignedHeader{Name: h.Name, Value: bytes.Clone(h.Value)}
+	}
+	return out
 }
 
 func marshalPlatformServiceEgressCommand(c control.NetworkHTTPRequestCommand) ([]byte, error) {
