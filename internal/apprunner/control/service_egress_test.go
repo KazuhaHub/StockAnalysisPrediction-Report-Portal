@@ -103,7 +103,7 @@ func TestServiceEgressSessionCanonicalSignedAndBounded(t *testing.T) {
 		"empty resources":   func(c *ServiceEgressSessionCommand) { c.Resources = []string{} },
 		"unsorted":          func(c *ServiceEgressSessionCommand) { c.Resources = []string{"notifications.publish", "network.http"} },
 		"duplicate":         func(c *ServiceEgressSessionCommand) { c.Resources = []string{"network.http", "network.http"} },
-		"foreign resource":  func(c *ServiceEgressSessionCommand) { c.Resources = []string{"network.http", "secrets.use"} },
+		"foreign resource":  func(c *ServiceEgressSessionCommand) { c.Resources = []string{"network.http", "secrets.read"} },
 		"task resource":     func(c *ServiceEgressSessionCommand) { c.Resources = []string{"tasks.schedule"} },
 		"concurrency 0":     func(c *ServiceEgressSessionCommand) { c.Concurrency = "0" },
 		"concurrency 5":     func(c *ServiceEgressSessionCommand) { c.Concurrency = "5" },

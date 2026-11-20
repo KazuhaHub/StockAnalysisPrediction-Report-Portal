@@ -56,6 +56,29 @@ func SignNetworkHTTPCheck(c NetworkHTTPRequestCommand, challenge string, key ed2
 	return signNetworkHTTPCheck(c, challenge, key, a, nowMS, networkHTTPCheckPurpose, networkHTTPCheckBinding, VerifyNetworkHTTPCheck)
 }
 
+// SignNetworkHTTPCheckDigest signs the check of a request the caller knows only
+// by the SHA-256 of its signed bytes and its expiry. It is for a caller that has
+// already judged the request and has wiped it (a request carrying a credential),
+// and it signs exactly what SignNetworkHTTPCheck signs for that request. It
+// validates nothing about the request: the caller must have, and must pass the
+// digest it computed over the exact signed bytes it sent to the runner, not a
+// digest it was handed. A proof for any other digest is refused by the runner.
+func SignNetworkHTTPCheckDigest(requestSHA256, challenge string, requestExpiresMS int64, key ed25519.PrivateKey, nowMS int64) ([]byte, []byte, error) {
+	if len(key) != ed25519.PrivateKeySize || !shaPattern.MatchString(requestSHA256) || !shaPattern.MatchString(challenge) || challenge == strings.Repeat("0", 64) || requestExpiresMS <= nowMS {
+		return nil, nil, ErrInvalidCommand
+	}
+	expires := requestExpiresMS
+	if expires-nowMS > 1000 {
+		expires = nowMS + 1000
+	}
+	proof := NetworkHTTPCheck{Format: NetworkHTTPCheckFormat, RequestSHA256: requestSHA256, Challenge: challenge, IssuedMS: strconv.FormatInt(nowMS, 10), ExpiresMS: strconv.FormatInt(expires, 10)}
+	raw, err := json.Marshal(proof)
+	if err != nil {
+		return nil, nil, ErrInvalidCommand
+	}
+	return raw, ed25519.Sign(key, frame(networkHTTPCheckPurpose, raw)), nil
+}
+
 func SignNetworkHTTPStreamCheck(c NetworkHTTPRequestCommand, challenge string, key ed25519.PrivateKey, a Authority, nowMS int64) ([]byte, []byte, error) {
 	return signNetworkHTTPCheck(c, challenge, key, a, nowMS, networkHTTPStreamCheckPurpose, networkHTTPStreamCheckBinding, VerifyNetworkHTTPStreamCheck)
 }

@@ -230,7 +230,7 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 	}
 	defer clear(request.Body)
 	digest := sha256.Sum256(request.Body)
-	admitted := EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:])}
+	admitted := EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:]), Credential: request.Credential}
 	// An input no admit frame can carry is invalid, and costs no rate token.
 	admit, err := EncodeEgressAdmit(admitted)
 	if err != nil {
@@ -243,6 +243,12 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 		return
 	}
 	defer done()
+	// Naming a binding needs a session that carries secrets.use. Portal is not
+	// asked: a session that never held the resource cannot use a credential.
+	if request.Credential != "" && !session.allows("secrets.use") {
+		writeAppError(w, broker.AppErrDenied)
+		return
+	}
 	call, err := session.mux.NewCall()
 	if err != nil {
 		writeAppError(w, newCallCode(err))
@@ -276,12 +282,16 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 		writeAppError(w, broker.AppErrUnavailable)
 		return
 	}
+	// The command frame and its decoded copy carry the credential value Portal
+	// placed: they are wiped when the call ends, as the foreground path wipes its.
+	defer clear(frame.Payload)
 	commandRaw, commandSig, err := DecodeEgressCommand(frame.Payload)
 	if err != nil {
 		session.mux.Close(EgressCloseRefused)
 		writeAppError(w, broker.AppErrUnavailable)
 		return
 	}
+	defer clear(commandRaw)
 	response, runErr := in.run(ctx, session, call, commandRaw, commandSig, request.Body, admitted)
 	outcome := egressOutcomeOf(response, runErr)
 	if payload, err := EncodeEgressOutcome(outcome); err == nil {
@@ -307,7 +317,9 @@ func (in *egressInstall) run(ctx context.Context, session *egressSession, call *
 	if err != nil || control.ValidateNetworkHTTPBody(verified, body) != nil {
 		return zero, broker.ErrDenied
 	}
+	defer verified.Clear()
 	command := verified.Command()
+	defer clear(command.CredentialValue)
 	if session.checkCommand(command, admit, body) != nil || !session.claim(command.RequestID) {
 		return zero, broker.ErrDenied
 	}

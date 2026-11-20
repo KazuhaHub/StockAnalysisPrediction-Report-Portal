@@ -51,18 +51,29 @@ const (
 type AppHTTPRequest struct {
 	RequestID, Method, URL, Accept, ContentType string
 	Body                                        []byte
+	// Credential is the name of a reviewed credential binding, or "". It is only
+	// a name: Portal decides whether the binding may be used and places the value.
+	Credential string
 }
 
 // DecodeAppHTTPRequest accepts exactly the six fields requestId, method, url,
-// accept, contentType and bodyBase64, each a JSON string, with no duplicate,
+// accept, contentType and bodyBase64, and optionally a seventh, credential (a
+// binding name), each a JSON string, with no duplicate,
 // unknown, differently-cased or null member. Value rules match the foreground
 // gateway (shared with it through package appplatform). On error nothing partial
 // is returned.
 func DecodeAppHTTPRequest(raw []byte) (AppHTTPRequest, error) {
 	var zero, out AppHTTPRequest
-	fields, err := decodeAppObject(raw, MaxAppRequestBytes, "requestId", "method", "url", "accept", "contentType", "bodyBase64")
-	if err != nil || len(fields) != 6 {
+	fields, err := decodeAppObject(raw, MaxAppRequestBytes, "requestId", "method", "url", "accept", "contentType", "bodyBase64", "credential")
+	_, named := fields["credential"]
+	if err != nil || len(fields) != 6+boolToInt(named) {
 		return zero, ErrAppInvalid
+	}
+	if named {
+		out.Credential = fields["credential"]
+		if !appplatform.ValidCredentialBindingName(out.Credential) {
+			return zero, ErrAppInvalid
+		}
 	}
 	out.RequestID, out.Method, out.URL, out.Accept, out.ContentType = fields["requestId"], fields["method"], fields["url"], fields["accept"], fields["contentType"]
 	if !validAppRequestID(out.RequestID) || !appplatform.ValidHTTPRequestMethod(out.Method) || len(out.URL) == 0 || len(out.URL) > appplatform.MaxHTTPTargetBytes || !appplatform.ValidHTTPPolicyHeaderValue(out.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(out.ContentType) {
@@ -73,6 +84,13 @@ func DecodeAppHTTPRequest(raw []byte) (AppHTTPRequest, error) {
 		return zero, ErrAppInvalid
 	}
 	return out, nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func validAppRequestID(s string) bool {

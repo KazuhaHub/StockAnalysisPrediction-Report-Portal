@@ -316,36 +316,40 @@ func validHTTPStreamResponseHeaders(response *http.Response, p HTTPStreamPolicy)
 }
 
 type httpStreamEchoGuard struct {
-	header string
-	value  []byte
-	tail   []byte
+	echo *echoMatcher
+	tail []byte
 }
 
 func newHTTPStreamEchoGuard(header string, value []byte) *httpStreamEchoGuard {
-	return &httpStreamEchoGuard{header: header, value: bytes.Clone(value)}
+	return &httpStreamEchoGuard{echo: newEchoMatcher(header, value)}
 }
 
 func (g *httpStreamEchoGuard) Accept(data []byte) ([]byte, bool) {
-	if len(g.value) == 0 {
+	if g.echo.span == 0 {
 		return bytes.Clone(data), false
 	}
 	window := append(bytes.Clone(g.tail), data...)
-	if credentialResponseEcho(window, g.header, g.value) {
+	if g.echo.Match(window) {
 		clear(window)
 		return nil, true
 	}
-	keep := len(g.value) - 1
-	if len(window) <= keep {
-		g.tail = window
+	// Hold back only what could still become the credential (see pending): an
+	// ordinary event is released as it arrives, not a chunk late. Held bytes are
+	// released as soon as a later chunk shows they cannot match, and at the end of
+	// the stream by Flush; they are never released while a match is possible.
+	hold := g.echo.pending(window)
+	safe := bytes.Clone(window[:len(window)-hold])
+	clear(g.tail)
+	g.tail = bytes.Clone(window[len(window)-hold:])
+	clear(window)
+	if len(safe) == 0 {
 		return nil, false
 	}
-	safe := bytes.Clone(window[:len(window)-keep])
-	g.tail = bytes.Clone(window[len(window)-keep:])
-	clear(window)
 	return safe, false
 }
 
 func (g *httpStreamEchoGuard) Flush() []byte {
+	defer g.echo.Clear()
 	result := bytes.Clone(g.tail)
 	clear(g.tail)
 	g.tail = nil
