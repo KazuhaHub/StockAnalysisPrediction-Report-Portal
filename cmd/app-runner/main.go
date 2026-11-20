@@ -18,7 +18,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
 )
 
-const usageLine = "usage: app-runner <inspect-daemon|bootstrap|serve|provision-xfs-images>"
+const usageLine = "usage: app-runner <inspect-daemon|bootstrap|serve|provision-xfs-images|pack-import>"
 
 func run(ctx context.Context, args []string, out io.Writer) int {
 	if len(args) == 0 {
@@ -34,6 +34,8 @@ func run(ctx context.Context, args []string, out io.Writer) int {
 		return serve(ctx, args[1:], out)
 	case "provision-xfs-images":
 		return provisionXFSImages(ctx, args[1:], out, provision.SystemEnv)
+	case "pack-import":
+		return runPackImport(ctx, args[1:], out)
 	default:
 		fmt.Fprintln(out, usageLine)
 		return 2

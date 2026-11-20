@@ -4,7 +4,7 @@ Status: Accepted 2026-11-20. Phase P1 (quota) is implemented; see the implementa
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
-- [182](182-cross-platform-backend-runtime.md): XFS images and decision D10, a 3 GiB quota for market-monitor.
+- [182](182-cross-platform-backend-runtime.md): XFS images and decision D10, a 3 GiB quota for market-monitor (superseded: 6 GiB, see section 3.3).
 
 Related: [154](154-lifecycle-action-matrix.md), [169](169-data-migration-plan.md), [184](184-reviewed-forward-proxy.md).
 
@@ -17,7 +17,7 @@ market-monitor will run on the same host as Portal. A new installation needs a o
 1. **The quota is fixed at 256 MiB and 65,536 inodes for every installation.**
    - `internal/app/app_platform_install_profile.go:18-27` returns `256 << 20`. The payload in `app_platform_data_intent.go:121` carries `"268435456"` and `"65536"`.
    - The same constant is checked again in `app_platform_checkpoint_intent.go:233` (`quota == 256<<20`), `app_platform_managed_update_review.go:585` and `app_platform_update_review.go:120`.
-   - D10's 3 GiB was decided but never implemented.
+   - D10's quota was decided but never implemented.
 2. **The quota cannot be raised by hand.** Start requires the live XFS limits to equal the journal evidence (`driver/candidate_runtime_linux.go:~155`, `writable_candidate_linux.go:~25`). A changed limit refuses the start.
 3. **A checkpoint is capped at 512 MiB** (`journal/checkpoint.go:21`). Install, update, managed enable and repair all take one first (154, 155), so a 750 MB tree fails at the next lifecycle action.
 4. **The checkpoint walker refuses hard links** (`data/checkpoint_linux.go:335`, `Nlink > 1`). market-monitor hard-links changed partitions into `snapshots/` before each write (182 §2, from `pipeline/MarketData/README.md:131-142`).
@@ -70,12 +70,12 @@ An app without the block keeps today's 256 MiB and 65,536, so the change is addi
   - the quota on the data volume;
   - plus up to two retained checkpoints of at most the quota each on the checkpoint volume. When the checkpoint root shares the data filesystem, both count against the data volume.
 - **Admission.** It refuses a quota, or a raise, that would take the sum of reservations above `capacity.disk_bytes` (data) or the checkpoint share (`capacity.go:136,180`). The refusal names the shortfall, so the operator knows to grow the images (handbook §4.2).
-- **Sizing for market-monitor.** The production images in D11 (8 GiB data, 8 GiB checkpoint, about 7 GiB usable) hold:
-  - 3 GiB live data;
-  - 2 × 3 GiB checkpoints on the checkpoint volume;
-  - plus the small apps.
+- **Sizing for market-monitor.** Its quota is **6 GiB** (6,442,450,944 bytes) and 100,000 inodes, approved after the storage redesign in Apps `apps/market-monitor/docs/store-v2.md` (about 2.5 GB after the first year, then about +0.45 GB a year). This supersedes doc 182 D10's 3 GiB. Each checkpoint archive is capped at about 6.2 GiB (6 GiB + 100,000 x 1.5 KiB + 64 MiB), so two retained checkpoints need about 12.4 GiB on the checkpoint volume. D11's 8 GiB checkpoint image (about 7 GiB usable) cannot hold that. Production sizing:
+  - checkpoint image of at least 16 GiB, grown online per handbook section 4.2;
+  - data image of 8 GiB (about 7 GiB usable), which holds 6 GiB plus the small apps for now;
+  - grow the data image when its capacity reaches 80%.
 
-  The images grow online when capacity reaches 80% (handbook §4.2). We do not over-provision, because XFS cannot shrink (Q8).
+  XFS cannot shrink (Q8), so the images are not over-provisioned beyond that.
 
 ### 3.4 Start evidence
 
@@ -88,7 +88,7 @@ The start check (`candidate_runtime_linux.go`) keeps requiring the live limits t
   - The first path seen is written as a regular file. Later paths are written as tar `TypeLink` entries pointing to it.
   - Restore and import recreate the links with `linkat` inside the target namespace, and verify the link counts on read-back.
   - A file whose `Nlink` exceeds the links found inside the namespace refuses the checkpoint, exactly as today. A namespace cannot hold such a file without a link from elsewhere on the volume, which never happens in practice.
-- **Duration.** Checkpointing 3 GiB is a few tens of seconds on the NVMe hosts. It already happens only at lifecycle actions (install, update, enable, repair), never on a schedule, so nothing in normal running gets slower.
+- **Duration.** Checkpointing 6 GiB is a few tens of seconds on the NVMe hosts. It already happens only at lifecycle actions (install, update, enable, repair), never on a schedule, so nothing in normal running gets slower.
 - **Retention.** Two retained checkpoints, as today, now sized by the quota. Q4 asks whether large namespaces should keep only one.
 
 ## 5. Administrator import
@@ -222,7 +222,7 @@ The runner journal is unchanged: its volume evidence already records the byte an
 
 The owner accepted the recommended answer to each question below (Q1 to Q10) and approved migration `0024` (Q9).
 
-Q1. **Per-installation quota bounds.** Decided: 256 MiB to 16 GiB in 64 MiB steps, and 65,536 to 1,000,000 inodes. The descriptor requests and the administrator approves; market-monitor requests 3 GiB and 100,000 inodes (D10).
+Q1. **Per-installation quota bounds.** Decided: 256 MiB to 16 GiB in 64 MiB steps, and 65,536 to 1,000,000 inodes. The descriptor requests and the administrator approves; market-monitor requests 6 GiB and 100,000 inodes (supersedes D10's 3 GiB).
 
 Q2. **Lowering a quota.** Decided: not in version 1. Lowering below usage would make the app fail its writes, and needs its own review of the usage. Only raising is supported.
 
@@ -236,7 +236,7 @@ Q6. **Seed through the proxy as well.** Decided: no platform work. Once P1 lands
 
 Q7. **Browser upload of import archives.** Decided: not in version 1; the runner-host inbox only.
 
-Q8. **Production image sizes.** Decided: keep D11's 8 GiB data and 8 GiB checkpoint, and grow online at 80% (handbook §4.2). They hold market-monitor's 3 GiB with two checkpoints. Do not start at 20 GiB, because XFS cannot shrink.
+Q8. **Production image sizes.** Decided (corrected 2026-11-20): a checkpoint image of at least 16 GiB, because two retained 6 GiB checkpoints need about 12.4 GiB, and a data image of 8 GiB, which holds market-monitor's 6 GiB plus small apps. Grow online at 80% (handbook section 4.2). Do not start larger, because XFS cannot shrink. D11's 8 GiB checkpoint image is too small for this quota.
 
 Q9. **Schema change in section 11.** Decided: approved as migration `0024`.
 
@@ -287,3 +287,32 @@ P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and 
   - The runner also needs a signed command with its own receipt and a journal evidence update fenced together with the namespace row.
 - **Console "Raise quota"** and its review dialog, which need `set_data_quota`. The console install review does not yet offer a smaller approval; the API does.
 - **Hard links** (P2), and **import** (P3), as the phasing says.
+
+## Implementation notes (set_data_quota, P3)
+
+This pass delivers the host-side and native parts of P3. The reviewed `set_data_quota` and `import_data` actions are **not implemented**: they are blocked on a schema decision.
+
+**Landed**
+
+- **`app-runner pack-import`** (`cmd/app-runner/pack_import.go`, `internal/apprunner/packimport`).
+  - Validates with the checkpoint walker's rules: regular files and directories only; no setuid, setgid or sticky bits; the reserved manifest name; names up to 255 bytes; at most 64 levels. Hard links are refused with an error naming phase P2.
+  - It also refuses a tree whose walk order the restore reader would reject (a directory `a` beside a sibling such as `a.txt`, which sorts before `a/`). The checkpoint walker has the same latent limit; the packer fails early instead of at import.
+  - Writes a canonical tar into `<checkpoint_root>/.portal-imports/` (root-owned, 0700, created if missing), owners `65532:65532`, directories 0750, files 0640, mtime zero. It writes a partial file, links it into place (never overwrites) and syncs.
+  - The first entry is a one-block manifest (`portal.app/data-import/1`: entries, bytes, `body_sha256`, packer). The printed SHA-256 is the digest of everything after the manifest block, so the runner finds an archive by reading its first 1 KiB and verifies the body when it uses it.
+- **Runner natives** (`internal/apprunner/data`).
+  - `RaiseQuota`: raises the XFS project limits online with the quota call. Lowering is refused (`ErrQuotaLower`); the live limits must equal the recorded old limits; it is convergent (an applied raise reports `AlreadyApplied`).
+  - `InspectImportInbox` and `InspectImportArchive`: exactly one archive by digest, full validation, manifest counts and the `.portal-data-schema` marker.
+  - `ImportData`: clears and extracts into the same namespace inode with `restoreExtract`, `importFits` (now `importFitsQuota`) and the restore read-back; refuses a data format mismatch and an archive over the quota before clearing anything; returns the bytes and inodes observed from the project quota. `RemoveImportArchive` deletes the archive and is for the completion step only.
+- **Handbook** section "Importing data", with the corrected market-monitor sizing.
+- **Doc corrections.** market-monitor's quota is 6 GiB (supersedes D10); two retained checkpoints need about 12.4 GiB, so the checkpoint image must be at least 16 GiB (sections 3.3 and Q8).
+
+**Tests.** Unit tests (no database involved) cover refusals, normalisation, canonical manifest and digest, never-overwrite, inbox and name checks, archive inspection with tampering and the entry cap, malformed raise and import requests. `TestNativeRaiseQuotaAndImportData` (raise, lowering, hand-edited limit, convergence, import, format mismatch, replace, archive removal) is written and gated like the other native tests. It was **not run**: it needs the disposable XFS fixture.
+
+**Not done, and why**
+
+- **`set_data_quota`**, **`import_data`**, their Portal plans, operations, stages, history loaders, audit, HTTP routes and console dialogs, the update-raises-quota deferral, and the `data_quota_lower_refused`, `data_import_*` and `data_format_mismatch` error codes and translations.
+- **Blocker: the runner journal schema.** Each new signed runner command needs a durable `runner_commands` row, and that table's `kind` list is a closed CHECK (`journal/schema.go`; v3 widened it for remove-image and delete-checkpoint). Doc 185 section 11 says the journal is unchanged, which does not hold for a new command kind. Reusing `prepare-data` or `import-checkpoint` is not safe: `requireDataRootHistory` and the import-checkpoint scan decode every row of those kinds with their own receipt formats.
+- **Needed from the owner:** approval for journal schema v5, widening the `kind` CHECK with `set-data-quota` and `import-data`, with the v3-style rebuild on upgrade. No Portal migration is needed beyond 0024.
+- **Design once approved.**
+  - `set_data_quota`: stages `queued -> validate -> prepare_data -> complete`, one fenced effect; the namespace row (`quota_bytes`, `quota_inodes`) and a journal evidence row are updated together. Every history loader reads the current quota from the namespace row or the latest raise instead of the install-time receipt.
+  - `import_data`: a same-release lifecycle for a disabled installation (stage `import` between `snapshot` and `start`), with the pre-import checkpoint restored on a failure after `import`. Quiesce is the verified stopped state: the installation must be disabled first.

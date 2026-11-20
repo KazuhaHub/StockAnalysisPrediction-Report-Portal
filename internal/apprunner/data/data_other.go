@@ -61,3 +61,17 @@ func (*Root) RemoveCheckpointArchive(context.Context, RootIdentity, string, int6
 func (*Root) QuarantineSummary(context.Context, RootIdentity) (QuarantineReport, error) {
 	return QuarantineReport{}, ErrUnsupported
 }
+
+func (*Root) RaiseQuota(context.Context, RootIdentity, QuotaRaiseRequest) (QuotaRaiseObservation, error) {
+	return QuotaRaiseObservation{}, ErrUnsupported
+}
+
+func (*Root) InspectImportInbox(context.Context, RootIdentity, string, int64) (ImportInboxArchive, error) {
+	return ImportInboxArchive{}, ErrUnsupported
+}
+
+func (*Root) RemoveImportArchive(context.Context, RootIdentity, string) error { return ErrUnsupported }
+
+func (*Root) ImportData(context.Context, RootIdentity, *Root, RootIdentity, ImportDataRequest) (ImportDataObservation, error) {
+	return ImportDataObservation{}, ErrUnsupported
+}

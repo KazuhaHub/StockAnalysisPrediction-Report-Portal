@@ -207,6 +207,11 @@ func importVerifyManifest(archive *os.File, request ImportRequest) error {
 // importFits refuses an archive whose rounded footprint exceeds the requested
 // quota, before any namespace or quota record exists.
 func (r *Root) importFits(entries []restoreEntry, request ImportRequest) error {
+	return r.importFitsQuota(entries, request.QuotaBytes, request.QuotaInodes)
+}
+
+// importFitsQuota is importFits for a caller that holds the quota as two numbers.
+func (r *Root) importFitsQuota(entries []restoreEntry, quotaBytes, quotaInodes int64) error {
 	var fs unix.Statfs_t
 	if err := native(r.file, func(fd uintptr) error { return unix.Fstatfs(int(fd), &fs) }); err != nil {
 		return errors.Join(ErrImportUnsafe, err)
@@ -219,7 +224,7 @@ func (r *Root) importFits(entries []restoreEntry, request ImportRequest) error {
 			footprint.addFile(entry.size)
 		}
 	}
-	if err := footprint.fits(request.QuotaBytes, request.QuotaInodes); err != nil {
+	if err := footprint.fits(quotaBytes, quotaInodes); err != nil {
 		return fmt.Errorf("%w: archive footprint exceeds the requested quota", err)
 	}
 	return nil
