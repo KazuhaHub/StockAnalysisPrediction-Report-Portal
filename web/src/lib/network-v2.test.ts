@@ -11,6 +11,7 @@ import {
   parseNetworkStreamEnd,
   parseNetworkStreamError,
   parseNetworkStreamStart,
+  parseNetworkTargets,
 } from "./network-v2";
 const request = () => ({method:"POST",url:"https://api.example.com/v1/check?q=%E4%B8%AD",accept:"application/json",contentType:"application/octet-stream",bodyBase64:"AP+A"});
 test("network bytes round trip exactly at both fixed limits",()=>{
@@ -24,7 +25,7 @@ test("network bytes round trip exactly at both fixed limits",()=>{
  expect(parseNetworkRequest({...request(),bodyBase64:encodeNetworkBody(new Uint8Array(65535))+"AAAA"})).toBeNull();
 });
 test("network wire rejects ambient authority and malformed inputs",()=>{
- for(const bad of [null,[],{...request(),headers:{}},{...request(),credential:{}},{...request(),credential:"Bad"},{...request(),credential:"upstream-api",credentialValue:"secret"},{...request(),method:"CONNECT"},{...request(),url:"http://api.example.com/v1"},{...request(),url:"https://u:p@api.example.com/v1"},{...request(),url:"https://api.example.com/v1#"},{...request(),url:"https://api.example.com/\\evil"},{...request(),accept:"x\r\nCookie: injected"},{...request(),contentType:"a".repeat(257)},{...request(),bodyBase64:"YQ"},{...request(),bodyBase64:"YR=="},{...request(),bodyBase64:"YQ==\n"}])expect(parseNetworkRequest(bad)).toBeNull();
+ for(const bad of [null,[],{...request(),headers:{}},{...request(),credential:{}},{...request(),credential:"Bad"},{...request(),credential:"upstream-api",credentialValue:"secret"},{...request(),method:"CONNECT"},{...request(),url:"https://u:p@api.example.com/v1"},{...request(),url:"https://api.example.com/v1#"},{...request(),url:"https://api.example.com/\\evil"},{...request(),accept:"x\r\nCookie: injected"},{...request(),contentType:"a".repeat(257)},{...request(),bodyBase64:"YQ"},{...request(),bodyBase64:"YR=="},{...request(),bodyBase64:"YQ==\n"}])expect(parseNetworkRequest(bad)).toBeNull();
  expect(parseNetworkRequest({...request(),credential:"upstream-api"})).toEqual({...request(),credential:"upstream-api"});
  for(const bad of [{status:302,contentType:"",bodyBase64:""},{status:199,contentType:"",bodyBase64:""},{status:600,contentType:"",bodyBase64:""},{status:200,contentType:"x\n",bodyBase64:""},{status:200,contentType:"",bodyBase64:"",headers:{}},{status:200,contentType:"",bodyBase64:"YQ"}])expect(parseNetworkResponse(bad)).toBeNull();
 });
@@ -65,4 +66,14 @@ test("network stream frames are closed, ordered and bounded",()=>{
   {type:"error",code:"private",retryable:false},
   {type:"error",code:"uncertain"},
  ]) expect(parseNetworkStreamError(bad)).toBeNull();
+});
+test("a plain http URL has the right shape; the server decides whether it is admitted",()=>{
+ expect(parseNetworkRequest({...request(),url:"http://10.1.2.3:8080/v1/check"})).not.toBeNull();
+ for(const bad of ["ftp://api.example.com/","http://u:p@api.example.com/","HTTP://api.example.com/","http:/api.example.com/"])expect(parseNetworkRequest({...request(),url:bad})).toBeNull();
+});
+test("target requests are a closed list of at most sixteen",()=>{
+ const target={id:"api",origin:"https://api.example.com",paths:["/v1/*"],methods:["GET"],network:"public"};
+ expect(parseNetworkTargets([target,{...target,id:"b",requestBytes:1024,deadlineMs:5000}])).toHaveLength(2);
+ expect(parseNetworkTargets(Array.from({length:16},(_,i)=>({...target,id:`t${i}`})))).toHaveLength(16);
+ for(const bad of [null,[],"x",Array.from({length:17},(_,i)=>({...target,id:`t${i}`})),[{...target,bounds:{}}],[{...target,requestBytes:-1}],[{...target,requestBytes:1.5}],[{...target,methods:[1]}],[{...target,paths:"/"}],[{id:"x"}],[null]])expect(parseNetworkTargets(bad)).toBeNull();
 });

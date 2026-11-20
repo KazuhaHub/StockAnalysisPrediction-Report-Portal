@@ -5,8 +5,11 @@ import {
   createBridgeClient,
   parseBridgePresentation,
   BRIDGE_PROTOCOL,
+  BRIDGE_PROTOCOL_PREVIOUS,
+  BRIDGE_TARGETS_BACKOFF_MS,
   BRIDGE_DEADLINE_MS,
   type BridgeBinding,
+  type NetworkTargetRequest,
   AppNetworkError,
   BridgeBackendError,
   BridgeObjectError,
@@ -2057,4 +2060,168 @@ test("network stream with secrets.use forwards only the binding name",async()=>{
  await expect(withUse.client.requestNetworkStream({...networkRequest(),credential:"upstream-api"})).resolves.toMatchObject({bytes:0,frames:0});
  expect(dispatch.mock.calls[0][0]).toMatchObject({credential:"upstream-api"});
  expect(JSON.stringify(dispatch.mock.calls[0][0])).not.toContain("credentialValue");
+});
+
+const target: NetworkTargetRequest = {
+  id: "api",
+  origin: "https://api.example.com",
+  paths: ["/v1/*"],
+  methods: ["GET"],
+  network: "public",
+};
+async function targetsPair(
+  onNetworkTargetsRequest?: Parameters<typeof createBridgeHost>[0]["onNetworkTargetsRequest"],
+  granted = true,
+  onNetworkTargetsApplied?: Parameters<typeof createBridgeHost>[0]["onNetworkTargetsApplied"],
+) {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: granted ? ["network.http"] : [],
+    onNetworkTargetsRequest,
+    onNetworkTargetsApplied,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  return { ...w, host, client };
+}
+
+test("network targets: applied answers the app, then hands over to the relaunch hook", async () => {
+  const order: string[] = [];
+  const ask = vi.fn(async (_targets: readonly NetworkTargetRequest[]) => ({ state: "applied", policyRevision: "2" }) as const);
+  const applied = vi.fn(() => {
+    order.push("relaunch");
+  });
+  const { client } = await targetsPair(ask, true, applied);
+  expect(BRIDGE_PROTOCOL).toBe("portal.app.bridge/2-dev.9");
+  await expect(client.requestNetworkTargets([target])).resolves.toEqual({
+    state: "applied",
+    policyRevision: "2",
+  });
+  expect(ask).toHaveBeenCalledOnce();
+  expect(ask.mock.calls[0][0]).toEqual([target]);
+  expect(applied).toHaveBeenCalledExactlyOnceWith("2");
+  expect(order).toEqual(["relaunch"]);
+});
+
+test("network targets: no callback or no network.http grant is not_permitted without any request", async () => {
+  const ask = vi.fn(async () => ({ state: "applied" }) as const);
+  const nothing = await targetsPair(undefined);
+  await expect(nothing.client.requestNetworkTargets([target])).resolves.toEqual({ state: "not_permitted" });
+  const ungranted = await targetsPair(ask, false);
+  await expect(ungranted.client.requestNetworkTargets([target])).rejects.toMatchObject({ code: "unsupported" });
+  expect(ask).not.toHaveBeenCalled();
+});
+
+test("network targets: a decline is final for ten seconds, then the dialog may open again", async () => {
+  let now = 1_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  const ask = vi
+    .fn<NonNullable<Parameters<typeof createBridgeHost>[0]["onNetworkTargetsRequest"]>>()
+    .mockResolvedValueOnce({ state: "declined" })
+    .mockResolvedValue({ state: "applied", policyRevision: "3" });
+  const { client } = await targetsPair(ask);
+  await expect(client.requestNetworkTargets([target])).resolves.toEqual({ state: "declined" });
+  now += BRIDGE_TARGETS_BACKOFF_MS - 1;
+  await expect(client.requestNetworkTargets([target])).resolves.toEqual({ state: "declined" });
+  expect(ask).toHaveBeenCalledOnce();
+  now += 1;
+  await expect(client.requestNetworkTargets([target])).resolves.toEqual({ state: "applied", policyRevision: "3" });
+  expect(ask).toHaveBeenCalledTimes(2);
+  vi.restoreAllMocks();
+});
+
+test("network targets: a failing dialog callback declines and only one request is pending", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(5_000_000);
+  const { client } = await targetsPair(async () => {
+    throw new Error("plan refused");
+  });
+  await expect(client.requestNetworkTargets([target])).resolves.toEqual({ state: "declined" });
+  vi.restoreAllMocks();
+  const held = await targetsPair(() => new Promise<never>(() => {}));
+  const first = held.client.requestNetworkTargets([target]);
+  await expect(held.client.requestNetworkTargets([target])).rejects.toMatchObject({ code: "busy" });
+  first.catch(() => {});
+});
+
+test("network targets: closing the host aborts the dialog", async () => {
+  let signal!: AbortSignal;
+  const { client, host } = await targetsPair((_, value) => {
+    signal = value;
+    return new Promise<never>(() => {});
+  });
+  client.requestNetworkTargets([target]).catch(() => {});
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  host.close();
+  expect(signal.aborted).toBe(true);
+});
+
+test("network targets: the request shape is closed and bounded", async () => {
+  const ask = vi.fn(async () => ({ state: "declined" }) as const);
+  const { client } = await targetsPair(ask);
+  const many = Array.from({ length: 17 }, (_, index) => ({ ...target, id: `t${index}` }));
+  for (const bad of [
+    [],
+    many,
+    [{ ...target, bounds: { requestBytes: 1 } }],
+    [{ ...target, headers: {} }],
+    [{ ...target, requestBytes: 0 }],
+    [{ ...target, paths: "/v1/*" }],
+    [{ id: "api" }],
+  ])
+    await expect(
+      client.requestNetworkTargets(bad as unknown as NetworkTargetRequest[]),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  expect(ask).not.toHaveBeenCalled();
+});
+
+test("a 2-dev.8 app still completes the handshake and has no network.targets messages", async () => {
+  const w = hostOnly();
+  expect(w.sent.find((item) => item.data.type === "app:challenge")?.data.protocol).toBe(
+    BRIDGE_PROTOCOL_PREVIOUS,
+  );
+  w.host.postMessage(
+    { ...boundHello(w), protocols: [BRIDGE_PROTOCOL_PREVIOUS] },
+    "https://portal.example.invalid",
+  );
+  await vi.waitFor(() =>
+    expect(w.received.some((item) => item.to === 1 && item.event.data.type === "app:init")).toBe(true),
+  );
+  const init = w.received.find((item) => item.to === 1 && item.event.data.type === "app:init")!.event;
+  expect(init.data.protocol).toBe(BRIDGE_PROTOCOL_PREVIOUS);
+  init.ports[0].postMessage(acknowledgement(init.data));
+  await vi.waitFor(() => expect(w.ready).toHaveBeenCalledOnce());
+  init.ports[0].postMessage({
+    ...Object.fromEntries(
+      Object.entries(init.data).filter(
+        ([key]) => !["type", "presentation", "capabilities", "backend", "revision"].includes(key),
+      ),
+    ),
+    type: "network.targets.request",
+    id: "1",
+    targets: [target],
+  });
+  await vi.waitFor(() => expect(w.failed).toHaveBeenCalledExactlyOnceWith("protocol_error"));
+});
+
+test("a host that offers only an unknown protocol never answers", () => {
+  const w = hostOnly();
+  w.host.postMessage(
+    { ...boundHello(w), protocols: ["portal.app.bridge/2-dev.7"] },
+    "https://portal.example.invalid",
+  );
+  expect(w.sent.filter((item) => item.data.type === "app:init")).toHaveLength(0);
 });
