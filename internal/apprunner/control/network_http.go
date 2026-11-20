@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -44,8 +45,17 @@ type NetworkHTTPRequestCommand struct {
 	CredentialName   string `json:"credential_name,omitempty"`
 	CredentialHeader string `json:"credential_header,omitempty"`
 	CredentialValue  []byte `json:"credential_value,omitempty"`
-	IssuedMS         string `json:"issued_ms"`
-	ExpiresMS        string `json:"expires_ms"`
+	// SigningScheme and the signed headers replace the credential header and value for a provider
+	// that signs each request (doc 177). Portal computed the headers from a key the runner never
+	// holds; the runner sets exactly these and no others, so it cannot change what was signed.
+	// The headers travel as two parallel scalar arrays (names, then base64 values) because a
+	// command is a flat object whose arrays hold only scalars; SignedHeaderList and
+	// SetSignedHeaders convert.
+	SigningScheme      string   `json:"signing_scheme,omitempty"`
+	SignedHeaderNames  []string `json:"signed_header_names,omitempty"`
+	SignedHeaderValues [][]byte `json:"signed_header_values,omitempty"`
+	IssuedMS           string   `json:"issued_ms"`
+	ExpiresMS          string   `json:"expires_ms"`
 }
 
 type VerifiedNetworkHTTPRequest struct{ command NetworkHTTPRequestCommand }
@@ -54,7 +64,45 @@ func (v VerifiedNetworkHTTPRequest) Command() NetworkHTTPRequestCommand {
 	c := v.command
 	c.PolicyRaw = bytes.Clone(c.PolicyRaw)
 	c.CredentialValue = bytes.Clone(c.CredentialValue)
+	c.SignedHeaderNames = slices.Clone(c.SignedHeaderNames)
+	if c.SignedHeaderValues != nil {
+		values := make([][]byte, len(c.SignedHeaderValues))
+		for i, v := range c.SignedHeaderValues {
+			values[i] = bytes.Clone(v)
+		}
+		c.SignedHeaderValues = values
+	}
 	return c
+}
+
+// SetSignedHeaders stores headers (copying nothing: the command aliases the values) as the command's
+// signed header arrays.
+func (c *NetworkHTTPRequestCommand) SetSignedHeaders(headers []appplatform.SignedHeader) {
+	c.SignedHeaderNames, c.SignedHeaderValues = nil, nil
+	for _, h := range headers {
+		c.SignedHeaderNames = append(c.SignedHeaderNames, h.Name)
+		c.SignedHeaderValues = append(c.SignedHeaderValues, h.Value)
+	}
+}
+
+// SignedHeaderList is the command's signed headers as pairs, aliasing the values; ok is false when
+// the two arrays differ in length.
+func (c NetworkHTTPRequestCommand) SignedHeaderList() (headers []appplatform.SignedHeader, ok bool) {
+	if len(c.SignedHeaderNames) != len(c.SignedHeaderValues) {
+		return nil, false
+	}
+	for i, name := range c.SignedHeaderNames {
+		headers = append(headers, appplatform.SignedHeader{Name: name, Value: c.SignedHeaderValues[i]})
+	}
+	return headers, true
+}
+
+// ClearSignedHeaders wipes the signed header values the command holds.
+func (c *NetworkHTTPRequestCommand) ClearSignedHeaders() {
+	for _, v := range c.SignedHeaderValues {
+		clear(v)
+	}
+	c.SignedHeaderNames, c.SignedHeaderValues = nil, nil
 }
 
 // Clear releases the decrypted credential copy held by a verified command.
@@ -64,6 +112,7 @@ func (v *VerifiedNetworkHTTPRequest) Clear() {
 	}
 	clear(v.command.CredentialValue)
 	v.command.CredentialValue = nil
+	v.command.ClearSignedHeaders()
 }
 
 func VerifyNetworkHTTPRequest(raw, signature []byte, a Authority, nowMS int64) (VerifiedNetworkHTTPRequest, error) {
@@ -254,7 +303,7 @@ func validateNetworkHTTPStreamRequest(c NetworkHTTPRequestCommand, a Authority, 
 		!appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
 		return ErrInvalidCommand
 	}
-	if !validNetworkCredential(c) {
+	if !validNetworkCredential(c) || c.SigningScheme != "" || len(c.SignedHeaderNames) != 0 || len(c.SignedHeaderValues) != 0 {
 		return ErrInvalidCommand
 	}
 	length, ok := counter(c.BodyBytes, false)
@@ -287,17 +336,36 @@ func ValidateNetworkHTTPStreamRequestMetadata(c NetworkHTTPRequestCommand, a Aut
 	return validateNetworkHTTPStreamRequest(c, a, nowMS)
 }
 
-func validNetworkCredential(c NetworkHTTPRequestCommand) bool {
-	if c.CredentialName == "" && c.CredentialHeader == "" && len(c.CredentialValue) == 0 {
-		return true
-	}
-	if len(c.CredentialName) < 1 || len(c.CredentialName) > 64 || c.CredentialName[0] < 'a' || c.CredentialName[0] > 'z' {
+func validNetworkCredentialName(name string) bool {
+	if len(name) < 1 || len(name) > 64 || name[0] < 'a' || name[0] > 'z' {
 		return false
 	}
-	for _, b := range []byte(c.CredentialName) {
+	for _, b := range []byte(name) {
 		if !(b >= 'a' && b <= 'z') && !(b >= '0' && b <= '9') && b != '-' {
 			return false
 		}
+	}
+	return true
+}
+
+// validNetworkSigning is the shape of a signed call: the scheme, the binding's name, the closed
+// header set Portal computed (checked against this very request) and no credential header or value.
+func validNetworkSigning(c NetworkHTTPRequestCommand) bool {
+	headers, ok := c.SignedHeaderList()
+	return ok && c.SigningScheme == appplatform.ACS3Scheme && validNetworkCredentialName(c.CredentialName) &&
+		c.CredentialHeader == "" && len(c.CredentialValue) == 0 &&
+		appplatform.CheckACS3SignedHeaders(c.Method, c.URL, c.ContentType, c.BodySHA256, headers) == nil
+}
+
+func validNetworkCredential(c NetworkHTTPRequestCommand) bool {
+	if c.SigningScheme != "" || len(c.SignedHeaderNames) != 0 || len(c.SignedHeaderValues) != 0 {
+		return validNetworkSigning(c)
+	}
+	if c.CredentialName == "" && c.CredentialHeader == "" && len(c.CredentialValue) == 0 {
+		return true
+	}
+	if !validNetworkCredentialName(c.CredentialName) {
+		return false
 	}
 	if c.CredentialHeader != "Authorization" && c.CredentialHeader != "X-API-Key" {
 		return false
