@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,6 +372,56 @@ func TestProxyReportBurstIsPacedAndTheSessionSurvives(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("only %d of %d refusal reports arrived", len(seen), hosts)
 		}
+	}
+}
+
+// storeOfBudget is the journal's budget table in memory: what survives a registry.
+type storeOfBudget struct {
+	mu   sync.Mutex
+	rows map[string]int64
+}
+
+func (s *storeOfBudget) key(id string, day int64) string { return fmt.Sprintf("%s/%d", id, day) }
+func (s *storeOfBudget) ProxyBudgetUsed(_ context.Context, id string, day int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rows[s.key(id, day)], nil
+}
+func (s *storeOfBudget) AddProxyBudget(_ context.Context, id string, day, n int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rows[s.key(id, day)] += n
+	return nil
+}
+func (s *storeOfBudget) PruneProxyBudget(context.Context, int64) error { return nil }
+
+// A spent budget is still spent after the runner restarts: a new registry over the same store refuses tunnels.
+func TestProxyBudgetSurvivesARunnerRestart(t *testing.T) {
+	store := &storeOfBudget{rows: map[string]int64{}}
+	first := newEgrFixture(t)
+	first.registry.useProxyBudget(store)
+	first.proxySeams()
+	first.open(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+	c, refusal := first.tunnel("1", "qt.gtimg.cn", 443)
+	c.Close()
+	if refusal != proxyforwarder.RefusalNone {
+		t.Fatalf("before the budget is spent: %q", refusal)
+	}
+	day := time.Now().UTC().Unix() / 86400
+	first.registry.budget.Add(first.installation, day, appplatform.ProxyDailyBytesMax)
+	if c, refusal := first.tunnel("1", "qt.gtimg.cn", 443); refusal != proxyforwarder.RefusalBudgetSpent {
+		c.Close()
+		t.Fatalf("a spent budget: %q", refusal)
+	}
+	first.registry.close() // the runner shuts down; the budget is flushed
+	second := newEgrFixture(t)
+	second.registry.useProxyBudget(store)
+	second.proxySeams()
+	second.open(proxyOptions(t, proxyAndHTTP, "qt.gtimg.cn"))
+	c, refusal = second.tunnel("1", "qt.gtimg.cn", 443)
+	c.Close()
+	if refusal != proxyforwarder.RefusalBudgetSpent {
+		t.Fatalf("after a restart the day's budget was given back: %q", refusal)
 	}
 }
 

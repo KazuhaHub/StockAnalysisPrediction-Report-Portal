@@ -1,6 +1,6 @@
 # Proposal: a reviewed forward proxy for backend egress
 
-Status: Accepted 2026-11-20; implemented on the Portal side (section 14), except the journal-backed daily budget. The Apps side is pending. The owner decided D1–D5 and accepted the recommended answers to Q1–Q7 on 2026-11-20 (sections 12 and 13). It builds on:
+Status: Accepted 2026-11-20; implemented on the Portal side (section 14), with the journal v4 budget table the owner approved on 2026-11-20. The Apps side is pending. The owner decided D1–D5 and accepted the recommended answers to Q1–Q7 on 2026-11-20 (sections 12 and 13). It builds on:
 
 - [174](174-background-broker-egress.md): the background egress session, the broker socket and the session lifetime;
 - [175](175-reviewed-multi-origin-and-private-network.md): reviewed targets, the private-network allowlist and the address guard.
@@ -228,12 +228,14 @@ Most of this runs locally (broker unit tests, the forwarder against a test broke
 
 ## 11. Schema
 
-No schema change is expected:
+No Portal database schema change is expected:
 - The policy is stored like the 175 network policy, in the installation's grant policy JSON.
 - Rollups go into the audit log.
 - Budgets live in the runner journal.
 
 If implementation shows a table is needed, it comes back to the owner first.
+
+Implementation showed one was needed: the runner journal had no table for the daily budget. The owner approved it on 2026-11-20: journal schema version 4 adds `runner_proxy_budget(installation_id, utc_day, bytes)`, upgraded from version 3 by creating the empty table, with old days pruned. Portal's own database is unchanged. See section 14, "Journal v4".
 
 ## 12. Owner decisions (2026-11-20)
 
@@ -281,9 +283,17 @@ The Portal side of this document is implemented. Where it differs from the text 
 
 ### Not done
 
-1. **The daily budget is not in the runner journal.** The runner journal has a closed physical schema (`internal/apprunner/journal/schema.go`: five tables with pinned declarations and a schema version) and no table that can hold a counter per installation and UTC day. Section 11 said no schema change was expected and that a needed table comes back to the owner first, so none was added. The budget is counted behind `broker.ProxyBudget` (`Used`, `Add`) and the registry builds `broker.NewMemoryProxyBudget()`. Consequences: the budget is exact within one runner process and by UTC day, but a runner restart gives every installation a fresh budget, and the test "the budget survives a runner restart" is not written. What is needed is a journal schema version 4 with one table, for example `runner_proxy_budget(installation_id, utc_day, bytes)`, plus a `ProxyBudget` that adds to it in batches. That is an owner decision.
+1. **The daily budget is in the runner journal (owner-approved table, 2026-11-20).** Implementation showed that the journal's closed schema had no table for a counter per installation and UTC day, so it came back to the owner as section 11 requires, and the owner approved journal schema version 4 with one table, `runner_proxy_budget(installation_id, utc_day, bytes)`. It is described under "Journal v4" below. Nothing in the deviations is left open for the budget, except that a crash (not a clean shutdown) can lose the bytes counted since the last flush, at most five seconds.
 2. **The Python `curl_cffi` end-to-end test has not run.** The forwarder tests run `requests` through the forwarder and a test broker when the module is present, and the `curl_cffi` variant skips when it is not. It was not installed on the development host. The fingerprint is preserved by construction (the broker forwards the first record unchanged), and a GREASE-ECH ClientHello is accepted in the broker tests, but no recorded Chrome or `curl_cffi` handshake was used: the test hellos are built by hand in the shape of a browser's (GREASE values, a large hybrid key share, an outer `encrypted_client_hello` extension).
 3. **The native container acceptance (section 10, "Native") has not run.** It needs root. `TestProxyEndpointAcceptance` (`internal/apprunner/transport/service_egress_proxy_native_linux_test.go`) uses the gate of `TestServiceEgressEndpointAcceptance` (`PORTAL_APP_RUNNER_EGRESS_ACCEPTANCE=1`, root, a GitHub-hosted runner) and is run by the same step of `.github/workflows/app-runner-probe.yml`, whose `-test.run` now names both tests. It stands a fresh network namespace with only loopback in for the container's `NetworkMode` `none`, runs the reference forwarder in it as uid 65532 against the real root-owned broker socket, and reaches a TLS fixture. It is not a Docker container: the existing egress acceptance is not one either. The resolver, the dial and the interface list are the test seams, as in every other egress test, so the fixture on loopback is not refused by the address guard.
+
+### Journal v4 (the approved table)
+
+- **Schema.** `runner_proxy_budget(installation_id ID, utc_day N, bytes N, PRIMARY KEY(installation_id, utc_day))`, declared in `schema.go` like every other product; `schemaVersion` is 4 and the inspection pins the declaration. Version 3 is otherwise unchanged.
+- **Upgrade.** From v3, `Open` creates the empty table in the upgrade transaction and inspects the result before committing; from v1 and v2 it first runs the existing steps to v3, then the same. An older binary refuses a v4 journal as newer (`ErrNewerVersion`), as it does any newer file. Existing tests that pinned version 3 or five tables now expect version 4 and six.
+- **Store.** `Store.ProxyBudgetUsed`, `AddProxyBudget` (an upsert that adds) and `PruneProxyBudget` (deletes days before a bound), each refusing a malformed installation ID or a negative value.
+- **Budget.** `broker.DurableProxyBudget` implements `ProxyBudget` over any `ProxyBudgetStore`. Bytes are counted in memory and written in batches every five seconds and at a clean shutdown, because a write per 32 KiB chunk would be hundreds a second at the throughput cap; a failed write stays pending and is retried, never counted twice. Days older than yesterday are pruned when the UTC day changes, so the table holds a few days per installation however long the runner runs. `ListenNetworkManagedController` wires it to the journal; the narrower constructors keep the in-memory budget, as they have no session and so no tunnel.
+- **Tests.** `journal/proxy_budget_test.go` (a fresh v4 journal, v3 and v1 upgrades, counting, survival across a close and reopen, pruning), `broker/proxy_budget_test.go` (batching, restart, retry, pruning, periodic flush) and `TestProxyBudgetSurvivesARunnerRestart` in the transport package (a spent budget is still spent after the registry closes and a new one opens over the same store).
 
 ### Decisions and deviations
 

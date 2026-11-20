@@ -63,6 +63,8 @@ func ListenNetworkManagedController(ctx context.Context, path string, uid, gid u
 	// constructor that has the journal, the native runtime and the network pool a
 	// session needs. The registry ends with Serve.
 	server.egress = newEgressRegistry(ctx, network, newJournalEgressBinder(store, native))
+	// The proxy's daily byte budget lives in the journal, so a restart does not give a fresh day.
+	server.egress.useProxyBudget(store)
 	server.candidateExecution.images = images
 	server.imageBlobs = &imageBlobProvider{store: images, enrollment: func(ctx context.Context) (control.Authority, error) {
 		enrollment, err := store.ControllerDeployment(ctx)

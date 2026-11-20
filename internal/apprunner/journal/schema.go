@@ -9,7 +9,7 @@ import (
 // schemaVersion is the newest journal schema this binary writes. Version 1 is
 // frozen: its table SQL is reproduced here only to recognise and upgrade files
 // written by earlier binaries.
-const schemaVersion = 3
+const schemaVersion = 4
 
 type schemaProduct struct{ kind, name, sql, rowCheck string }
 
@@ -19,7 +19,9 @@ type schemaProduct struct{ kind, name, sql, rowCheck string }
 // identical in both versions. Version 3 adds runner_reservations (doc 171) and its
 // indexes, and widens the runner_commands kind list once more with remove-image
 // (doc 171, PR 4c) and delete-checkpoint (doc 172, owner decision 2026-11-16);
-// every other version 2 product is unchanged.
+// every other version 2 product is unchanged. Version 4 adds runner_proxy_budget (doc 184): the bytes an
+// installation moved through the reviewed forward proxy in a UTC day, so a runner restart does not reset the
+// daily budget; every version 3 product is unchanged.
 func schemaProducts(version int) []schemaProduct {
 	return buildSchemaProducts(version, len(v3AddedKinds))
 }
@@ -95,7 +97,13 @@ func buildSchemaProducts(version int, addedKinds int) []schemaProduct {
 				enumCondition("state", "held", "released"),
 				"(kind IN ('backend','migration') AND disk_bytes=0 AND image_bytes=0) OR (kind='namespace' AND memory_mib=0 AND cpu_millis=0 AND image_bytes=0) OR (kind='image' AND memory_mib=0 AND cpu_millis=0 AND disk_bytes=0)"}})
 	}
-	products := make([]schemaProduct, 0, 8)
+	if version >= 4 {
+		tables = append(tables, struct {
+			name, fields, keys string
+			checks             []string
+		}{"runner_proxy_budget", "installation_id:ID utc_day:N bytes:N", "PRIMARY KEY(installation_id,utc_day)", nil})
+	}
+	products := make([]schemaProduct, 0, 9)
 	for _, table := range tables {
 		columns := []string{}
 		predicates := []string{}

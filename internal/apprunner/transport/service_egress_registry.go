@@ -77,6 +77,8 @@ type egressRegistry struct {
 	// proxy is what every installation's proxy tunnels share (doc 184): the runner-wide tunnel
 	// cap, the daily budget store and the network seams.
 	proxy *broker.ProxyRunner
+	// budget, when the runner has a journal, is the durable daily budget; close flushes it.
+	budget *broker.DurableProxyBudget
 
 	// openMu serialises opens, which are rare and may touch the journal.
 	openMu sync.Mutex
@@ -168,7 +170,20 @@ func (r *egressRegistry) close() {
 		r.closeInstall(in, EgressCloseShutdown)
 	}
 	r.wg.Wait()
+	if r.budget != nil {
+		r.budget.Close()
+	}
 }
+
+// useProxyBudget makes the daily budget of the proxy durable in store (doc 184 section 6), so a runner
+// restart does not reset it. It is called once, before the registry serves.
+func (r *egressRegistry) useProxyBudget(store broker.ProxyBudgetStore) {
+	r.budget = broker.NewDurableProxyBudget(store, r.now, proxyBudgetFlushInterval)
+	r.proxy.SetBudget(r.budget)
+}
+
+// proxyBudgetFlushInterval is how often counted bytes are written to the journal.
+const proxyBudgetFlushInterval = 5 * time.Second
 
 // open verifies, binds, acknowledges and installs one session. The connection
 // belongs to the registry from the call on: it is closed on refusal, and

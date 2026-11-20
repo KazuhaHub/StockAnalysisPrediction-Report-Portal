@@ -132,6 +132,13 @@ func NewProxyRunner(maxTunnels int, budget ProxyBudget) *ProxyRunner {
 	}
 }
 
+// SetBudget replaces the budget store. It is called once, before the runner serves a stream.
+func (r *ProxyRunner) SetBudget(b ProxyBudget) {
+	r.mu.Lock()
+	r.budget = b
+	r.mu.Unlock()
+}
+
 func (r *ProxyRunner) take() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

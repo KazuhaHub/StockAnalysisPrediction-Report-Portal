@@ -379,9 +379,10 @@ func checkProfile(ctx context.Context, db *sql.DB) error {
 // order the runner admitted it in, and later checks rely on it (see rowOrder).
 // From v1 or v2, runner_commands is rebuilt to the v3 declaration (which adds the remove-image and delete-checkpoint kinds) and the
 // additive v3 reservation table is created and backfilled. A journal at either earlier v3 shape is refused by the
-// inspection that precedes the upgrade; it is not converted.
+// inspection that precedes the upgrade; it is not converted. From v1, v2 or v3 the additive v4 budget table is
+// created (empty: nothing was counted before it existed).
 func upgrade(ctx context.Context, db *sql.DB, from int) error {
-	if from != 1 && from != 2 {
+	if from < 1 || from > 3 {
 		return ErrIncompatible
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -389,11 +390,20 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := upgradeCommandsToV3(ctx, tx); err != nil {
-		return err
+	if from < 3 {
+		if err := upgradeCommandsToV3(ctx, tx); err != nil {
+			return err
+		}
+		if err := upgradeReservationsV2ToV3(ctx, tx); err != nil {
+			return err
+		}
 	}
-	if err := upgradeReservationsV2ToV3(ctx, tx); err != nil {
-		return err
+	for _, product := range schemaProducts(4) {
+		if product.name == "runner_proxy_budget" {
+			if _, err := tx.ExecContext(ctx, product.sql); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
 		return err
