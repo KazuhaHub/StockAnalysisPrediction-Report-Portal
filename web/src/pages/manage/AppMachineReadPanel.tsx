@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { confirmAction } from '../../components/Confirm'
 import { Alert, App, Button, Checkbox, Input, InputNumber, Modal, Space, Table, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -133,16 +134,15 @@ export default function AppMachineReadPanel({ root, installation, granted, ready
     setShown(made)
     await load()
   })
-  const revoke = (token: Token) => modal.confirm({
+  const revoke = (token: Token) => confirmAction(modal, {
     title: t('appPlatform.settings.machine.revokeTitle', { label: token.label }),
-    content: t('appPlatform.settings.machine.revokeBody'),
+    description: t('appPlatform.settings.machine.revokeBody'),
     okText: t('appPlatform.settings.machine.revoke'),
-    cancelText: t('common.cancel'),
     onOk: () => guarded(async () => {
       await api.post(`${tokenRoute}/${token.handle}/revoke`, {})
       await load()
     }),
-  })
+  }, t)
   const openapi = shown ? `${window.location.origin}${shown.openapiPath}` : ''
   const policyRoutes = preview?.policy.routes ?? []
   const declared = preview?.declared.routes ?? []
