@@ -93,7 +93,22 @@ func TestPlatformManagementInstallHTTPPostgres(t *testing.T) {
 	testPlatformManagementInstallHTTP(t, true)
 }
 
-func TestPlatformManagementManagedInstallCommitRequiresRuntime(t *testing.T) {
+// Fails if a runner-backed install plan is admitted into a format no executor runs. The console creates the
+// writable format; a managed-format plan (made by an earlier build) is refused rather than queued forever, and
+// a writable-format plan routes to the runner-backed consumer, which needs the runtime.
+func TestPlatformManagementRunnerInstallCommitRoutesByFormat(t *testing.T) {
+	for _, c := range []struct {
+		format, code string
+		status       int
+	}{
+		{platformManagedInstallFormat, "app_platform_plan_changed", http.StatusConflict},
+		{platformWritableInstallFormat, "app_platform_runtime_unavailable", http.StatusServiceUnavailable},
+	} {
+		t.Run(c.format, func(t *testing.T) { testPlatformRunnerInstallCommitRoute(t, c.format, c.code, c.status) })
+	}
+}
+
+func testPlatformRunnerInstallCommitRoute(t *testing.T, format, code string, status int) {
 	s, actor := platformTrustTestServer(t, false)
 	platformRegisterTestPublisher(t, s, actor)
 	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
@@ -128,7 +143,7 @@ func TestPlatformManagementManagedInstallCommitRequiresRuntime(t *testing.T) {
 		"account_generation":    actor.generation,
 		"authority_fingerprint": facts.authorityFingerprint,
 		"plan_sha256":           platformDigest([]byte("managed-routing-plan")),
-		"plan_json":             `{"format":"` + platformManagedInstallFormat + `"}`,
+		"plan_json":             `{"format":"` + format + `"}`,
 		"expires_ms":            now + 60000, "consumed_ms": nil,
 		"created_ms": now, "updated_ms": now,
 	})
@@ -141,11 +156,11 @@ func TestPlatformManagementManagedInstallCommitRequiresRuntime(t *testing.T) {
 		platformFixtureID(991))
 	got := sessionTestRequest(
 		mux, "POST", "/api/admin/app-platform/operations", cookie, body)
-	if got.Code != http.StatusServiceUnavailable ||
-		!strings.Contains(got.Body.String(), "app_platform_runtime_unavailable") ||
+	if got.Code != status ||
+		!strings.Contains(got.Body.String(), code) ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`) != 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE consumed_ms IS NOT NULL`) != 0 {
-		t.Fatal("managed commit fell through to the static consumer",
+		t.Fatal("runner-backed commit routed wrongly",
 			got.Code, got.Body.String())
 	}
 }

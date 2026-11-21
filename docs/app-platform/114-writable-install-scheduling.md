@@ -221,3 +221,25 @@ cleanup. Add cancellation during startup and restart/expiry recovery evidence.
 Then connect generic managed launch/assets/bridge to the shared browser shell;
 continue physical lifecycle/broker/tasks/SDK/marketplace reference-app work.
 Production rollout, public SDK freeze and Status adoption remain separate gates.
+
+## Addendum 2026-11-21: the console plans the writable format
+
+Up to v2026.47.6 the console's `POST /plans` planned a runner-backed install as
+`portal.managed-install-review/1-dev.1`, a format only test drivers execute; the operation engine
+claims only `portal.writable-install-review/1-dev.1`, so such an install stayed `queued` with no
+log line. Every automated path that ran installs to completion called the writable review functions
+directly and never went through the route.
+
+- `POST /plans` now plans the writable format, and refuses a runner-backed install
+  (`app_platform_requirements_unavailable`) when the runner does not advertise the writable sandbox,
+  since nothing would run it.
+- `POST /operations` refuses a managed-format plan (`app_platform_plan_changed`); the administrator
+  plans again.
+- The operation engine fails a queued, effect-free managed-format install with error code
+  `install_format_unsupported` (audit row, one log line) and removes its installation, since it took
+  no effect. An install queued by an earlier build is therefore closed by the first fixed build, and
+  the administrator plans it again; nothing needs cancelling first. An install it cannot close (one
+  with effects, or a row it cannot read) is left alone and logged once, and the engine carries on.
+- `TestConsolePlansARunnerInstallTheEngineClaims` guards the route in every CI run (only the runner's
+  observation is faked); the capacity soak and the native completion test now also install through
+  the console routes against a real runner.

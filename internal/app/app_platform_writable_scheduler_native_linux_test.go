@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,13 +50,30 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	if err != nil {
 		t.Fatal("stage background package", err)
 	}
-	plan, err := s.createPlatformWritableInstallReview(ctx, actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}}, endpoint)
-	if err != nil {
-		t.Fatal("review background install", err)
+	// Plan and admit through the console routes, as an administrator installing from the catalogue does: the
+	// plan they create must be one the operation engine runs (the v2026.47.6 managed-format install never ran).
+	s.platformBackendEndpoint.Store(&endpoint)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	planned := sessionTestRequest(mux, http.MethodPost, "/api/admin/app-platform/plans", cookie, fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","audience":[{"type":"user","username":%q}]}`, release.sha256, actor.username))
+	var plan struct {
+		ID     string `json:"plan_id"`
+		SHA256 string `json:"plan_sha256"`
 	}
-	admitted, err := s.consumePlatformWritableInstallReview(ctx, actor, plan.ID, plan.SHA256, platformFixtureID(975), endpoint)
-	if err != nil {
-		t.Fatal("admit background install", err)
+	if planned.Code != http.StatusOK || json.Unmarshal(planned.Body.Bytes(), &plan) != nil {
+		t.Fatal("review background install", planned.Code, planned.Body.String())
+	}
+	if format, err := platformParseInstallProfile(scalar[string](t, s.st, `SELECT plan_json FROM app_platform_review_plans WHERE id=?`, plan.ID)); err != nil || format != platformWritableInstallFormat {
+		t.Fatal("console planned a format the engine does not run", format, err)
+	}
+	committed := sessionTestRequest(mux, http.MethodPost, "/api/admin/app-platform/operations", cookie, fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, plan.ID, plan.SHA256, platformFixtureID(975)))
+	var admitted struct {
+		OperationID    string `json:"operation_id"`
+		InstallationID string `json:"installation_id"`
+	}
+	if committed.Code != http.StatusAccepted || json.Unmarshal(committed.Body.Bytes(), &admitted) != nil {
+		t.Fatal("admit background install", committed.Code, committed.Body.String())
 	}
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, admitted.OperationID) != "queued" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, admitted.OperationID) != 0 {
 		t.Fatal("background fixture did not start clean")

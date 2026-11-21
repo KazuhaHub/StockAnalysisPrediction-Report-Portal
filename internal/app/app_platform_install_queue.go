@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"time"
 
@@ -26,7 +27,98 @@ func (s *Server) claimNextPlatformFrontendInstall(ctx context.Context, worker st
 	return s.claimNextPlatformInstallForFormat(ctx, worker, platformFrontendInstallFormat)
 }
 func (s *Server) claimNextPlatformWritableInstall(ctx context.Context, worker string) (platformInstallSelection, error) {
-	return s.claimNextPlatformInstallForFormat(ctx, worker, platformWritableInstallFormat)
+	selected, err := s.claimNextPlatformInstallForFormat(ctx, worker, platformWritableInstallFormat)
+	if err != nil || selected.reviewed || selected.lease.id != "" {
+		return selected, err
+	}
+	closed, err := s.closeNextUnexecutablePlatformInstall(ctx)
+	if err != nil && ctx.Err() == nil {
+		// Closing is housekeeping: a row it cannot close must not stop the engine's other work. Log it once.
+		if last, _ := s.platformUnclosableInstallLog.Swap(err.Error()).(string); last != err.Error() {
+			log.Printf("app-platform: cannot close an install in an unexecutable format: %v", err)
+		}
+		return platformInstallSelection{}, nil
+	}
+	return closed, err
+}
+
+// platformInstallFormatUnsupportedCode closes a runner-backed install whose plan format no executor runs. Earlier
+// builds planned console installs as portal.managed-install-review, which only test drivers execute; such an
+// install would otherwise stay queued with no log line.
+const platformInstallFormatUnsupportedCode = "install_format_unsupported"
+
+// closeNextUnexecutablePlatformInstall fails one queued, effect-free managed-format install with
+// install_format_unsupported and removes its installation. It claims nothing and dispatches nothing; the
+// administrator sees the failed operation and plans the install again.
+func (s *Server) closeNextUnexecutablePlatformInstall(ctx context.Context) (platformInstallSelection, error) {
+	var zero platformInstallSelection
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err = lockOUMutation(e); err != nil {
+		return zero, err
+	}
+	if err = lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	active, err := platformControlActive(e)
+	if err != nil || !active {
+		return zero, err
+	}
+	var epoch string
+	if err = e.queryRow(`SELECT v FROM meta WHERE k='app_platform_controller_epoch'`).Scan(&epoch); err != nil {
+		return zero, err
+	}
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		return zero, err
+	}
+	var id string
+	err = e.queryRow(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.action='install' AND o.managed=1 AND o.source_generation=0 AND o.target_generation=1 AND o.completed_ms IS NULL AND o.stage='queued' AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.phase='pending' AND i.desired_state='enabled' AND i.runtime_id IS NOT NULL AND i.generation=1 AND i.controller_epoch=? AND o.controller_epoch=? AND p.plan_json LIKE ? ORDER BY o.created_ms,o.id LIMIT 1`, now, epoch, epoch, `{"format":"`+platformManagedInstallFormat+`",%`).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return zero, nil
+	}
+	if err != nil {
+		return zero, err
+	}
+	facts, err := loadPlatformOperationLease(e, id)
+	if errors.Is(err, errAppPlatformLeaseConflict) {
+		return zero, nil
+	}
+	if err != nil {
+		return zero, err
+	}
+	resources, err := platformInstallResourceCount(e, facts.lease.installationID)
+	if err != nil {
+		return zero, err
+	}
+	if resources > 0 {
+		// Not effect-free: leave it to an operator rather than guess.
+		return zero, nil
+	}
+	if err = finalizePlatformInstallForReview(e, facts, platformInstallFormatUnsupportedCode, true); err != nil {
+		return zero, err
+	}
+	// It never took an effect, so nothing needs reviewing: remove the installation outright, as a completed
+	// uninstall does, so the administrator can plan the app again. The failed operation keeps the code.
+	changed, err := e.exec(`UPDATE app_platform_installations SET desired_state='removed',phase='removed',revision=revision+1,updated_ms=? WHERE id=? AND phase='review_required' AND desired_state='enabled' AND generation=1 AND controller_epoch=?`, now, facts.lease.installationID, epoch)
+	if err = platformLeaseCAS(changed, err); err != nil {
+		return zero, err
+	}
+	if _, err = e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, facts.lease.installationID); err != nil {
+		return zero, err
+	}
+	if _, err = e.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, facts.lease.installationID); err != nil {
+		return zero, err
+	}
+	if err = tx.Commit(); err != nil {
+		return zero, err
+	}
+	log.Printf("app-platform: install %s uses plan format %s, which no executor runs; closed and removed, plan it again", id, platformManagedInstallFormat)
+	return platformInstallSelection{operationID: id, reviewed: true}, nil
 }
 func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, format string) (platformInstallSelection, error) {
 	var zero platformInstallSelection
@@ -215,13 +307,13 @@ func platformInstallResourceCount(e migExec, installation string) (int, error) {
 // claimed merely to stop it; live work requires the exact still-current lease.
 func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code string, expired bool) error {
 	lease := facts.lease
-	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && code != platformStartNeverRanErrorCode && !isPlatformCapacityErrorCode(code) {
+	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && code != platformInstallFormatUnsupportedCode && code != platformStartNeverRanErrorCode && !isPlatformCapacityErrorCode(code) {
 		return errAppPlatformStageEvidence
 	}
 	if lease.snapshot.Action != appplatform.ActionInstall || lease.snapshot.Generation != 1 || facts.controlFence != lease.fence || facts.controlFence == math.MaxInt64 || facts.installationRevision == math.MaxInt64 || lease.rowRevision == math.MaxInt64 {
 		return errAppPlatformLeaseConflict
 	}
-	runtimeID, err := platformInstallReviewRuntime(e, lease)
+	runtimeID, err := platformInstallReviewRuntime(e, lease, code == platformInstallFormatUnsupportedCode)
 	if err != nil {
 		return err
 	}
