@@ -27,14 +27,58 @@ env:
   GOTOOLCHAIN: "local"
 
 jobs:
-  # THE GO TESTS ARE THREE KINDS OF JOB, AND ONE REQUIRED CHECK. This job carries everything that
-  # runs once: formatting, build, vet, the focused named steps, staticcheck, govulncheck and every
-  # package except internal/app. The app package's ordinary run is dealt over the go-test-shard
-  # jobs below, because its PostgreSQL variants put it at 16 to 20 minutes on a runner, which hit
-  # the package timeout on pull requests with an unrelated test running when it fired. The
-  # required check "go-test" is the summary job after them.
+  # WHICH JOBS A PULL REQUEST NEEDS, FROM THE FILES IT CHANGES. A docs-only pull request ran the
+  # whole suite for 26 minutes; a web-only one ran every Go job. scripts/ci_changes.py sorts each
+  # changed file into docs, web, Go or both (anything it does not know, and any file the other side
+  # reads, is both), and the Go, web and docker jobs run only when their group is needed. A push to
+  # main and a manual run always need everything: release_guard.wait_ci tags only a commit whose
+  # push or manual run passed in full, so nothing here may skip there, and no path filter is put on
+  # this workflow. The required checks stay the always() summary jobs, which pass a skipped group
+  # only when this job said the pull request did not need it, and fail if this job did not succeed.
+  # On a pull request HEAD is GitHub's merge commit, whose first parent is the base branch, so the
+  # diff between the two is exactly what the pull request would merge.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.classify.outputs.go }}
+      web: ${{ steps.classify.outputs.web }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Classify the changed files
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != pull_request ]; then
+            printf 'go=true\nweb=true\n' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" = 3 || { echo "::error::HEAD is not the pull request's merge commit"; exit 1; }
+          # --no-renames lists a moved file under its old path too: a rename of a file the other side
+          # reads would otherwise show only its new, harmless-looking path.
+          files=$(git diff --no-renames --name-only HEAD^1 HEAD)
+          printf '%s\n' "$files"
+          printf '%s\n' "$files" | python3 -B scripts/ci_changes.py | tee -a "$GITHUB_OUTPUT"
+
+  # THE GO TESTS ARE FOUR KINDS OF JOB, AND TWO REQUIRED CHECKS. This job carries everything that
+  # runs once: formatting, build, vet, staticcheck, govulncheck and every package except
+  # internal/app. The app package's ordinary run is dealt over the go-test-shard jobs below, because
+  # its PostgreSQL variants put it at 16 to 20 minutes on a runner. The required check "go-test" is
+  # the summary job after them. The race-detector runs of the app platform's focused tests, which
+  # need PostgreSQL, are go-race-platform, a job of their own beside this one.
+  #
+  # NO FOCUSED STEP RUNS AN internal/app TEST WITHOUT -race. Such steps used to sit here, 5.5 minutes
+  # of the critical path, running tests the go-test shards already run with the same database: the
+  # shards run every Test and Fuzz of the package. A test that must also run in some other way (a
+  # flag, an environment variable) still gets its own step, as the published market does.
   go-test-checks:
     name: go test (checks + other packages)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     # Includes the focused SQL diagnostics and the ordinary full PostgreSQL run.
     # The latter now executes after the repaired vulnerability gate.
@@ -103,58 +147,8 @@ jobs:
           test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
-      - name: Bounded application HTTP broker executor
-        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/broker
-      - name: Private network controller transport
-        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/transport -run '^TestNetwork(Session|Unix|Root|Observation|Runtime)'
-      - name: Background broker egress
-        run: |
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=5m ./internal/apprunner/transport -run '^TestServiceEgress'
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/control -run '^TestServiceEgress'
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=8m ./internal/app -run '^TestPlatformServiceEgress'
-      - name: Signed application descriptor and query contracts
-        run: GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/appplatform
-      - name: Application credential schema and custody
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatform(Credential|SecretBindingPolicy|SecretUninstall)'
-      - name: Application capability review and publication
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^(TestPlatformInstallCapability|TestManagedInstallRequiresOpaqueRuntimeFacts)'
-      - name: Current network provider authority
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m -v ./internal/app -run '^TestPlatformNetworkRuntimeNoAuthority'
-      - name: Current viewer network request authority
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetwork(Request|HTTP)'
-      - name: Writable application review and writer storage
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatformWriter(Intent|IntentClockSkew|Refusals)(SQLite|Postgres)|TestWritableReviewCannotUseReadonlyRuntime|TestPlatformWritableStart(Intent|Refusals)(SQLite|Postgres)|TestPlatformWritableReadiness(Source|Refusals)(SQLite|Postgres)|TestPlatformWritableRegistration(Intent|Refusals)(SQLite|Postgres)|TestPlatformWritableRegistrationFreshness|TestPlatformWritableBootRequiresAppliedDelivery(SQLite|Postgres))$'
-      - name: Writable activation and current access
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatform(Writable(Access|AccessRefusals|ActivationMetadata|ActivationRefusals)|ManagedAccess|ManagedAccessRefusals)(SQLite|Postgres)|TestPlatformWritableRequest(SigningSQLite|PayloadBoundary|BindingBoundary|BindingSQLite|BindingPostgres)|TestPlatformBackendHTTP(Admission(SQLite|Postgres)|Decoder|BootstrapRefusal|Enrolment|ReadDeadline|WriteDeadline))$'
-      - name: Writable installation worker
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableInstallRun(Pending|Refusals)|StaticInstallRun(Progress|Activation))(SQLite|Postgres)$'
-      - name: Writable installation queue and scheduling
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableQueue(Claim|Recovery|Authority)|WritableFailureBinding|WritableSchedulerRetries|InstallQueue(Claim|Recovery)|InstallSchedulerRetries)(SQLite|Postgres)$|^TestPlatformWritable(SchedulerCancellation|ReadinessWaitRevocation)SQLite$|^TestPlatformWritableFixtureOwnership$'
-      - name: Writable launch documents and directory
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(BackendCapabilitySnapshot|CapabilitySnapshot|WritableLaunch|WritableAccess|ManagedAccess|Launch|Directory|Viewer|HTTP)|^TestPostgresPlatform(AssetRead|Launch|DocumentRead|HTTPDocument|Directory|Display)'
-      - name: Principal directory and its grant
-        run: |
-          test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatformPrincipal'
+      # Besides its own test, this step compiles internal/app's test binary with the shards' flags,
+      # which is what puts it into the cache this job saves for them.
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:
@@ -219,16 +213,93 @@ jobs:
             ~/.cache/staticcheck
           key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
 
-  # internal/app's ordinary run, dealt round-robin over four shards the way go-race-full deals its
-  # race run: the Go toolchain has no -shard flag, so the deterministic test list is split by
-  # position and each shard passes its share to -run. A new test lands in exactly one shard
-  # without editing this file. Every shard has its own PostgreSQL service because the PostgreSQL
-  # variants are most of the package's time, and the tests of one shard must not share a database
-  # with another's. The shard count comes from the matrix (strategy.job-total) so the partition
-  # cannot fall out of step with it; a shard dealt nothing fails rather than pass green.
-  # release_guard_test.py holds the job name, this matrix and release_guard.ci_ready to one count.
+  # THE APP PLATFORM'S FOCUSED TESTS UNDER THE RACE DETECTOR, ON POSTGRESQL. They were steps of
+  # go-test-checks, the critical path, and run here beside it instead, on every event, exactly as
+  # before: neither race lane below has a database, so these are the only race runs of these tests'
+  # PostgreSQL variants, and of the runner's broker, transport and control egress paths on a pull
+  # request. Not dealt over shards: about five minutes in all, under the go-test shards' time.
+  go-race-platform:
+    name: go race (app platform, PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: portal
+          POSTGRES_PASSWORD: portal
+          POSTGRES_DB: reports_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U portal -d reports_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v6
+      # The build cache pair go-test-checks explains, restore half only and under go-race-full's
+      # key, whose race objects for internal/app and its dependencies are most of what this compiles.
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-race-app-${{ runner.os }}-
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Bounded application HTTP broker executor
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/broker
+      - name: Private network controller transport
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/transport -run '^TestNetwork(Session|Unix|Root|Observation|Runtime)'
+      - name: Background broker egress
+        run: |
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=5m ./internal/apprunner/transport -run '^TestServiceEgress'
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/control -run '^TestServiceEgress'
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=8m ./internal/app -run '^TestPlatformServiceEgress'
+      - name: Application credential schema and custody
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatform(Credential|SecretBindingPolicy|SecretUninstall)'
+      - name: Application capability review and publication
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^(TestPlatformInstallCapability|TestManagedInstallRequiresOpaqueRuntimeFacts)'
+      - name: Current network provider authority
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m -v ./internal/app -run '^TestPlatformNetworkRuntimeNoAuthority'
+      - name: Current viewer network request authority
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetwork(Request|HTTP)'
+
+  # internal/app's ordinary run, dealt over four shards by recorded duration: the Go toolchain has
+  # no -shard flag, so each shard lists the tests and scripts/ci_shard.py prints its share for -run.
+  # Dealt by position, the shards ran 243s to 594s of tests; dealt by the durations in
+  # .github/ci/internal-app-test-timings.txt (heaviest first, to the lightest shard), 409s to 426s.
+  # A test the file does not know is dealt by position, so a new test lands in exactly one shard
+  # without editing anything, and a stale file costs balance, never coverage. To refresh it, put
+  # the go-test-shard-N-timings artifacts of a recent main run together:
+  #   gh run download <run> -p 'go-test-shard-*-timings' && cat go-test-shard-*-timings/*.txt \
+  #     | awk '{printf "%9s  %s\n", $1, $2}' | sort -k2 > .github/ci/internal-app-test-timings.txt
+  # Every shard has its own PostgreSQL service because the PostgreSQL variants are most of the
+  # package's time, and the tests of one shard must not share a database with another's. The shard
+  # count comes from the matrix (strategy.job-total) so the partition cannot fall out of step with
+  # it; a shard dealt nothing fails rather than pass green. release_guard_test.py holds the job
+  # name, this matrix and release_guard.ci_ready to one count.
   go-test-shard:
     name: go test (${{ matrix.shard }}/4)
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -278,7 +349,7 @@ jobs:
           set -euo pipefail
           # Fuzz targets are listed too: an ordinary run executes their seed corpus as a test.
           tests=$(go test -list '^(Test|Fuzz)' ./internal/app/ | grep -E '^(Test|Fuzz)' | grep -v '^TestMain$')
-          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
+          regex=$(printf '%s\n' "$tests" | python3 -B scripts/ci_shard.py --shard "${{ matrix.shard }}" --of "${{ strategy.job-total }}" --timings .github/ci/internal-app-test-timings.txt)
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
           go test -v -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-test-shard-${{ matrix.shard }}.txt"
       # The slowest top-level tests of this shard, so a test that is becoming the long pole shows
@@ -314,33 +385,43 @@ jobs:
 
   # The required check. A job that `needs` a failed shard is skipped unless it says always(), and
   # branch protection counts a skipped required check as passed, so this must run and fail itself.
+  # A skipped Go job passes only on a pull request the changes job found to need no Go job; on a
+  # push or a manual run the changes job always says go=true.
   go-test:
     name: go-test
     if: always()
-    needs: [go-test-checks, go-test-shard]
+    needs: [changes, go-test-checks, go-test-shard]
     runs-on: ubuntu-latest
     steps:
-      - name: The checks and every test shard passed
+      - name: The checks and every test shard passed, or the pull request needs no Go job
         run: |
-          test "${{ needs.go-test-checks.result }}" = success
-          test "${{ needs.go-test-shard.result }}" = success
+          test "${{ needs.changes.result }}" = success
+          if [ "${{ needs.changes.outputs.go }}" = false ]; then
+            test "${{ needs.go-test-checks.result }}" = skipped
+            test "${{ needs.go-test-shard.result }}" = skipped
+          else
+            test "${{ needs.go-test-checks.result }}" = success
+            test "${{ needs.go-test-shard.result }}" = success
+          fi
 
   # The race detector on the concurrent core, split by event: full `-race ./...` is dominated by
   # internal/app (one big test binary), which used to put 6+ minutes on every PR. A PR runs the
   # packages where concurrency actually lives plus the app package's scheduler/engine/webhook
   # tests; a main-branch push runs everything as the post-merge backstop, so a missed race turns
-  # into a red main instead of a blocked PR. The PR subset grew past nine minutes in one job, so it
-  # is dealt round-robin over three shards the way the full lane is, and the required check "go
-  # race" is the summary job below.
+  # into a red main instead of a blocked PR. Shard 1 races the concurrency packages, whose
+  # internal/apprunner/journal alone takes five minutes under -race; the app subset is dealt
+  # round-robin over the other shards. (With three shards, shard 1 carried both, 10.8 minutes against
+  # 7.5 for the others.) The required check "go race" is the summary job below.
   go-race-shard:
-    name: go race (${{ matrix.shard }}/3)
-    if: github.event_name == 'pull_request'
+    name: go race (${{ matrix.shard }}/4)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
       # The build cache pair go-test-checks explains, restore half only: this job never runs on main, so
@@ -357,19 +438,22 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # shell: bash, so the step gets pipefail and a failed test is not hidden behind tee's exit status.
       - name: Race the concurrency packages
         if: matrix.shard == 1
+        shell: bash
         run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ ./internal/apprunner/journal/ 2>&1 | tee go-race-packages.txt
       # The subset is name-based on purpose: the run queue, scheduler, retry/reconcile loops,
       # webhook delivery and chat gate are the paths a race detector can actually catch here. The
-      # list is the top-level tests that pattern selects, dealt out exactly like go-race-full's.
+      # list is the top-level tests that pattern selects, dealt by position over shards 2 to N.
       - name: Race shard ${{ matrix.shard }}/${{ strategy.job-total }} of the app subset
+        if: matrix.shard != 1
         shell: bash
         run: |
           set -euo pipefail
           subset='Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout|Forecast|Evaluator|Settle|Watchdog|Population|Restore|Scope|Alert|Ledger|QuoteOrder|Readiness|QuoteProbe|QuoteShadow|SinaRange|SinaKline|ShadowHTTPBudget|ShadowNeverWrites|FallbackModesTier1|AppPlatform|Keyring|Seal|RotateSecretKey'
           tests=$(go test -race -list "$subset" ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
-          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
+          regex=$(printf '%s\n' "$tests" | python3 -B scripts/ci_shard.py --shard "$(( ${{ matrix.shard }} - 1 ))" --of "$(( ${{ strategy.job-total }} - 1 ))")
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
           go test -race -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
       - name: Upload race output
@@ -382,14 +466,23 @@ jobs:
 
   # The required check. A job that `needs` a failed shard is skipped unless it says always(), and
   # branch protection counts a skipped required check as passed, so this must run and fail itself.
+  # A skipped race job passes only when the changes job found the pull request to need no Go job.
   go-race:
     name: go race
     if: always() && github.event_name == 'pull_request'
-    needs: go-race-shard
+    needs: [changes, go-race-shard, go-race-platform]
     runs-on: ubuntu-latest
     steps:
-      - name: Every race shard passed
-        run: test "${{ needs.go-race-shard.result }}" = success
+      - name: Every race shard passed, or the pull request needs no Go job
+        run: |
+          test "${{ needs.changes.result }}" = success
+          if [ "${{ needs.changes.outputs.go }}" = false ]; then
+            test "${{ needs.go-race-shard.result }}" = skipped
+            test "${{ needs.go-race-platform.result }}" = skipped
+          else
+            test "${{ needs.go-race-shard.result }}" = success
+            test "${{ needs.go-race-platform.result }}" = success
+          fi
 
   # Full -race over every package, on main pushes only: PRs run the scoped go-race lane above.
   # The other packages get their own job rather than riding in every shard — they were ~50s of
@@ -544,6 +637,8 @@ jobs:
 
   web-checks:
     name: web lint + typecheck + build
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -582,6 +677,8 @@ jobs:
   # minutes in one job), and each file is independent, so vitest deals the files over three shards.
   web-test:
     name: web tests (${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -603,24 +700,38 @@ jobs:
         run: npm run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The required check keeps its name and now summarises the two jobs above. It says always() for
-  # the same reason as "go race": a skipped required check would count as passed.
+  # the same reason as "go race": a skipped required check would count as passed. A skipped web job
+  # passes only when the changes job found the pull request to need no web job.
   web-build:
     name: web typecheck + build
     if: always()
-    needs: [web-checks, web-test]
+    needs: [changes, web-checks, web-test]
     runs-on: ubuntu-latest
     steps:
-      - name: The web checks and every test shard passed
+      - name: The web checks and every test shard passed, or the pull request needs no web job
         run: |
-          test "${{ needs.web-checks.result }}" = success
-          test "${{ needs.web-test.result }}" = success
+          test "${{ needs.changes.result }}" = success
+          if [ "${{ needs.changes.outputs.web }}" = false ]; then
+            test "${{ needs.web-checks.result }}" = skipped
+            test "${{ needs.web-test.result }}" = skipped
+          else
+            test "${{ needs.web-checks.result }}" = success
+            test "${{ needs.web-test.result }}" = success
+          fi
 
   # Builds the final release image and runs it. This used to stop at `--target runtime-base` (the
   # font gate), so the first execution of the actual container — entrypoint, privilege drop,
   # config seeding, HTTP bind, /healthz — happened on a user's machine. The full build runs the
   # same font gate on the way through and then proves the container starts and answers.
+  # Needed by any Go or web change, since the image carries both; a docs-only pull request skips it.
+  # It is a required check, and a job skipped by its own `if:` reports as passed, which here is
+  # meant: it is skipped only when the changes job succeeded and said so. Had the changes job
+  # failed, this would skip too, but go-test, go race and web typecheck + build then fail. A push
+  # always runs it (release_guard.ci_ready waits for it).
   docker-image:
     name: docker image (font gate + smoke)
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
