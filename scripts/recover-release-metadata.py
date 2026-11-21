@@ -13,7 +13,7 @@ import sys
 import tarfile
 import tempfile
 from datetime import datetime, timezone
-from release_guard import gh_json, image_digest
+from release_guard import gh_json, image_digest, image_for
 
 
 def recover(repo, tag):
@@ -29,6 +29,11 @@ def recover(repo, tag):
     commit = obj['sha']
     image = f'ghcr.io/{repo.lower()}'
     digest = image_digest(f'{image}:{tag}')
+    if image_digest(f'{image_for("app-runner", image)}:{tag}') is not None:
+        # Metadata written here has the legacy, Portal-only shape: it would drop the runner image from the
+        # release and let a channel move only the Portal tag. Re-run the failed jobs of the original run instead.
+        raise RuntimeError('A runner image exists for this tag; Portal-only metadata would drop it. '
+                           'Re-run the failed jobs of the original release run instead of recovering')
     if digest is None:
         raise RuntimeError('There is no fixed image to recover')
     immutable = f'{image}@{digest}'

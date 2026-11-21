@@ -574,3 +574,17 @@ func connectEndpoint(ctx context.Context, path string, profile endpointProfile) 
 	}
 	return conn, nil
 }
+
+// ProbeControlSocket connects to the runner's own control socket and closes the connection without sending a
+// byte. It is the dial of the container healthcheck (doc 187 section 6), kept here with the other dials of that
+// socket so that no other file needs a net dial: the runner drops a peer that is not the controller UID, which is
+// the expected answer. It checks nothing about the socket's owner or mode; the caller does.
+func ProbeControlSocket(ctx context.Context, path string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	if err != nil {
+		return ErrRunnerUnreachable
+	}
+	return connection.Close()
+}

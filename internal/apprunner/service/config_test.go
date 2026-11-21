@@ -27,7 +27,7 @@ func configFixture(canonical string) Config {
 		DataRoot: filepath.Join(canonical, "data"), CheckpointRoot: filepath.Join(canonical, "checkpoints"), ImageRoot: filepath.Join(canonical, "images"),
 		IPCRoot: filepath.Join(canonical, "ipc"), ControlRoot: filepath.Join(canonical, "control"),
 		ControlSocket: filepath.Join(canonical, "control", "runner.sock"), ControllerUID: 41001, ControllerGID: 41001,
-		NetworkActive: 4, NetworkEntries: 1024, MinimumCPUs: 2, MinimumMemory: 2 << 30, Controller: controllerFixture(),
+		NetworkActive: 4, NetworkEntries: 32, MinimumCPUs: 2, MinimumMemory: 2 << 30, Controller: controllerFixture(),
 	}
 }
 

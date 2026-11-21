@@ -1,3 +1,7 @@
+# The documented ALTERNATIVE to the compose service (docs/app-platform/187-compose-app-runner.md): the same binary and
+# the same /etc/portal-app-runner files. `app-runner host-setup` runs directly on the host to prepare it, and adopts
+# the layout this unit already uses. The compose service replaces this unit; never run both (the journal's lock
+# refuses the second).
 [Unit]
 Description=Portal application runtime runner
 After=docker.service

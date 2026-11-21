@@ -1,0 +1,48 @@
+#!/bin/sh
+# Entry of the app-runner image (doc 187 section 5).
+#
+# The runner must run in the host's mount namespace: it and dockerd have to resolve every path the same way, and
+# the runner's daemon-identity, overlap and root checks compare its own mount table with the daemon's. A Go
+# program cannot join a mount namespace once its threads have started, and the release build has no cgo, so the
+# switch is made here, by nsenter, before the runner is executed.
+#
+# The runner binary is opened on descriptor 3 BEFORE the switch, because after it the image's own filesystem is
+# no longer reachable by path. It is executed from that descriptor (/proc/self/fd/3, resolved in the host's
+# /proc). The descriptor cannot be close-on-exec, because the exec of nsenter would close it first, so the
+# runner itself marks it close-on-exec as its first action after checking that it is its own executable.
+#
+# Refuses unless PID 1's PID and network namespaces are this container's own (pid: host and network_mode: host)
+# and its mount namespace is not (it is the container's). Fails closed; nothing is started otherwise.
+#
+# The three PORTAL_ENTRY_* variables are test hooks for scripts/app_runner_entry_test.sh. The compose file never
+# sets them.
+set -eu
+
+proc=${PORTAL_ENTRY_PROC:-/proc}
+runner=${PORTAL_ENTRY_RUNNER:-/usr/local/bin/app-runner}
+enter=${PORTAL_ENTRY_NSENTER:-nsenter}
+
+fail() {
+	printf 'portal-app-runner-entry: %s\n' "$1" >&2
+	exit 1
+}
+
+for ns in mnt net pid; do
+	readlink "$proc/1/ns/$ns" >/dev/null 2>&1 ||
+		fail "cannot read PID 1's $ns namespace: the service needs privileged: true and pid: host"
+done
+
+[ "$(readlink "$proc/1/ns/pid")" = "$(readlink "$proc/self/ns/pid")" ] ||
+	fail "not in the host PID namespace: the service needs pid: host"
+[ "$(readlink "$proc/1/ns/net")" = "$(readlink "$proc/self/ns/net")" ] ||
+	fail "not in the host network namespace: the service needs network_mode: host"
+[ "$(readlink "$proc/1/ns/mnt")" != "$(readlink "$proc/self/ns/mnt")" ] ||
+	fail "already in PID 1's mount namespace: PID 1 here is not the host's init (the service needs pid: host), or this entry is not in the container's own mount namespace"
+
+[ -f "$runner" ] && [ -x "$runner" ] || fail "the runner binary is missing from the image"
+
+umask 0077
+exec 3<"$runner"
+PORTAL_APP_RUNNER_EXEC_FD=3
+export PORTAL_APP_RUNNER_EXEC_FD
+exec "$enter" --mount="$proc/1/ns/mnt" -- /proc/self/fd/3 "$@"

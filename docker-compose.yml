@@ -2,11 +2,25 @@
 #   mkdir -p /opt/StockAnalysisPrediction-Report-Portal
 #   cd /opt/StockAnalysisPrediction-Report-Portal
 #   curl -O https://raw.githubusercontent.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/main/docker-compose.yml
+#   mkdir -p app-runner-control   # the control directory Portal binds; see the app-runner service below
 #   docker compose up -d
 #   docker compose logs           # first run prints the random admin password
 #   # To enable legacy-portal passthrough / change settings: log in and configure under Settings
 #
 # Update: docker compose pull && docker compose up -d
+#   First `mkdir -p app-runner-control` beside this file if it is not there yet (this release binds it into the
+#   portal, and Docker never creates a bind source: the portal would not start).
+#   Always the whole project, with no service names. One variable, PORTAL_VERSION, selects the Portal image and
+#   the app-runner image together, and the two must come from the same release: never `docker compose pull
+#   report-portal` or `up -d report-portal` alone across a version change. Production pins PORTAL_VERSION to a
+#   fixed tag in .env; the default follows :latest.
+#
+# Backend apps (the app-runner service, off by default): prepare the host once, then enable the profile.
+#   docker compose run --rm app-runner host-setup                   # plan only
+#   docker compose run --rm app-runner host-setup --apply --enrollment <file>
+#   then add the .env lines it prints (COMPOSE_PROFILES=app-runner, PORTAL_VERSION, PORTAL_UID/GID, ...) and
+#   docker compose up -d
+#   docs/app-platform/187-compose-app-runner.md and the handbook (docs/app-platform/07-handbook.md section 4).
 #
 # Database: this Docker stack defaults to a bundled PostgreSQL ("db" service) — the
 # portal is pointed at it via the RP_DB_DSN env var below. (The standalone binary,
@@ -49,7 +63,8 @@ services:
     #   :latest   → the recommended full release (set by .github/workflows/release-channels.yml)
     #   :beta     → the newest published release, pre-releases included
     #   :vYYYY.W.R → pin a specific release
-    image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal:latest
+    # PORTAL_VERSION selects the channel or release for both images; the line was hard-coded :latest before.
+    image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal:${PORTAL_VERSION:-latest}
     container_name: report-portal
     restart: unless-stopped
     pull_policy: always
@@ -72,6 +87,18 @@ services:
     volumes:
       - ./config:/app/config    # holds the auto-generated secret_key (persisted across restarts)
       - rp-data:/app/data       # runtime data (unused for the DB when Postgres is active)
+      # The runner's control directory, read-only: Portal can connect to the socket in it, but cannot create or
+      # replace anything there. Portal gets nothing else of the runner: no Docker socket, data root, IPC root or
+      # journal. Static-only installs just need the (empty) directory to exist: create_host_path is false, so a
+      # missing source stops Portal with an error naming it instead of Docker inventing a root:root 0755
+      # directory the runner would then refuse. On a runner host RP_APP_RUNNER_CONTROL_DIR is the durable
+      # directory host-setup made (/var/lib/portal-app-runner/control).
+      - type: bind
+        source: ${RP_APP_RUNNER_CONTROL_DIR:-./app-runner-control}
+        target: /var/lib/portal-app-runner/control
+        read_only: true
+        bind:
+          create_host_path: false
 
     environment:
       TZ: Asia/Shanghai
@@ -86,15 +113,68 @@ services:
       # Pin that /32 to trust nothing else, or take the whole range if you would rather it survive
       # the network being recreated. The portal warns on the audit page while this is unset.
       # RP_TRUSTED_PROXIES: "172.20.0.1/32"   # or "172.16.0.0/12"
-      # Make ./config owned by you so it's editable on the host without sudo (set your id -u / id -g)
-      # PUID: "1000"
-      # PGID: "1000"
+      # Make ./config owned by you so it's editable on the host without sudo (set your id -u / id -g). With the
+      # app-runner service, PUID must equal the runner's controller UID (host-setup prints PORTAL_UID/PORTAL_GID).
+      PUID: ${PORTAL_UID:-10001}
+      PGID: ${PORTAL_GID:-10001}
+      # Managed backend apps. All three empty (the default) = managed execution off, static apps unchanged.
+      # host-setup prints the values; the socket path is the one INSIDE this container.
+      RP_APP_RUNNER_SOCKET: ${RP_APP_RUNNER_SOCKET:-}
+      RP_APP_RUNNER_CONTROLLER_UID: ${RP_APP_RUNNER_CONTROLLER_UID:-}
+      RP_APP_RUNNER_CONTROLLER_GID: ${RP_APP_RUNNER_CONTROLLER_GID:-}
 
     # Resource cap so it doesn't contend with Dify/Ragflow on the same host
     deploy:
       resources:
         limits:
           memory: 256M
+
+  # The application runtime runner (docs/app-platform/187-compose-app-runner.md). Off unless the profile is
+  # enabled (COMPOSE_PROFILES=app-runner in .env), so a static-only install is unchanged. `docker compose run`
+  # activates the profile of the service it names, so host-setup works before .env enables it.
+  app-runner:
+    image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal-app-runner:${PORTAL_VERSION:-latest}
+    container_name: report-portal-app-runner
+    profiles: ["app-runner"]
+    pull_policy: always               # a host with a fixed PORTAL_VERSION can use `missing`
+    restart: unless-stopped
+    # NOT A PRIVILEGE INCREASE. The systemd unit this replaces ran as root in the host's namespaces with the
+    # Docker socket, and Docker-socket access is root on the host (doc 187 section 4). The image's entry joins the
+    # host's MOUNT namespace before it executes the runner, so the runner sees the filesystem, mount table and
+    # network the systemd binary sees, and every one of its startup checks stays as strict as before. The
+    # container is only how the binary is delivered and supervised.
+    privileged: true
+    network_mode: host
+    pid: host
+    ipc: host
+    uts: host
+    cgroup: host
+    userns_mode: host
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    # No volumes, ports, devices, cpus, cpuset or memory limit, on purpose (doc 187 section 2): a container that
+    # bound the data or IPC root would trip the runner's own overlap guard, a cpuset or CPU limit would make the
+    # CPU reservation refuse, and the runner needs the host's real view of memory and CPUs.
+    command: ["serve", "--config", "/etc/portal-app-runner/service.json"]
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    # `docker exec` joins the mount namespace of the container's init, and the init IS the runner, in the HOST's
+    # mount namespace: the image's files (the entry, /usr/local/bin/app-runner) are not visible to a healthcheck.
+    # So the check finds the runner in the container's own cgroup and runs its `health` through /proc/<pid>/exe,
+    # using only the host's sh, sed and cat. `docker compose run --rm app-runner health` is the same check from
+    # a fresh container. Nothing depends on this status (doc 187 implementation notes).
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          cg=$$(sed -n 's/^0:://p' /proc/self/cgroup); for p in $$(cat "/sys/fs/cgroup$${cg}/cgroup.procs"); do case "$$(readlink "/proc/$$p/exe")" in */app-runner) exec "/proc/$$p/exe" health --config /etc/portal-app-runner/service.json;; esac; done; echo "no runner process in the container cgroup" >&2; exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
 volumes:
   rp-data:

@@ -990,7 +990,10 @@ func TestPlatformRunnerServiceChild(t *testing.T) {
 		}()
 	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
-	if err := service.Serve(ctx, os.Getenv("PORTAL_RUNNER_SERVICE_CONFIG"), logger); err != nil {
+	// The network acceptance runs Portal and this runner in an isolated network namespace with dockerd outside it
+	// (platformNetworkNamespaceFixture); the mount namespace is shared and still required.
+	options := service.ServeOptions{SeparateNetworkNamespace: os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1"}
+	if err := service.ServeWith(ctx, os.Getenv("PORTAL_RUNNER_SERVICE_CONFIG"), logger, options); err != nil {
 		t.Fatal(err)
 	}
 }

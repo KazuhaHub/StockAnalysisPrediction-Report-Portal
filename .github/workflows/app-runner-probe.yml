@@ -8,6 +8,11 @@ on:
       - 'internal/app/app_platform_actor*'
       - 'internal/app/secretbox*'
       - 'cmd/app-runner/**'
+      - 'deploy/app-runner/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile.app-runner'
+      - 'scripts/probe-compose-runner.sh'
+      - 'scripts/probe-runner-image.sh'
       - '.github/workflows/app-runner-probe.yml'
       - 'go.mod'
       - 'go.sum'
@@ -19,6 +24,11 @@ on:
       - 'internal/app/app_platform_actor*'
       - 'internal/app/secretbox*'
       - 'cmd/app-runner/**'
+      - 'deploy/app-runner/**'
+      - 'docker-compose.yml'
+      - 'Dockerfile.app-runner'
+      - 'scripts/probe-compose-runner.sh'
+      - 'scripts/probe-runner-image.sh'
       - '.github/workflows/app-runner-probe.yml'
       - 'go.mod'
       - 'go.sum'
@@ -127,7 +137,7 @@ jobs:
               controller_uid:41001,
               controller_gid:41001,
               network_active:4,
-              network_entries:1024,
+              network_entries:32,
               minimum_reported_cpus:2,
               minimum_reported_memory_bytes:2147483648,
               controller:{
@@ -409,6 +419,48 @@ jobs:
           go test -p 2 -race -c -o "$portal_binary" ./internal/app
           chmod 0500 "$portal_binary"
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_RUNTIME_CONFIRM_ACCEPTANCE=1 "$portal_binary" -test.v -test.timeout=90s -test.run='^TestPlatformRuntimeEndpointAcceptance$'
+
+  # Doc 187 section 11: the compose runner, natively, on the worker (rootful Docker, privileged containers in the
+  # host namespaces are what this exercises). The image is built here from the commit and never pushed: host-setup
+  # plan and --apply through `docker compose run`, a second --apply, a refused conflict, `up -d`, the startup
+  # checks and the managed profile observed as the controller UID, restart, a killed runner and its stale socket,
+  # `down`, health with the runner stopped, and a simulated reboot. The release workflow runs the image's own
+  # entry checks (scripts/probe-runner-image.sh) on both architectures by digest before anything is recorded.
+  compose-runner-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install the host tools host-setup needs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs
+      - name: Build the runner image and the observer
+        shell: bash
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          mkdir -p bin/linux-amd64
+          go build -trimpath -o bin/linux-amd64/app-runner ./cmd/app-runner
+          docker build --build-arg TARGETARCH=amd64 -f Dockerfile.app-runner -t app-runner-probe:local .
+          GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-runner-observer" ./internal/apprunner/service
+          chmod 0555 "$RUNNER_TEMP/app-runner-observer"
+      - name: Run the compose lifecycle probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo -n sh scripts/probe-compose-runner.sh app-runner-probe:local "$RUNNER_TEMP/app-runner-observer"
 
   # The same steps natively on arm64. A separate job rather than a runner matrix: runs-on stays a literal
   # GitHub-hosted label (capacity_soak_test.WorkflowHostGuardTests).

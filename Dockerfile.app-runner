@@ -1,0 +1,26 @@
+# The app-runner image of the Portal compose project (docs/app-platform/187-compose-app-runner.md section 5).
+#
+# It only delivers and supervises the runner binary. The entry joins the HOST mount namespace before it executes
+# the runner, so the runner sees the filesystem, mount table and network the systemd binary sees; the container
+# needs privileged: true, network_mode: host and pid: host, and has no volumes (see docker-compose.yml).
+#
+# Contents: the prebuilt static binary of the release's build-runner job (COPY, no in-container build, buildx
+# picks the architecture through TARGETARCH) and the entry. No xfsprogs and no Docker CLI: after the namespace
+# switch every host tool is resolved in the HOST's filesystem, so host-setup uses the host's xfsprogs and
+# util-linux (Q2). nsenter comes from the base image's util-linux. There is no USER: the runner is root, as under
+# systemd.
+#
+# The base is pinned by digest like Dockerfile.release; Dependabot's docker updates bump it.
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+ARG TARGETARCH
+
+# A build that lost nsenter must fail here, not at the first start of the service.
+RUN command -v nsenter >/dev/null && command -v readlink >/dev/null
+
+COPY --chmod=0755 bin/linux-${TARGETARCH}/app-runner /usr/local/bin/app-runner
+COPY --chmod=0755 deploy/app-runner/portal-app-runner-entry /usr/local/bin/portal-app-runner-entry
+COPY internal/apprunner/driver/seccomp/LICENSE internal/apprunner/driver/seccomp/README.md /usr/share/doc/app-runner/third-party/moby-profiles/
+COPY LICENSE /usr/share/doc/app-runner/LICENSE
+
+ENTRYPOINT ["/usr/local/bin/portal-app-runner-entry"]
+CMD ["serve", "--config", "/etc/portal-app-runner/service.json"]
