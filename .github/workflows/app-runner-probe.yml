@@ -137,7 +137,7 @@ jobs:
               controller_uid:41001,
               controller_gid:41001,
               network_active:4,
-              network_entries:1024,
+              network_entries:32,
               minimum_reported_cpus:2,
               minimum_reported_memory_bytes:2147483648,
               controller:{

@@ -35,6 +35,9 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
+		if errors.Is(err, ErrPoolBounds) {
+			logger.Printf("app-runner not ready: %v", err)
+		}
 		return ErrConfig
 	}
 	// An allowlisted prefix must never reach this host: refuse before anything is opened.

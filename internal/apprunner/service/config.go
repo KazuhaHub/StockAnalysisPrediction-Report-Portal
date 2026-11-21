@@ -8,12 +8,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/broker"
 )
 
 const (
@@ -23,6 +25,9 @@ const (
 )
 
 var ErrConfig = errors.New("invalid app-runner configuration")
+
+// ErrPoolBounds is a configuration whose network_active or network_entries exceeds what the broker's pools accept.
+var ErrPoolBounds = fmt.Errorf("%w: network_active must be 1 to %d and network_entries 16 to %d, the broker pools' maxima", ErrConfig, broker.MaxNetworkPoolActive, broker.MaxNetworkPoolEntries)
 
 type Controller struct {
 	DeploymentID    string `json:"deployment_id"`
@@ -80,7 +85,7 @@ func LoadConfig(path string) (Config, error) {
 		!validAbsolute(cfg.DockerSocket) || !validAbsolute(cfg.JournalDir) || !validAbsolute(cfg.DataRoot) || !validAbsolute(cfg.CheckpointRoot) || !validAbsolute(cfg.ImageRoot) ||
 		!validAbsolute(cfg.IPCRoot) || !validAbsolute(cfg.ControlRoot) || !validAbsolute(cfg.ControlSocket) ||
 		filepath.Dir(cfg.ControlSocket) != cfg.ControlRoot || !validIdentity(cfg.ControllerUID, cfg.ControllerGID) ||
-		cfg.NetworkActive < 1 || cfg.NetworkActive > 16 || cfg.NetworkEntries < 16 || cfg.NetworkEntries > 4096 ||
+		cfg.NetworkActive < 1 || cfg.NetworkEntries < 16 ||
 		!cfg.Capacity.valid() || appplatform.ValidatePrivateNetworks(cfg.PrivateNetworks) != nil || appplatform.ValidateProxyOperatorPins(cfg.ProxyPins) != nil ||
 		cfg.MinimumCPUs < 1 || cfg.MinimumCPUs > 1024 || cfg.MinimumMemory < 64<<20 || cfg.MinimumMemory > 1<<50 ||
 		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.CheckpointRoot) || overlap(cfg.JournalDir, cfg.IPCRoot) || overlap(cfg.JournalDir, cfg.ControlRoot) ||
@@ -89,6 +94,11 @@ func LoadConfig(path string) (Config, error) {
 		overlap(cfg.ImageRoot, cfg.JournalDir) || overlap(cfg.ImageRoot, cfg.DataRoot) || overlap(cfg.ImageRoot, cfg.CheckpointRoot) ||
 		overlap(cfg.ImageRoot, cfg.IPCRoot) || overlap(cfg.ImageRoot, cfg.ControlRoot) {
 		return Config{}, ErrConfig
+	}
+	// The broker's pools refuse more than their maxima when the runner starts, so a larger value would load here
+	// and never become ready. Refused at load instead, with the reason.
+	if cfg.NetworkActive > broker.MaxNetworkPoolActive || cfg.NetworkEntries > broker.MaxNetworkPoolEntries {
+		return Config{}, ErrPoolBounds
 	}
 	return cfg, nil
 }
