@@ -223,9 +223,12 @@ jobs:
 
   ci:
     name: Verify release commit passed full CI
+    # It looks once and refuses while CI is still running, so a release holds no runner waiting for it;
+    # web and build-runner (and build, through web) need it, so nothing is built for a commit CI has not
+    # passed. Dispatch the release once the commit's full test.yml and licence.yml runs are green.
     needs: setup
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
@@ -240,7 +243,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT: ${{ needs.setup.outputs.sha }}
-        run: python3 scripts/release_guard.py wait-ci "$COMMIT"
+        run: python3 scripts/release_guard.py check-ci "$COMMIT"
 
   tag:
     name: Create or verify the annotated tag
@@ -278,7 +281,7 @@ jobs:
           fi
 
           if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
-            echo "::error::tag ${VERSION} was created while this run was waiting"
+            echo "::error::tag ${VERSION} was created while this run was building"
             exit 1
           fi
           notes_file=$(mktemp)
@@ -296,7 +299,7 @@ jobs:
     name: Build web assets
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: setup
+    needs: [setup, ci]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -407,7 +410,7 @@ jobs:
     name: Build app-runner linux/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [setup]
+    needs: [setup, ci]
     strategy:
       fail-fast: false
       matrix:
@@ -475,8 +478,8 @@ jobs:
   # database. The tag job waits for it, and the draft and the image wait for the tag: setup refuses
   # a version whose tag exists, so a tag on a binary that cannot start spends that version, and a
   # fixed image tag is never replaced. That puts about 20-30s on the critical path once per
-  # release, as `ci` is usually done in seconds (6s in run 35551784386, a minute before the build
-  # was). docker names it as well, so its own reason does not rest on the tag job's needs.
+  # release, after the builds, which themselves start only once `ci` has passed. docker names it as
+  # well, so its own reason does not rest on the tag job's needs.
   smoke-arm64:
     name: Start the linux/arm64 binary
     needs: [setup, build, build-runner]
