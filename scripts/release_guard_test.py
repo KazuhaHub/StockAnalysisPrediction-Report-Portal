@@ -12,6 +12,13 @@ from release_guard import image_digest, validate_metadata, ci_ready, read_state,
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+CHANGES_CONDITIONS = (
+    "needs.changes.outputs.go == 'true'",
+    "needs.changes.outputs.web == 'true'",
+    "needs.changes.outputs.go == 'true' || needs.changes.outputs.web == 'true'",
+)
+
+
 def push_run_jobs(workflow):
     """The check names one push run of `workflow` reports, read from the file itself.
 
@@ -26,9 +33,14 @@ def push_run_jobs(workflow):
         cond = re.search(r'^    if: (.+?)\s*$', block, re.M)
         cond = cond[1] if cond else None
         # A summary job says always() so that a failed dependency fails it instead of skipping it.
-        if cond in ("github.event_name == 'pull_request'", "always() && github.event_name == 'pull_request'"):
+        if cond in ("github.event_name == 'pull_request'", "always() && github.event_name == 'pull_request'",
+                    "github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'"):
             continue
         if cond == 'always()':
+            cond = None
+        # The changes job says go=true and web=true on every event but a pull request
+        # (test_changes_job_needs_everything_off_a_pull_request), so a job gated on them runs on a push.
+        if cond in CHANGES_CONDITIONS:
             cond = None
         # `!= 'pull_request' || <more>` runs on every push whatever <more> says.
         if cond is not None and cond.startswith("github.event_name != 'pull_request' ||"):
@@ -109,7 +121,8 @@ class GuardTests(unittest.TestCase):
 
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
-                ['go-test','go test (checks + other packages)','web typecheck + build','web lint + typecheck + build','workflow lint',
+                ['changes','go-test','go test (checks + other packages)','go race (app platform, PostgreSQL)',
+                 'web typecheck + build','web lint + typecheck + build','workflow lint',
                  'docker image (font gate + smoke)','go race full (other packages)',
                  'release targets (cross-compile)'] + [f'web tests ({i}/3)' for i in range(1,4)]]
         self.assertFalse(ci_ready(jobs))
@@ -158,9 +171,9 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(shards, list(range(1, len(shards) + 1)))
         name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
         self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
-        partition = re.search(r'awk -v s="\$\{\{ matrix\.shard \}\}" -v m=("[^"]*"|\S+)', block)
-        self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
-        self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
+        # scripts/ci_shard.py deals the tests; ci_shard_test.py holds that every test lands in one shard.
+        self.assertIn('scripts/ci_shard.py --shard "${{ matrix.shard }}" --of "${{ strategy.job-total }}"', block)
+        self.assertIn('--timings .github/ci/internal-app-test-timings.txt', block)
         self.assertIn('test -n "$regex"', block)
         self.assertIn('TEST_POSTGRES_DSN', block)
         self.assertIn('image: postgres:16', block)
@@ -187,6 +200,44 @@ class GuardTests(unittest.TestCase):
                 needs = re.search(r'^    needs: (.+?)\s*$', block, re.M)[1].strip('[]').split(',')
                 for need in (n.strip() for n in needs):
                     self.assertIn(f'test "${{{{ needs.{need}.result }}}}" = success', block)
+                # A skipped job passes only on the changes job's word that the group was not needed.
+                self.assertEqual(needs[0], 'changes')
+                skipped = re.findall(r'test "\$\{\{ needs\.([\w-]+)\.result \}\}" = skipped', block)
+                self.assertEqual(sorted(skipped), sorted(n.strip() for n in needs[1:]))
+                self.assertRegex(block, r'if \[ "\$\{\{ needs\.changes\.outputs\.(go|web) \}\}" = false \]; then')
+
+    def test_changes_job_needs_everything_off_a_pull_request(self):
+        # push_run_jobs counts a job gated on needs.changes.outputs as running on a push, which holds
+        # only while the changes job says go=true and web=true on every event but a pull request, and
+        # before it reads any diff. Its outputs are those of that one step.
+        block = job_block(read_workflow('test.yml'), 'changes')
+        self.assertNotRegex(block, r'^    if:', 'the changes job must run on every event')
+        step = block[block.index('id: classify'):]
+        early = step.index('exit 0')
+        self.assertIn('if [ "${{ github.event_name }}" != pull_request ]; then', step[:early])
+        self.assertIn("printf 'go=true\\nweb=true\\n' | tee -a \"$GITHUB_OUTPUT\"", step[:early])
+        self.assertLess(early, step.index('git diff'))
+        # A renamed file must be listed under its old path as well as its new one.
+        self.assertIn('git diff --no-renames --name-only HEAD^1 HEAD', step)
+        self.assertIn('go: ${{ steps.classify.outputs.go }}', block)
+        self.assertIn('web: ${{ steps.classify.outputs.web }}', block)
+
+    def test_pr_race_shards_split_packages_from_the_subset(self):
+        # Shard 1 races the packages; the app subset is dealt over the other shards, so the deal must
+        # count them, not the matrix.
+        block = job_block(read_workflow('test.yml'), 'go-race-shard')
+        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
+        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
+        packages = block[block.index('Race the concurrency packages'):block.index('of the app subset')]
+        self.assertIn('if: matrix.shard == 1', packages)
+        # Shard 1's only work is a pipe into tee: without bash's pipefail a failed race passes.
+        self.assertIn('shell: bash', packages)
+        subset = block[block.index('of the app subset'):]
+        self.assertIn('if: matrix.shard != 1', subset)
+        self.assertIn('--shard "$(( ${{ matrix.shard }} - 1 ))" --of "$(( ${{ strategy.job-total }} - 1 ))"', subset)
+        self.assertIn('test -n "$regex"', subset)
 
     def test_ci_compiles_every_release_target(self):
         # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles
