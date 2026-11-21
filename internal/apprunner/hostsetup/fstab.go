@@ -70,7 +70,8 @@ func fstabState(lines []fstabLine, image, mount string) (state, detail string) {
 		}
 		ok := l.spec == image && l.file == mount && l.fsType == "xfs"
 		for _, option := range requiredFstabOptions {
-			ok = ok && l.options[option]
+			// XFS spells project quota prjquota or pquota.
+			ok = ok && (l.options[option] || (option == "prjquota" && l.options["pquota"]))
 		}
 		if !ok {
 			return "conflict", "an fstab line names " + mount + " or " + image + " with other fields: " + l.raw
@@ -78,6 +79,25 @@ func fstabState(lines []fstabLine, image, mount string) (state, detail string) {
 		state = "match"
 	}
 	return state, ""
+}
+
+// fstabSafePath reports whether a path can be written into an fstab field as it is: no whitespace, backslash,
+// comment or quote character, no control character and nothing outside printable ASCII. Anything else would need
+// the octal escapes of fstab(5), and host-setup refuses rather than escape.
+func fstabSafePath(path string) bool {
+	for _, c := range []byte(path) {
+		if c <= ' ' || c >= 0x7f || c == '\\' || c == '#' || c == '"' || c == '\'' {
+			return false
+		}
+	}
+	return path != ""
+}
+
+// refuseSymlinkedFstab: the rename that installs the new table would replace a symbolic link with a regular
+// file, so a symbolic /etc/fstab is refused instead of silently detached from its target.
+func (r *run) fstabIsSymlink() bool {
+	info, err := os.Lstat(r.env.path(fstabPath))
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 var findmntSummary = regexp.MustCompile(`(\d+) parse errors?, (\d+) errors?, (\d+) warnings?`)
@@ -96,6 +116,9 @@ func findmntAccepts(out string, err error) bool {
 // `findmnt --verify --tab-file`, fsyncs it and renames it over the file. The first time only, it keeps
 // /etc/fstab.before-portal-app-runner. A failed check leaves /etc/fstab untouched.
 func (r *run) appendFstab(ctx context.Context, wanted [][2]string) error {
+	if r.fstabIsSymlink() {
+		return refuse("/etc/fstab is a symbolic link; host-setup would replace it with a regular file, so it leaves it alone")
+	}
 	path := r.env.path(fstabPath)
 	current, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {

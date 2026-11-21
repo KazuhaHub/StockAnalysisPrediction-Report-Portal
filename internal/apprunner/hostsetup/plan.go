@@ -558,6 +558,12 @@ func (r *run) planFstab(wanted [][2]string) {
 	lines := parseFstab(data)
 	var missing [][2]string
 	for _, w := range wanted {
+		for _, path := range w {
+			if !fstabSafePath(path) {
+				r.conflict("%q contains whitespace or a character that needs fstab escaping (backslash, #, quotes, control or non-ASCII characters); host-setup does not write such a path into /etc/fstab", path)
+				return
+			}
+		}
 		switch state, detail := fstabState(lines, w[0], w[1]); state {
 		case "conflict":
 			r.conflict("%s", detail)
@@ -568,6 +574,10 @@ func (r *run) planFstab(wanted [][2]string) {
 		}
 	}
 	if len(missing) == 0 {
+		return
+	}
+	if r.fstabIsSymlink() {
+		r.conflict("/etc/fstab is a symbolic link; host-setup would replace it with a regular file, so it leaves it alone")
 		return
 	}
 	var text []string

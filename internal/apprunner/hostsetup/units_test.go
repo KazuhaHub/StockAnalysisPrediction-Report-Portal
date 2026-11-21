@@ -80,3 +80,24 @@ func TestSummarizeProvisionKeepsOnlyTheVolumeLines(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// XFS spells project quota prjquota or pquota; a line with either is the same line.
+func TestFstabStateAcceptsPquotaAsProjectQuota(t *testing.T) {
+	line := "/data/a.img /srv/a xfs loop,pquota,nodev,nosuid,noexec 0 0"
+	if state, _ := fstabState(parseFstab([]byte(line)), "/data/a.img", "/srv/a"); state != "match" {
+		t.Fatalf("pquota: %s", state)
+	}
+	noQuota := "/data/a.img /srv/a xfs loop,nodev,nosuid,noexec 0 0"
+	if state, _ := fstabState(parseFstab([]byte(noQuota)), "/data/a.img", "/srv/a"); state != "conflict" {
+		t.Fatalf("no quota option: %s", state)
+	}
+}
+
+func TestFstabSafePathRejectsWhatNeedsEscaping(t *testing.T) {
+	for path, want := range map[string]bool{"/data/a.img": true, "/srv/portal-runner/data": true, "/a b": false, "/a\tb": false, "/a\nb": false,
+		`/a\b`: false, "/a#b": false, `/a"b`: false, "/a\x01b": false, "/\u00e9": false} {
+		if got := fstabSafePath(path); got != want {
+			t.Errorf("%q: %v, want %v", path, got, want)
+		}
+	}
+}

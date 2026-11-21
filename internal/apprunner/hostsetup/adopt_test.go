@@ -409,3 +409,21 @@ func TestNoReloadWhenTheFstabNeedsNothingAtApply(t *testing.T) {
 		t.Fatalf("a fstab that needed nothing was rewritten or reloaded: %v", h.mutating())
 	}
 }
+
+// An adopted loop image whose path would need fstab escaping is refused when its line is missing, never written
+// with a guessed escape.
+func TestAdoptRefusesAnImagePathThatNeedsFstabEscaping(t *testing.T) {
+	h, _, _ := adopted(t)
+	spaced := "/data/portal apps data.img"
+	h.write(spaced, "", 0o600)
+	h.loops["/dev/loop3"] = spaced
+	h.write("/etc/fstab", "/dev/sda1 / ext4 defaults 0 1\n", 0o644)
+	before := h.snapshot()
+	code, out := h.run(h.adoptOptions(true))
+	if code != ExitFailed || !strings.Contains(out, "fstab escaping") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if h.snapshot() != before {
+		t.Fatal("a refused run changed the host")
+	}
+}

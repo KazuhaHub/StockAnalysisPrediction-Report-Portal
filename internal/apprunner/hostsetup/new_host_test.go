@@ -407,3 +407,39 @@ func TestEnvReportNamesTheContainerSideSocketForACustomControlRoot(t *testing.T)
 		t.Fatalf("the runner's own socket path: %s", cfg.ControlSocket)
 	}
 }
+
+// A symbolic /etc/fstab would be replaced by the rename, so it is refused (at the plan, before anything changes).
+func TestSymlinkedFstabIsRefusedAndLeftAlone(t *testing.T) {
+	h := newHost(t)
+	h.write("/etc/real-fstab", "/dev/sda1 / ext4 defaults 0 1\n", 0o644)
+	os.Remove(h.p("/etc/fstab"))
+	if err := os.Symlink(h.p("/etc/real-fstab"), h.p("/etc/fstab")); err != nil {
+		t.Fatal(err)
+	}
+	opts := h.options(true)
+	opts.Enrollment = h.enrollmentFile(enrollmentDoc(1))
+	before := h.snapshot()
+	code, out := h.run(opts)
+	if code != ExitFailed || !strings.Contains(out, "symbolic link") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if h.snapshot() != before || len(h.mutating()) != 0 {
+		t.Fatal("a refused run changed the host")
+	}
+}
+
+// A path that would need fstab escaping is refused with the reason, before anything changes.
+func TestPathsNeedingFstabEscapingAreRefused(t *testing.T) {
+	h := newHost(t)
+	opts := h.options(true)
+	opts.ImageDir = "/var/lib/portal volumes"
+	opts.Enrollment = h.enrollmentFile(enrollmentDoc(1))
+	before := h.snapshot()
+	code, out := h.run(opts)
+	if code != ExitFailed || !strings.Contains(out, "whitespace") {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if h.snapshot() != before {
+		t.Fatal("a refused run changed the host")
+	}
+}
