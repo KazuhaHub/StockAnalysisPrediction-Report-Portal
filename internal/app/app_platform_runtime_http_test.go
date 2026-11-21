@@ -39,9 +39,12 @@ func platformRuntimeState(h platformRecoveryHTTP) map[string]any {
 // host-setup reads), confirm once the runner serves. Every step is visible on the status read.
 func testPlatformRuntimeEnrollmentThroughHTTP(t *testing.T, pg bool) {
 	s, actor, h := platformRuntimeHTTPFixture(t, pg)
-	audits := func(action string) int {
+	// The Postgres test database is shared, so audit rows are counted from where this test started.
+	count := func(action string) int {
 		return scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action=?`, action)
 	}
+	base := map[string]int{"app_platform.runtime_prepared": count("app_platform.runtime_prepared"), "app_platform.runtime_confirmed": count("app_platform.runtime_confirmed")}
+	audits := func(action string) int { return count(action) - base[action] }
 
 	// The surface keeps its siblings' guards.
 	for _, method := range []string{"GET", "POST"} {
