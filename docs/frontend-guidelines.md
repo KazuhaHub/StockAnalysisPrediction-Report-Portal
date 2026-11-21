@@ -184,6 +184,15 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
   black page.
 - Overflowing tab rows never show antd's "…" menu; they scroll and fade (`tabsOverflow.test.ts`).
 - Code and payload blocks share `.rp-code` (`codeBlocks.test.ts`).
+- A block whose lines must stay whole (a shell command, a document whose identifiers someone may
+  compare or retype) adds `rp-code--nowrap`: it scrolls sideways inside itself instead of breaking
+  a word. Payloads keep the wrapping default.
+- Long machine identifiers shown for reference (UUIDs, key fingerprints, hashes) use `LongId`: one
+  monospace line, shortened in the middle with the last eight characters kept, the full value in its
+  tooltip and on a copy button. It fills a box its surroundings size (a `Descriptions` item, a
+  stretched `Flex` child), never running text or a `Space` item. A value an administrator must
+  compare character by character before confirming (a trust review's key or fingerprint) stays
+  whole and wraps.
 
 ## Checklist for a UI change
 

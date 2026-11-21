@@ -14,7 +14,7 @@ function counter(value: string, zero: boolean) {
   return /^(0|[1-9][0-9]*)$/.test(value) && value.length <= 19 && BigInt(value) <= 9223372036854775807n && (zero || value !== '0')
 }
 
-export default function AppPlatformPublishersPanel() {
+export default function AppPlatformPublishersPanel({ onInitialized }: { onInitialized?: () => void } = {}) {
   const { t } = useTranslation()
   const { user } = useAuth()
   const [directory, setDirectory] = useState<PublisherDirectory | null>(null)
@@ -110,6 +110,7 @@ export default function AppPlatformPublishersPanel() {
       await api.post(request.action === 'initialize' ? `${root}/control/initialize` : `${root}/publishers`, request)
       if (!live(account, epoch)) return
       setPending(null); setEditor(null); setDirectory(null); setReload(v => v + 1)
+      if (request.action === 'initialize') onInitialized?.()
     } catch (e) {
       if (live(account, epoch)) { setError(errText(e, t)); setDirty(true); setPending(null); setEditor(null) }
     } finally { if (live(account, epoch)) { active.current = false; setBusy(false) } }

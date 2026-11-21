@@ -2629,7 +2629,7 @@ body {
 .rp-audit-record__raw.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding-inline: 0; color: var(--ant-color-primary); }
 .rp-audit-record__raw.ant-collapse .ant-collapse-content-box { padding-inline: 0; }
 /* Code and payload blocks (codeBlocks.test.ts): one template, wrapped rather than scrolled sideways
-   so a command or a payload reads on a phone, bounded in height. */
+   so a payload reads on a phone, bounded in height. Commands use rp-code--nowrap below. */
 .rp-code {
   max-height: 320px;
   margin: 0;
@@ -2641,6 +2641,41 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
 }
+/* Commands and documents whose lines must stay whole (rp-code--nowrap): a command or an identifier
+   broken mid-word cannot be read or retyped, so the block
+   scrolls sideways inside itself instead (never the page). */
+.rp-code.rp-code--nowrap {
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
+/* Long identifiers (LongId): one monospace line, shortened in the middle, the copy button kept. */
+/* width 0 + min-width 100%: the identifier fills its box but adds nothing to the box's intrinsic
+   width, so a table cell or a flex item around it shrinks to the space there is. It therefore needs
+   a box whose width is set by its surroundings (a Descriptions item, a stretched Flex child, a
+   block); in a shrink-to-fit box (a Space item, a Tag) or inside running text it has no width to
+   take. */
+.rp-id.ant-typography {
+  display: inline-flex;
+  align-items: center;
+  width: 0;
+  min-width: 100%;
+  font-family: var(--ant-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  vertical-align: bottom;
+  overflow: hidden;
+}
+.rp-id__value { display: flex; min-width: 0; }
+.rp-id__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-id__tail { flex: none; white-space: nowrap; }
+.rp-id .ant-typography-copy { flex: none; }
 /* The leading chevron: small and quiet, turning down to point at its open record. */
 .rp-audit-expand.ant-btn { width: 24px; height: 24px; color: var(--ant-color-text-tertiary); }
 .rp-audit-expand.ant-btn:hover { color: var(--ant-color-text); }

@@ -425,14 +425,14 @@ The journal, the installed applications and their `/data` are never copied, so n
 
    If aaPanel does not read them, anchan's host-specific compose file drops the `profiles:` key and states its values literally, and the procedure is the CLI one: `cd /data/report-portal && docker compose …`.
 2. **Install the compose file** with the new service, then start Portal: `docker compose up -d report-portal`. On anchan, Portal's database is the host's.
-3. **Get the enrollment document.** Prepare the runtime binding in the admin console, and save the enrollment document on the host.
+3. **Get the enrollment document.** In **Manage → Apps → Publishers**, press **Initialize application platform**, then **Prepare runtime binding** on the **Application runner** card, and save the document on the host (`GET /api/admin/app-platform/runtime`, `POST /api/admin/app-platform/control/runtime` with `prepare`).
 4. **Provision.** Run `host-setup` (plan only), then:
 
    ```sh
    host-setup --apply --image-dir /data/portal-runner --data-size 8G --checkpoint-size 16G --enrollment …
    ```
 5. **Start.** Add the `.env` lines, which change `PORTAL_UID` and `PORTAL_GID` to 41001 (Q3), then `docker compose up -d`.
-6. **Confirm** the runtime in the admin console.
+6. **Confirm** the runtime: **Confirm runtime** on the same card (`confirm` on the same route).
 
 ## 11. Test plan (these must fail first)
 

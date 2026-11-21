@@ -543,6 +543,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/secret-bindings/{id}/revoke", s.apiPlatformSecretBindingRevoke)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/initialize", s.apiPlatformControlInitialize)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/end-recovery", s.apiPlatformEndRecovery)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/runtime", s.apiPlatformRuntimeStatus)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/runtime", s.apiPlatformRuntimeControl)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/replacement-runtime", s.apiPlatformReplacementRuntime)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/abandon-runtime", s.apiPlatformAbandonRuntime)
 	// V2 documents remain session-only and inherit the enrolment wall. Response

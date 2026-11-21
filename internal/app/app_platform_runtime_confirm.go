@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -21,6 +22,10 @@ type platformRuntimeEndpoint struct {
 	path                         string
 	controllerUID, controllerGID uint32
 }
+
+// errAppPlatformRuntimeNotObserved is a confirmation whose runner gave no enrollment observation: it is
+// not running, cannot be reached through the endpoint, or has no enrollment.
+var errAppPlatformRuntimeNotObserved = errors.New("application runner reported no enrollment")
 
 func (s *Server) platformRuntimeEndpoint() (platformRuntimeEndpoint, bool) {
 	if s == nil {
@@ -140,7 +145,10 @@ func (s *Server) confirmPlatformRuntimeBindingMode(ctx context.Context, session 
 	}
 	observation, err := observe(ctx, endpoint)
 	if err != nil {
-		return platformRuntimeRegistration{}, err
+		if ctx.Err() != nil {
+			return platformRuntimeRegistration{}, err
+		}
+		return platformRuntimeRegistration{}, errors.Join(errAppPlatformRuntimeNotObserved, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return platformRuntimeRegistration{}, err
