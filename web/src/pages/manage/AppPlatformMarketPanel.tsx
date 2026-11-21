@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Descriptions, Empty, Input, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Descriptions, Empty, Input, Space, Switch, Table, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../auth'
 import { api, errText } from '../../api/client'
 import { parsePlatformMarket, type PlatformMarketHint, type PlatformRelease } from '../../api/appPlatform'
 
 const root = '/api/admin/app-platform'
+type OfficialSource = { name: string; url: string; enabled: boolean }
+function parseSources(value: unknown): OfficialSource | null {
+  const official = value && typeof value === 'object' ? (value as { official?: unknown }).official : undefined
+  if (!official || typeof official !== 'object') return null
+  const { name, url, enabled } = official as Record<string, unknown>
+  return typeof name === 'string' && typeof url === 'string' && url.startsWith('https://') && typeof enabled === 'boolean' ? { name, url, enabled } : null
+}
 
 export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange }: { disabled: boolean; onReady: (release: PlatformRelease) => void; onBusyChange: (busy: boolean) => void }) {
   const { t } = useTranslation()
@@ -17,6 +24,8 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
   const [error, setError] = useState('')
   const [ready, setReady] = useState(false)
   const [verifiedRelease, setVerifiedRelease] = useState<PlatformRelease | null>(null)
+  const [official, setOfficial] = useState<OfficialSource | null>(null)
+  const [switching, setSwitching] = useState(false)
   const owner = useRef(user)
   owner.current = user
   const mounted = useRef(false)
@@ -39,6 +48,25 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     return () => { mounted.current = false; generation.current = {}; reportBusy.current(false) }
   }, [user])
 
+  useEffect(() => {
+    const abort = new AbortController()
+    setOfficial(null)
+    // The built-in catalogue is a preset only; a failed read leaves the URL field as the way in.
+    api.get<unknown>(`${root}/market/sources`, { signal: abort.signal }).then(value => { if (!abort.signal.aborted) setOfficial(parseSources(value)) }).catch(() => {})
+    return () => abort.abort()
+  }, [user])
+
+  const toggleOfficial = async (enabled: boolean) => {
+    if (!official || switching) return
+    const account = user
+    setSwitching(true); setError('')
+    try {
+      await api.post(`${root}/market/sources`, { official_enabled: enabled })
+      if (mounted.current && owner.current === account) setOfficial({ ...official, enabled })
+    } catch (e) { if (mounted.current && owner.current === account) setError(errText(e, t)) }
+    finally { if (mounted.current && owner.current === account) setSwitching(false) }
+  }
+
   const changeAddress = (next: string) => {
     generation.current = {}
     active.current = false
@@ -47,9 +75,10 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     reportBusy.current(false)
   }
 
-  const discover = async () => {
-    if (active.current || disabled || !address.trim()) return
-    const account = user, epoch = generation.current, requested = address.trim()
+  const discover = async (preset?: string) => {
+    const requested = (preset ?? address).trim()
+    if (active.current || disabled || !requested) return
+    const account = user, epoch = generation.current
     active.current = true; setBusy('discover'); setError(''); setReady(false)
     setVerifiedRelease(null); setEntries(null)
     // Discovery does not change package state and remains independently editable.
@@ -90,6 +119,14 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
   return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
     <Typography.Title level={5}>{t('appMarket.title')}</Typography.Title>
     <Typography.Paragraph type="secondary">{t('appMarket.description')}</Typography.Paragraph>
+    {official && <Space wrap align="center">
+      <Tag color="blue">{t('appMarket.builtin')}</Tag>
+      <Typography.Text strong>{official.name}</Typography.Text>
+      {official.enabled
+        ? <Button disabled={disabled || busy !== null} loading={busy === 'discover' && address === official.url} onClick={() => { changeAddress(official.url); void discover(official.url) }}>{t('appMarket.browseOfficial')}</Button>
+        : <Typography.Text type="secondary">{t('appMarket.officialDisabled')}</Typography.Text>}
+      <Switch size="small" aria-label={t('appMarket.officialEnabled')} checked={official.enabled} loading={switching} disabled={disabled || busy !== null} onChange={checked => void toggleOfficial(checked)} />
+    </Space>}
     <Space.Compact style={{ width: '100%' }}>
       <Input aria-label={t('appMarket.catalogueURL')} placeholder="https://…/index.json" value={address} maxLength={2048} disabled={disabled || busy === 'stage'} onChange={e => changeAddress(e.target.value)} onPressEnter={() => void discover()} />
       <Button loading={busy === 'discover'} disabled={disabled || busy === 'stage' || !address.trim()} onClick={() => void discover()}>{t('appMarket.fetch')}</Button>

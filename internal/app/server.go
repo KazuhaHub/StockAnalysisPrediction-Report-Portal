@@ -47,6 +47,11 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	// platformBuiltinPublishers and platformOfficialCatalogue are the built-in official sources (doc 189). The
+	// production constructor sets them; a bare test Server has none.
+	platformBuiltinPublishers []platformBuiltinPublisher
+	platformOfficialCatalogue string
+
 	platformBackendRequests platformDocumentBudget
 	platformNetworkRequests platformDocumentBudget
 	platformNetworkStreams  platformDocumentBudget
@@ -330,7 +335,8 @@ func RunServer(cfgPath string) {
 		log.Printf("\n%s\n  first run: created admin account\n    username: admin\n    password: %s\n  log in and change the password in Users soon.\n%s", bar, pw, bar)
 	}
 	s := &Server{cfg: cfg, st: st, appTok: newAppTokens(30 * time.Minute), loginThr: newLoginThrottle(), v1Rate: newRateLimiter(),
-		trustedNets: trustedNets, captchaSvc: captcha.New()}
+		trustedNets: trustedNets, captchaSvc: captcha.New(),
+		platformBuiltinPublishers: platformOfficialPublishers, platformOfficialCatalogue: platformOfficialCatalogueURL}
 	configurePlatformRuntimeEndpoint(s)
 	// The failed-login ceiling and its window are settings (limits.go); handing the throttle the
 	// reader rather than the numbers is what makes a change on the settings page apply to the next
@@ -412,7 +418,11 @@ func RunServer(cfgPath string) {
 	s.wireExportCleanup()
 	s.exportRecover()        // return jobs a restart interrupted to the queue before the worker starts
 	s.platformImageRecover() // drop what a crash left in the managed image stores before any operation uses them
-	go s.exportLoop()        // the data-export task worker and its hourly expiry sweep (ADR 0045)
+	// Seed or complete the built-in publisher on an initialized deployment; a failure leaves trust as it was.
+	if err := s.ensurePlatformBuiltinTrust(context.Background()); err != nil {
+		log.Printf("app platform: built-in publisher check failed: %v", err)
+	}
+	go s.exportLoop() // the data-export task worker and its hourly expiry sweep (ADR 0045)
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

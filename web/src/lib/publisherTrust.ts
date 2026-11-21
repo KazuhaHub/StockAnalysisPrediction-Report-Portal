@@ -1,8 +1,9 @@
 export interface PublisherNamespace { kind: 'exact' | 'prefix'; value: string }
 export interface PublisherKeyInput { id: string; public_key: string; not_before_ms: string; not_after_ms: string | null }
 export interface PublisherKey extends PublisherKeyInput { algorithm: 'Ed25519'; revision: string; revoked_ms: string | null }
-export interface TrustedPublisher { id: string; enabled: boolean; revision: string; namespaces: PublisherNamespace[]; keys: PublisherKey[] }
-export interface PublisherDirectory { initialized: boolean; paused: boolean; publishers: TrustedPublisher[] }
+// builtin/display_name mark the publisher Portal ships (doc 189); the server sets them only on a matching row.
+export interface TrustedPublisher { id: string; enabled: boolean; revision: string; namespaces: PublisherNamespace[]; keys: PublisherKey[]; builtin?: boolean; display_name?: string }
+export interface PublisherDirectory { initialized: boolean; paused: boolean; publishers: TrustedPublisher[]; builtin_conflict?: boolean }
 export type PublisherMutation =
   | { action: 'initialize' }
   | { action: 'register'; publisher_id: string; enabled: boolean; namespaces: PublisherNamespace[]; key: PublisherKeyInput }

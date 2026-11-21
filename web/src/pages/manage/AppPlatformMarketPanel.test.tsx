@@ -164,7 +164,8 @@ describe('remote application catalogue', () => {
     mock.user = 'admin'
     page.rerender(<AppPlatformMarketPanel disabled={false} onReady={ready} onBusyChange={() => {}} />)
     await act(async () => resolve({ release_sha256: digest }))
-    expect(mock.get).not.toHaveBeenCalled()
+    // Only the mount-time read of the catalogue sources; nothing for the late staging response.
+    expect(mock.get.mock.calls.every(([url]) => String(url).endsWith('/market/sources'))).toBe(true)
     expect(ready).not.toHaveBeenCalled()
   })
 
@@ -193,5 +194,35 @@ describe('remote application catalogue', () => {
       },
     })
     expect(result.violations).toEqual([])
+  })
+
+  it('browses the built-in official catalogue without typing a URL', async () => {
+    const official = 'https://raw.githubusercontent.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/catalogue/catalogue.json'
+    mock.get.mockImplementation((url: string) => Promise.resolve(url.endsWith('/market/sources') ? { official: { name: 'Kazuha Hub', url: official, enabled: true } } : { items: [verified], next_cursor: '' }))
+    const user = userEvent.setup()
+    render(<AppPlatformMarketPanel disabled={false} onReady={() => {}} onBusyChange={() => {}} />)
+    expect(await screen.findByText('Kazuha Hub')).toBeTruthy()
+    expect(screen.getByText('appMarket.builtin')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'appMarket.browseOfficial' }))
+    expect(mock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, { catalogue_url: official })
+    await screen.findByText('notes')
+    await user.click(screen.getByRole('button', { name: 'appMarket.verifyDownload' }))
+    expect(mock.post).toHaveBeenCalledWith(`${root}/market/stage`, { catalogue_url: official, release_sha256: digest })
+  })
+
+  it('disables and re-enables the official catalogue explicitly', async () => {
+    let enabled = true
+    const official = 'https://raw.githubusercontent.com/x/y/catalogue/catalogue.json'
+    mock.get.mockImplementation((url: string) => Promise.resolve(url.endsWith('/market/sources') ? { official: { name: 'Kazuha Hub', url: official, enabled } } : { items: [], next_cursor: '' }))
+    mock.post.mockImplementation((url: string, body: { official_enabled?: boolean }) => { if (url.endsWith('/market/sources')) enabled = !!body.official_enabled; return Promise.resolve({ official_enabled: enabled }) })
+    const user = userEvent.setup()
+    render(<AppPlatformMarketPanel disabled={false} onReady={() => {}} onBusyChange={() => {}} />)
+    await user.click(await screen.findByRole('switch', { name: 'appMarket.officialEnabled' }))
+    expect(mock.post).toHaveBeenCalledWith(`${root}/market/sources`, { official_enabled: false })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'appMarket.browseOfficial' })).toBeNull())
+    expect(screen.getByText('appMarket.officialDisabled')).toBeTruthy()
+    await user.click(screen.getByRole('switch', { name: 'appMarket.officialEnabled' }))
+    expect(mock.post).toHaveBeenLastCalledWith(`${root}/market/sources`, { official_enabled: true })
+    expect(await screen.findByRole('button', { name: 'appMarket.browseOfficial' })).toBeTruthy()
   })
 })

@@ -138,7 +138,12 @@ func platformReadSessionAccount(e migExec, session platformActorSession, now int
 }
 
 func (s *Server) initializeAppPlatformControl(session platformActorSession) error {
-	return s.withAppPlatformActor(session, true, nil)
+	if len(s.platformBuiltinPublishers) == 0 {
+		return s.withAppPlatformActor(session, true, nil)
+	}
+	return s.withAppPlatformActor(session, true, func(e migExec, _ platformActorFacts, control platformActorControl) error {
+		return s.seedPlatformBuiltinTrust(e, control.nowMS)
+	})
 }
 
 func (s *Server) withAppPlatformActor(session platformActorSession, initialize bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {

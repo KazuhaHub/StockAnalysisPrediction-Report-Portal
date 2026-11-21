@@ -51,6 +51,15 @@ func (s *Server) endPlatformRecovery(session platformActorSession) error {
 }
 
 func (s *Server) endPlatformRecoveryContext(ctx context.Context, session platformActorSession) error {
+	err := s.endPlatformRecoveryTx(ctx, session)
+	if err == nil {
+		// A restored dump may predate the built-in publisher; trust it now rather than at the next restart.
+		s.ensurePlatformBuiltinTrustLogged(ctx)
+	}
+	return err
+}
+
+func (s *Server) endPlatformRecoveryTx(ctx context.Context, session platformActorSession) error {
 	return s.withPlatformRecoveryTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		var inflight int
 		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE action IN ('restore_import','restore') AND completed_ms IS NULL`).Scan(&inflight); err != nil {
