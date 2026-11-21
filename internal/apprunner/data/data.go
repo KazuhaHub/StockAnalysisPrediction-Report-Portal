@@ -346,22 +346,6 @@ type importFootprint struct {
 	overflow             bool
 }
 
-// importFootprintOf is the rounded footprint of an archive's entries on a filesystem with the given block size.
-// A link entry adds no inode and no bytes: it names a file whose first path is already charged.
-func importFootprintOf(entries []restoreEntry, block int64) *importFootprint {
-	footprint := newImportFootprint(block)
-	for _, entry := range entries {
-		switch {
-		case entry.link != "":
-		case entry.directory:
-			footprint.addDirectory()
-		default:
-			footprint.addFile(entry.size)
-		}
-	}
-	return footprint
-}
-
 func newImportFootprint(block int64) *importFootprint {
 	f := &importFootprint{block: block}
 	if block <= 0 || block&(block-1) != 0 {
