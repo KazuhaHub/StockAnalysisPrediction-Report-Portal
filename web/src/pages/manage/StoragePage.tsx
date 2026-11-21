@@ -403,7 +403,7 @@ export default function StoragePage() {
   return (
     <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
     <>
-    {loaded && loadErr && <Alert type="error" showIcon title={loadErr} style={{ marginBottom: 16 }} />}
+    {loaded && loadErr && <Alert type="error" showIcon title={loadErr} />}
     <SettingsWorkspace active={section} onChange={setSection} sections={[
       { key: 'usage', label: t('manage.operation.usage') }, { key: 'policy', label: t('manage.operation.retention') },
       { key: 'login', label: t('manage.operation.loginHistory') }, { key: 'platform', label: t('manage.operation.platformRetention') }, { key: 'history', label: t('manage.operation.cleanupHistory') },

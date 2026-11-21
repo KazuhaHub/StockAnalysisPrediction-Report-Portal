@@ -277,7 +277,7 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
                   />
                 }
               >
-                {modeHint && <Alert type="info" showIcon closable onClose={() => setModeHint(false)} title={t('export.mode.advancedOnly')} style={{ marginBottom: 12 }} />}
+                {modeHint && <Alert type="info" showIcon closable onClose={() => setModeHint(false)} title={t('export.mode.advancedOnly')} />}
                 {mode === 'filter' ? (
                   <FilterBar source={source} filter={filter} onChange={setFilter} labels={labels} today={today} />
                 ) : (

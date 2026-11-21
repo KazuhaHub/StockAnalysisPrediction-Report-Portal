@@ -33,6 +33,6 @@ export default function AppPageHeader({ name, icon, state, onBack }: {
           onClick={() => state.invoke(action.id)}>{action.label}</Button>)}
       </Flex>}
     </Flex>
-    {state?.outcome === 'uncertain' && <Alert style={{ marginTop: 12 }} type="warning" showIcon title={t('apps.v2ActionUncertain')} />}
+    {state?.outcome === 'uncertain' && <Alert type="warning" showIcon title={t('apps.v2ActionUncertain')} />}
   </div>
 }

@@ -122,7 +122,7 @@ export default function RegisterPage() {
         </Typography.Text>
       )}
       {config?.requires_verification && (
-        <Alert type="info" showIcon title={t('register.willVerify')} style={{ marginBottom: 12 }} />
+        <Alert type="info" showIcon title={t('register.willVerify')} />
       )}
       <Button type="primary" size="large" htmlType="submit" block loading={busy}>
         {t('register.submit')}

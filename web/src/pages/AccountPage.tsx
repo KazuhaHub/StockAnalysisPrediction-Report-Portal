@@ -321,7 +321,7 @@ function TwoFactorCard({ enabled, allowed, onChange }: { enabled: boolean; allow
         onCancel={() => setRecovery([])}
         cancelButtonProps={{ style: { display: 'none' } }}
       >
-        <Alert type="warning" showIcon title={t('account.recoveryWarn')} style={{ marginBottom: 12 }} />
+        <Alert type="warning" showIcon title={t('account.recoveryWarn')} />
         <Typography.Paragraph copyable={{ text: recovery.join('\n') }}>
           {recovery.map((c) => (
             <div key={c}>

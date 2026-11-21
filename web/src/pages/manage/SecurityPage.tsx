@@ -241,7 +241,7 @@ function GlobalSecuritySettings() {
           <Switch checked={login.sso_only} onChange={(v) => setLogin({ ...login, sso_only: v })} />
         </Row>
         {!login.sso_available && (login.mode !== 'local_only' || login.sso_only) && (
-          <Alert type="warning" showIcon style={{ marginTop: 12 }} title={t('security.noProviderWarning')} />
+          <Alert type="warning" showIcon title={t('security.noProviderWarning')} />
         )}
       </Card>
       </SettingsPanel>

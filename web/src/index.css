@@ -63,6 +63,13 @@ body {
 .ant-card .ant-card-head > .ant-card-head-wrapper { flex-wrap: wrap; column-gap: 12px; row-gap: 8px; padding-block: 8px; }
 .ant-card-head .ant-card-head-title { flex: 1 0 auto; max-width: 100%; }
 .ant-card-head .ant-card-extra { margin-inline-start: auto; max-width: 100%; }
+/* An alert never touches the content before or after it: inside a generic block container (an antd
+   card, modal, drawer, form, tab pane, collapse panel or popover body, a spin wrapper, or a plain
+   unclassed div) it keeps 12px from its neighbours. Vertical margins collapse, so two alerts in a row
+   stay 12px apart. A classed layout container (rp-*, Flex, Space, Row) spaces its children with its
+   own gap and is left to it. Alerts set no margin of their own (alertSpacing.test.ts). */
+:where(.ant-card:not(.rp-dashboard-summary .ant-card) > .ant-card-body, .ant-modal-body, .ant-drawer-body, .ant-form, .ant-tabs-tabpane, .ant-collapse-body, .ant-spin-container, .rp-admin-page-body, .rp-settings-panel, .ant-form-item-control-input-content, div:not([class]):not([style*="display: flex"]):not([style*="display: inline-flex"]):not([style*="display: grid"]):not([style*="display: inline-grid"])) > .ant-alert:not(:last-child) { margin-block-end: 12px; }
+:where(.ant-card:not(.rp-dashboard-summary .ant-card) > .ant-card-body, .ant-modal-body, .ant-drawer-body, .ant-form, .ant-tabs-tabpane, .ant-collapse-body, .ant-spin-container, .rp-admin-page-body, .rp-settings-panel, .ant-form-item-control-input-content, div:not([class]):not([style*="display: flex"]):not([style*="display: inline-flex"]):not([style*="display: grid"]):not([style*="display: inline-grid"])) > * + .ant-alert { margin-block-start: 12px; }
 /* LoadingPlaceholder: the loading ring and its words, centred in the space the view will fill. */
 .rp-loading {
   display: grid;

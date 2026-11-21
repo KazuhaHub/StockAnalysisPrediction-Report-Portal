@@ -182,7 +182,7 @@ export default function ReviewPage() {
         extra={total > 0 ? filters : undefined}
         styles={{ body: { paddingTop: 12 } }}
       >
-        {err && <Alert type="error" showIcon title={err} style={{ marginBottom: 12 }} />}
+        {err && <Alert type="error" showIcon title={err} />}
 
         {!loading && total === 0 && !err ? (
           // Empty is the expected state until the workflow emits any. Say what is missing and

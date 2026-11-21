@@ -113,7 +113,7 @@ export default function AppPostgresPolicyPanel({ root, installation, ready, onCh
     void refresh()
   }, [refresh])
 
-  if (!preview) return loadError ? <Alert type="error" showIcon title={loadError} style={{ marginTop: 12 }} /> : null
+  if (!preview) return loadError ? <Alert type="error" showIcon title={loadError} /> : null
   if (!preview.declared) return null
 
   const editable = ready && preview.ready

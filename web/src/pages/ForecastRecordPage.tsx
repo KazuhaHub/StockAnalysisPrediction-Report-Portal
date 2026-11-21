@@ -377,9 +377,9 @@ export default function ForecastRecordPage() {
         />
 
         {mode === 'custom' && (
-          <Alert type="warning" showIcon closable={false} title={t('forecast.custom.banner')} style={{ marginBottom: 12 }} />
+          <Alert type="warning" showIcon closable={false} title={t('forecast.custom.banner')} />
         )}
-        {paused && <Alert type="warning" showIcon role="note" title={t('forecast.phase.settlement_paused')} style={{ marginBottom: 12 }} />}
+        {paused && <Alert type="warning" showIcon role="note" title={t('forecast.phase.settlement_paused')} />}
 
         <span className="rp-sr-only" role="status">{status}</span>
         {body()}

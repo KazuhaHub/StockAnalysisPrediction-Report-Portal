@@ -748,7 +748,6 @@ export default function StockPage() {
               <Alert
                 type="error"
                 showIcon
-                style={{ marginTop: 12 }}
                 title={predErr}
                 action={
                   <Button size="small" onClick={() => setPredNonce((n) => n + 1)}>

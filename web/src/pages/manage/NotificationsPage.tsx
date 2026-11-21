@@ -230,7 +230,7 @@ export default function NotificationsPage() {
       </Space>}
     </Drawer>
     <Modal open={!!action} title={t(action === 'replay' ? 'notify.replay' : 'notify.dismissUncertain')} onCancel={() => setAction(undefined)} onOk={finishAction} confirmLoading={busy} okButtonProps={{ disabled: !reason.trim() || (action === 'replay' && !!needsConfirmation && !confirmed) }}>
-      <Alert type="warning" title={t('notify.replayHelp')} /><Input.TextArea aria-label={t('notify.reason')} placeholder={t('notify.reason')} maxLength={500} value={reason} onChange={e => setReason(e.target.value)} style={{ marginTop: 16 }} />
+      <Alert type="warning" title={t('notify.replayHelp')} /><Input.TextArea aria-label={t('notify.reason')} placeholder={t('notify.reason')} maxLength={500} value={reason} onChange={e => setReason(e.target.value)} />
       {action === 'replay' && needsConfirmation && <Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>{t('notify.confirmDuplicate')}</Checkbox>}
     </Modal>
   </LoadGate>

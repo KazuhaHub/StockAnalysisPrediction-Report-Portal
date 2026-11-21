@@ -308,7 +308,6 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
               type="error"
               showIcon
               title={current.error}
-              style={{ marginBottom: 8 }}
               action={<Button size="small" onClick={retry}>{t('common.retry')}</Button>}
             />
           )}

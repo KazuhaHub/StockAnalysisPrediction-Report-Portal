@@ -144,7 +144,6 @@ function Row({
           <Alert
             type="warning"
             showIcon
-            style={{ marginTop: 6 }}
             title={t('batch.refresh.symbolLost', { name: r.symbol_input_lost })}
           />
         )}
