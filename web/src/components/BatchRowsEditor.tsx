@@ -838,7 +838,7 @@ export default function BatchRowsEditor({
       const { title, detail } = inputDisplayMeta(input)
       return {
         title: (
-          <TableColumnHeader id={input.key} name={title} onMeasure={measure} onResize={resize} onCancel={cancel}>
+          <TableColumnHeader id={input.key} name={title} min={MIN_COLUMN_WIDTH} onMeasure={measure} onResize={resize} onCancel={cancel}>
           <div className="rp-batch-grid-heading">
             <div className="rp-batch-grid-heading__title">
               <Tooltip title={title}>

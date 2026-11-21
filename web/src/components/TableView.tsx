@@ -52,6 +52,10 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   // rather than keeping columns hidden that it offers no way to bring back.
   const phone = !screens.sm
   const shown = available.filter((column) => phone || required.includes(columnKey(column)) || !preference.hidden.includes(columnKey(column)))
+  // A dragged column, and the neighbour that gives way to it, stop at the column's own minimum.
+  // A width stored before a column had its minimum is shown at the minimum, so a shrink never widens it.
+  const floorOf = (column: ColumnType<T>) => column.minWidth ?? 64
+  const widthOf = (column: ColumnType<T>, widths: ColumnWidths) => Math.max(floorOf(column), widths[columnKey(column)] ?? weight(column))
   const weight = (column: ColumnType<T>) => typeof column.width === 'number' ? column.width : 240
   const defaults = Object.fromEntries(source.map((column) => [columnKey(column), weight(column)]))
   const moveColumn = (from: string, to: string) => {
@@ -63,14 +67,15 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   const resizeColumn: ResizeColumn = (key, width, commit = true, snapshot = measured) => {
     if (!byKey.has(key) || !Number.isFinite(width)) return
     const widths = { ...defaults, ...preference.widths, ...snapshot }
-    const next = clampColumnWidth(width, 64), previous = widths[key]
+    source.forEach((column) => { widths[columnKey(column)] = Math.max(floorOf(column), widths[columnKey(column)]) })
+    const next = clampColumnWidth(width, floorOf(byKey.get(key)!)), previous = widths[key]
     const index = shown.findIndex((column) => columnKey(column) === key)
     const neighbor = index < 0 ? undefined : shown[index + 1] ?? shown[index - 1]
     // Exchange width with the adjacent column where possible, avoiding a jump in the overall
     // table width when a fitted layout first switches to explicit pixel widths.
     if (neighbor) {
       const other = columnKey(neighbor)
-      widths[other] = Math.max(64, widths[other] - (next - previous))
+      widths[other] = Math.max(floorOf(neighbor), widths[other] - (next - previous))
     }
     widths[key] = next
     if (commit) { setDraftWidths(null); save({ ...preference, fit: false, widths }) }
@@ -79,7 +84,7 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   const fit = preference.fit && draftWidths === null
   const explicit = draftWidths ?? preference.widths
   const minimum = shown.reduce((sum, column) => sum + (column.minWidth ?? 96), 0)
-  const total = shown.reduce((sum, column) => sum + (explicit[columnKey(column)] ?? weight(column)), 0)
+  const total = shown.reduce((sum, column) => sum + widthOf(column, explicit), 0)
   const labelOf = (column: ColumnType<T>) => labels[columnKey(column)] ?? (typeof column.title === 'function' ? columnKey(column) : column.title || t('table.actions'))
   const nameOf = (column: ColumnType<T>) => { const label = labelOf(column); return typeof label === 'string' || typeof label === 'number' ? String(label) : columnKey(column) }
   const fixedOf = (column: ColumnType<T>, index: number) =>
@@ -99,10 +104,10 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   const components = useMemo(() => makeColumnMenuComponents(live), [])
   // phoneLabel: the header is a component here, so CardTable is told the column's name for its cards.
   const columns: (ColumnType<T> & { phoneLabel?: string })[] = shown.map((column, index) => ({ ...column, responsive: undefined, phoneLabel: nameOf(column),
-    width: fit ? `${(column.minWidth ?? 96) / minimum * 100}%` : explicit[columnKey(column)] ?? weight(column),
+    width: fit ? `${(column.minWidth ?? 96) / minimum * 100}%` : widthOf(column, explicit),
     fixed: fixedOf(column, index),
     onHeaderCell: (data) => ({ ...column.onHeaderCell?.(data), 'data-column-key': columnKey(column) } as HTMLAttributes<HTMLElement>),
-    title: (props) => <TableColumnHeader id={columnKey(column)} name={nameOf(column)} onMeasure={measure}
+    title: (props) => <TableColumnHeader id={columnKey(column)} name={nameOf(column)} min={floorOf(column)} onMeasure={measure}
       onResize={resizeColumn} onCancel={() => setDraftWidths(null)}
       extra={index === shown.length - 1 ? <ColumnMenuButton state={menu} open={menuOpen} onOpenChange={setMenuOpen} /> : undefined}>
       {typeof column.title === 'function' ? column.title(props) : column.title}

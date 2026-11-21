@@ -37,6 +37,19 @@ describe('CardTable', () => {
     expect(container.querySelector('.ant-table-content')?.getAttribute('style') ?? '').not.toContain('overflow-x: auto')
   })
 
+  // A card does not scroll sideways, so a pinned column has nothing to stay put against; antd's pin
+  // shadow would otherwise reach past the card's edge and push the page sideways.
+  it('unpins columns on a phone and keeps them pinned on a wide screen', () => {
+    const pinned = [{ ...columns[0], fixed: 'left' as const }, { ...columns[1], fixed: 'right' as const }]
+    width(true)
+    const phone = render(<CardTable<Row> rowKey="id" columns={pinned} dataSource={rows} scroll={{ x: 900 }} />)
+    expect(phone.container.querySelector('.ant-table-cell-fix-start, .ant-table-cell-fix-end, .ant-table-cell-fix-left, .ant-table-cell-fix-right')).toBeNull()
+    phone.unmount()
+    width(false)
+    const wide = render(<CardTable<Row> rowKey="id" columns={pinned} dataSource={rows} scroll={{ x: 900 }} />)
+    expect(wide.container.querySelector('.ant-table-tbody .ant-table-cell-fix-start, .ant-table-tbody .ant-table-cell-fix-left')).not.toBeNull()
+  })
+
   it('keeps a column’s own cell props', () => {
     width(true)
     const own = [{ title: 'Name', dataIndex: 'name', key: 'name', onCell: () => ({ title: 'own' }) }]

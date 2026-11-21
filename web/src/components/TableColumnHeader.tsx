@@ -4,8 +4,10 @@ import { useTranslation } from 'react-i18next'
 export type ColumnWidths = Record<string, number>
 export type ResizeColumn = (key: string, width: number, commit?: boolean, snapshot?: ColumnWidths) => void
 
-export default function TableColumnHeader({ id, name, children, extra, onMeasure, onResize, onCancel }: {
+export default function TableColumnHeader({ id, name, children, extra, min = 64, onMeasure, onResize, onCancel }: {
   id: string; name: string; children: ReactNode; extra?: ReactNode
+  /** The narrowest the column may be dragged; the table's own floor applies on top. */
+  min?: number
   onMeasure: (key: string, width: number) => void
   onResize: ResizeColumn
   onCancel: () => void
@@ -36,7 +38,7 @@ export default function TableColumnHeader({ id, name, children, extra, onMeasure
   return <div className="rp-table-column-title" ref={title} data-resize-column={id}>
     <span>{children}</span>
     {extra}
-    <span role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={64} aria-valuemax={1200}
+    <span role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={1200}
       aria-valuenow={width} aria-label={t('table.resizeColumn', { name })} title={t('table.resizeColumn', { name })}
       className="rp-table-resize-handle"
       onClick={(event) => event.stopPropagation()}
@@ -50,7 +52,7 @@ export default function TableColumnHeader({ id, name, children, extra, onMeasure
       onPointerMove={(event) => {
         const active = drag.current
         if (!active || active.pointer !== event.pointerId) return
-        active.next = Math.max(64, Math.min(1200, active.width + event.clientX - active.x))
+        active.next = Math.max(min, Math.min(1200, active.width + event.clientX - active.x))
         onResize(id, active.next, false, active.snapshot)
       }}
       onPointerUp={(event) => {
