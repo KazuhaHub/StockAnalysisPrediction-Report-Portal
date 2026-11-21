@@ -8,6 +8,8 @@
 #   # To enable legacy-portal passthrough / change settings: log in and configure under Settings
 #
 # Update: docker compose pull && docker compose up -d
+#   First `mkdir -p app-runner-control` beside this file if it is not there yet (this release binds it into the
+#   portal, and Docker never creates a bind source: the portal would not start).
 #   Always the whole project, with no service names. One variable, PORTAL_VERSION, selects the Portal image and
 #   the app-runner image together, and the two must come from the same release: never `docker compose pull
 #   report-portal` or `up -d report-portal` alone across a version change. Production pins PORTAL_VERSION to a

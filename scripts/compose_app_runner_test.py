@@ -110,6 +110,14 @@ class PortalServiceTests(unittest.TestCase):
         self.assertIn('PUID: ${PORTAL_UID:-10001}', self.portal)
         self.assertIn('PGID: ${PORTAL_GID:-10001}', self.portal)
 
+    def test_update_instructions_make_the_control_directory_too(self):
+        # A host that replaces its compose file by updating it (not by the zero-clone steps) still needs the bind
+        # source, because Docker never creates it.
+        head = compose().split('\nservices:\n', 1)[0]
+        update = head[head.index('# Update:'):]
+        update = update[:update.index('\n#\n')]
+        self.assertIn('mkdir -p app-runner-control', update)
+
     def test_header_makes_the_control_directory_for_static_installs(self):
         self.assertIn('mkdir -p app-runner-control', compose().split('\nservices:\n', 1)[0])
 
