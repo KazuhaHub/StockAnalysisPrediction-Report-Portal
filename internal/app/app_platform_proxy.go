@@ -225,6 +225,10 @@ func parsePlatformProxyPlan(raw string) (platformProxyPlan, error) {
 		policyPins = parsed.Policy.Pins
 	}
 	if plan.Format == platformProxyReviewFormat {
+		// A 1-dev.1 plan predates pins: nothing in it binds a pin to the runner's entries.
+		if len(policyPins) > 0 {
+			return platformProxyPlan{}, fail
+		}
 		return plan, nil
 	}
 	if !validPlatformProxyPinDiff(plan, policyPins) {
