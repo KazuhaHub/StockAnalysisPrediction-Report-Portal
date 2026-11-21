@@ -5,7 +5,7 @@ import re
 import unittest
 from unittest.mock import patch
 import subprocess
-from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci, recorded_images, image_for
+from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci, recorded_images, image_for, guard_fixed_image
 
 # CI runs `python3 -B -m unittest discover -s scripts` from the repository root, so every file
 # these tests read is found relative to this one rather than to the working directory.
@@ -368,6 +368,42 @@ def metadata(portal_digest='sha256:' + 'a' * 64, runner_digest='sha256:' + 'b' *
         meta['images'] = {'portal': {'image': PORTAL, 'digest': portal_digest},
                           'app-runner': {'image': RUNNER, 'digest': runner_digest}}
     return meta
+
+
+class FixedImageGuardTests(unittest.TestCase):
+    """A fixed tag is never replaced, and a half-published release is never recovered as Portal-only."""
+
+    def guard(self, ref, existing):
+        with patch('release_guard.image_digest', side_effect=lambda r: existing.get(r)):
+            guard_fixed_image(ref)
+
+    def test_nothing_published_passes(self):
+        self.guard(PORTAL + ':v1', {})
+        self.guard(RUNNER + ':v1', {})
+
+    def test_an_existing_runner_tag_is_refused_and_points_at_a_rerun_not_at_recovery(self):
+        with self.assertRaisesRegex(RuntimeError, r'runner image exists.*Re-run the failed jobs'):
+            self.guard(RUNNER + ':v1', {RUNNER + ':v1': 'sha256:' + 'a' * 64})
+
+    def test_a_portal_tag_with_a_runner_tag_is_not_sent_to_the_portal_only_recovery(self):
+        existing = {PORTAL + ':v1': 'sha256:' + 'a' * 64, RUNNER + ':v1': 'sha256:' + 'b' * 64}
+        with self.assertRaises(RuntimeError) as raised:
+            self.guard(PORTAL + ':v1', existing)
+        self.assertNotIn('recover-release-metadata.py to verify', str(raised.exception))
+        self.assertIn('Re-run the failed jobs', str(raised.exception))
+
+    def test_a_portal_only_tag_still_points_at_recovery(self):
+        with self.assertRaisesRegex(RuntimeError, 'recover-release-metadata.py to verify'):
+            self.guard(PORTAL + ':v1', {PORTAL + ':v1': 'sha256:' + 'a' * 64})
+
+    def test_the_runner_job_runs_the_amd64_image_before_it_pushes_the_fixed_tag(self):
+        block = job_block(read_workflow('release.yml'), 'docker-runner')
+        load, push = block.index('load: true'), block.index('push: true')
+        probe = block.index('scripts/probe-runner-image.sh')
+        self.assertLess(load, probe)
+        self.assertLess(probe, push)
+        self.assertEqual(block.count('push: true'), 1)
+        self.assertEqual(block.count('push: false') + block.count('push: true'), block.count('docker/build-push-action'))
 
 
 class RunnerImageMetadataTests(unittest.TestCase):

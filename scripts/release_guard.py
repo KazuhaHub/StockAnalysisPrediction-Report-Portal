@@ -189,6 +189,26 @@ def verify_target(repo, tag, image, key='portal'):
     return images[key][1] if key in images else ''
 
 
+def guard_fixed_image(ref):
+    """Refuse when a fixed image tag already exists: it is never rebuilt or replaced.
+
+    The message depends on what is published. A release with a runner image is never recovered as Portal-only
+    (that would drop the runner image from its metadata), so its message points at re-running the failed jobs of
+    the original run, which read the images by digest. Only a Portal-only tag points at the recovery script.
+    """
+    if image_digest(ref) is None:
+        return
+    path, _, tag = ref.rpartition(':')
+    portal = path[:-len(RUNNER_IMAGE_SUFFIX)] if path.endswith(RUNNER_IMAGE_SUFFIX) else path
+    has_runner = path.endswith(RUNNER_IMAGE_SUFFIX) or image_digest(f'{image_for("app-runner", portal)}:{tag}') is not None
+    if has_runner:
+        raise RuntimeError('Fixed image already exists, and a runner image exists for this tag; do not rebuild or '
+                           'replace draft assets. Re-run the failed jobs of the original run (they read both images by '
+                           'digest); scripts/recover-release-metadata.py refuses a release that has a runner image.')
+    raise RuntimeError('Fixed image already exists; do not rebuild or replace draft assets. '
+                       'Use scripts/recover-release-metadata.py to verify and recover metadata.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['guard', 'wait-ci', 'verify-target', 'state', 'guard-draft'])
@@ -201,9 +221,7 @@ def main():
     if args.command != 'state' and not args.value:
         parser.error('value is required for this command')
     if args.command == 'guard':
-        if image_digest(args.value) is not None:
-            raise RuntimeError('Fixed image already exists; do not rebuild or replace draft assets. '
-                               'Use scripts/recover-release-metadata.py to verify and recover metadata.')
+        guard_fixed_image(args.value)
     elif args.command == 'state':
         read_state(args.repo)
     elif args.command == 'guard-draft':

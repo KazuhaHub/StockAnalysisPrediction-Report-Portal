@@ -45,7 +45,7 @@ class RecoveryTests(unittest.TestCase):
             elif args[:3] == ['gh','release','upload']:
                 uploaded.append(json.loads(Path(args[4]).read_text()))
         with patch.object(recovery, 'gh_json', side_effect=api), \
-             patch.object(recovery, 'image_digest', return_value='sha256:'+'c'*64), \
+             patch.object(recovery, 'image_digest', side_effect=lambda ref: None if '-app-runner' in ref else 'sha256:'+'c'*64), \
              patch.object(recovery.subprocess, 'run', side_effect=run), \
              patch.object(recovery.subprocess, 'check_output', side_effect=output):
             if mismatch:
@@ -60,6 +60,21 @@ class RecoveryTests(unittest.TestCase):
         self.exercise(False)
     def test_mismatch_never_uploads_metadata(self):
         self.exercise(True)
+
+    def test_a_release_with_a_runner_image_is_never_recovered_as_portal_only(self):
+        def api(endpoint):
+            if '/git/ref/' in endpoint:
+                return {'object': {'type': 'tag', 'sha': 'a' * 40}}
+            if '/git/tags/' in endpoint:
+                return {'object': {'type': 'commit', 'sha': 'b' * 40}}
+            return {'draft': True}
+        existing = {'ghcr.io/owner/repo:v2026.47': 'sha256:' + 'c' * 64, 'ghcr.io/owner/repo-app-runner:v2026.47': 'sha256:' + 'd' * 64}
+        with patch.object(recovery, 'gh_json', side_effect=api), \
+             patch.object(recovery, 'image_digest', side_effect=lambda ref: existing.get(ref)), \
+             patch.object(recovery.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'runner image'):
+                recovery.recover('owner/repo', 'v2026.47')
+            run.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()

@@ -851,6 +851,29 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/release_guard.py guard "${IMAGE}:${VERSION}"
+      # The amd64 image is built, loaded and run BEFORE the fixed tag is pushed (a pushed fixed tag is never replaced,
+      # so an image that cannot work must not reach the registry). The arm64 image is run by its own job after the
+      # push, from the digest.
+      - name: Build the linux/amd64 image locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile.app-runner
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: app-runner-prepush:amd64
+          provenance: false
+          cache-from: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:buildcache
+      - name: Run the linux/amd64 image before pushing
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          sh scripts/probe-runner-image.sh app-runner-prepush:amd64 linux/amd64 "${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
       - name: Build and push the fixed multi-arch image
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -871,7 +894,7 @@ jobs:
           provenance: false
           cache-from: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner:buildcache,mode=max
-      - name: Run the linux/amd64 image by digest
+      - name: Run the pushed linux/amd64 image by digest
         shell: bash
         env:
           IMAGE: ghcr.io/${{ needs.setup.outputs.owner_lc }}/${{ needs.setup.outputs.repo_lc }}-app-runner@${{ steps.push.outputs.digest }}
