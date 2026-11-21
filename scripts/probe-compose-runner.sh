@@ -51,6 +51,10 @@ cleanup() {
 	status=$?
 	if [ -z "${PROBE_KEEP:-}" ]; then
 		compose down --remove-orphans >/dev/null 2>&1 || true
+		systemctl disable --now portal-app-runner >/dev/null 2>&1 || true
+		rm -f /etc/systemd/system/portal-app-runner.service
+		rm -rf /opt/portal-app-runner
+		getent group portal-app-runner >/dev/null && groupdel portal-app-runner 2>/dev/null || true
 		for mnt in /srv/portal-runner/data /srv/portal-runner/checkpoint; do
 			umount "$mnt" 2>/dev/null || true
 		done
@@ -83,11 +87,12 @@ wait_ready() { # wait for the ready line of the CURRENT container, then for `hea
 
 pid_of_runner() { docker inspect -f '{{.State.Pid}}' report-portal-app-runner; }
 
-observe() {
+observe() { # [socket]
 	[ -n "$observer" ] || return 0
+	socket=${1:-$control/runner.sock}
 	env -i PATH=/usr/bin:/bin GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GOARCH="$(dpkg --print-architecture)" \
 		PORTAL_APP_RUNNER_SERVICE_ACCEPTANCE=1 PORTAL_APP_RUNNER_SERVICE_UID=$uid PORTAL_APP_RUNNER_SERVICE_GID=$gid \
-		PORTAL_APP_RUNNER_SERVICE_SOCKET="$control/runner.sock" PORTAL_APP_RUNNER_SERVICE_PUBLIC_KEY="$public" \
+		PORTAL_APP_RUNNER_SERVICE_SOCKET="$socket" PORTAL_APP_RUNNER_SERVICE_PUBLIC_KEY="$public" \
 		PORTAL_APP_RUNNER_SERVICE_DEPLOYMENT_ID="$deployment" PORTAL_APP_RUNNER_SERVICE_CONTROLLER_EPOCH="$epoch" \
 		PORTAL_APP_RUNNER_SERVICE_FINGERPRINT="$fingerprint" \
 		setpriv --reuid=$uid --regid=$gid --clear-groups --no-new-privs \
@@ -208,5 +213,94 @@ mount /srv/portal-runner/checkpoint
 compose up -d app-runner
 wait_ready
 observe
+
+# ---- Portal's bind of the control directory (doc 187 section 11, "Portal") -----------------------------------------
+# The runner image stands in for the Portal image: the checks are about what compose does with the bind, not about Portal.
+step "Portal's bind: read-only, and a missing source stops the container with an error naming it"
+docker tag "$image" ghcr.io/kazuhahub/stockanalysisprediction-report-portal:probe
+portal_run() { # control dir, then the shell command run in a report-portal container with the bind
+	RP_APP_RUNNER_CONTROL_DIR=$1 compose run --rm --no-deps --entrypoint sh report-portal -c "$2"
+}
+[ -d "$control" ] || fail "the control directory is missing"
+if portal_run "$control" 'touch /var/lib/portal-app-runner/control/created-by-portal' >"$work/ro.log" 2>&1; then
+	fail "Portal could create a file in the control directory"
+fi
+grep -qi 'read-only file system' "$work/ro.log" || { cat "$work/ro.log" >&2; fail "creating a file did not fail with a read-only file system"; }
+[ ! -e "$control/created-by-portal" ] || fail "a file appeared in the control directory"
+missing=$work/no-such-control-directory
+if portal_run "$missing" 'true' >"$work/missing.log" 2>&1; then fail "Portal started with a missing control directory"; fi
+grep -q "$missing" "$work/missing.log" || { cat "$work/missing.log" >&2; fail "the error does not name the missing path"; }
+[ ! -e "$missing" ] || fail "Docker created the missing control directory"
+
+# ---- the systemd alternative: the same host, adopted from a unit and back (doc 187 section 10) -----------------
+step "migration: a systemd runner on the doc 146 layout is adopted, then moved to compose and back"
+compose down
+cid=$(docker create "$image" version)
+mkdir -p /opt/portal-app-runner
+docker cp "$cid:/usr/local/bin/app-runner" /opt/portal-app-runner/app-runner
+docker rm "$cid" >/dev/null
+chmod 0755 /opt/portal-app-runner/app-runner
+groupadd --gid $gid portal-app-runner
+cp "$repo/deploy/app-runner/portal-app-runner.service" /etc/systemd/system/portal-app-runner.service
+# The control path of a host set up before doc 187: under /run, every directory root:gid 0750 (doc 146).
+legacy=/run/portal-app-runner/control
+jq --arg root "$legacy" '.control_root = $root | .control_socket = ($root + "/runner.sock")' /etc/portal-app-runner/service.json >"$work/legacy.json"
+install -m 0600 -o root -g root "$work/legacy.json" /etc/portal-app-runner/service.json
+rm -rf "$control"
+install -d -m 0750 -o root -g $gid /run/portal-app-runner "$legacy"
+systemctl daemon-reload
+systemctl start portal-app-runner
+n=0
+until [ -S "$legacy/runner.sock" ]; do
+	n=$((n + 1))
+	[ "$n" -le 60 ] || { journalctl -u portal-app-runner --no-pager | tail -20 >&2; fail "the systemd runner did not become ready"; }
+	sleep 1
+done
+observe "$legacy/runner.sock"
+
+# The plan works while the unit serves, adopts every item and reports the /run control root; --apply refuses.
+unit_state=$(state)
+$HOST_SETUP >"$work/adopt-plan.log" 2>&1 || { cat "$work/adopt-plan.log" >&2; fail "the adopt plan failed while the unit serves"; }
+cat "$work/adopt-plan.log"
+grep -q 'adopting the existing layout' "$work/adopt-plan.log" || fail "the plan did not adopt"
+grep -q 'is under /run' "$work/adopt-plan.log" || fail "the plan did not report the /run control root"
+if grep -q '^  create ' "$work/adopt-plan.log"; then fail "adopting the unit's layout wants to create something"; fi
+[ "$(state)" = "$unit_state" ] || fail "the adopt plan changed the host"
+if $HOST_SETUP --apply >"$work/adopt-running.log" 2>&1; then fail "--apply was accepted while the unit serves"; fi
+grep -q 'the runner is running: stop it first' "$work/adopt-running.log" || { cat "$work/adopt-running.log" >&2; fail "the refusal does not say the runner is running"; }
+[ "$(state)" = "$unit_state" ] || fail "a refused --apply changed the host"
+
+# A unit still running makes the compose runner exit with "in use" (the journal's lock), and the unit keeps serving.
+docker rm -f report-portal-app-runner >/dev/null 2>&1 || true
+compose up -d app-runner
+sleep 5
+compose logs app-runner 2>&1 | grep -q 'in use' || { compose logs app-runner >&2; fail "the compose runner did not refuse a journal the unit holds"; }
+compose down
+observe "$legacy/runner.sock"
+
+# Switch: the durable control path, the unit stopped and disabled, host-setup --apply, compose up.
+systemctl disable --now portal-app-runner
+[ ! -e "$legacy/runner.sock" ] || fail "the unit left its socket after a clean stop"
+jq --arg root "$control" '.control_root = $root | .control_socket = ($root + "/runner.sock")' /etc/portal-app-runner/service.json >"$work/durable.json"
+install -m 0600 -o root -g root "$work/durable.json" /etc/portal-app-runner/service.json
+$HOST_SETUP --apply >"$work/switch.log" 2>&1 || { cat "$work/switch.log" >&2; fail "the switch apply failed"; }
+cat "$work/switch.log"
+[ "$(stat -c '%a %u:%g' "$control")" = "750 0:$gid" ] || fail "the new control root is not root:$gid 0750"
+grep -q 'enrollment pending' "$work/switch.log" && fail "an adopted, enrolled host asked for an enrollment"
+compose up -d app-runner
+wait_ready
+observe
+
+# Rollback: compose stopped, the unit on the same (durable) control path.
+compose stop app-runner
+systemctl enable --now portal-app-runner
+n=0
+until [ -S "$control/runner.sock" ]; do
+	n=$((n + 1))
+	[ "$n" -le 60 ] || fail "the unit did not return to ready after the rollback"
+	sleep 1
+done
+observe
+systemctl disable --now portal-app-runner
 
 printf '\nall compose runner probes passed\n'
