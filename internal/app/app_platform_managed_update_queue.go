@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"math"
 	"reflect"
 	"time"
@@ -95,7 +94,7 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		return zero, err
 	}
 	if len(ids) == 0 {
-		log.Printf("app-platform managed update claim: no eligible operation")
+		// The normal idle state of every tick: nothing to log.
 		return zero, nil
 	}
 	trust, err := loadPlatformPublisherTrust(e)

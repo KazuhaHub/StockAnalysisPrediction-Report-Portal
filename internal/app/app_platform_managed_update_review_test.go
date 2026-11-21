@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"strconv"
 	"strings"
 	"testing"
@@ -351,6 +353,27 @@ func testPlatformManagedUpdateQueueClaimsExactAdmission(t *testing.T, pg bool) {
 			AND lease_owner=?`, lease.installationID,
 			platformFixtureID(6113)) != 1 {
 		t.Fatal("managed update claim changed the live source")
+	}
+}
+
+// An idle queue is the normal state of every scheduler tick, twice a second on a running Portal, so
+// finding nothing to claim must not write a log line.
+func TestPlatformManagedUpdateQueueIdleClaimLogsNothing(t *testing.T) {
+	s, lease := platformManagedUpdateOperationFixture(t, false)
+	if selected, err := s.claimNextPlatformManagedUpdate(
+		context.Background(), platformFixtureID(6113)); err != nil || selected.lease.id != lease.id {
+		t.Fatal("first claim", selected, err)
+	}
+	var logged bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6114))
+	if err != nil || selected.lease.id != "" {
+		t.Fatal("an idle claim", selected, err)
+	}
+	if logged.Len() != 0 {
+		t.Fatalf("an idle claim logged %q", logged.String())
 	}
 }
 
