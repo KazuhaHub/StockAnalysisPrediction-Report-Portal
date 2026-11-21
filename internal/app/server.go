@@ -86,7 +86,7 @@ type Server struct {
 	platformObserveCapability func(context.Context, platformActorSession, platformRuntimeEndpoint) (platformCapabilityObservation, error)
 	// platformObserveProxy is the runner seam of the proxy review: the PRPX0001 answer. nil selects the
 	// local socket.
-	platformObserveProxy func(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error)
+	platformObserveProxy func(context.Context, platformRuntimeEndpoint) (transport.ProxyRunnerState, error)
 	// platformObservePostgres is the runner seam of the network.postgres grant review (doc 178).
 	platformObservePostgres func(ctx context.Context, endpoint platformRuntimeEndpoint, needTargets bool) (platformPostgresObservation, error)
 

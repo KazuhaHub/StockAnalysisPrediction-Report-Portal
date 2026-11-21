@@ -47,7 +47,7 @@ const (
 type platformServiceEgressTransport interface {
 	Query(ctx context.Context, e platformRuntimeEndpoint) (transport.ServiceEgressProfile, error)
 	// QueryProxy is the PRPX0001 query (doc 184): whether the runner serves the reviewed forward proxy.
-	QueryProxy(ctx context.Context, e platformRuntimeEndpoint) (transport.ProxyProfile, error)
+	QueryProxy(ctx context.Context, e platformRuntimeEndpoint) (transport.ProxyRunnerState, error)
 	Open(ctx context.Context, e platformRuntimeEndpoint, raw, signature []byte, a control.Authority, descriptor []byte) (*transport.EgressMux, error)
 }
 
@@ -327,11 +327,16 @@ func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint pl
 		return err
 	}
 	resources := slices.Clone(plan.resources)
+	// A policy that holds pins (doc 186) needs a runner that serves them.
+	pinned := plan.proxy != nil && len(plan.proxy.Policy.Pins) > 0
 	plan.Close()
 	// The proxy rides the session only when the runner says it serves it (doc 184): a runner that predates
 	// the proxy, or enforces other limits, gets a session without it, and the grant stays reviewed but unused.
+	// A pinned policy also needs pin support, so a downgraded runner gets no proxy rather than the proxy
+	// minus its pins. A pin the operator has since removed does not stop the session: it carries the reviewed
+	// policy and the broker refuses that pin.
 	if slices.Contains(resources, platformServiceEgressProxy) {
-		serves, err := c.runnerServesProxy(ctx, endpoint)
+		serves, err := c.runnerServesProxy(ctx, endpoint, pinned)
 		if err != nil {
 			return err
 		}
@@ -389,7 +394,7 @@ func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint pl
 	}
 	runCtx, runCancel := context.WithCancel(c.root)
 	l := &platformServiceEgressLive{
-		state: platformServiceEgressSessionState{sessionID: sessionID, identity: identity, resources: slices.Clone(a.resources), pin: a.pin(), expiresMS: expiresMS},
+		state: platformServiceEgressSessionState{sessionID: sessionID, identity: identity, resources: slices.Clone(a.resources), pin: a.pin(), expiresMS: expiresMS, proxy: a.proxy},
 		mux:   mux, cancel: runCancel, finalized: make(chan struct{}),
 	}
 	c.mu.Lock()

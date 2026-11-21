@@ -55,7 +55,10 @@ var ErrInvalidProxyPolicy = errors.New("invalid proxy policy")
 
 // ProxyPolicy is the reviewed content of the network.proxy grant row.
 type ProxyPolicy struct {
-	Hosts      []string
+	Hosts []string
+	// Pins are the reviewed pinned destinations (doc 186), sorted by host. A policy with pins is encoded as
+	// ProxyPolicyFormatPins; one without keeps ProxyPolicyFormat.
+	Pins       []ProxyPin
 	DailyBytes int64
 }
 
@@ -63,6 +66,13 @@ type proxyPolicyWire struct {
 	Format     string   `json:"format"`
 	Hosts      []string `json:"hosts"`
 	DailyBytes int64    `json:"daily_bytes"`
+}
+
+type proxyPolicyPinsWire struct {
+	Format     string     `json:"format"`
+	Hosts      []string   `json:"hosts"`
+	Pins       []ProxyPin `json:"pins"`
+	DailyBytes int64      `json:"daily_bytes"`
 }
 
 // ParsedProxyPolicy is a policy with the SHA-256 of its canonical bytes, the value
@@ -134,10 +144,22 @@ func ValidProxyHosts(hosts []string) bool {
 
 // NormalizeProxyPolicy validates a policy and returns a copy.
 func NormalizeProxyPolicy(p ProxyPolicy) (ProxyPolicy, error) {
-	if len(p.Hosts) < 1 || !ValidProxyHosts(p.Hosts) || p.DailyBytes < ProxyDailyBytesMin || p.DailyBytes > ProxyDailyBytesMax {
+	if len(p.Hosts)+len(p.Pins) < 1 || len(p.Hosts)+len(p.Pins) > MaxProxyHosts || !ValidProxyHosts(p.Hosts) || !ValidProxyPins(p.Pins) ||
+		p.DailyBytes < ProxyDailyBytesMin || p.DailyBytes > ProxyDailyBytesMax {
 		return ProxyPolicy{}, ErrInvalidProxyPolicy
 	}
-	return ProxyPolicy{Hosts: slices.Clone(p.Hosts), DailyBytes: p.DailyBytes}, nil
+	// A pinned name may be covered by a wildcard, but not also be an exact entry.
+	for _, pin := range p.Pins {
+		if slices.Contains(p.Hosts, pin.Host) {
+			return ProxyPolicy{}, ErrInvalidProxyPolicy
+		}
+	}
+	// Hosts is never nil, so a pins-only policy encodes "hosts":[].
+	out := ProxyPolicy{Hosts: append([]string{}, p.Hosts...), DailyBytes: p.DailyBytes}
+	if len(p.Pins) > 0 {
+		out.Pins = slices.Clone(p.Pins)
+	}
+	return out, nil
 }
 
 // CanonicalProxyPolicy is the one encoding of a valid policy.
@@ -146,7 +168,12 @@ func CanonicalProxyPolicy(p ProxyPolicy) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(proxyPolicyWire{Format: ProxyPolicyFormat, Hosts: p.Hosts, DailyBytes: p.DailyBytes})
+	var raw []byte
+	if len(p.Pins) > 0 {
+		raw, err = json.Marshal(proxyPolicyPinsWire{Format: ProxyPolicyFormatPins, Hosts: p.Hosts, Pins: p.Pins, DailyBytes: p.DailyBytes})
+	} else {
+		raw, err = json.Marshal(proxyPolicyWire{Format: ProxyPolicyFormat, Hosts: p.Hosts, DailyBytes: p.DailyBytes})
+	}
 	if err != nil || len(raw) > MaxProxyPolicyBytes {
 		return nil, ErrInvalidProxyPolicy
 	}
@@ -159,18 +186,43 @@ func ParseProxyPolicy(raw []byte) (ParsedProxyPolicy, error) {
 	if len(raw) == 0 || len(raw) > MaxProxyPolicyBytes || !utf8.Valid(raw) {
 		return zero, ErrInvalidProxyPolicy
 	}
-	var wire proxyPolicyWire
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if d.Decode(&wire) != nil || wire.Format != ProxyPolicyFormat || wire.Hosts == nil {
+	var head struct {
+		Format string `json:"format"`
+	}
+	if json.Unmarshal(raw, &head) != nil {
 		return zero, ErrInvalidProxyPolicy
 	}
-	canonical, err := CanonicalProxyPolicy(ProxyPolicy{Hosts: wire.Hosts, DailyBytes: wire.DailyBytes})
+	var policy ProxyPolicy
+	switch head.Format {
+	case ProxyPolicyFormat:
+		var wire proxyPolicyWire
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		if d.Decode(&wire) != nil || wire.Hosts == nil {
+			return zero, ErrInvalidProxyPolicy
+		}
+		policy = ProxyPolicy{Hosts: wire.Hosts, DailyBytes: wire.DailyBytes}
+	case ProxyPolicyFormatPins:
+		var wire proxyPolicyPinsWire
+		d := json.NewDecoder(bytes.NewReader(raw))
+		d.DisallowUnknownFields()
+		if d.Decode(&wire) != nil || wire.Hosts == nil || len(wire.Pins) == 0 {
+			return zero, ErrInvalidProxyPolicy
+		}
+		policy = ProxyPolicy{Hosts: wire.Hosts, Pins: wire.Pins, DailyBytes: wire.DailyBytes}
+	default:
+		return zero, ErrInvalidProxyPolicy
+	}
+	canonical, err := CanonicalProxyPolicy(policy)
 	if err != nil || !bytes.Equal(canonical, raw) {
 		return zero, ErrInvalidProxyPolicy
 	}
+	normalized, err := NormalizeProxyPolicy(policy)
+	if err != nil {
+		return zero, ErrInvalidProxyPolicy
+	}
 	sum := sha256.Sum256(raw)
-	return ParsedProxyPolicy{Policy: ProxyPolicy{Hosts: slices.Clone(wire.Hosts), DailyBytes: wire.DailyBytes}, SHA256: hex.EncodeToString(sum[:]), Raw: bytes.Clone(raw)}, nil
+	return ParsedProxyPolicy{Policy: normalized, SHA256: hex.EncodeToString(sum[:]), Raw: bytes.Clone(raw)}, nil
 }
 
 // Match reports whether a CONNECT host is covered by an entry of the policy. The

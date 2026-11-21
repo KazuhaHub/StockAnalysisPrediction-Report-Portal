@@ -3,8 +3,16 @@ package driver
 import "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
 
 type runtimeOptions struct {
-	imagePolicy ImagePolicy
-	appCPUs     string
+	imagePolicy    ImagePolicy
+	appCPUs        string
+	requireHostNet bool
+}
+
+// WithHostNetworkNamespace makes every connection of the runtime's daemon client be vetted as being in the runner's
+// network namespace (doc 186): the runner holds pinned proxy destinations, which are addresses of its own
+// namespace. A daemon in another namespace, or one that cannot be identified, makes the client's requests fail.
+func WithHostNetworkNamespace() RuntimeOption {
+	return func(o *runtimeOptions) { o.requireHostNet = true }
 }
 
 // RuntimeOption configures OpenCandidateRuntime. The zero configuration is the production profile.

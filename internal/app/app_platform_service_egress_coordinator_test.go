@@ -27,10 +27,13 @@ type fakeEgressRunner struct {
 	proxyProfile transport.ProxyProfile
 	proxyErr     error
 	proxyAsked   int
-	queries      int
-	opens        int
-	openErr      error
-	sessions     chan *fakeEgressSession
+	// pinsSupported and proxyPins are what PRPX0002 answers (doc 186).
+	pinsSupported bool
+	proxyPins     []appplatform.ProxyPin
+	queries       int
+	opens         int
+	openErr       error
+	sessions      chan *fakeEgressSession
 	// postgres is whether the runner answers the PostgreSQL probe query (doc 178); queriedPostgres
 	// counts the questions.
 	postgres        bool
@@ -58,11 +61,18 @@ func newFakeEgressRunner() *fakeEgressRunner {
 }
 
 // QueryProxy answers the PRPX0001 query (doc 184).
-func (f *fakeEgressRunner) QueryProxy(context.Context, platformRuntimeEndpoint) (transport.ProxyProfile, error) {
+func (f *fakeEgressRunner) QueryProxy(context.Context, platformRuntimeEndpoint) (transport.ProxyRunnerState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.proxyAsked++
-	return f.proxyProfile, f.proxyErr
+	return transport.ProxyRunnerState{Profile: f.proxyProfile, PinsSupported: f.pinsSupported, Pins: f.proxyPins}, f.proxyErr
+}
+
+// setProxyPins makes the runner answer PRPX0002 (pins supported) with the allowlist pins.
+func (f *fakeEgressRunner) setProxyPins(pins ...appplatform.ProxyPin) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pinsSupported, f.proxyPins = true, pins
 }
 
 func (f *fakeEgressRunner) setProxy(p transport.ProxyProfile, err error) {

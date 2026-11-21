@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"slices"
 	"sort"
@@ -10,15 +12,37 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
+
+// platformProxyViewQueryTimeout bounds the question the console view puts to the runner.
+const platformProxyViewQueryTimeout = 4 * time.Second
 
 // The administrator routes of the proxy review and the console view (doc 184 sections 5.2 and 7). All three sit
 // under the admin management route pattern, so a non-administrator, a cross-origin request or a body that is not
 // closed JSON is refused before any plan is written.
 
 type platformProxyPolicyView struct {
-	Hosts      []string `json:"hosts"`
-	DailyBytes int64    `json:"daily_bytes"`
+	Hosts []string `json:"hosts"`
+	// Pins are the reviewed pinned destinations (doc 186), each marked with whether the runner's allowlist
+	// currently holds the exact entry.
+	Pins       []platformProxyPinView `json:"pins"`
+	DailyBytes int64                  `json:"daily_bytes"`
+}
+
+type platformProxyPinView struct {
+	Host      string `json:"host"`
+	Address   string `json:"address"`
+	Port      int    `json:"port"`
+	Permitted bool   `json:"permitted"`
+}
+
+// platformProxyRunnerView is what the runner says it can do for pins: the only choices of the review dialog.
+// Available is false when the runner could not be asked or does not serve the proxy at all.
+type platformProxyRunnerView struct {
+	Available     bool                   `json:"available"`
+	PinsSupported bool                   `json:"pins_supported"`
+	Pins          []appplatform.ProxyPin `json:"pins"`
 }
 
 type platformProxyToday struct {
@@ -43,6 +67,7 @@ type platformProxyView struct {
 	Ready                bool                      `json:"ready"`
 	DeclaredHosts        []string                  `json:"declared_hosts"`
 	Policy               *platformProxyPolicyView  `json:"policy"`
+	Runner               platformProxyRunnerView   `json:"runner"`
 	MaxDailyBytes        int64                     `json:"max_daily_bytes"`
 	PreviousPolicySHA256 string                    `json:"previous_policy_sha256"`
 	Today                platformProxyToday        `json:"today"`
@@ -67,7 +92,20 @@ func (s *Server) apiPlatformProxyView(w http.ResponseWriter, r *http.Request, us
 		platformManagementError(w, err)
 		return
 	}
-	out := platformProxyView{DeclaredHosts: []string{}, Rollups: []platformProxyRollupView{}, MaxDailyBytes: appplatform.ProxyDailyBytesMax}
+	out := platformProxyView{DeclaredHosts: []string{}, Rollups: []platformProxyRollupView{}, MaxDailyBytes: appplatform.ProxyDailyBytesMax,
+		Runner: platformProxyRunnerView{Pins: []appplatform.ProxyPin{}}}
+	// The runner is asked outside the read, as a review asks it. A runner that cannot be asked is not an error
+	// of the view: the dialog then offers no pin and marks every reviewed pin as not permitted.
+	var runner transport.ProxyRunnerState
+	if endpoint, ok := s.platformRuntimeEndpoint(); ok || s.platformObserveProxy != nil {
+		queryCtx, cancel := context.WithTimeout(r.Context(), platformProxyViewQueryTimeout)
+		state, err := s.observePlatformProxy(queryCtx, endpoint)
+		cancel()
+		if err == nil {
+			runner = state
+			out.Runner = platformProxyRunnerView{Available: true, PinsSupported: state.PinsSupported, Pins: append([]appplatform.ProxyPin{}, state.Pins...)}
+		}
+	}
 	err = s.withAppPlatformActorRead(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		var desired, phase, release, epoch string
 		var revision int64
@@ -106,7 +144,11 @@ func (s *Server) apiPlatformProxyView(w http.ResponseWriter, r *http.Request, us
 		// Granted is what the session loader treats as granted: a row a consumed review backs.
 		if policy, err := loadPlatformProxyGrant(e, installation, revision, release, epoch); err == nil {
 			out.Granted = true
-			out.Policy = &platformProxyPolicyView{Hosts: slices.Clone(policy.Policy.Hosts), DailyBytes: policy.Policy.DailyBytes}
+			out.Policy = &platformProxyPolicyView{Hosts: slices.Clone(policy.Policy.Hosts), Pins: []platformProxyPinView{}, DailyBytes: policy.Policy.DailyBytes}
+			for _, pin := range policy.Policy.Pins {
+				out.Policy.Pins = append(out.Policy.Pins, platformProxyPinView{Host: pin.Host, Address: pin.Address, Port: pin.Port,
+					Permitted: out.Runner.Available && runner.PinsSupported && slices.Contains(runner.Pins, pin)})
+			}
 			budget = policy.Policy.DailyBytes
 		}
 		now := time.Now().UTC()
@@ -195,11 +237,53 @@ func (s *Server) apiPlatformProxyView(w http.ResponseWriter, r *http.Request, us
 	writeJSON(w, out)
 }
 
+// platformProxyPinsFromJSON reads the optional pins member: an array of closed {host, address, port} objects. The
+// port is bounded before it is narrowed.
+func platformProxyPinsFromJSON(raw json.RawMessage) ([]appplatform.ProxyPin, error) {
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil || items == nil || len(items) > appplatform.MaxProxyPins {
+		return nil, errPlatformManagementInput
+	}
+	pins := make([]appplatform.ProxyPin, 0, len(items))
+	for _, item := range items {
+		fields, err := platformManagementObject(item, "host", "address", "port")
+		if err != nil || len(fields) != 3 {
+			return nil, errPlatformManagementInput
+		}
+		host, err := platformManagementString(fields, "host")
+		if err != nil {
+			return nil, err
+		}
+		address, err := platformManagementString(fields, "address")
+		if err != nil {
+			return nil, err
+		}
+		port, ok := platformManagementInt(fields["port"])
+		if !ok || port < 1 || port > 65535 {
+			return nil, errPlatformManagementInput
+		}
+		pins = append(pins, appplatform.ProxyPin{Host: host, Address: address, Port: int(port)})
+	}
+	return pins, nil
+}
+
 func platformProxyRequestFromBody(w http.ResponseWriter, r *http.Request) (platformProxyRequest, error) {
 	var req platformProxyRequest
-	fields, err := platformManagementRead(w, r, "policyRevision", "previousPolicySha256", "hosts", "dailyBytes")
+	// pins is optional, so that a client that predates pins keeps working; every other member is required.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
+	if err != nil {
+		return req, errPlatformManagementInput
+	}
+	fields, err := platformManagementObject(raw, "policyRevision", "previousPolicySha256", "hosts", "dailyBytes", "pins")
 	if err != nil {
 		return req, err
+	}
+	if _, hasPins := fields["pins"]; hasPins {
+		if req.Pins, err = platformProxyPinsFromJSON(fields["pins"]); err != nil {
+			return req, err
+		}
+	} else if len(fields) != 4 {
+		return req, errPlatformManagementInput
 	}
 	for _, key := range []string{"policyRevision", "previousPolicySha256", "hosts", "dailyBytes"} {
 		if _, ok := fields[key]; !ok {
@@ -269,6 +353,7 @@ func (s *Server) apiPlatformProxyPlan(w http.ResponseWriter, r *http.Request, us
 		"policy_revision": strconv.FormatInt(plan.PolicyRevision, 10),
 		"diff": map[string]any{
 			"added": platformProxyDiffEntries(plan.HostsAdded), "removed": platformProxyDiffEntries(plan.HostsRemoved),
+			"pins":        map[string]any{"added": plan.PinsAdded, "removed": plan.PinsRemoved, "changed": plan.PinsChanged},
 			"daily_bytes": map[string]int64{"old": plan.DailyBytesOld, "new": plan.DailyBytesNew},
 		},
 	})

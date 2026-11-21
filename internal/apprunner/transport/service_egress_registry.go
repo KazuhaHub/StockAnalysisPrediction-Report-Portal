@@ -192,6 +192,12 @@ func (r *egressRegistry) useProxyBudget(store broker.ProxyBudgetStore) {
 	r.proxy.SetBudget(r.budget)
 }
 
+// applyProxyPins gives the operator's allowlist of pinned destinations (doc 186) to the broker's runner-wide
+// state, which judges every pinned dial against it. It is called once, before the registry serves.
+func (r *egressRegistry) applyProxyPins(pins []appplatform.ProxyPin) {
+	r.proxy.SetPins(pins)
+}
+
 // proxyBudgetFlushInterval is how often counted bytes are written to the journal.
 const proxyBudgetFlushInterval = 5 * time.Second
 
