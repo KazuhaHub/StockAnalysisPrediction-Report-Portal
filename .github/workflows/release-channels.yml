@@ -48,6 +48,11 @@ on:
         required: false
         type: boolean
         default: false
+      allow_runner_regress:
+        description: "Allow moving a channel to a release without a runner image while its current target has one"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -215,6 +220,31 @@ jobs:
               echo "verified ${key} image of ${tag}@${digest}"
             done < "target-$tag.txt"
           done
+
+      - name: Refuse a move that would leave the runner image behind
+        # A release from before the runner image moves only the Portal tag, so moving a channel to one while its
+        # current target has a runner image would leave the runner tag on a newer release (doc 187 section 12).
+        if: steps.decide.outputs.LATEST_TARGET != '' || steps.decide.outputs.BETA_TARGET != ''
+        shell: bash
+        env:
+          IMAGE: ${{ steps.state.outputs.image }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          REPO: ${{ github.repository }}
+          CURRENT_LATEST: ${{ steps.state.outputs.current_latest }}
+          CURRENT_BETA: ${{ steps.state.outputs.current_beta }}
+          LATEST_ACTION: ${{ steps.decide.outputs.LATEST_ACTION }}
+          LATEST: ${{ steps.decide.outputs.LATEST }}
+          BETA_ACTION: ${{ steps.decide.outputs.BETA_ACTION }}
+          BETA: ${{ steps.decide.outputs.BETA }}
+          ALLOW: ${{ inputs.allow_runner_regress == true && '1' || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$LATEST_ACTION" = "set" ] && [ -n "$LATEST" ]; then
+            python3 scripts/release_guard.py check-move "$CURRENT_LATEST" --target "$LATEST" --repo "$REPO" --image "$IMAGE" ${ALLOW:+--allow-runner-regress}
+          fi
+          if [ "$BETA_ACTION" = "set" ] && [ -n "$BETA" ]; then
+            python3 scripts/release_guard.py check-move "$CURRENT_BETA" --target "$BETA" --repo "$REPO" --image "$IMAGE" ${ALLOW:+--allow-runner-regress}
+          fi
 
       - name: Apply the channels
         if: steps.decide.outputs.LATEST_TARGET != '' || steps.decide.outputs.BETA_TARGET != ''

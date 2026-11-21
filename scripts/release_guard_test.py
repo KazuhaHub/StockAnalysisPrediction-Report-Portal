@@ -5,7 +5,7 @@ import re
 import unittest
 from unittest.mock import patch
 import subprocess
-from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci, recorded_images, image_for, guard_fixed_image
+from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci, recorded_images, image_for, guard_fixed_image, check_move
 
 # CI runs `python3 -B -m unittest discover -s scripts` from the repository root, so every file
 # these tests read is found relative to this one rather than to the working directory.
@@ -368,6 +368,51 @@ def metadata(portal_digest='sha256:' + 'a' * 64, runner_digest='sha256:' + 'b' *
         meta['images'] = {'portal': {'image': PORTAL, 'digest': portal_digest},
                           'app-runner': {'image': RUNNER, 'digest': runner_digest}}
     return meta
+
+
+class ChannelMoveTests(unittest.TestCase):
+    """A channel never moves to a release without a runner image while its current target has one (doc 187)."""
+
+    def move(self, current, target, allow=False):
+        releases = {'v2026.47.1': metadata(), 'v2026.46.1': metadata(images=False), 'v2026.45.1': metadata(images=False)}
+
+        def fetch(repo, tag):
+            meta = dict(releases[tag])
+            meta['tag'] = tag
+            return meta, SHA
+
+        with patch('release_guard.fetch_release_metadata', side_effect=fetch):
+            check_move('owner/repo', PORTAL, current, target, allow)
+
+    def test_moving_to_an_older_portal_only_release_from_one_with_a_runner_image_is_refused(self):
+        with self.assertRaisesRegex(RuntimeError, 'runner image'):
+            self.move('v2026.47.1', 'v2026.46.1')
+
+    def test_the_explicit_flag_allows_it(self):
+        self.move('v2026.47.1', 'v2026.46.1', allow=True)
+
+    def test_other_moves_are_unaffected(self):
+        self.move('v2026.46.1', 'v2026.47.1')   # forward to a release with a runner image
+        self.move('v2026.45.1', 'v2026.46.1')   # between Portal-only releases
+        self.move('', 'v2026.46.1')             # a channel that has never been set
+        self.move('v2026.47.1', 'v2026.47.1')   # no move at all
+
+    def test_a_current_target_that_cannot_be_read_is_refused_not_assumed_to_have_none(self):
+        with patch('release_guard.fetch_release_metadata', side_effect=lambda repo, tag: (_ for _ in ()).throw(RuntimeError('gone')) if tag == 'v2026.47.1' else (dict(metadata(images=False), tag=tag), SHA)):
+            with self.assertRaises(RuntimeError):
+                check_move('owner/repo', PORTAL, 'v2026.47.1', 'v2026.46.1')
+
+    def test_the_channel_workflow_checks_each_move_and_offers_the_flag(self):
+        workflow = read_workflow('release-channels.yml')
+        head = workflow.split('\njobs:\n', 1)[0]
+        self.assertRegex(head, r'allow_runner_regress:\n\s+description:.*\n\s+required: false\n\s+type: boolean\n\s+default: false')
+        block = job_block(workflow, 'reconcile')
+        check, apply = block.index('release_guard.py check-move'), block.index('Apply the channels')
+        self.assertLess(block.index('Verify every target exists'), check)
+        self.assertLess(check, apply)
+        self.assertIn('CURRENT_LATEST', block[check - 600:check + 400])
+        self.assertIn('CURRENT_BETA', block[check - 600:check + 600])
+        self.assertIn('${ALLOW:+--allow-runner-regress}', block[check:apply])
 
 
 class FixedImageGuardTests(unittest.TestCase):

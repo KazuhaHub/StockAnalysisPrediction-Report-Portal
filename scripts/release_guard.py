@@ -154,16 +154,9 @@ def guard_draft(repo, tag):
         raise RuntimeError('Release is already published; cut a new version')
 
 
-def verify_target(repo, tag, image, key='portal'):
-    """Verify a release is promotable and return the digest recorded for `key`.
-
-    Every image the release recorded is checked, whichever key is asked for: a fixed tag that no longer matches
-    its recorded digest refuses the whole release, so neither channel tag can move to half a release. `key` is
-    'portal', 'app-runner' or 'all'. For one key the result is its digest, or '' when a Portal-only release
-    recorded none; for 'all' it is one `<key> <digest>` line per recorded image.
-    """
-    if key not in IMAGE_KEYS + ('all',):
-        raise ValueError(f'Unknown image key {key!r}')
+def fetch_release_metadata(repo, tag):
+    """A published release's release-metadata.json and the commit its annotated tag points at, with the checks
+    that make them the release's own (published, complete assets, annotated tag on a commit)."""
     release = gh_json(f'repos/{repo}/releases/tags/{tag}')
     if release['draft']:
         raise RuntimeError('Cannot promote a draft release')
@@ -178,8 +171,42 @@ def verify_target(repo, tag, image, key='portal'):
     asset = next(a for a in release['assets'] if a['name'] == 'release-metadata.json')
     raw = subprocess.check_output(['gh', 'api', '-H', 'Accept: application/octet-stream',
                                    f'repos/{repo}/releases/assets/{asset["id"]}'])
-    meta = json.loads(raw)
-    validate_metadata(meta, tag, image, commit['sha'])
+    return json.loads(raw), commit['sha']
+
+
+def check_move(repo, image, current, target, allow_runner_regress=False):
+    """Refuse a channel move that would leave the runner image behind.
+
+    A release from before the runner image moves only the Portal tag, so moving a channel to one while its
+    current target has a runner image would leave the runner tag on a newer release than Portal's. Refused unless
+    explicitly allowed. A current target that cannot be read is refused too, never assumed to have no runner image.
+    """
+    if not current or current == target:
+        return
+
+    def has_runner(tag):
+        meta, commit = fetch_release_metadata(repo, tag)
+        validate_metadata(meta, tag, image, commit)
+        return 'app-runner' in recorded_images(meta, image)
+
+    if has_runner(current) and not has_runner(target) and not allow_runner_regress:
+        raise RuntimeError(f'Moving the channel from {current}, which has a runner image, to {target}, which has none, '
+                           'would leave the runner tag on a newer release than the Portal tag; pass '
+                           '--allow-runner-regress (the allow_runner_regress dispatch input) to do it deliberately')
+
+
+def verify_target(repo, tag, image, key='portal'):
+    """Verify a release is promotable and return the digest recorded for `key`.
+
+    Every image the release recorded is checked, whichever key is asked for: a fixed tag that no longer matches
+    its recorded digest refuses the whole release, so neither channel tag can move to half a release. `key` is
+    'portal', 'app-runner' or 'all'. For one key the result is its digest, or '' when a Portal-only release
+    recorded none; for 'all' it is one `<key> <digest>` line per recorded image.
+    """
+    if key not in IMAGE_KEYS + ('all',):
+        raise ValueError(f'Unknown image key {key!r}')
+    meta, commit_sha = fetch_release_metadata(repo, tag)
+    validate_metadata(meta, tag, image, commit_sha)
     images = recorded_images(meta, image)
     for name, (path, digest) in images.items():
         if image_digest(f'{path}:{tag}') != digest:
@@ -211,19 +238,25 @@ def guard_fixed_image(ref):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['guard', 'wait-ci', 'verify-target', 'state', 'guard-draft'])
+    parser.add_argument('command', choices=['guard', 'wait-ci', 'verify-target', 'state', 'guard-draft', 'check-move'])
     parser.add_argument('value', nargs='?')
     parser.add_argument('--repo', default=os.environ.get('GITHUB_REPOSITORY'))
     parser.add_argument('--image')
+    parser.add_argument('--target', help='check-move: the tag the channel would move to (the value is the current tag)')
+    parser.add_argument('--allow-runner-regress', action='store_true')
     parser.add_argument('--image-key', choices=IMAGE_KEYS + ('all',), default='portal',
                         help='verify-target: which recorded digest to print (every recorded image is verified)')
     args = parser.parse_args()
-    if args.command != 'state' and not args.value:
+    if args.command not in ('state', 'check-move') and not args.value:
         parser.error('value is required for this command')
     if args.command == 'guard':
         guard_fixed_image(args.value)
     elif args.command == 'state':
         read_state(args.repo)
+    elif args.command == 'check-move':
+        if not args.target:
+            parser.error('--target is required for check-move')
+        check_move(args.repo, args.image, args.value or '', args.target, args.allow_runner_regress)
     elif args.command == 'guard-draft':
         guard_draft(args.repo, args.value)
     elif args.command == 'wait-ci':
