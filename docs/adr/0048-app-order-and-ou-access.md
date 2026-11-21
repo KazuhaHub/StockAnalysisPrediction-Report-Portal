@@ -3,6 +3,20 @@
 **Status: Proposed.** 2026-10-29. Builds on ADR 0003 (downloadable apps), ADR 0022 (OU tree), ADR 0035
 (migrations after a frozen baseline) and ADR 0046 (the OU policy model this one reuses).
 
+> **Amended 2026-11-21 by doc 190** (`docs/app-platform/190-legacy-retirement-and-console.md`, D2 and
+> D2a). Two changes override the body below:
+> 1. Administrators are no longer exempt: they resolve through the OU chain like everyone else. The
+>    console reads every app, open or not, from `GET /api/admin/apps/layout` (which carries each
+>    installed app's version, entry and scopes), and the pages where switches are edited (the OU policy
+>    pages and every app's access settings) never depend on app access, so an administrator cannot
+>    lock themselves out.
+> 2. "Built-in apps cannot be gated by the server" no longer holds for Scheduled tasks, the one
+>    built-in feature that owns server routes: `builtin:recurring` gates every
+>    `/api/admin/batch/recurring*` route with `403 {"code":"app_closed"}`. Batch and Quotes own no
+>    route (the run dialog and the queue share tickets, run-quota, retry, priority and schedule), so
+>    closing them still only hides the entry. The recurring scheduler is not gated either: existing
+>    schedules keep running when the switch is closed.
+
 ## Context
 
 The Apps hub lists the compiled-in apps first and the installed apps after them, newest installed

@@ -37,7 +37,7 @@ func TestOnlyAClosingChangeRevokesTokens(t *testing.T) {
 func TestReopeningNeverRevokes(t *testing.T) {
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
-	tok := e.mint("admin", "alpha") // an administrator is exempt, so can hold a token for a closed app
+	tok := e.mint("admin", "alpha") // minted while the app was still open, so it can outlive the closing
 	e.mustSetAccess("alpha", e.ou, "null")
 	if code := e.bridgeGet(tok); code != http.StatusOK {
 		t.Fatalf("reopening revoked a token: %d", code)
@@ -116,10 +116,10 @@ func TestAnAppWithNoAccessRowsCostsNoSnapshot(t *testing.T) {
 	if code := e.bridgeGet(tok); code != http.StatusOK || appAccessSnapshotLoads.Load() == before {
 		t.Fatalf("an app with rows must resolve: %d", code)
 	}
-	// Administrators never need the snapshot.
+	// Administrators resolve like everyone else (doc 190, D2a): an app with rows pays for the snapshot.
 	atok := e.mint("admin", "alpha")
 	before = appAccessSnapshotLoads.Load()
-	if code := e.bridgeGet(atok); code != http.StatusOK || appAccessSnapshotLoads.Load() != before {
+	if code := e.bridgeGet(atok); code != http.StatusOK || appAccessSnapshotLoads.Load() == before {
 		t.Fatalf("admin bridge = %d, loads %d", code, appAccessSnapshotLoads.Load()-before)
 	}
 }

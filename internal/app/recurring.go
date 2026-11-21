@@ -26,6 +26,10 @@ func (s *Server) recurringLoop() {
 	}
 }
 
+// Closing builtin:recurring for an OU governs interactive access to the routes only (routes.go); it
+// does not pause automation, so the tick below never consults app access and existing schedules keep
+// running (TestRecurringTickIgnoresTheSwitch).
+//
 // recurringTick fires every enabled task whose cadence is due. It stamps the period BEFORE firing
 // (MarkRecurringFired) so a crash or a slow fire can't let the ticker re-fire the same period.
 func (s *Server) recurringTick() {

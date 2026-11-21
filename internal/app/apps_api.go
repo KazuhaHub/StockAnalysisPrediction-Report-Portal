@@ -57,12 +57,14 @@ func appJSON(a App) map[string]any {
 //
 // The answer is what this user may open, in the administrator's order (ADR 0048):
 //   - apps: the installed apps that are open for the caller, in order. Existing clients read this.
-//   - builtin_apps: the open built-in app slugs, in order. The server cannot gate a built-in app's own
-//     API, so the SPA hides the ones missing from this list.
+//   - builtin_apps: the open built-in app slugs, in order. The SPA hides the ones missing from this
+//     list; the server refuses a closed app's own routes only where the feature owns them (Scheduled
+//     tasks), not the routes the run dialog and the queue share.
 //   - order: both of the above as one sequence of keys (`builtin:<slug>` or an installed id), which
 //     is how the hub interleaves the two kinds.
 //
-// An administrator is exempt and receives everything.
+// Administrators resolve through the OU chain like everyone else (doc 190, D2a); the console reads
+// every app, open or not, from GET /api/admin/apps/layout instead.
 func (s *Server) apiApps(w http.ResponseWriter, r *http.Request, user string) {
 	view, err := s.st.appAccessFor(user)
 	if err != nil {

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { Alert, App, Button, Card, Result, Space, Tag, Typography, theme } from 'antd'
+import { App, Button, Card, Result, Space, Tag, Typography, theme } from 'antd'
 import { RightOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -109,7 +109,6 @@ function AppDetail({ app }: { app: AdminApp }) {
 
   return (
     <>
-      {!app.detailKnown && <Alert type="warning" showIcon title={t('apps.detail.installedFailed')} />}
       <AppsBreadcrumb app={app} name={name} />
       <div className="rp-app-detail">
         <Card styles={{ body: { padding: 20 } }}>
@@ -145,8 +144,6 @@ function AppDetail({ app }: { app: AdminApp }) {
             value={
               app.builtinDef ? (
                 <Typography.Text>{permLabel(app.builtinDef.perm)}</Typography.Text>
-              ) : !app.detailKnown ? (
-                '—'
               ) : app.scopes.length ? (
                 <Space size={4} wrap>
                   {app.scopes.map((s) => (

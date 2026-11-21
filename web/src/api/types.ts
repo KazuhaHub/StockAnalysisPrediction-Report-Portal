@@ -1225,6 +1225,10 @@ export interface AppLayoutEntry {
   name: string // an installed app's name; a built-in app's slug
   builtin: boolean
   icon?: string
+  // An installed app's manifest detail, sent for every app whether or not it is open for the caller.
+  version?: string
+  entry?: string
+  scopes?: string[]
   access: AppAccessOU[]
 }
 

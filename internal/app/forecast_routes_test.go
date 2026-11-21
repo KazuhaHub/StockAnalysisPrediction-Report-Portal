@@ -86,7 +86,7 @@ func TestForecastRoutesAreSessionRoutesBehindTheWall(t *testing.T) {
 		if reader != (row.gate == gateForecastScope) {
 			t.Errorf("incorrect forecast annotation: %+v", row)
 		}
-		if row.gate != "" && !reader {
+		if row.gate != "" && !reader && !strings.HasPrefix(row.gate, gateFeaturePrefix) { // feature switches: feature_switch_test.go
 			t.Errorf("unexpected gate outside forecast reader routes: %+v", row)
 		}
 	}

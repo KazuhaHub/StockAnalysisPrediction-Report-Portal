@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
-import type { AppAccessOU, AppLayoutEntry, AppLayoutResp, AppsResp, AppSummary } from '../../api/types'
+import type { AppAccessOU, AppLayoutEntry, AppLayoutResp } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
 
 // The administrator's view of one app (ADR 0048): the layout entry (key, kind, per-OU access) joined
@@ -17,8 +17,6 @@ export interface AdminApp {
   version?: string
   entry?: string
   scopes: string[]
-  /** False when the installed list could not be read, so version, entry and scopes are unknown, not empty. */
-  detailKnown: boolean
   access: AppAccessOU[]
 }
 
@@ -51,26 +49,25 @@ export function useAppLabels() {
   }
 }
 
-function merge(entry: AppLayoutEntry, installed: Map<string, AppSummary> | null): AdminApp {
+function merge(entry: AppLayoutEntry): AdminApp {
   const def = entry.builtin ? builtinAppByKey(builtinSlug(entry.key)) : undefined
-  const inst = entry.builtin ? undefined : installed?.get(entry.key)
   return {
     key: entry.key,
     builtin: entry.builtin,
     builtinDef: def,
     name: entry.name,
-    icon: entry.icon ?? inst?.icon,
-    version: inst?.version,
-    entry: inst?.entry,
-    scopes: inst?.scopes ?? [],
-    detailKnown: entry.builtin || installed !== null,
+    icon: entry.icon,
+    version: entry.version,
+    entry: entry.entry,
+    scopes: entry.scopes ?? [],
     access: entry.access ?? [],
   }
 }
 
 /**
- * Loads every app in the administrator's order. The installed list only adds detail; when it cannot
- * be read the apps say so (`detailKnown`) rather than claiming to have no scopes. `reload` resolves
+ * Loads every app in the administrator's order, with each installed app's detail, from the admin
+ * layout alone: the reader listing shows only what the caller's switches leave open, so the console
+ * must not depend on it. `reload` resolves
  * false when a refresh failed: before the first load that is the page's error, after it the page it
  * already has stays and the caller decides how to warn.
  */
@@ -86,12 +83,8 @@ export function useAppsCatalog() {
     // connection returns.
     let settled = true
     try {
-      const [layout, installed] = await Promise.all([
-        api.get<AppLayoutResp>('/api/admin/apps/layout'),
-        api.get<AppsResp>('/api/apps').catch(() => null),
-      ])
-      const byID = installed ? new Map((installed.apps ?? []).map((a) => [a.id, a])) : null
-      setApps((layout?.apps ?? []).map((e) => merge(e, byID)))
+      const layout = await api.get<AppLayoutResp>('/api/admin/apps/layout')
+      setApps((layout?.apps ?? []).map(merge))
       setError('')
       loaded.current = true
       return true
