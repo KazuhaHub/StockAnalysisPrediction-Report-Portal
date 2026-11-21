@@ -7,7 +7,10 @@ market release.
 
 ## Explicit setup
 
-The runtime administrator creates only infrastructure:
+Two deployments run the same binary with the same files. The compose runner
+(section "Compose deployment" below, doc [187](187-compose-app-runner.md)) is set up by
+`app-runner host-setup`; the systemd unit is the documented alternative and is set up by
+hand as here. On a unit host the runtime administrator creates only infrastructure:
 
 - a dedicated rootful Linux host or VM;
 - the fixed Portal controller UID and runner endpoint GID;
@@ -20,10 +23,15 @@ The runtime administrator creates only infrastructure:
 - the `portal-app-runner` binary and systemd unit from `deploy/app-runner/`.
 
 The controller-socket ancestors must be traversable by the fixed Portal
-controller. The reference layout uses `/run/portal-app-runner` and
-`/run/portal-app-runner/control` as `root:controller-gid` mode `0750`, and the
-service-created `runner.sock` as `root:controller-gid` mode `0660`. The separate
-application IPC root remains `root:root` mode `0700`.
+controller. The reference layout uses the durable
+`/var/lib/portal-app-runner/control` as `root:controller-gid` mode `0750` (so it exists
+after a reboot, before any container starts), and the service-created `runner.sock` as
+`root:controller-gid` mode `0660`. A host set up before doc 187 may keep
+`/run/portal-app-runner` and `/run/portal-app-runner/control` as `root:controller-gid`
+mode `0750`; the runner accepts that layout unchanged and `host-setup` only reports
+that `/run` is rebuilt at every boot. The separate application IPC root, by default
+`/run/portal-app-runner/ipc`, is `root:root` mode `0700` and is created by `serve`
+when it is missing (below).
 
 Run the enrollment step once:
 
@@ -56,18 +64,39 @@ Startup is ordered:
    inode identity;
 5. inspect the fixed Docker socket and require the native rootful profile plus
    configured reported CPU/memory floors;
-6. open the constrained candidate runtime;
-7. bind the fixed root/controller protected Unix endpoint with the bounded data,
-   candidate and network providers;
-8. accept work.
+6. require the daemon to be identified as a local `dockerd` in the runner's mount
+   namespace and its network namespace, and refuse before anything is created or bound
+   otherwise (a runner started without the compose entry, or beside another daemon,
+   fails here);
+7. make the application IPC root: a missing `ipc_root` is created as `root:root` mode
+   `0700` (a missing parent as `0755`), an existing parent is accepted when it is
+   root-owned and not group- or world-writable (so doc 146's `root:<gid> 0750` and a
+   fresh `0755` both pass), and an existing `ipc_root` with any other owner or mode
+   refuses;
+8. open the constrained candidate runtime;
+9. remove a stale control socket and bind the fixed root/controller protected Unix
+   endpoint with the bounded data, candidate and network providers. The socket a killed
+   runner left is removed only while the journal's exclusive lock is held and only when
+   it is a socket owned `0:<controller gid>` with mode `0660` and one link; anything
+   else at that path is refused;
+10. accept work.
 
-Any failed prerequisite exits non-zero without enabling execution. Static Portal
-applications do not depend on this service.
+Any failed prerequisite exits non-zero without enabling execution, and says why
+without naming a configured path. Static Portal applications do not depend on this
+service.
+
+`app-runner health --config` checks that the control socket is a socket owned
+`0:<controller gid>` with mode `0660` and that `connect()` succeeds (the runner drops
+the connection, because the peer is not the controller UID); it takes no lock.
+`app-runner version` prints the release identity the build was stamped with, and the
+ready line ends with `version=<tag> commit=<short sha>`.
 
 The journal's exclusive owner lock rejects a duplicate runner process. SIGTERM or
 SIGINT cancels the listener and in-flight sessions, then closes native handles,
 the data root and journal in reverse order. The systemd unit uses bounded restart
-backoff and a start limit instead of an unbounded crash loop.
+backoff and a start limit instead of an unbounded crash loop; the compose service
+restarts `unless-stopped` with Docker's growing delay, and every retry fails closed in
+the same startup checks.
 
 ## Portal connection
 
@@ -84,6 +113,34 @@ An absent set leaves managed execution unavailable and static apps unchanged. A
 partial or invalid set is logged without paths/details and leaves managed
 execution unavailable. A valid set is bound once at startup through the existing
 atomic endpoint slot.
+
+## Compose deployment
+
+Doc [187](187-compose-app-runner.md) ships the runner as an image,
+`ghcr.io/kazuhahub/stockanalysisprediction-report-portal-app-runner`, with exactly
+Portal's tags, as the `app-runner` service of `docker-compose.yml` (profile
+`app-runner`). The service is privileged in the host's PID, network, IPC, UTS and
+cgroup namespaces with no volumes, and the image's entry joins the **host mount
+namespace** with `nsenter` before it executes the runner, from a descriptor it opened
+before the switch (`PORTAL_APP_RUNNER_EXEC_FD`, which the runner checks is its own
+executable and marks close-on-exec first of all). The runner therefore sees what the
+systemd binary sees, and every check above is unchanged.
+
+`app-runner host-setup` sets the host up (plan without `--apply`, adopt of an existing
+layout, refusals) and prints the `.env` lines; Portal reaches the control socket
+through a read-only bind of the control directory that Docker never creates, with
+`PUID` equal to the controller UID. The deployment values of the section above are then:
+
+```text
+RP_APP_RUNNER_CONTROL_DIR=/var/lib/portal-app-runner/control   # host side of the bind
+RP_APP_RUNNER_SOCKET=/var/lib/portal-app-runner/control/runner.sock   # inside Portal's container
+RP_APP_RUNNER_CONTROLLER_UID=41001
+RP_APP_RUNNER_CONTROLLER_GID=41001
+```
+
+The handbook (section 4.0 to 4.7) has the procedures: set-up, whole-project upgrades
+under one `PORTAL_VERSION`, moving a unit host to compose and back, and the fresh-host
+procedure.
 
 ## Verification boundary
 

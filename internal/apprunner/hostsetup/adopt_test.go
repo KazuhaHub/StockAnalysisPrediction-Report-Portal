@@ -237,10 +237,11 @@ func TestAdoptWithARunningRunner(t *testing.T) {
 // creates it as root:gid 0750 and nothing else. No --enrollment is needed because the enrollment is recognised.
 func TestAdoptMigrationCreatesOnlyTheNewControlRoot(t *testing.T) {
 	h, _, cfg := adopted(t)
-	cfg["control_root"] = "/var/lib/portal-app-runner/control"
-	cfg["control_socket"] = "/var/lib/portal-app-runner/control/runner.sock"
-	h.writeConfig(cfg)
-	h.mkdir("/var/lib/portal-app-runner", 0o755)
+	// The example already names the durable control path; the host has not been given the directory yet.
+	if cfg["control_root"] != "/var/lib/portal-app-runner/control" || cfg["control_socket"] != "/var/lib/portal-app-runner/control/runner.sock" {
+		t.Fatalf("the shipped example does not name the durable control path: %v %v", cfg["control_root"], cfg["control_socket"])
+	}
+	os.RemoveAll(h.p("/var/lib/portal-app-runner/control"))
 	code, plan := h.run(h.adoptOptions(false))
 	if code != ExitOK || strings.Count(plan, "  create ") != 1 || !strings.Contains(plan, "control root /var/lib/portal-app-runner/control") {
 		t.Fatalf("plan exit %d, want exactly the control root:\n%s", code, plan)

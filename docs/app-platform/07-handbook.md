@@ -88,8 +88,10 @@ P13. It is not a request to modify the current server.
    remain static-only until a supported adapter is installed. Sections 4.2 to
    4.4 give the XFS volume recipe for ext4 hosts, the per-platform support
    matrix, and the Linux VM recipe for macOS and Windows.
-2. Obtain the platform-compatible runner from the official verified release.
-   Verify signature/digest and compatibility before execution.
+2. Obtain the platform-compatible runner from the official verified release:
+   the app-runner image of the same release as Portal (section 4.0) or, for the
+   systemd alternative, the verified tarball (section 4.1). Verify digest and
+   compatibility before execution.
 3. Prepare owner-only runtime directories. Proposed logical roots are control,
    journal, verified artifacts, installation data, sockets and recovery. Resolve
    final filesystem ownership/path layout in D1/D2, not from an app manifest.
@@ -114,7 +116,98 @@ ownership, health checks, safe log limits and how to undo bootstrap. If the runn
 needs a privilege the profile does not provide, fail with a clear reason rather
 than suggesting broad permissions as a routine fix.
 
-### 4.1 The runner binary
+### 4.0 The compose runner (recommended)
+
+Portal, its database and the runner are one compose project
+(`docker-compose.yml`, doc [187](187-compose-app-runner.md)). The runner is the
+`app-runner` service, off unless the `app-runner` profile is enabled, so a
+static-only install is unchanged. It is a privileged container in the host's
+PID, network, IPC, UTS and cgroup namespaces with no volumes, and the image's
+entry joins the **host mount namespace** before it executes the runner, so the
+runner runs exactly as the systemd binary does: same filesystem, mount table,
+network and checks. That is not a privilege increase: the unit already ran as
+root in the host's namespaces with the Docker socket. Portal gains one read-only
+bind of the control directory and nothing else (no Docker socket, data root, IPC
+root or journal).
+
+Host requirements: Linux 5.14 or later, cgroup v2, a rootful Docker daemon that
+passes `app-runner inspect-daemon`, and the host's own `xfsprogs` and
+`util-linux` (the tools run in the host's filesystem; preflight names a missing
+package). Docker Desktop and rootless Docker do not qualify.
+
+**Set the host up once.** From the compose project directory:
+
+```sh
+docker compose run --rm app-runner host-setup                     # plan only: changes nothing, takes no lock
+docker compose run --rm app-runner host-setup --apply --enrollment <file>
+```
+
+`<file>` is the public enrollment document prepared in the administrator console
+(a host path). `host-setup` is idempotent. On a **new host** it creates the
+directories, the two loop-mounted XFS images (data 8 GiB, checkpoint 16 GiB by
+default; `--data-size`, `--checkpoint-size`, `--image-dir`), their `/etc/fstab`
+lines, `service.json`, `bootstrap.json` and the enrollment, from the defaults:
+
+| Item | Default | Owner, mode |
+|---|---|---|
+| Configuration | `/etc/portal-app-runner/{service,bootstrap}.json` | `root:root 0600`, dir `0700` |
+| Journal | `/var/lib/portal-app-runner/journal` | `root:root 0700` |
+| Image scratch | `/var/lib/portal-app-runner/images` | `root:root 0700` |
+| XFS images | `/var/lib/portal-app-runner/volumes/{data,checkpoint}.img` | `root:root 0600` |
+| Data and checkpoint roots | `/srv/portal-runner/{data,checkpoint}/root` | XFS, `root:root 0700` |
+| Control root | `/var/lib/portal-app-runner/control` (durable) | `root:<gid> 0750` |
+| IPC root | `/run/portal-app-runner/ipc` | made by the runner at each start |
+
+Controller UID and GID default to 41001; Portal runs as the same IDs. On an
+**existing runner host** it adopts the layout already there: the existing
+`service.json` and `bootstrap.json` are the source of truth, it verifies rather
+than recreates, and it compares only the fields it owns (the path fields, the
+controller IDs and block, `bootstrap.json`). `capacity`, `network_*`,
+`private_networks`, `proxy_pins` and the rest are yours and are never rewritten.
+It refuses, names the item and changes nothing when something it owns conflicts
+(a directory of another mode, an fstab line for the same mount with other options,
+an image of another size, a UID held by another account, a flag that disagrees
+with an existing `service.json`). It never deletes, unmounts or detaches anything
+it did not create in the same run, and never edits `/etc/passwd`, `/etc/group`,
+`/etc/docker` or unit files. `--apply` needs the runner stopped (it takes the
+journal and data-root locks and holds them until it exits). Without an enrollment
+document a new host is prepared but gets no configuration, and the exit status is 3.
+
+`--apply` prints the `.env` lines for the compose project (it never writes
+them): `COMPOSE_PROFILES=app-runner`, `PORTAL_VERSION`, `PORTAL_UID`,
+`PORTAL_GID`, `RP_APP_RUNNER_CONTROL_DIR`, `RP_APP_RUNNER_SOCKET` and the two
+`RP_APP_RUNNER_CONTROLLER_*` values. Add them and run `docker compose up -d`.
+A static-only install needs only `mkdir -p app-runner-control` beside the
+compose file, because Docker never creates the bind source.
+
+**Check it.** `docker compose logs app-runner` shows `app-runner ready ... version=<tag>`;
+`docker compose run --rm app-runner health --config /etc/portal-app-runner/service.json`
+exits 0 while it serves; `docker compose run --rm app-runner version` prints the
+image's release identity.
+
+**Upgrade the whole project.** `docker compose pull && docker compose up -d`,
+with no service names. One variable, `PORTAL_VERSION`, selects both images and
+they must come from the same release: never `pull report-portal` or
+`up -d report-portal` alone across a version change. Production pins
+`PORTAL_VERSION` to a fixed tag in `.env` and uses `pull_policy: missing`; before
+`up -d`, compare the runner image digest with `images["app-runner"].digest` in the
+release's `release-metadata.json`. Restarting the runner stops no application;
+backend requests and broker calls fail for those seconds and journalled work
+resumes. A newer runner upgrades the journal when it opens it and an older one
+refuses a newer journal, so a release whose notes name a journal schema change is
+the rollback limit.
+
+**Operations.** `docker compose down` stops only Portal, its database and the
+runner; application containers keep running, unmanaged until the runner returns.
+`docker exec` into the runner container is a host root shell (as any `docker`
+group member already had), and the container healthcheck runs the runner's own
+`health` from the host namespace. The runner opens no TCP or UDP listener.
+
+### 4.1 The runner binary (the systemd alternative)
+
+The systemd unit stays supported, with the same binary and configuration files;
+`host-setup` also runs directly on a host (`app-runner host-setup`), and the VM
+recipe in section 4.4 uses it. Compose hosts do not install the binary below.
 
 Official releases carry `app-runner_<version>_linux_amd64.tar.gz` and
 `app-runner_<version>_linux_arm64.tar.gz` beside the Portal archives. They are
@@ -123,9 +216,16 @@ anything. Each archive holds `app-runner`, the systemd unit, the example
 configuration and the licence files. There is no `app-runner` for macOS or
 Windows and no prebuilt VM image: the VM recipe in section 4.3 is the supported
 way to run backend apps on those systems. Install the binary as
-`/opt/portal-app-runner/app-runner` (the path the unit uses).
+`/opt/portal-app-runner/app-runner` (the path the unit uses). The control root
+of the reference layout moved from `/run/portal-app-runner/control` to the
+durable `/var/lib/portal-app-runner/control`, so it exists before either
+container starts; a unit host may keep the old path or move to the new one.
 
 ### 4.2 XFS volumes for backend apps
+
+On a compose host, `host-setup` (section 4.0) does everything below for a new host
+and installs the fstab lines itself; this section is the recipe for the systemd
+alternative and the reference for what `host-setup` runs.
 
 The runner enforces hard byte and inode limits with XFS project quota, and it
 opens exactly two roots: a data root and a distinct checkpoint root. Both must
@@ -327,7 +427,7 @@ Use this when a backend app must reach a service that is served on the same host
 
 The procedure changes the host's nginx and the runner's configuration only when the operator runs it. Nothing here is done by Portal or by the runner.
 
-1. **Check the runner runs in the host network namespace.** A pin such as `127.0.0.1:20443` is an address of the runner's own namespace. With the systemd unit shipped in `deploy/app-runner/portal-app-runner.service` it is (no `PrivateNetwork=`, no `NetworkNamespacePath=`). Under Compose the service must use `network_mode: host` and `pid: host`, the configuration file must stay root-owned mode `0600` through a read-only bind mount, and the runner must run as root. The runner enforces the namespace rule itself: with `proxy_pins` set it refuses to start with `proxy_pins_netns` unless it identifies its Docker daemon in its own network namespace, and every Docker request fails if a later connection is not. Do not work around that refusal; fix the deployment.
+1. **Check the runner runs in the host network namespace.** A pin such as `127.0.0.1:20443` is an address of the runner's own namespace. With the systemd unit shipped in `deploy/app-runner/portal-app-runner.service` it is (no `PrivateNetwork=`, no `NetworkNamespacePath=`). Under Compose (section 4.0) the `app-runner` service has `network_mode: host` and `pid: host` and reads `/etc/portal-app-runner/service.json` in the host's mount namespace, so there is no bind mount for it; the file stays root-owned mode `0600` and the runner runs as root. The runner enforces the namespace rule itself: with `proxy_pins` set it refuses to start with `proxy_pins_netns` unless it identifies its Docker daemon in its own network namespace, and every Docker request fails if a later connection is not. Do not work around that refusal; fix the deployment.
 2. **Add the dedicated nginx listener.** Use `deploy/app-runner/proxy-pin-listener.nginx.example.conf` as the starting point: one `server` block for the name on `127.0.0.1:20443`, a `default_server` block that rejects every other SNI, a `421` for any other host (including an absolute-URI request line), and the fixed name as the upstream `Host`. Never pin the shared `127.0.0.1:443`: through it the app could send any other site's `Host` header and the broker cannot see inside TLS. The certificate is the site's own (Let's Encrypt via DNS-01), because the app verifies it against the name. Keep the file in an include that aaPanel does not manage: aaPanel rewrites `/www/server/panel/vhost/nginx/<site>.conf` when the site is edited in the panel. Which include point your aaPanel keeps across edits is for you to confirm on the host; the probe below is the proof.
 3. **Run the acceptance probe, as the operator, on the host.** `sh scripts/probe-proxy-pin-listener.sh --nginx-include <the include file> --upstream-log <the frp upstream log>` (add `--name`, `--other-host`, `--port` or `--address` if yours differ). It sends requests to the loopback listener and reads the include and the socket table; it changes nothing. Every check must pass: the request verifies the certificate; another `Host` answers 421; another SNI is rejected with no certificate; an absolute-URI request line for another site answers 421; the include fixes the upstream `Host` (never `$http_host`) and listens on loopback only; the upstream log shows the fixed name; and exactly one socket listens on the port, `127.0.0.1:20443`. If you cannot read the upstream log, pass `--no-upstream-log` and look at the frp upstream by hand. Do not continue after a failure. **Run the probe again after any aaPanel edit of the site.**
 4. **List the destination and restart the runner.** Add the block to `/etc/portal-app-runner/service.json` (`deploy/app-runner/service.proxy-pins.example.json` is the plain example with exactly this block added):
@@ -340,6 +440,71 @@ The procedure changes the host's nginx and the runner's configuration only when 
 5. **Review the pin in Portal.** Open the installation's settings, then the proxy panel. The runner now advertises the entry, so the exact host `quotes.internal.anchan.kazuhahub.com` (in the list of approved hosts) offers a select with the destinations you listed for that name. Choose it and review: the dialog shows the pin as added, with a warning that the name will connect to that address on the runner's machine without DNS. Confirm to consume it. The pin shows next to its host as "pinned to 127.0.0.1:20443". If you later remove the entry from `proxy_pins`, the pin stays reviewed but is shown as not permitted by the runner, and the broker refuses tunnels to the name (`address_denied`) until you list it again or remove the pin in a new review.
 
 Upgrading the runner and Portal in either order is safe: the runner keeps answering the old capability query exactly as before, and a new Portal falls back to it when it talks to an older runner. A pinned grant needs a runner that knows pins: after a downgrade, Portal opens the session without the proxy rather than with the proxy minus its pins.
+
+### 4.6 Moving a systemd runner to compose, and back (doc 187 section 10)
+
+No data moves: the compose runner reads the same configuration, journal, roots
+and images, and `host-setup` runs in adopt mode. One version change at a time:
+use the release whose image matches the installed binary, or upgrade the binary
+first.
+
+1. **Before.** Record `systemctl status portal-app-runner` and its ready line,
+   the installations and their states in the console, and `findmnt` for both
+   roots. While the unit still runs, run
+   `docker compose run --rm app-runner host-setup` (plan only). It should adopt:
+   every root, image, directory and the enrollment match, and the only planned items
+   are fstab lines that were never installed. It also reports a `control_root` under
+   `/run` without refusing. Anything else stops the migration here.
+2. **Switch.** Edit `control_root` and `control_socket` in `service.json` to the
+   durable path (the one edit to a field `host-setup` owns, made by you).
+   `systemctl stop portal-app-runner && systemctl disable portal-app-runner`
+   (application containers keep running). Then
+   `docker compose run --rm app-runner host-setup --apply`: it creates the new
+   control root as `root:<gid> 0750` and any missing fstab lines, and needs no
+   `--enrollment` because the enrollment is recognised. Add the printed `.env`
+   lines, then `docker compose pull && docker compose up -d`. Check `app-runner
+   ready`, `health`, the same runtime identity in the console and each enabled
+   backend.
+3. **Rollback.** `docker compose stop app-runner` and take `app-runner` out of
+   `COMPOSE_PROFILES`; keep the durable control path or revert the two fields
+   (Portal's `RP_APP_RUNNER_*` must match); `systemctl enable --now
+   portal-app-runner` with the tarball binary of the **same release**; then
+   `docker compose up -d` and check as above. Crossing a journal schema change is
+   refused by the older binary; going further back is the restore path of doc 168.
+
+The journal's exclusive lock and the data root's own lock refuse a second runner
+in both directions: a unit still running makes the compose runner exit with `in
+use` and makes `host-setup --apply` refuse.
+
+### 4.7 A fresh host: the anchan procedure (operator-only)
+
+Nothing in the repository runs this. It is the procedure for the owner to follow
+when the owner asks for it (doc 187 phase P4), after the release that carries
+the runner image is published. anchan's Portal is one compose file,
+`/data/report-portal/docker-compose.yml`, which pins a fixed tag and uses the host's
+PostgreSQL, with aaPanel's nginx in front.
+
+1. **Precheck on the host, changing nothing.** Kernel 5.14 or later; cgroup v2;
+   `app-runner inspect-daemon` reports the rootful profile; `xfsprogs` is installed;
+   UID and GID 41001 are free (`getent passwd 41001 group 41001`); and whether
+   aaPanel's compose page reads `.env` and `COMPOSE_PROFILES`. If it does not, the
+   host-specific compose file drops the `profiles:` key and states its values
+   literally, and every command below is run on the CLI
+   (`cd /data/report-portal && docker compose ...`). aaPanel's compose page broke on
+   multi-file projects, so the file stays one file.
+2. **Install the compose file** that carries the `app-runner` service, taking the
+   usual backup of the old binary and file first and the existing deploy procedure's
+   tag edit (now made once in `.env`), then `docker compose up -d report-portal`.
+3. **Get the enrollment document.** Prepare the runtime binding in the administrator
+   console and save the document on the host.
+4. **Provision.** `host-setup` (plan only), then
+   `host-setup --apply --image-dir /data/portal-runner --data-size 8G --checkpoint-size 16G --enrollment <file>`.
+5. **Start.** Add the printed `.env` lines, which change `PORTAL_UID` and `PORTAL_GID` to
+   41001, then `docker compose up -d`. Portal's files are re-owned once by its entry, and
+   the backup step's `docker exec -u` changes to `41001:41001`.
+6. **Confirm** the runtime in the console, and the three production checks: the runner
+   image digest against `release-metadata.json`, `app-runner ready` with the expected
+   `version=` in `docker compose logs app-runner`, and the managed profile in the console.
 
 ## 5. Everyday administrator procedures
 
