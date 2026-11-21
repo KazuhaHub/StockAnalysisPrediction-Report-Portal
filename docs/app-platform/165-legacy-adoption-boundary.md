@@ -1,5 +1,7 @@
 # Legacy adoption boundary
 
+> **Superseded 2026-11-21** for v1 apps by [190](190-legacy-retirement-and-console.md): the original app system is retired, and the compatibility promises below no longer hold.
+
 Status: development acceptance. This proves that matching names do not grant
 managed ownership. It does not implement P14 app-specific adoption.
 

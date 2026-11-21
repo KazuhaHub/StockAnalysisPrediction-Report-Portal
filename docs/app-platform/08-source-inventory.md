@@ -1,5 +1,7 @@
 # Source inventory and legacy compatibility map
 
+> **Superseded 2026-11-21** for v1 apps by [190](190-legacy-retirement-and-console.md): the original app system is retired, and the compatibility promises below no longer hold.
+
 Inspected against Portal commit
 `d84f138e483034e12395359bb976dc1b9027ac51`. These are source observations, not
 new runtime tests, security certification or approval to migrate existing apps.

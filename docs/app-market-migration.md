@@ -1,5 +1,7 @@
 # Application market migration
 
+> **Superseded 2026-11-21** for v1 apps by [190](app-platform/190-legacy-retirement-and-console.md): the original app system is retired, and the compatibility promises below no longer hold.
+
 The shared application repository is
 [Report Portal Apps](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps).
 Applications retain independent versions, frontend archives and optional backend

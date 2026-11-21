@@ -1,5 +1,7 @@
 # ADR 0040: Viewer-bound external application backend connections
 
+> **Superseded 2026-11-21** for v1 apps by [190](../app-platform/190-legacy-retirement-and-console.md): the original app system is retired, and the compatibility promises below no longer hold.
+
 Status: accepted 2026-10-22. The owner explicitly approved Option A in
 [the storage proposal](../status-storage-and-platform-proposal.md).
 
