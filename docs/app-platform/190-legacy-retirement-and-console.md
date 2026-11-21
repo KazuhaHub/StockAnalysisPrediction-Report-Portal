@@ -31,7 +31,7 @@ connection and a running container `report-portal-status`.
 | # | Decision |
 |---|---|
 | D1 | Batch, Scheduled tasks and Quotes stay core Portal features, not platform apps. Readers still see them as tiles on `/apps`. |
-| D2 | Their per-OU switch is enforced by the server on the routes that belong to the feature alone: every `/api/admin/batch/recurring*` route (Scheduled tasks), and the batch console's own `tickets`, `run-quota` and `jobs/{id}/retry|priority|schedule` (Batch). Routes shared with other pages (quotes, the run dialog, the queue) are not gated; Quotes, which has no route of its own, keeps a hidden entry only. A closed feature answers `403 {"code":"app_closed"}`. |
+| D2 | Their per-OU switch is enforced by the server on the routes that belong to the feature alone. Only Scheduled tasks has such routes: every `/api/admin/batch/recurring*` route answers `403 {"code":"app_closed"}` when it is closed. Batch's routes (targets, presets, tickets, run quota, the queue and job actions) also serve the header run dialog and the shared queue page, and Quotes' routes serve the reading pages, so neither is gated: closing Batch or Quotes hides its entry. Closing Scheduled tasks does not pause schedules that already exist; they keep running. |
 | D2a | Administrators are bound by the switches like everyone else (ADR 0048's administrator exemption ends). No switch can close the console pages where switches are edited: the OU policy pages and every app's access settings stay open to administrators. |
 | D3 | `demo-symbols` is dropped. |
 | D4 | R2 drops `apps`, `app_files`, `app_backend_connections` and `app_platform_access_grants`, after a read-only row check and a backup, in one transaction. Restoring an older backup skips those tables with one log line. |
@@ -118,7 +118,7 @@ Labels lead with the verb ("Update", not "Review update").
 |---|---|
 | P0 | Shared alert spacing (frontend guidelines) |
 | P1 | This document and the superseded-by pointers |
-| P2 | Server: unified directory and order including platform installations; platform access as OU policy (D7); feature switches on owned routes and the administrator lock-out guard (D2, D2a) |
+| P2 | Server: unified directory and order including platform installations; platform access as OU policy (D7); the Scheduled tasks switch on its routes and the administrator lock-out guard (D2, D2a) |
 | P3 | Apps tab and app page, lifecycle actions moved there |
 | P4 | Install page |
 | P5 | Sources and trust, Runtime, Activity tabs; preview notice removed |
@@ -136,7 +136,7 @@ Each becomes a test; the direction a guard fails is stated.
 - **A3** A database holding v1 rows starts under R1 unchanged; readers do not see those apps; `/apps/x/<id>` shows the retired-app page.
 - **A4** Under R1 the v1 tables are neither read nor written (SQLite and PostgreSQL), so the previous image still serves them.
 - **A5** The admin Apps list holds the three built-in features and every platform installation; after a reorder, `/apps` shows the same order.
-- **A6** With a feature switched off for an OU, its owned routes answer 403 to that OU's users, administrators included; its shared routes (quotes, run dialog, queue) still answer. Fails closed on the owned routes.
+- **A6** With Scheduled tasks switched off for an OU, every recurring route answers 403 to that OU's users, administrators included, and existing schedules still fire. No route the web code calls outside the Scheduled tasks console carries a feature gate (checked against the callers in `web/src`). Fails closed on the gated routes.
 - **A6a** An administrator in an OU where every feature and every app is closed can still open the OU policy pages and every app's access settings, and re-open them.
 - **A7** A new platform installation is closed to everyone until an OU row opens it; built-in features with no rows stay open. An OU opened at install time is open the moment activation commits.
 - **A7a** Launch, directory, status, viewer identity, notifications and the principal directory all follow the OU policy and agree with each other for the same user; `app_platform_access_grants` is neither read nor written.
