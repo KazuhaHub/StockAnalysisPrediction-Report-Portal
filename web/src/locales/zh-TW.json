@@ -4143,6 +4143,7 @@
   "err.event_subscription_capacity": "事件訂閱容量已滿。",
   "err.install_lease_recovery_required": "安裝曾中斷，需要復原審核。",
   "err.install_authority_review_required": "安裝授權已變更，需要管理員審核。",
+  "err.install_format_unsupported": "此安裝依本 Portal 無法執行的格式規劃，請重新規劃安裝。",
   "err.install_execution_review_required": "安裝未能完成，需要管理員審核。",
   "err.start_never_ran": "應用後端從未啟動，運行器已確認沒有任何程序殘留。",
   "err.start_never_ran_review_required": "應用後端沒有啟動，但運行器無法確認沒有其他變動，需要管理員檢查。",

@@ -9,8 +9,10 @@ import (
 
 // The failure transition grants no execution authority. It still pins the exact
 // consumed writable review and installation runtime; a revoked runtime need not
-// be usable before its pending work can be denied and retained for recovery.
-func platformInstallReviewRuntime(e migExec, lease platformOperationLease) (string, error) {
+// be usable before its pending work can be denied and retained for recovery. A
+// managed-format plan is accepted only when closeUnexecutable is set: no executor runs that format, so the
+// only transition it may take is being closed as install_format_unsupported.
+func platformInstallReviewRuntime(e migExec, lease platformOperationLease, closeUnexecutable bool) (string, error) {
 	var actual sql.NullString
 	if err := e.queryRow(`SELECT runtime_id FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&actual); err != nil {
 		return "", err
@@ -31,7 +33,7 @@ func platformInstallReviewRuntime(e migExec, lease platformOperationLease) (stri
 	}
 	canonical, err := json.Marshal(p)
 	requestBytes, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, digest})
-	if err != nil || string(canonical) != raw || platformDigest(canonical) != digest || platformDigest(requestBytes) != request || p.Format != platformWritableInstallFormat || p.ControllerEpoch != lease.controllerEpoch || p.Runtime == nil || !platformValidUUID(p.Runtime.RuntimeID) || !actual.Valid || actual.String != p.Runtime.RuntimeID || p.Runtime.ControllerEpoch != lease.controllerEpoch || p.Runtime.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile {
+	if err != nil || string(canonical) != raw || platformDigest(canonical) != digest || platformDigest(requestBytes) != request || (p.Format != platformWritableInstallFormat && !(closeUnexecutable && p.Format == platformManagedInstallFormat)) || p.ControllerEpoch != lease.controllerEpoch || p.Runtime == nil || !platformValidUUID(p.Runtime.RuntimeID) || !actual.Valid || actual.String != p.Runtime.RuntimeID || p.Runtime.ControllerEpoch != lease.controllerEpoch || (p.Format == platformWritableInstallFormat && p.Runtime.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) {
 		return "", errAppPlatformStageEvidence
 	}
 	return actual.String, nil

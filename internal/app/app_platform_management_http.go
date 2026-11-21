@@ -398,7 +398,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 				platformManagementError(w, errAppPlatformRuntimeConflict)
 				return
 			}
-			review, err = s.createPlatformManagedInstallReview(
+			review, err = s.createPlatformRunnerInstallReview(
 				reviewCtx, actor, release, n, targets, endpoint)
 		} else {
 			review, err = s.createPlatformInstallReviewForFormatContext(
@@ -758,13 +758,16 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 			err = formatErr
 			break
 		}
-		if platformManagedFormat(format) {
+		if format == platformManagedInstallFormat {
+			// No executor runs this format; admitting it would queue an install forever. Plan it again.
+			err = errAppPlatformPlanChanged
+		} else if format == platformWritableInstallFormat {
 			endpoint, ok := s.platformRuntimeEndpoint()
 			if !ok {
 				err = errAppPlatformRuntimeConflict
 				break
 			}
-			result, err = s.consumePlatformManagedInstallReview(
+			result, err = s.consumePlatformWritableInstallReview(
 				r.Context(), actor, id, sha, key, endpoint)
 		} else {
 			result, err = s.consumePlatformInstallReviewForFormatContext(

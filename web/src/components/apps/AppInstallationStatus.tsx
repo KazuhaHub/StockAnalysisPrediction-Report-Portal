@@ -37,6 +37,7 @@ const errors = new Set([
   'install_lease_recovery_required',
   'install_authority_review_required',
   'install_execution_review_required',
+  'install_format_unsupported',
   'start_never_ran',
   'start_never_ran_review_required',
   'capacity_exhausted_memory',

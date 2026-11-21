@@ -141,8 +141,8 @@ The stable JSON error codes are translated in all three Portal locales:
 
 Existing session/enrollment wrappers retain their normal refusal responses.
 Safe progress error codes install_lease_recovery_required,
-install_authority_review_required and install_execution_review_required also have
-three-locale messages. Never translate by matching fallback English error text.
+install_authority_review_required, install_execution_review_required and
+install_format_unsupported (doc 114, addendum 2026-11-21) also have three-locale messages. Never translate by matching fallback English error text.
 
 ## Verification and remaining work
 

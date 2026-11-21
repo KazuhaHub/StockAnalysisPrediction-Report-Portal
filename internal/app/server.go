@@ -51,6 +51,8 @@ type Server struct {
 	// production constructor sets them; a bare test Server has none.
 	platformBuiltinPublishers []platformBuiltinPublisher
 	platformOfficialCatalogue string
+	// platformUnclosableInstallLog holds the last error logged for an install the engine could not close.
+	platformUnclosableInstallLog atomic.Value
 
 	platformBackendRequests platformDocumentBudget
 	platformNetworkRequests platformDocumentBudget

@@ -4143,6 +4143,7 @@
   "err.event_subscription_capacity": "Event subscription capacity is exhausted.",
   "err.install_lease_recovery_required": "The interrupted installation requires recovery review.",
   "err.install_authority_review_required": "Installation authority changed. Administrator review is required.",
+  "err.install_format_unsupported": "This installation was planned in a format this Portal cannot run. Plan the installation again.",
   "err.install_execution_review_required": "The installation could not finish. Administrator review is required.",
   "err.start_never_ran": "The app's backend never started, and the runner confirmed that nothing was left running.",
   "err.start_never_ran_review_required": "The app's backend did not start, but the runner could not confirm that nothing else was changed, so an administrator needs to review it.",

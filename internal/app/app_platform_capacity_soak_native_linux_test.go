@@ -675,18 +675,30 @@ func (c *soakChild) installManagedWithCode(app string, memoryMiB, cpuMillis int)
 	return c.installStagedRelease(app, release.sha256, release.trustRevision)
 }
 
-// installStagedRelease reviews, admits and drives the install of an already staged managed release.
+// installStagedRelease reviews, admits and drives the install of an already staged managed release through the
+// console routes an administrator uses, so the plan format is the one the console creates.
 func (c *soakChild) installStagedRelease(app, sha string, trust int64) (string, string) {
 	t := c.t
-	review, err := c.s.createPlatformWritableInstallReview(c.ctx, c.session, sha, trust, c.audience(), c.endpoint)
-	if err != nil {
-		t.Fatal("review "+app, err)
+	planned := sessionTestRequest(c.mux, http.MethodPost, "/api/admin/app-platform/plans", c.cookie, fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"audience":[{"type":"user","username":%q}]}`, sha, strconv.FormatInt(trust, 10), c.session.username))
+	var review struct {
+		ID     string `json:"plan_id"`
+		SHA256 string `json:"plan_sha256"`
 	}
-	committed, err := c.s.consumePlatformWritableInstallReview(c.ctx, c.session, review.ID, review.SHA256, c.id(), c.endpoint)
-	if err != nil {
-		t.Fatal("admit "+app, err)
+	if planned.Code != http.StatusOK || json.Unmarshal(planned.Body.Bytes(), &review) != nil {
+		t.Fatalf("review %s answered %d: %.300s", app, planned.Code, planned.Body.String())
 	}
-	return committed.InstallationID, c.drive(committed.OperationID, 12*time.Minute)
+	if format, err := platformParseInstallProfile(scalar[string](t, c.s.st, `SELECT plan_json FROM app_platform_review_plans WHERE id=?`, review.ID)); err != nil || format != platformWritableInstallFormat {
+		t.Fatalf("review %s planned format %q (%v), which the operation engine does not run", app, format, err)
+	}
+	committed := sessionTestRequest(c.mux, http.MethodPost, "/api/admin/app-platform/operations", c.cookie, fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, review.ID, review.SHA256, c.id()))
+	var admitted struct {
+		OperationID    string `json:"operation_id"`
+		InstallationID string `json:"installation_id"`
+	}
+	if committed.Code != http.StatusAccepted || json.Unmarshal(committed.Body.Bytes(), &admitted) != nil {
+		t.Fatalf("admit %s answered %d: %.300s", app, committed.Code, committed.Body.String())
+	}
+	return admitted.InstallationID, c.drive(admitted.OperationID, 12*time.Minute)
 }
 
 // installOffline imports a release as an administrator does, through the offline import route, and installs it.
