@@ -310,7 +310,7 @@ jobs:
           APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" APP_V2_AUTHORING_BROWSER_RUNNER="$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/template.cjs" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateBrowser$' -count=1 -v -timeout=90s
       - name: Preserve generated-template browser evidence
         if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: v2-template-browser
           if-no-files-found: ignore
@@ -325,7 +325,7 @@ jobs:
         run: node scripts/app-install-browser-acceptance.cjs
       - name: Preserve installation-browser evidence
         if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-install-browser
           if-no-files-found: ignore
@@ -337,7 +337,7 @@ jobs:
         run: node scripts/app-platform-failure-browser.cjs
       - name: Preserve application failure browser evidence
         if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-failure-browser
           if-no-files-found: ignore
@@ -350,7 +350,7 @@ jobs:
         run: node scripts/app-reference-apps-shell-browser.cjs
       - name: Preserve reference-app shell browser evidence
         if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reference-apps-browser
           if-no-files-found: ignore
@@ -477,7 +477,7 @@ jobs:
           retention-days: 14
       - name: Preserve real-runner lifecycle browser evidence
         if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-platform-lifecycle-browser
           path: ${{ runner.temp }}/app-platform-lifecycle-browser
