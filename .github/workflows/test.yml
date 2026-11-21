@@ -439,10 +439,12 @@ jobs:
           go-version-file: go.mod
           cache: false
       # shell: bash, so the step gets pipefail and a failed test is not hidden behind tee's exit status.
+      # Without it, journal's runs at the old -timeout=5m (it takes about 300s under -race) timed out
+      # and still passed; 10m leaves it room, as the push lane's 12m does.
       - name: Race the concurrency packages
         if: matrix.shard == 1
         shell: bash
-        run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ ./internal/apprunner/journal/ 2>&1 | tee go-race-packages.txt
+        run: go test -race -count=1 -timeout=10m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ ./internal/apprunner/journal/ 2>&1 | tee go-race-packages.txt
       # The subset is name-based on purpose: the run queue, scheduler, retry/reconcile loops,
       # webhook delivery and chat gate are the paths a race detector can actually catch here. The
       # list is the top-level tests that pattern selects, dealt by position over shards 2 to N.
