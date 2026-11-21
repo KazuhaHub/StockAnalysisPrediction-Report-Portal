@@ -1,5 +1,7 @@
 # 3. Downloadable apps (iframe app platform)
 
+> **Superseded 2026-11-21** for v1 apps by [190](../app-platform/190-legacy-retirement-and-console.md): the original app system is retired, and the compatibility promises below no longer hold.
+
 ## Status
 
 Accepted — 2026-07-03. **Phase 1 implemented** 2026-07-03 (app registry +
