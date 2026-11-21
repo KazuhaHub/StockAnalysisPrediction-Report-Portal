@@ -31,6 +31,9 @@ type CatalogueRelease struct {
 	// release. Online install downloads it and then runs the offline path, so the
 	// descriptor and signature must be byte-equal to the package's.
 	PackageURL string `json:"package_url,omitempty"`
+	// PackageOCI names the same package as an OCI artifact by repository and manifest digest (format 2-dev.3,
+	// doc 188). It excludes PackageURL.
+	PackageOCI *CataloguePackageOCI `json:"package_oci,omitempty"`
 }
 
 type ParsedCatalogue struct {
@@ -67,10 +70,10 @@ func ParseCatalogue(raw []byte) (ParsedCatalogue, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&doc) != nil || (doc.Format != "portal.catalogue/2-dev.1" && doc.Format != "portal.catalogue/2-dev.2") || doc.Releases == nil || len(doc.Releases) > MaxCatalogueReleases {
+	if d.Decode(&doc) != nil || (doc.Format != "portal.catalogue/2-dev.1" && doc.Format != "portal.catalogue/2-dev.2" && doc.Format != "portal.catalogue/2-dev.3") || doc.Releases == nil || len(doc.Releases) > MaxCatalogueReleases {
 		return zero, ErrInvalidCatalogue
 	}
-	// An explicit empty package_url is ambiguous with an absent one; refuse it.
+	// An explicit empty package_url or null package_oci is ambiguous with an absent one; refuse it.
 	var keys struct {
 		Releases []map[string]json.RawMessage `json:"releases"`
 	}
@@ -81,6 +84,9 @@ func ParseCatalogue(raw []byte) (ParsedCatalogue, error) {
 		if value, present := r["package_url"]; present && string(value) == `""` {
 			return zero, ErrInvalidCatalogue
 		}
+		if value, present := r["package_oci"]; present && string(bytes.TrimSpace(value)) == "null" {
+			return zero, ErrInvalidCatalogue
+		}
 	}
 	seen := map[string]bool{}
 	for _, r := range doc.Releases {
@@ -89,6 +95,9 @@ func ParseCatalogue(raw []byte) (ParsedCatalogue, error) {
 			return zero, ErrInvalidCatalogue
 		}
 		if r.PackageURL != "" && (doc.Format == "portal.catalogue/2-dev.1" || ValidateCatalogueURL(r.PackageURL) != nil) {
+			return zero, ErrInvalidCatalogue
+		}
+		if r.PackageOCI != nil && (doc.Format != "portal.catalogue/2-dev.3" || r.PackageURL != "" || !validCataloguePackageOCI(r.PackageOCI)) {
 			return zero, ErrInvalidCatalogue
 		}
 		seen[identity], seen[r.DescriptorSHA256] = true, true

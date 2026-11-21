@@ -54,8 +54,17 @@ func newPlatformMarketClient() *platformMarketClient {
 		}
 		rangeHeader := via[0].Header.Get("Range")
 		ifRange := via[0].Header.Get("If-Range")
+		authorization := via[0].Header.Get("Authorization")
+		accept := via[0].Header.Get("Accept")
 		r.Header = make(http.Header)
 		r.Header.Set("Accept-Encoding", "identity")
+		// A registry token belongs to the host that issued the challenge; a blob CDN on another host gets none.
+		if authorization != "" && r.URL.Host == via[0].URL.Host {
+			r.Header.Set("Authorization", authorization)
+		}
+		if accept != "" && !strings.ContainsAny(accept, "\r\n") {
+			r.Header.Set("Accept", accept)
+		}
 		if strings.HasPrefix(rangeHeader, "bytes=") &&
 			!strings.ContainsAny(rangeHeader, "\r\n") {
 			r.Header.Set("Range", rangeHeader)
@@ -401,11 +410,11 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 	// A managed release with image content installs from its package: the same bytes, and so the same release,
 	// digests and image, as an offline install. Its descriptor and signature are checked equal to the package's.
 	managedImages := manifest.Backend != nil && len(manifest.Backend.Images) > 0
-	if managedImages != (entry.PackageURL != "") {
+	if managedImages != (entry.PackageURL != "" || entry.PackageOCI != nil) {
 		return zero, errAppPlatformInstallUnavailable
 	}
 	if managedImages {
-		return s.fetchAndStagePlatformPackage(requestCtx, actor, client, entry.PackageURL, descriptor, signature)
+		return s.fetchAndStagePlatformPackage(requestCtx, actor, client, *entry, descriptor, signature)
 	}
 	// Resolve only the signed relative artifact path against the descriptor's
 	// original directory. Redirect URLs never redefine artifact authority/base.
