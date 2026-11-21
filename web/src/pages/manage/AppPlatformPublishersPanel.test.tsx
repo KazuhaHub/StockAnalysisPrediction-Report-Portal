@@ -182,4 +182,23 @@ describe('publisher trust review', () => {
     expect(screen.queryByText('old account failure')).toBeNull()
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
+
+  it('marks the built-in publisher and offers only enable, disable and revoke for it', async () => {
+    const builtin = { id: 'kazuha-hub', display_name: 'Kazuha Hub', builtin: true, revision: '1', enabled: true, namespaces: [{ kind: 'prefix', value: 'kazuha-hub-' }], keys: [{ ...key, id: 'kazuha-hub-2026-11', revision: '1' }] }
+    mock.get.mockResolvedValue({ initialized: true, paused: false, publishers: [builtin] })
+    render(<AppPlatformPublishersPanel />)
+    expect(await screen.findByText('Kazuha Hub')).toBeTruthy()
+    expect(screen.getByText('appTrust.builtin')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'appTrust.disable' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'appTrust.revoke' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'appTrust.editPolicy' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appTrust.addKey' })).toBeNull()
+  })
+
+  it('explains a built-in publisher conflict', async () => {
+    mock.get.mockResolvedValue({ initialized: true, paused: false, builtin_conflict: true, publishers: [publisher] })
+    render(<AppPlatformPublishersPanel />)
+    expect(await screen.findByText('appTrust.builtinConflict')).toBeTruthy()
+  })
 })
+

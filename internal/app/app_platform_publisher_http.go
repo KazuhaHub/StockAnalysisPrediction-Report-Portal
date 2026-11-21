@@ -192,6 +192,9 @@ func (s *Server) apiPlatformControlInitialize(w http.ResponseWriter, r *http.Req
 		if err != nil {
 			return err
 		}
+		if err := s.seedPlatformBuiltinTrust(e, control.nowMS); err != nil {
+			return err
+		}
 		_, err = platformRefreshActor(e, actor, facts, control)
 		return err
 	})
@@ -229,13 +232,15 @@ func (s *Server) apiPlatformEndRecovery(w http.ResponseWriter, r *http.Request, 
 }
 
 type platformPublisherDirectory struct {
-	Initialized bool                           `json:"initialized"`
-	Paused      bool                           `json:"paused"`
-	Publishers  []appplatform.TrustedPublisher `json:"publishers"`
+	Initialized bool                    `json:"initialized"`
+	Paused      bool                    `json:"paused"`
+	Publishers  []platformPublisherView `json:"publishers"`
+	// BuiltinConflict: a built-in publisher is missing or registered with another namespace or key (doc 189).
+	BuiltinConflict bool `json:"builtin_conflict,omitempty"`
 }
 
 func (s *Server) readPlatformPublisherDirectory(ctx context.Context, actor platformActorSession) (platformPublisherDirectory, error) {
-	result := platformPublisherDirectory{Publishers: []appplatform.TrustedPublisher{}}
+	result := platformPublisherDirectory{Publishers: []platformPublisherView{}}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return result, err
@@ -260,9 +265,11 @@ func (s *Server) readPlatformPublisherDirectory(ctx context.Context, actor platf
 	if err != nil {
 		return result, err
 	}
-	if len(trust.Publishers) > 0 {
-		result.Publishers = trust.Publishers
+	active, err := platformControlActive(e)
+	if err != nil {
+		return result, err
 	}
+	result.Publishers, result.BuiltinConflict = s.platformPublisherViews(trust, active)
 	var epoch, paused, seed sql.NullString
 	if err = e.queryRow(`SELECT (SELECT v FROM meta WHERE k='app_platform_controller_epoch'),(SELECT v FROM meta WHERE k='app_platform_restore_paused'),(SELECT v FROM meta WHERE k='app_platform_actor_seed')`).Scan(&epoch, &paused, &seed); err != nil {
 		return result, err

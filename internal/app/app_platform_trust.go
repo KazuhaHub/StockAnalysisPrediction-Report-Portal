@@ -55,6 +55,13 @@ func (s *Server) changePlatformPublisherTrustContext(ctx context.Context, sessio
 				break
 			}
 		}
+		var current *appplatform.TrustedPublisher
+		if index >= 0 {
+			current = &trust.Publishers[index]
+		}
+		if !s.platformBuiltinChangeAllowed(change, current) {
+			return errAppPlatformTrustConflict
+		}
 		registering := change.kind == "register"
 		if registering {
 			if index != -1 || change.expectedRevision != 0 || change.key == nil || change.keyID != "" || change.expectedKeyRevision != 0 {
@@ -206,6 +213,8 @@ func (s *Server) changePlatformPublisherTrustContext(ctx context.Context, sessio
 	if err != nil {
 		return platformPublisherTrustRevision{}, err
 	}
+	// A change may have cleared what kept a built-in publisher out (an overlapping namespace, a conflicting row).
+	s.ensurePlatformBuiltinTrustLogged(ctx)
 	return result, nil
 }
 
