@@ -25,11 +25,35 @@ var hostInterfaces InterfaceLister = SystemInterfaces
 // checkDaemonNamespaces is the fail-fast namespace check (doc 187 section 7); tests replace it.
 var checkDaemonNamespaces = driver.CheckDaemonNamespaces
 
+// checkDaemonMountNamespace is the same check without the network half; tests replace it.
+var checkDaemonMountNamespace = driver.CheckDaemonMountNamespace
+
+// ServeOptions are the explicit, non-default ways to start the runner. The command never sets any of them.
+type ServeOptions struct {
+	// SeparateNetworkNamespace drops the requirement that dockerd is in the runner's NETWORK namespace, for a runner
+	// deliberately placed in a namespace of its own with dockerd outside (the network acceptance runs Portal and
+	// the runner in an isolated one). The mount namespace stays mandatory, and what needs the shared network
+	// namespace is still checked where it is used: pinned proxy destinations at start and every network volume.
+	SeparateNetworkNamespace bool
+}
+
+func runNamespaceCheck(ctx context.Context, socket string, options ServeOptions) error {
+	if options.SeparateNetworkNamespace {
+		return checkDaemonMountNamespace(ctx, socket)
+	}
+	return checkDaemonNamespaces(ctx, socket)
+}
+
 var ErrUnsupported = errors.New("app-runner service requires native Linux amd64 or arm64")
 
 // Serve owns one already-provisioned runtime. Configuration never selects an
 // arbitrary command, mount, app, image or controller key.
 func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
+	return ServeWith(ctx, configPath, logger, ServeOptions{})
+}
+
+// ServeWith is Serve with explicit options; see ServeOptions.
+func ServeWith(ctx context.Context, configPath string, logger *log.Logger, serve ServeOptions) error {
 	if ctx == nil || logger == nil || os.Geteuid() != 0 || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return ErrNotReady
 	}
@@ -106,8 +130,8 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	// The runner and dockerd must share a mount namespace and a network namespace (doc 187 section 2). Checked
 	// before anything is created or bound, so a runner started without the container entry, or beside another
 	// daemon, fails here and not in the first operation that needs the guarantee.
-	if err := checkDaemonNamespaces(ctx, cfg.DockerSocket); err != nil {
-		logger.Printf("app-runner not ready: namespaces: the container daemon is not identified as a local dockerd in the runner's mount and network namespaces (a Compose runner starts through its entry with pid: host and network_mode: host)")
+	if err := runNamespaceCheck(ctx, cfg.DockerSocket, serve); err != nil {
+		logger.Printf("app-runner not ready: namespaces: the container daemon is not identified as a local dockerd in the runner's mount and network namespaces (a Compose runner starts through its entry with pid: host and network_mode: host): %v", err)
 		return ErrNotReady
 	}
 	// The IPC root lives on /run and does not survive a reboot: serve makes it (doc 187 section 7).

@@ -52,3 +52,33 @@ func TestCheckDaemonNamespacesAtStart(t *testing.T) {
 		t.Fatal("a missing socket passed")
 	}
 }
+
+// The mount-only check is for a runner deliberately placed in its own network namespace (the network acceptance
+// puts it in an isolated one with dockerd outside). The mount namespace stays mandatory: another mount namespace
+// is refused, and so is a daemon that cannot be identified or does not answer.
+func TestCheckDaemonMountNamespaceOnly(t *testing.T) {
+	socket := unixDaemon(t)
+	acceptExecutable(t, func(string) bool { return true })
+
+	fakeMountNamespace(t, func(int) bool { return true })
+	fakeNetworkNamespace(t, func(int) bool { return false })
+	if err := checkDaemonMountNamespace(context.Background(), realPeerClient(socket)); err != nil {
+		t.Fatalf("another network namespace must not matter here: %v", err)
+	}
+	if err := checkDaemonNamespaces(context.Background(), realPeerClient(socket)); !errors.Is(err, ErrHostNetworkNamespace) {
+		t.Fatalf("the full check must still refuse another network namespace: %v", err)
+	}
+
+	fakeMountNamespace(t, func(int) bool { return false })
+	if err := checkDaemonMountNamespace(context.Background(), realPeerClient(socket)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("another mount namespace: %v", err)
+	}
+	fakeMountNamespace(t, func(int) bool { return true })
+	acceptExecutable(t, func(string) bool { return false })
+	if err := checkDaemonMountNamespace(context.Background(), realPeerClient(socket)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("an unidentified daemon: %v", err)
+	}
+	if err := CheckDaemonMountNamespace(context.Background(), socket+".missing"); err == nil {
+		t.Fatal("a missing socket passed")
+	}
+}

@@ -86,6 +86,31 @@ func checkDaemonNamespaces(ctx context.Context, client *http.Client) error {
 	return netErr
 }
 
+// CheckDaemonMountNamespace is CheckDaemonNamespaces without the network half, for a runner that is deliberately
+// placed in a network namespace of its own with dockerd outside (the network acceptance does exactly that). The
+// mount namespace stays mandatory: another one, a daemon that cannot be identified and a daemon that does not
+// answer all refuse. What needs the shared network namespace is still checked where it is used: the pinned
+// proxy destinations at start and every network volume.
+func CheckDaemonMountNamespace(ctx context.Context, socket string) error {
+	client, closeClient := newDockerClient(socket, time.Second, probeTimeout)
+	defer closeClient()
+	return checkDaemonMountNamespace(ctx, client)
+}
+
+func checkDaemonMountNamespace(ctx context.Context, client *http.Client) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dockerRequestHost+"/version", nil)
+	if err != nil {
+		return ErrUnavailable
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+	response.Body.Close()
+	return requireDaemonIdentified(client)
+}
+
 func checkHostNetworkNamespace(ctx context.Context, client *http.Client) error {
 	requireHostNetworkNamespace(client)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dockerRequestHost+"/version", nil)
