@@ -28,6 +28,8 @@ export default function CardTable<T>({
     const card = i === 0 ? { 'data-label': label, 'data-primary': '' } : { 'data-label': label }
     return {
       ...c,
+      // Cards do not scroll sideways, so nothing needs pinning; antd's pin shadow would overhang the card.
+      fixed: phone ? undefined : c.fixed,
       onCell: (record: T, index?: number) => ({ ...(c.onCell?.(record, index) ?? {}), ...card }) as ReturnType<NonNullable<ColumnType<T>['onCell']>>,
     }
   })

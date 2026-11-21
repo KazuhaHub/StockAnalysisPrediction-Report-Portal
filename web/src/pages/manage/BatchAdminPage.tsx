@@ -13,6 +13,7 @@ import { difyModeTag, surfaceSupportsMode } from '../../lib/batchUi'
 import { ALL_SURFACES } from '../../api/types'
 import type { Surface } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
+import { useTableView } from '../../components/TableView'
 import type { BatchPlugin, BatchTarget, DifyInput, DifyRefreshResult, DifyTargetEdit, PluginInput } from '../../api/types'
 import DifyRefreshModal from './DifyRefreshModal'
 import LoadGate, { LoadingPlaceholder } from '../../components/LoadGate'
@@ -404,10 +405,12 @@ function GlobalExecutionTargets() {
   }
 
   const targetCols: ColumnsType<BatchTarget> = [
-    { key: 'sort', width: 44, align: 'center', render: () => <DragHandle label={t('common.reorder')} /> },
+    { key: 'sort', width: 44, minWidth: 44, align: 'center', render: () => <DragHandle label={t('common.reorder')} /> },
     {
+      key: 'name',
       title: t('common.name'),
-      width: '26%',
+      width: 220,
+      minWidth: 140,
       render: (_: unknown, tg: BatchTarget) => (
         <Space size={6} wrap>
           {tg.name}
@@ -416,15 +419,20 @@ function GlobalExecutionTargets() {
       ),
     },
     {
+      key: 'inputs',
       title: t('batch.admin.inputs'),
+      width: 300,
+      minWidth: 160,
       // The API already sends label + required for every input; rendering only `key` threw
       // both away and left a row of identical grey chips. `symbol` reads fine, but `n`,
       // `query` and `rumor` do not — and nothing said which ones the run form will demand.
       render: (_: unknown, tg: BatchTarget) => <TargetInputsPreview inputs={tg.inputs || []} />,
     },
     {
+      key: 'surfaces',
       title: t('batch.admin.surfaces'),
-      width: '18%',
+      width: 160,
+      minWidth: 100,
       render: (_: unknown, tg: BatchTarget) => {
         const list = tg.surfaces && tg.surfaces.length ? tg.surfaces : ALL_SURFACES
         // Only the surfaces this app kind can actually serve are worth showing: an agent
@@ -444,10 +452,13 @@ function GlobalExecutionTargets() {
         )
       },
     },
-    { title: t('batch.admin.createdAt'), dataIndex: 'created_at', width: '18%' },
+    { key: 'created_at', title: t('batch.admin.createdAt'), dataIndex: 'created_at', width: 160, minWidth: 100 },
     {
+      key: 'actions',
       title: t('batch.col.actions'),
       width: 136,
+      minWidth: 136,
+      fixed: 'right',
       render: (_: unknown, tg: BatchTarget) => (
         <Space size={4} wrap>
           <Button size="small" icon={<EyeOutlined />} title={t('batch.admin.surfacesTitle')} onClick={() => openSurfaces(tg)} />
@@ -471,13 +482,20 @@ function GlobalExecutionTargets() {
     },
   ]
 
+  // Both lists keep their widths, visible columns and order in the header, like every console table.
+  // The row drag handle, the name and the actions cannot be hidden; the actions stay pinned right.
+  const targetsView = useTableView('batch-targets', targetCols, ['sort', 'name', 'actions'], { sort: t('common.reorder') })
+
   const pluginCols: ColumnsType<BatchPlugin> = [
-    { title: t('common.name'), dataIndex: 'name' },
-    { title: t('batch.admin.slug'), dataIndex: 'slug' },
-    { title: t('batch.admin.version'), dataIndex: 'version', width: 90 },
+    { key: 'name', title: t('common.name'), dataIndex: 'name', width: 220, minWidth: 140 },
+    { key: 'slug', title: t('batch.admin.slug'), dataIndex: 'slug', width: 200, minWidth: 120 },
+    { key: 'version', title: t('batch.admin.version'), dataIndex: 'version', width: 90, minWidth: 80 },
     {
+      key: 'actions',
       title: t('batch.col.actions'),
       width: 80,
+      minWidth: 80,
+      fixed: 'right',
       render: (_: unknown, p: BatchPlugin) => (
         <Confirm title={t('batch.admin.deletePluginConfirm')} onConfirm={() => deletePlugin(p.slug)} okText={t('batch.admin.deletePluginAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
@@ -485,6 +503,7 @@ function GlobalExecutionTargets() {
       ),
     },
   ]
+  const pluginsView = useTableView('batch-plugins', pluginCols, ['name', 'actions'])
 
   return (
     <>
@@ -554,15 +573,15 @@ function GlobalExecutionTargets() {
                 {targets.length === 0 && <Typography.Text type="secondary">{t('batch.dify.targetsHint')}</Typography.Text>}
                 <SortableWrapper ids={targets.map((tg) => String(tg.id))} onReorder={reorderTargets}>
                   <CardTable
-                    className="rp-batch-targets-table"
+                    className={`${targetsView.className} rp-batch-targets-table`}
                     rowKey="id"
                     size="small"
                     dataSource={targets}
-                    columns={targetCols}
+                    columns={targetsView.columns}
                     pagination={false}
-                    components={sortableTableComponents}
+                    components={{ ...sortableTableComponents, ...targetsView.components }}
                     tableLayout="fixed"
-                    scroll={{ x: 640 }}
+                    scroll={{ x: targetsView.scroll.x }}
                   />
                 </SortableWrapper>
                 </LoadGate>
@@ -586,7 +605,8 @@ function GlobalExecutionTargets() {
                 ) : customPlugins.length === 0 ? (
                   <Typography.Text type="secondary">{t('batch.admin.advancedPluginsHint')}</Typography.Text>
                 ) : (
-                  <CardTable rowKey="slug" size="small" dataSource={customPlugins} columns={pluginCols} pagination={false} scroll={{ x: 'max-content' }} />
+                  <CardTable rowKey="slug" size="small" dataSource={customPlugins} columns={pluginsView.columns} components={pluginsView.components}
+                    className={pluginsView.className} tableLayout="fixed" pagination={false} scroll={{ x: pluginsView.scroll.x }} />
                 )}
               </Space>
             ),

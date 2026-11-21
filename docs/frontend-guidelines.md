@@ -66,6 +66,9 @@ When in doubt, look at how they solve it before inventing a pattern.
   right-click on any header open the same menu (`TableView` / `TableColumnMenu`); headers are
   reordered by dragging (mouse, touch after a short press, or Space + arrow keys). Pinned columns
   stay put; action columns are pinned right.
+- Column widths are dragged at the header's right edge (or set with the arrow keys on it) and kept per
+  table. A drag stops at the column's own `minWidth`, for the column and the neighbour giving way, and
+  a width stored below it shows at the minimum. On a phone the cards unpin every column.
 - A filtered empty result says it is the filters and offers to clear them (`filtered` /
   `onClearFilters`, `NoMatches`); an empty list is a plain empty state.
 

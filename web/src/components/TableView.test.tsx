@@ -134,3 +134,61 @@ it('shows every column on a phone, where the cards have no header to bring a hid
   render(<Preview />)
   expect(screen.getByTestId('columns').textContent).toBe('name,owner,actions')
 })
+
+function FlooredPreview() {
+  const view = useTableView('floored', [
+    { key: 'name', title: 'Name', width: 300, minWidth: 140 },
+    { key: 'owner', title: 'Owner', width: 200, minWidth: 120 },
+    { key: 'actions', title: 'Actions', width: 100, minWidth: 80, fixed: 'right' },
+  ], ['name', 'actions'])
+  const width = (key: string) => view.columns.find((column) => column.key === key)?.width
+  return <><Table rowKey="name" dataSource={[]} columns={view.columns} components={view.components} />
+    <div data-testid="widths">{`${width('name')},${width('owner')}`}</div>
+    <button onClick={() => view.resizeColumn('owner', 20)}>Shrink owner</button>
+    <button onClick={() => view.resizeColumn('name', 900, true, { name: 300, owner: 200, actions: 100 })}>Widen name</button></>
+}
+it('holds a dragged column, and the neighbour that gives way, at their own minimum widths', () => {
+  render(<FlooredPreview />)
+  fireEvent.click(screen.getByText('Shrink owner'))
+  expect(screen.getByTestId('widths').textContent?.split(',')[1]).toBe('120')
+  fireEvent.click(screen.getByText('Widen name'))
+  expect(screen.getByTestId('widths').textContent).toBe('900,120')
+})
+it('tells the resize handle each column’s own minimum', () => {
+  render(<FlooredPreview />)
+  const handles = screen.getAllByRole('separator')
+  expect(handles.map((handle) => handle.getAttribute('aria-valuemin'))).toEqual(['140', '120', '80'])
+})
+it('resizes from the keyboard and still resizes when storage refuses to save', () => {
+  const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+  try {
+    render(<FlooredPreview />)
+    const [name] = screen.getAllByRole('separator')
+    fireEvent.keyDown(name, { key: 'ArrowRight' })
+    // jsdom measures nothing, so the handle steps from its 96px default, and the result is held at Name's 140 minimum.
+    expect(screen.getByTestId('widths').textContent?.split(',')[0]).toBe('140')
+  } finally { setItem.mockRestore() }
+})
+
+it('shows a width stored below a column’s minimum at the minimum, so shrinking never widens it', () => {
+  localStorage.setItem('rp.table.floored', JSON.stringify({ hidden: [], fit: false, widths: { name: 300, owner: 70, actions: 100 }, order: [] }))
+  render(<FlooredPreview />)
+  expect(screen.getByTestId('widths').textContent).toBe('300,120')
+  fireEvent.click(screen.getByText('Shrink owner'))
+  expect(screen.getByTestId('widths').textContent).toBe('300,120')
+})
+it('lets a column narrower than the shared floor keep its own minimum', () => {
+  function Narrow() {
+    const view = useTableView('narrow', [
+      { key: 'grip', title: 'Grip', width: 44, minWidth: 44 },
+      { key: 'name', title: 'Name', width: 300, minWidth: 140 },
+    ], ['grip', 'name'])
+    return <><Table rowKey="name" dataSource={[]} columns={view.columns} components={view.components} />
+      <div data-testid="grip">{view.columns[0].width}</div>
+      <button onClick={() => view.resizeColumn('grip', 10)}>Shrink grip</button></>
+  }
+  render(<Narrow />)
+  expect(screen.getAllByRole('separator')[0].getAttribute('aria-valuemin')).toBe('44')
+  fireEvent.click(screen.getByText('Shrink grip'))
+  expect(screen.getByTestId('grip').textContent).toBe('44')
+})

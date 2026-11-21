@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import BatchAdminPage, { TargetInputsPreview } from './BatchAdminPage'
@@ -128,5 +128,41 @@ describe('BatchAdminPage — targets / plugins sub-tabs', () => {
     expect((body.inputs as Array<Record<string, unknown>>)[0].display_label).toBe('Ticker')
     expect((body.inputs as Array<Record<string, unknown>>)[0].description).toBe('Six-digit exchange code')
     expect(body.collapse_optional_inputs).toBe(true)
+  })
+
+  describe('on a desktop', () => {
+    const phoneMatchMedia = window.matchMedia
+    const desktop = (query: string) => ({ matches: query.includes('min-width'), media: query, onchange: null,
+      addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })
+    beforeEach(() => {
+      localStorage.clear()
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: desktop })
+    })
+    afterEach(() => { Object.defineProperty(window, 'matchMedia', { configurable: true, value: phoneMatchMedia }) })
+
+    it('lets the targets columns be resized from the header, and remembers the width', async () => {
+      const { container, unmount } = render(<MemoryRouter><App><BatchAdminPage /></App></MemoryRouter>)
+      await screen.findByText('My workflow')
+      const table = container.querySelector<HTMLElement>('.rp-batch-targets-table')!
+      const handle = within(table).getByRole('separator', { name: /table\.resizeColumn.*common\.name/ })
+      fireEvent.keyDown(handle, { key: 'ArrowRight' })
+      const stored = JSON.parse(localStorage.getItem('rp.table.batch-targets') || 'null')
+      expect(stored?.fit).toBe(false)
+      expect(typeof stored?.widths?.name).toBe('number')
+      // The rows can still be dragged into a new order: the row drag handle survives.
+      expect(within(table).getByRole('button', { name: 'common.reorder' })).toBeTruthy()
+      unmount()
+      const again = render(<MemoryRouter><App><BatchAdminPage /></App></MemoryRouter>)
+      await screen.findByText('My workflow')
+      const col = again.container.querySelectorAll('.rp-batch-targets-table colgroup col')
+      expect([...col].some((element) => (element as HTMLElement).style.width === `${stored.widths.name}px`)).toBe(true)
+    })
+
+    it('puts a resize handle on every targets column', async () => {
+      render(<MemoryRouter><App><BatchAdminPage /></App></MemoryRouter>)
+      await screen.findByText('My workflow')
+      const table = document.querySelector<HTMLElement>('.rp-batch-targets-table')!
+      expect(within(table).getAllByRole('separator').length).toBeGreaterThanOrEqual(4)
+    })
   })
 })
