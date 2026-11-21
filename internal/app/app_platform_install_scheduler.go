@@ -578,13 +578,17 @@ func (w *platformInstallScheduler) serve(ctx context.Context) error {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	defer func() { w.status.Store(&platformInstallWorkerStatus{code: "stopped"}) }()
+	var ticks platformTickLog
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			if err := w.tick(ctx); err != nil && ctx.Err() == nil && !platformRunnerUnreachable(err) {
-				log.Printf("app-platform scheduler tick: %v", err)
+			// An unreachable runner is reported by the health tracker, not here.
+			if err := w.tick(ctx); ctx.Err() == nil && !platformRunnerUnreachable(err) {
+				if line, ok := ticks.report(err); ok {
+					log.Print(line)
+				}
 			}
 			if ctx.Err() != nil {
 				return nil

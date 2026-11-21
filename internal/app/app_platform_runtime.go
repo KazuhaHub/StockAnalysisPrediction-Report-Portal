@@ -25,8 +25,8 @@ type platformRuntimeRegistration struct {
 // preparePlatformRuntimeBinding creates one disabled initial local binding. Only
 // an explicitly initialized current administrator can prepare it. Exact pending
 // retries preserve the key; restored, corrupt, enabled or changed identities are
-// never silently repaired, rotated, adopted or enrolled. No startup/HTTP caller is
-// connected. The existing DEK seals the seed with a binding-specific purpose.
+// never silently repaired, rotated, adopted or enrolled. Its one HTTP caller is the
+// console's control/runtime route; nothing calls it at startup. The existing DEK seals the seed with a binding-specific purpose.
 func (s *Server) preparePlatformRuntimeBinding(session platformActorSession, deployment string) (platformRuntimeRegistration, error) {
 	return s.preparePlatformRuntimeBindingMode(session, deployment, false)
 }

@@ -13,6 +13,7 @@ import CardTable from '../../components/CardTable'
 import AppPlatformInstallPanel from './AppPlatformInstallPanel'
 import AppPlatformStorageStatus from './AppPlatformStorageStatus'
 import AppPlatformPublishersPanel from './AppPlatformPublishersPanel'
+import AppPlatformRuntimePanel from './AppPlatformRuntimePanel'
 import AppPlatformTasksPanel from './AppPlatformTasksPanel'
 import AppPlatformEventSubscriptionsPanel from './AppPlatformEventSubscriptionsPanel'
 
@@ -30,6 +31,7 @@ export default function AppsAdminPage() {
   const { apps, loading, error, reload } = useAppsCatalog()
   const [search, setSearch] = useState('')
   const [reordering, setReordering] = useState(false)
+  const [runtimeReload, setRuntimeReload] = useState(0)
   const [activeTab, setActiveTab] = useState(operation || installation ? 'platform' : 'apps')
   useEffect(() => {
     if (operation || installation) setActiveTab('platform')
@@ -115,7 +117,7 @@ export default function AppsAdminPage() {
       </LoadGate>,
     },
     { key: 'platform', label: t('appPlatform.tab'), children: <><AppPlatformStorageStatus /><AppPlatformInstallPanel /></> },
-    { key: 'publishers', label: t('appTrust.tab'), children: <AppPlatformPublishersPanel /> },
+    { key: 'publishers', label: t('appTrust.tab'), children: <><AppPlatformRuntimePanel reload={runtimeReload} /><AppPlatformPublishersPanel onInitialized={() => setRuntimeReload(v => v + 1)} /></> },
     { key: 'tasks', label: t('appPlatform.tasks.tab'), children: <AppPlatformTasksPanel /> },
     { key: 'subscriptions', label: t('appPlatform.events.tab'), children: <AppPlatformEventSubscriptionsPanel /> },
   ]} />

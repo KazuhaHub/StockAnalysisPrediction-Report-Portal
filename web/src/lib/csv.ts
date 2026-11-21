@@ -1,3 +1,5 @@
+import { downloadText } from './download'
+
 // Shared CSV helpers for batch and recurring-run templates. parseCSV supports
 // quoted fields (double quotes, "" escaping) so values may contain commas and
 // newlines.
@@ -70,11 +72,5 @@ export function toCSV(headers: string[], rows: (string | number)[][]): string {
 
 // downloadCSV saves an editor/template string as a UTF-8 CSV file in the browser.
 export function downloadCSV(name: string, text: string): void {
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadText(name, text, 'text/csv;charset=utf-8')
 }

@@ -142,8 +142,17 @@ docker compose run --rm app-runner host-setup                     # plan only: c
 docker compose run --rm app-runner host-setup --apply --enrollment <file>
 ```
 
-`<file>` is the public enrollment document prepared in the administrator console
-(a host path). `host-setup` is idempotent. On a **new host** it creates the
+`<file>` is the public enrollment document (a host path) from the administrator
+console: **Manage → Apps → Publishers**, card **Application runner**. On a fresh
+Portal press **Initialize application platform** first (same tab), then **Prepare
+runtime binding**, and save the document with **Download document** (or copy it)
+to the host. It holds only public identity (including the controller public key), never a
+private key or other secret, and preparing again while
+the binding waits for confirmation shows the same document (**Show enrollment
+document**). After `docker compose up -d`, press **Confirm runtime** on the same
+card: Portal reads the identity the runner enrolled through its socket and enables
+the binding only on an exact match. The button stays disabled until Portal has the
+runner socket (the `.env` lines below). `host-setup` is idempotent. On a **new host** it creates the
 directories, the two loop-mounted XFS images (data 8 GiB, checkpoint 16 GiB by
 default; `--data-size`, `--checkpoint-size`, `--image-dir`), their `/etc/fstab`
 lines, `service.json`, `bootstrap.json` and the enrollment, from the defaults:
@@ -495,16 +504,23 @@ PostgreSQL, with aaPanel's nginx in front.
 2. **Install the compose file** that carries the `app-runner` service, taking the
    usual backup of the old binary and file first and the existing deploy procedure's
    tag edit (now made once in `.env`), then `docker compose up -d report-portal`.
-3. **Get the enrollment document.** Prepare the runtime binding in the administrator
-   console and save the document on the host.
+3. **Get the enrollment document.** In **Manage → Apps → Publishers**, press
+   **Initialize application platform** (once per Portal), then **Prepare runtime
+   binding** on the **Application runner** card, and save the document with
+   **Download document** as a file on the host, for example
+   `/data/report-portal/portal-runner-enrollment.json`.
 4. **Provision.** `host-setup` (plan only), then
    `host-setup --apply --image-dir /data/portal-runner --data-size 8G --checkpoint-size 16G --enrollment <file>`.
 5. **Start.** Add the printed `.env` lines, which change `PORTAL_UID` and `PORTAL_GID` to
    41001, then `docker compose up -d`. Portal's files are re-owned once by its entry, and
    the backup step's `docker exec -u` changes to `41001:41001`.
-6. **Confirm** the runtime in the console, and the three production checks: the runner
-   image digest against `release-metadata.json`, `app-runner ready` with the expected
-   `version=` in `docker compose logs app-runner`, and the managed profile in the console.
+6. **Confirm** the runtime: **Confirm runtime** on the **Application runner** card, which
+   then reads **Confirmed** and shows the identity the runner reported. Then the
+   production checks: the runner image digest against `release-metadata.json`, and
+   `app-runner ready` with the expected `version=` in `docker compose logs app-runner`.
+   The console does not show the runner's managed profile yet;
+   `docker compose run --rm app-runner health --config /etc/portal-app-runner/service.json`
+   exiting 0 is the check until it does.
 
 ## 5. Everyday administrator procedures
 
