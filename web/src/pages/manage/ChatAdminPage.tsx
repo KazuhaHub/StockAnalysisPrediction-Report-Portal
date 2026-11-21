@@ -228,7 +228,7 @@ export default function ChatAdminPage() {
           </Space>
         }
       >
-        {cfgErr && <Alert type="error" showIcon title={cfgErr} style={{ marginBottom: 12 }} />}
+        {cfgErr && <Alert type="error" showIcon title={cfgErr} />}
         <CardTable
           size="small"
           rowKey="id"

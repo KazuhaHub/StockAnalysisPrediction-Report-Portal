@@ -12,7 +12,7 @@ export default function ForecastBacklog({ backlog }: { backlog: ForecastSettings
     <Typography.Text type="secondary">{t('forecast.backlog.none', { at: dayjs(backlog.as_of).format('YYYY-MM-DD HH:mm') })}</Typography.Text>
   </Card>
   return <Card size="small" title={t('forecast.backlog.title')}>
-    {backlog.overdue > 0 && <Alert type="warning" showIcon title={t('forecast.backlog.warning', { n: backlog.overdue })} style={{ marginBottom: 12 }} />}
+    {backlog.overdue > 0 && <Alert type="warning" showIcon title={t('forecast.backlog.warning', { n: backlog.overdue })} />}
     <Descriptions size="small" column={{ xs: 1, sm: 3 }} items={[
       { key: 'due', label: t('forecast.backlog.due'), children: backlog.due },
       { key: 'retrying', label: t('forecast.backlog.retrying'), children: backlog.retrying },

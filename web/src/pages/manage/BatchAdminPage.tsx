@@ -665,7 +665,7 @@ function GlobalExecutionTargets() {
                 <Input placeholder={t('batch.admin.targetNamePlaceholder')} />
               </Form.Item>
               {isChat && (
-                <Alert type="info" showIcon style={{ marginBottom: 10 }} title={<>{difyModeTag(t, mode)}{t('batch.dify.chatHint')}</>} />
+                <Alert type="info" showIcon title={<>{difyModeTag(t, mode)}{t('batch.dify.chatHint')}</>} />
               )}
               <div style={{ marginBottom: 6 }}>
                 <Typography.Text type="secondary">{t('batch.dify.inputsLabel')}</Typography.Text>

@@ -45,6 +45,13 @@ When in doubt, look at how they solve it before inventing a pattern.
 - **Segmented controls fold on phones.** Below 768 px (`useNarrow`) a segmented choice of more than
   a few options becomes a small Select, and a labelled toggle becomes icon-only (name kept in
   `aria-label` and `title`), so a card header stays on one line.
+- **Alerts never touch their neighbours.** One rule in `index.css` keeps an `Alert` 12 px from the
+  content before and after it inside a generic block container: an antd card, modal, drawer, form,
+  tab pane or collapse panel body, a spin wrapper, the console page body (`.rp-admin-page-body`), a
+  settings panel (`.rp-settings-panel`), or a plain unclassed div (a progress
+  block above its Refresh button, a warning under an Add button). A classed layout container
+  (`rp-*`, `Flex`, `Space`, `Row`, an inline `display: flex/grid` div) spaces its children with its
+  own `gap` and is left to it. An `Alert` sets no margin of its own (`alertSpacing.test.ts`).
 - **Forms keep a readable width** (`.rp-settings-panel > .ant-form-item`, 720 px); tables and cards
   use the full width.
 - **Back leads the title.** A page reached from a list (a stock, a run, an editor, an app) puts its

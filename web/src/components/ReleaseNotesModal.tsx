@@ -181,7 +181,6 @@ export default function ReleaseNotesModal({
           // The one thing a reader needs to know before they click Refresh: anything they have typed
           // and not saved goes with the page. Nothing is refreshed for them.
           title={t('update.requiredWarning')}
-          style={{ marginBottom: 12 }}
         />
       )}
       {showCurrent && (

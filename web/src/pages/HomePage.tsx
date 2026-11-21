@@ -474,7 +474,6 @@ export default function HomePage() {
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 12 }}
             title={t('common.loadFailedContent')}
             description={loadErr}
             action={<Button size="small" onClick={load}>{t('common.retry')}</Button>}

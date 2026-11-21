@@ -109,7 +109,7 @@ function AppDetail({ app }: { app: AdminApp }) {
 
   return (
     <>
-      {!app.detailKnown && <Alert type="warning" showIcon title={t('apps.detail.installedFailed')} style={{ marginBottom: 16 }} />}
+      {!app.detailKnown && <Alert type="warning" showIcon title={t('apps.detail.installedFailed')} />}
       <AppsBreadcrumb app={app} name={name} />
       <div className="rp-app-detail">
         <Card styles={{ body: { padding: 20 } }}>

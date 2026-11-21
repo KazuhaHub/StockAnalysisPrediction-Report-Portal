@@ -155,7 +155,7 @@ function LastSeenClaims({ slug }: { slug: string }) {
   if (seen === null) return null
   if (!seen || !claims?.length) {
     return (
-      <Alert type="info" showIcon style={{ marginBottom: 16 }} title={t('sso.claimsNoneYet')} />
+      <Alert type="info" showIcon title={t('sso.claimsNoneYet')} />
     )
   }
   return (
@@ -297,7 +297,7 @@ function ProviderForm({
 
   return (
     <Form className="rp-sso-provider-form" form={form} name={`sso-${kind}`} layout="vertical" disabled={saving}>
-      {!publicUrl && <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={t('sso.needPublicUrl')} />}
+      {!publicUrl && <Alert type="warning" showIcon title={t('sso.needPublicUrl')} />}
       <SettingsWorkspace active={section} onChange={setSection} sections={[
         { key: 'connection', label: t('sso.section.connection') },
         { key: 'presentation', label: t('sso.section.presentation') },

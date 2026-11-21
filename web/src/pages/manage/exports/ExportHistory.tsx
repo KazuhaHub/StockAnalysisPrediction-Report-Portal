@@ -156,7 +156,7 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
         </Space>
       }
     >
-      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon title={error} />}
       <CardTable<ExportJob>
         size="small"
         rowKey="id"

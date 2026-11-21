@@ -246,13 +246,13 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     const duration = startedMs && end >= startedMs ? formatElapsed(end - startedMs, t) : ''
     return (
       <>
-        <Space wrap style={{ marginBottom: 12 }}>
+        <Space wrap style={{ display: 'flex', marginBottom: 12 }}>
           {statusTag(t, it.status)}
           {executionTags(t, j)}
           {queueLine && <Typography.Text type="secondary">{queueLine}</Typography.Text>}
         </Space>
         {d.job.status === 'running' && !d.running_in_process && (
-          <Alert type="info" showIcon style={{ marginBottom: 12 }} title={t('queue.notInProcess')} description={t('queue.notInProcessHint')} />
+          <Alert type="info" showIcon title={t('queue.notInProcess')} description={t('queue.notInProcessHint')} />
         )}
         <Descriptions bordered size="small" column={1} styles={{ label: { width: 120 } }}>
           <Descriptions.Item label={t('queue.detail.workflow')}>{target}</Descriptions.Item>
@@ -361,13 +361,13 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       {detail && single && singleRun(single, detail)}
       {detail && !single && (
         <>
-          <Space wrap style={{ marginBottom: 12 }}>{executionTags(t, detail.job)}</Space>
+          <Space wrap style={{ display: 'flex', marginBottom: 12 }}>{executionTags(t, detail.job)}</Space>
           {/* A job the queue calls "running" is not necessarily running HERE: after a restart the row
               survives while the goroutine driving it does not, and the portal reconciles it by polling
               rather than by executing. The one signal that tells an admin whether a stuck job is stuck
               in THIS process or merely being watched. Only said when it is worth saying. */}
           {detail.job.status === 'running' && !detail.running_in_process && (
-            <Alert type="info" showIcon style={{ marginBottom: 12 }} title={t('queue.notInProcess')} description={t('queue.notInProcessHint')} />
+            <Alert type="info" showIcon title={t('queue.notInProcess')} description={t('queue.notInProcessHint')} />
           )}
           <CardTable
             rowKey="id"

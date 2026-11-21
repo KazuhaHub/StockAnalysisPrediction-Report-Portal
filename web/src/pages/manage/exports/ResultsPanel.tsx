@@ -71,7 +71,7 @@ export default function ResultsPanel({
           {onManageColumns && <Button icon={<SettingOutlined />} aria-label={t('export.results.columns')} title={t('export.results.columns')} onClick={onManageColumns} />}
         </Space>
       </div>
-      {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon title={error} />}
       <CardTable<Row>
         size="small"
         rowKey={(r) => String(r.id ?? JSON.stringify(r))}

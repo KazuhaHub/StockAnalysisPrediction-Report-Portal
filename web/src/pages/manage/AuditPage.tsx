@@ -797,7 +797,7 @@ export default function AuditPage() {
       title={t('audit.title')}
       styles={{ body: { paddingTop: 12 } }}
     >
-      {err && <Alert type="error" showIcon title={err} style={{ marginBottom: 12 }} />}
+      {err && <Alert type="error" showIcon title={err} />}
       {/* The filtering controls sit in the body at every width, wrapping as the card narrows, so
           the header never squeezes them; what acts on the results sits with the results. */}
       <div className="rp-audit-toolbar">
@@ -868,7 +868,6 @@ export default function AuditPage() {
         <Alert
           type="warning"
           showIcon
-          style={{ marginTop: 16 }}
           title={t('audit.proxyHintTitle')}
           description={t('audit.proxyHintBody')}
         />

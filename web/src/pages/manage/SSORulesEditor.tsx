@@ -238,9 +238,9 @@ export default function SSORulesEditor({
   return (
     <div>
       <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={220}>
-      <Alert type="info" showIcon style={{ marginBottom: 12 }} title={t('sso.rules.intro')} />
+      <Alert type="info" showIcon title={t('sso.rules.intro')} />
       {providers.filter((p) => p.id > 0).length === 0 && (
-        <Alert type="warning" showIcon style={{ marginBottom: 12 }} title={t('sso.rules.noProviders')} />
+        <Alert type="warning" showIcon title={t('sso.rules.noProviders')} />
       )}
       {loaded && loadErr && <Alert type="error" showIcon title={loadErr} />}
       <ConfigProvider componentDisabled={saving}>

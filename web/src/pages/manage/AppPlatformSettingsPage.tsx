@@ -697,7 +697,7 @@ export default function AppPlatformSettingsPage() {
       </Space>
       : undefined}>
       {settings.data && !settings.import_eligible && <Typography.Paragraph type="secondary" data-testid="import-disabled-hint">{t('appPlatform.settings.importDisabledHint')}</Typography.Paragraph>}
-      {deleteError && !deletePlan && <Alert type="error" showIcon title={deleteError} style={{ marginBottom: 12 }} />}
+      {deleteError && !deletePlan && <Alert type="error" showIcon title={deleteError} />}
       {settings.data ? <Descriptions column={1} size="small" items={[
         { key: 'namespace', label: t('appPlatform.settings.dataNamespace'), children: <Typography.Text code>{settings.data.id}</Typography.Text> },
         { key: 'state', label: t('appPlatform.settings.dataState'), children: settings.data.state },
@@ -712,9 +712,9 @@ export default function AppPlatformSettingsPage() {
     <Card title={t('appPlatform.settings.recovery')} extra={settings.repair_eligible
       ? <Button loading={repairing} icon={<ToolOutlined aria-hidden="true" />} onClick={() => void prepareRepair()}>{t('appPlatform.settings.repair')}</Button>
       : undefined}>
-      {settings.control_paused && <Alert type="warning" showIcon title={t('err.app_platform_control_paused')} description={t('appPlatform.settings.restorePaused')} style={{ marginBottom: 12 }} />}
-      {repairError && !repairPlan && <Alert type="error" showIcon title={repairError} style={{ marginBottom: 12 }} />}
-      {restoreError && !restorePlan && <Alert type="error" showIcon title={restoreError} style={{ marginBottom: 12 }} />}
+      {settings.control_paused && <Alert type="warning" showIcon title={t('err.app_platform_control_paused')} description={t('appPlatform.settings.restorePaused')} />}
+      {repairError && !repairPlan && <Alert type="error" showIcon title={repairError} />}
+      {restoreError && !restorePlan && <Alert type="error" showIcon title={restoreError} />}
       {settings.recovery.points.length
         ? <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           {settings.recovery.points.map((point) => <div key={point.id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, paddingBottom: 12 }}>
@@ -761,7 +761,7 @@ export default function AppPlatformSettingsPage() {
     </Card>}
 
     <Card title={t('appPlatform.settings.credentials')} extra={<Link to={`/manage/apps/${encodeURIComponent(settings.app_id)}/credentials`}><KeyOutlined aria-hidden="true" /> {t('appPlatform.settings.manageCredentials')}</Link>}>
-      {bindingError && <Alert type="warning" showIcon title={bindingError} style={{ marginBottom: 12 }} />}
+      {bindingError && <Alert type="warning" showIcon title={bindingError} />}
       {bindings.length ? <Space orientation="vertical" style={{ width: '100%' }}>
         {bindings.map((binding) => <div key={binding.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: `1px solid ${token.colorBorderSecondary}`, paddingBlock: 8 }}>
           <Space size={8} wrap><Typography.Text strong>{binding.name}</Typography.Text><Tag>{binding.operation}</Tag><StatusTag className={binding.state === 'active' ? 'rp-platform-success-tag' : undefined} tone={binding.state === 'active' ? 'success' : binding.state === 'review_required' ? 'warning' : 'neutral'}>{binding.state}</StatusTag></Space>

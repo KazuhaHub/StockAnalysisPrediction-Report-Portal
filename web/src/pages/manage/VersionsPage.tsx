@@ -149,7 +149,7 @@ function VersionRegistry() {
           onDiscard={() => { setDraft(original); setNameError('') }} />}>
         {draft && <ConfigProvider componentDisabled={saving}>
           <Form layout="vertical">
-            {draft.is_default && <Alert style={{ marginBottom: 16 }} type="info" showIcon title={t('versions.defaultHint')} />}
+            {draft.is_default && <Alert type="info" showIcon title={t('versions.defaultHint')} />}
             <Form.Item label={t('versions.name')} validateStatus={nameError ? 'error' : undefined} help={nameError || undefined} required>
               <Input aria-label={t('versions.name')} value={draft.name} disabled={!adding || saving}
                 onChange={(event) => { patch({ name: event.target.value }); setNameError('') }} />
