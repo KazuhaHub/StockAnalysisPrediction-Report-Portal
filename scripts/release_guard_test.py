@@ -5,7 +5,7 @@ import re
 import unittest
 from unittest.mock import patch
 import subprocess
-from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci, recorded_images, image_for, guard_fixed_image, check_move
+from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, check_ci, recorded_images, image_for, guard_fixed_image, check_move
 
 # CI runs `python3 -B -m unittest discover -s scripts` from the repository root, so every file
 # these tests read is found relative to this one rather than to the working directory.
@@ -338,7 +338,7 @@ class LicenceGateTests(unittest.TestCase):
                 return {'workflow_runs': []}
             return {'workflow_runs': [self.runs(wf, licence_conclusion if wf == 'licence.yml' else 'success')[0]]}
         with patch('release_guard.gh_json', side_effect=fake):
-            wait_ci('o/r', 'a' * 40)
+            check_ci('o/r', 'a' * 40)
 
     def test_green_tests_and_green_licence_pass(self):
         self.wait()
@@ -354,6 +354,26 @@ class LicenceGateTests(unittest.TestCase):
     def test_no_licence_run_for_the_commit_blocks_the_release(self):
         with self.assertRaisesRegex(RuntimeError, 'licence.yml'):
             self.wait(licence_runs=False)
+
+
+class ReleaseGateTests(unittest.TestCase):
+    """The gate looks once: a release holds no runner while CI runs, and builds nothing CI has not passed."""
+
+    def test_an_unfinished_ci_run_refuses_at_once(self):
+        run = {'id': 1, 'event': 'push', 'status': 'in_progress', 'conclusion': None, 'html_url': 'u/test.yml'}
+        with patch('release_guard.gh_json', return_value={'workflow_runs': [run]}):
+            with self.assertRaisesRegex(RuntimeError, 'has not finished.*failed jobs.*u/test.yml'):
+                check_ci('o/r', 'a' * 40)
+
+    def test_builds_start_only_after_the_gate(self):
+        release = read_workflow('release.yml')
+        needs = RunnerImageWorkflowTests.needs
+        self.assertIn('ci', needs(self, release, 'web'))
+        self.assertIn('ci', needs(self, release, 'build-runner'))
+        self.assertIn('web', needs(self, release, 'build'))
+        gate = job_block(release, 'ci')
+        self.assertIn('release_guard.py check-ci', gate)
+        self.assertLessEqual(int(re.search(r'timeout-minutes: (\d+)', gate)[1]), 5)
 
 
 PORTAL = 'ghcr.io/owner/repo'

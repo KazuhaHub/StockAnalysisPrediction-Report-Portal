@@ -73,7 +73,7 @@ gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dag
    membership of the repository's npm workspaces. A third party carrying AGPL fails.
 10. **A dedicated workflow, not a job of `test.yml`.** The release guard names `test.yml`'s jobs one by one and requires each;
     a new job there would change what a release waits on. `licence.yml` runs on every pull request and every push to `main` and
-    `integration/app-platform`. The licence scan **is** a release prerequisite in code: `release_guard.py wait-ci` waits for a
+    `integration/app-platform`. The licence scan **is** a release prerequisite in code: `release_guard.py check-ci` requires a
     green `licence.yml` run of the exact commit (job `licence scan`) as well as the full `test.yml` run, and Apps'
     `status-publish.py` lists the `licence` job among the `check.yml` jobs a status release requires. What stays a
     repository setting, pending owner approval, is adding the two checks (`licence scan` in the Portal, `licence` in Apps)

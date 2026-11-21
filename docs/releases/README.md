@@ -77,10 +77,12 @@ onward says what its file says.
 
 The normal release path is entirely in GitHub: open **Actions → Release → Run workflow**, select
 `main`, leave Version blank to derive the next CalVer number (or enter one explicitly), paste the
-reader-facing Markdown notes, and choose `beta`, `stable`, or `draft`. The workflow verifies the
-exact `main` commit's full CI before it creates the annotated tag. It then builds the six archives and
-fixed container image, publishes the Release at the selected maturity, and lets Release channels
-reconcile `:beta` and `:latest`.
+reader-facing Markdown notes, and choose `beta`, `stable`, or `draft`. The workflow first checks
+that the exact `main` commit's full CI (`test.yml` and `licence.yml` push runs) has passed; it looks
+once, so dispatch after those runs are green: a dispatch while they still run is refused at once and
+builds nothing. It then builds the six archives and fixed container image, creates the annotated tag,
+publishes the Release at the selected maturity, and lets Release channels reconcile `:beta` and
+`:latest`.
 
 The command-line equivalent remains available for recovery and automation:
 
@@ -89,6 +91,10 @@ scripts/tag-release.sh --next
 scripts/tag-release.sh --notes-file /tmp/release.md
 git push origin v2026.38
 ```
+
+Push the tag once the commit's full CI has passed. A tag pushed while it still runs fails at the CI
+check without building; do not delete and re-push the tag (a second push of the same tag starts no
+run): once CI is green, use **Re-run failed jobs** on that tag's Release run.
 
 Without a version, the script derives one: **the week comes from the clock** (the current UTC ISO
 week) and **the revision from what this checkout has** — it cuts the highest release note written for
@@ -330,7 +336,8 @@ the same ordering applies: dump before the bridge, restore before reverting the 
 ## Recovering an interrupted image publication
 
 Release preparation requires successful full CI for the exact commit. If no push run exists
-(for example on a maintenance branch), dispatch `test.yml` on that branch and wait for it.
+(for example on a maintenance branch), dispatch `test.yml` on that branch and release once it has passed (the check looks once and
+does not wait; for a pushed tag, re-run the failed jobs of its Release run).
 Different release tags may build concurrently; attempts for the same tag are serialized.
 
 Once the fixed image exists, rebuilding or replacing the archives is refused. Once the release has been

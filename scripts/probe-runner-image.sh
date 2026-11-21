@@ -28,7 +28,12 @@ fail() {
 	exit 1
 }
 
-host_mnt=$(readlink /proc/1/ns/mnt)
+# PID 1's mount namespace, read from a privileged container in the host's PID namespace with the entry bypassed:
+# on a CI runner the probe runs as an unprivileged user, who cannot read /proc/1/ns/mnt directly (GNU readlink then
+# fails without a word, and set -e ends the probe with no message).
+host_mnt=$(docker run --rm --platform "$platform" --privileged --pid host --network none --entrypoint readlink \
+	"$image" -v /proc/1/ns/mnt) || fail "could not read PID 1's mount namespace through $image"
+[ -n "$host_mnt" ] || fail "PID 1's mount namespace read back empty"
 
 # The test hook PORTAL_ENTRY_RUNNER swaps the program the entry opens on descriptor 3 for the image's shell, so
 # the namespace the entry really lands in can be read from inside it. The compose file never sets it.

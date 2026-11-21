@@ -4,7 +4,6 @@ import json
 import os
 import re
 import subprocess
-import time
 
 
 def gh_json(endpoint):
@@ -100,30 +99,26 @@ def licence_ready(jobs):
     return any(j['name'] == LICENCE_JOB and j.get('conclusion') == 'success' for j in jobs)
 
 
-def wait_workflow(repo, sha, workflow, ready, label):
-    deadline = time.monotonic() + 1800
-    while time.monotonic() < deadline:
-        runs = gh_json(f'repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=100')['workflow_runs']
-        runs = [r for r in runs if r['event'] in ('push', 'workflow_dispatch')]
-        if not runs:
-            raise RuntimeError(f'No {label} run for this commit; dispatch {workflow} on its branch first')
-        run = max(runs, key=lambda r: r['id'])
-        if run['status'] == 'completed':
-            jobs = gh_json(f'repos/{repo}/actions/runs/{run["id"]}/jobs?per_page=100')['jobs']
-            if run['conclusion'] != 'success' or not ready(jobs):
-                raise RuntimeError(f'{label[0].upper()}{label[1:]} did not pass: {run["html_url"]}')
-            print(f'Verified {label}: {run["html_url"]}')
-            return
-        print(f'Waiting for {label}: {run["html_url"]}', flush=True)
-        time.sleep(15)
-    raise RuntimeError(f'Timed out waiting for {label}')
+def check_workflow(repo, sha, workflow, ready, label):
+    """Look once: a run that has not finished refuses now instead of holding a runner until it does."""
+    runs = gh_json(f'repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=100')['workflow_runs']
+    runs = [r for r in runs if r['event'] in ('push', 'workflow_dispatch')]
+    if not runs:
+        raise RuntimeError(f'No {label} run for this commit; dispatch {workflow} on its branch first')
+    run = max(runs, key=lambda r: r['id'])
+    if run['status'] != 'completed':
+        raise RuntimeError(f'{label[0].upper()}{label[1:]} has not finished; once it passes, dispatch the release again, or for a pushed tag re-run this run\'s failed jobs: {run["html_url"]}')
+    jobs = gh_json(f'repos/{repo}/actions/runs/{run["id"]}/jobs?per_page=100')['jobs']
+    if run['conclusion'] != 'success' or not ready(jobs):
+        raise RuntimeError(f'{label[0].upper()}{label[1:]} did not pass: {run["html_url"]}')
+    print(f'Verified {label}: {run["html_url"]}')
 
 
-def wait_ci(repo, sha):
-    wait_workflow(repo, sha, 'test.yml', ci_ready, 'full CI')
+def check_ci(repo, sha):
+    check_workflow(repo, sha, 'test.yml', ci_ready, 'full CI')
     # A separate workflow, so the test.yml job names above stay the whole of ci_ready. It runs on every
     # push to main, so the exact commit being released has a run.
-    wait_workflow(repo, sha, 'licence.yml', licence_ready, 'licence scan')
+    check_workflow(repo, sha, 'licence.yml', licence_ready, 'licence scan')
 
 
 def expected_assets(tag):
@@ -238,7 +233,7 @@ def guard_fixed_image(ref):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['guard', 'wait-ci', 'verify-target', 'state', 'guard-draft', 'check-move'])
+    parser.add_argument('command', choices=['guard', 'check-ci', 'verify-target', 'state', 'guard-draft', 'check-move'])
     parser.add_argument('value', nargs='?')
     parser.add_argument('--repo', default=os.environ.get('GITHUB_REPOSITORY'))
     parser.add_argument('--image')
@@ -259,8 +254,8 @@ def main():
         check_move(args.repo, args.image, args.value or '', args.target, args.allow_runner_regress)
     elif args.command == 'guard-draft':
         guard_draft(args.repo, args.value)
-    elif args.command == 'wait-ci':
-        wait_ci(args.repo, args.value)
+    elif args.command == 'check-ci':
+        check_ci(args.repo, args.value)
     else:
         print(verify_target(args.repo, args.value, args.image, args.image_key))
 

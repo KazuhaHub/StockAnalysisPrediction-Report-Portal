@@ -424,8 +424,9 @@ jobs:
   # host namespaces are what this exercises). The image is built here from the commit and never pushed: host-setup
   # plan and --apply through `docker compose run`, a second --apply, a refused conflict, `up -d`, the startup
   # checks and the managed profile observed as the controller UID, restart, a killed runner and its stale socket,
-  # `down`, health with the runner stopped, and a simulated reboot. The release workflow runs the image's own
-  # entry checks (scripts/probe-runner-image.sh) on both architectures by digest before anything is recorded.
+  # `down`, health with the runner stopped, and a simulated reboot. It also runs the image's own entry checks
+  # (scripts/probe-runner-image.sh) as the release does; the release workflow runs them again on both architectures
+  # by digest before anything is recorded.
   compose-runner-lifecycle:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -454,6 +455,15 @@ jobs:
           docker build --build-arg TARGETARCH=amd64 -f Dockerfile.app-runner -t app-runner-probe:local .
           GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-runner-observer" ./internal/apprunner/service
           chmod 0555 "$RUNNER_TEMP/app-runner-observer"
+      # The release workflow's pre-push check, as it runs there: the unprivileged runner user, no sudo. Without this
+      # the probe ran only during a release, and v2026.47.2 stopped at it.
+      - name: Run the image entry probe as the release does
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sh scripts/probe-runner-image.sh app-runner-probe:local linux/amd64
       - name: Run the compose lifecycle probe
         shell: bash
         run: |
