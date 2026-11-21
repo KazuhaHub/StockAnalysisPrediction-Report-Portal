@@ -103,6 +103,7 @@ type Server struct {
 	platformHeldStartCursor     platformKeysetCursor
 	platformMigrationCursor     platformKeysetCursor
 	platformRecoveryStartCursor platformKeysetCursor
+	platformRaiseCursor         platformKeysetCursor
 	// platformReclaimCursor rotates the window of the image removal step.
 	platformReclaimCursor int
 	// platformPruneCursor rotates the window of the recovery set pruning step. platformPruneNoted remembers the host

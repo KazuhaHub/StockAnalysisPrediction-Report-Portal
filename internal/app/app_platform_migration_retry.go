@@ -32,8 +32,11 @@ func requirePlatformRetrySource(e migExec, installation, recovers string) error 
 	var owner string
 	if err := e.queryRow(`SELECT action,managed,stage,COALESCE(error_code,''),installation_id FROM app_platform_operations WHERE id=?`, recovers).
 		Scan(&action, &managed, &stage, &code, &owner); err != nil || action != "update" || managed != 1 || stage != "recovery_required" ||
-		code != "update_recovery_required" || owner != installation {
+		!platformUpdateRecoveryCodes(code) || owner != installation {
 		return errAppPlatformPlanChanged
+	}
+	if err := platformRequireSettledRaise(e, recovers); err != nil {
+		return err
 	}
 	state, err := platformMigrationSettlementState(e, recovers)
 	if err != nil {
@@ -209,8 +212,8 @@ func (s *Server) runPlatformRetryEvidenceStage(ctx context.Context, expected pla
 	}
 	next := appplatform.StageSnapshot
 	if stage == appplatform.StageMigrate {
-		if admitted.plan.Migration != nil {
-			// The migration is still to run, so the operation stays at this stage.
+		if admitted.plan.Migration != nil || admitted.plan.DataQuota != nil {
+			// The quota raise or the migration is still to run, so the operation stays at this stage.
 			if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
 				return zero, false, err
 			}

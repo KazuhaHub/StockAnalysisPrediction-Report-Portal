@@ -1,6 +1,6 @@
 # Proposal: per-installation data quota and administrator data import
 
-Status: Accepted 2026-11-20. All three phases are implemented: P1 (quota), P3 (reviewed `set_data_quota` and `import_data`, `pack-import`) and P2 (hard links in checkpoints); see the implementation notes at the end. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
+Status: Accepted 2026-11-20. All three phases are implemented: P1 (quota), P3 (reviewed `set_data_quota` and `import_data`, `pack-import`) and P2 (hard links in checkpoints), and so is the update raise of section 3.2; see the implementation notes at the end. The owner accepted the recommended answer to every question in section 12 and approved migration `0024` (section 11). This document changes no code, schema or contract. It builds on:
 
 - [155](155-managed-update-checkpoint-design.md): checkpoint and restore;
 - [168](168-fresh-host-restore-plan.md): fresh-host import;
@@ -276,7 +276,7 @@ P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and 
 
 **Deviations**
 
-- **Update raise not applied.** The update review shows the raise, but the update keeps the approved quota (`raise_applied` is false). Applying it in the update would change the update-start evidence of every update path; it belongs with `set_data_quota`.
+- **Update raise not applied.** The update review shows the raise, but the update keeps the approved quota (`raise_applied` is false). Applying it in the update would change the update-start evidence of every update path; it belongs with `set_data_quota`. Superseded: the update now applies the raise, see "Implementation notes (update raise)".
 - **Restore walk bound.** A restore's entry walk (re-verify and clear) is bounded by the namespace's own inode quota, read from its prepare-data receipt in the runner journal. The platform maximum (1,000,000) stands in only when the journal does not know the quota. Its archive bound is the checkpoint's own verified size, and the XFS project quota is the binding limit either way. The walk holds its entries in memory, at most the inode quota of them.
 - **Hard links** were still refused by the walker at this point; P2 lifted that.
 - **Migration shape.** `quota_inodes` carries a CHECK of 65,536 to 1,000,000 (a table constraint on PostgreSQL, part of the column on SQLite, which cannot add a table constraint to an existing table) and the PostgreSQL verifier checks its default is 65,536. A database at 0023 verifies under the 0015 and 0021 verifiers through the 0021-era shape.
@@ -294,7 +294,7 @@ P1 is partly done. What landed, where it differs from sections 3, 4 and 11, and 
 
 ## Implementation notes (set_data_quota, P3)
 
-P3 and the reviewed `set_data_quota` action are implemented, apart from the item listed under "Not done".
+P3 and the reviewed `set_data_quota` action are implemented. The update raise that this section's "Not done" once listed is done, see "Implementation notes (update raise)".
 
 **Runner**
 
@@ -324,7 +324,7 @@ P3 and the reviewed `set_data_quota` action are implemented, apart from the item
 - **Review capacity is the runner's admission answer** (fits, or the dimension and shortfall), not a free-bytes figure.
 - **The review checks size with the manifest's numbers** (content bytes against the byte quota, entries plus the namespace root against the inode quota); the exact block-rounded footprint is checked by the runner at the import.
 - **Journal kinds and stages.** The two commands share the stages `prepare_data` and `restore_data` with other effects (no stage was added); the Portal records the import under its own effect stage `import`.
-- **An unknown raise** (one that may have applied; a raise the native layer refused is failed, not unknown) ends `recovery_required` after its attempts. The runner finishes an effect left unknown when the same signed command arrives, but Portal does not yet reconcile one automatically; a limit above the journal evidence refuses a start until the raise is reviewed again.
+- **An unknown raise** (one that may have applied; a raise the native layer refused is failed, not unknown) ends `recovery_required` after its attempts, and the row stays unknown. Superseded: the Portal now converges it from the runner's answer, see "Implementation notes (update raise)".
 
 **Tests**
 
@@ -333,8 +333,50 @@ P3 and the reviewed `set_data_quota` action are implemented, apart from the item
 
 **Not done**
 
-- **Update raises quota.** An approved update that asks for more still keeps the approved quota (`raise_applied` stays false); raising is the separate reviewed action. Folding it into the update changes the update's start evidence on every update path. The design that fits: run the same `set-data-quota` effect between the checkpoint and the start, derive the Portal's quota chain from applied `set-data-quota` effect receipts (which also covers an update's own raise, in flight), and count the extra effect in the registration's base. It needs its own review.
-- **Hard links** (P2): done, see the next section.
+- **Hard links** (P2): done, see "Implementation notes (P2)".
+
+## Implementation notes (update raise)
+
+An approved update that asks for more quota than the installation holds now raises it (section 3.2, "Updates"). The two items of the earlier "Not done" lists, "Update raises quota" and "an unknown raise is not reconciled", are done. The owner accepted every recommendation of the plan, listed here with where the build differs.
+
+**Shape**
+
+- **Stages.** The operation's stages do not change, so every stored operation revision stays valid. The raise is an effect of the `migrate` stage, after the source removal and before the migration: it needs the checkpoint (cut at the old quota, which always fits) and the stopped source, and the migrate-data payload carries the quota that the runner checks the live limit against after the job, so a raise after it would break the stored digest. An update with no raise has no raise row and its finalized plan has no `data_quota` key, byte for byte what it was.
+- **Slots.** The runner's command is the standalone `set-data-quota` command, header `prepare_data` / effect 1 under the update's operation id; an update uses that slot for nothing else. The Portal row is `migrate` / **4**, not 3: slot 3 of the migrate stage is the settlement's discard (a fixed number of the runner's contract), so the plan's number 3 was taken. The stage therefore runs its effects in the order 1, 4, 2, and nothing may assume the numbers ascend with time (documented beside `platformUpdateRaiseEffectNumber`).
+- **Quota chain.** The Portal derives a namespace's chain from applied `set-data-quota` effect receipts of its reviewed raises and its updates, ordered by where each link starts, never by time. A fork, a receipt that is never reached, a link that does not grow, or a receipt that disagrees with its row or its operation's plan is stage evidence. An update's raise is a link from the moment it applies, while the update still runs, and stays one if the update fails.
+- **Review.** The update review records the new quota (the larger of the current value and the request, per dimension) and the runner's capacity answer, asked outside any transaction. A short answer cannot be consumed (`data_quota_capacity`). An unconsumed review stored with `raise_applied:false` is refused as `plan_changed` and has to be reviewed again; an update already admitted from one runs to its end with no raise.
+- **Registration.** The registration's base is four, plus applied migrations, plus applied raises; a raise row in any other state still counts in the total, so the comparison fails closed.
+
+**Decisions**
+
+1. **The quota stays raised after a rollback.** A checkpoint restores contents, not limits; the runner's reservations already hold the new size; lowering is refused in version 1 and needs a native path that does not exist.
+2. **Convergence.** A raise with no verdict ends the update `recovery_required` with its row `unknown`, and the restore and retry reviews wait for it (`app_platform_quota_raise_unsettled`). The settlement tick reads it back under its own identity: a receipt applies the row and the namespace together, a failed status reverts the row, a runner still working is waited for, an orphaned effect is finished by sending the same command again (signed anew, verified by the runner under the settlement purpose), and an absence is final only once every signed window has passed, and then reverts the row. The same step settles a reviewed `set_data_quota` whose raise was unknown: a receipt completes the operation, a definite answer fails it. The operation model gained the two transitions that need (`Recover`, `Settle` for `set_data_quota`).
+3. **A definite failure reverts the row**, for the update's raise and the standalone alike, and ends the operation at once without spending retries. The standalone used to leave its row `prepared`.
+4. **Error codes.** `finishPlatformManagedUpdateWith` takes the code, so an update shows `data_quota_capacity` (the runner refused) or `data_quota_unavailable` (it failed for good). The restore and retry reviews accept any of the update's recovery codes, since the recovery is the same.
+5. **Legacy reviews** are handled as above.
+6. **Position.** After the checkpoint and the source removal, before the migration. The race of a raise that fails after the source is stopped is narrowed, not removed: the validate stage asks the runner for capacity again, before anything stops, and ends the update `failed` with no effects and `data_quota_capacity` when it is short.
+
+**Also done**
+
+- **Retention keeps every operation that holds an applied `set-data-quota` effect.** Before, an older completed `set_data_quota` was deleted once a later one completed, and its effects went with it; the chain then refused and the installation stopped working.
+- **Applied raise rows are never rewritten.** The chain relies on their state, update time and receipt; a test compares them before and after a whole lifecycle.
+- **Runner.** A second raise in a slot that holds one, under another effect id, is a `ErrCommandConflict` before anything is claimed. No journal schema change; no Portal migration.
+
+**Review follow-ups**
+
+- **A re-claimed lease reuses the raise row.** A real re-claim raises the installation fence (`control_fence + 1`), so the row admitted under an earlier fence is accepted when its fence is at most the lease's, as the migrate-data row is, and the effect id and digest are reused. The command is signed again at the admitted fence. The same holds for a reviewed raise.
+- **An unsettled raise closes the installation to what the runner would block.** A raise with no verdict on an operation that already ended makes the runner refuse the checkpoint, start and restore (J4), and the convergence only runs for an installation that is `ready` or `disabled` (a reviewed raise) or in `recovery_required` (an update's). An update admitted in between would have ended `recovery_required` with the raise unable to converge. The safer choice is to refuse, not to converge in any phase: converging while another operation moves the fence and the chain would apply a receipt under a fence the runner no longer accepts. So the update and `set_data_quota` reviews, and the admission of every start-bearing action and of `set_data_quota` (in the operation insert, the one writer of operations), are refused with `app_platform_quota_raise_unsettled` until the row is applied or reverted. `disable` and `uninstall` are not blocked by the runner and stay open. A raise still running on its own operation does not count.
+- **Rows written before windows were recorded.** A row with no recorded signing window (receipt `{}`) is treated as signed until its last write plus 25 s (the longest command lifetime the earlier code used) and the same 5 s margin, so an absence read right after an upgrade is not final.
+- **The retention pin ends with the data.** It holds while the installation exists or any of its namespaces is not deleted, and is released once the installation is removed and its data deleted. The query reads the effect rows of one kind joined to their operations inside the sweep's transaction; there is no index on the kind and none may be added.
+
+**Tests**
+
+Portal tests run on SQLite and PostgreSQL: the difference and the review, a short runner (nothing admitted), no raise (unchanged), a raise without and with a migration through the scheduler's own stage function, every reader after a completed raise (chain, launch, history), a tampered or forked chain, a typed failure and a capacity refusal, an unknown raise and its convergence (receipt, failed, pending, absent inside and after the window, orphaned), a lost acknowledgement, a lease takeover, a legacy review and a legacy in-flight update, the rollback and the retry, the registration with an extra row, retention. Journal tests J1 to J7 state what the runner does with a raise under an update's operation.
+
+**Not done**
+
+- A retry of an update whose raise was reverted is not offered: the update has no migration, so there is no settlement to retry from. The only recovery is the rollback, after which a new update review proposes the raise again. This follows from how a retry is defined (it begins from the data a settled migration restored), not from the raise.
+- **Hard links** (P2): done, see "Implementation notes (P2)".
 
 ## Implementation notes (P2)
 

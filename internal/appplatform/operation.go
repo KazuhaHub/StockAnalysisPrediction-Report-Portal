@@ -121,10 +121,12 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 }
 
 // recoverableAction names the actions whose operations are settled, recovered or reopened out of
-// recovery_required: the restore import and the restore, whose recovery paths are the only writers of the
-// states one revision past an ordinary one. Every other action ends recovery_required for good.
+// recovery_required: the restore import and the restore, whose recovery paths write the states one revision past an
+// ordinary one, and the reviewed quota raise, whose unknown effect the Portal converges from the runner's own answer
+// (a receipt completes it, a definite failure or a proven absence fails it). Every other action ends
+// recovery_required for good.
 func recoverableAction(action Action) bool {
-	return action == ActionRestoreImport || action == ActionRestore
+	return action == ActionRestoreImport || action == ActionRestore || action == ActionSetDataQuota
 }
 
 func (o Operation) Snapshot() OperationSnapshot {

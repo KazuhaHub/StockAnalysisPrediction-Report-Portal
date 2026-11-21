@@ -56,6 +56,9 @@ type platformManagedUpdatePlan struct {
 	Import *platformImportStep `json:"import,omitempty"`
 	// RecoversOperationID names the failed update this one retries; empty for an ordinary update.
 	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
+	// DataQuota is the quota raise the update applies between its checkpoint and its start (doc 185 section 3.2).
+	// Absent for an update that raises nothing, so that plan's bytes are what they were before the raise existed.
+	DataQuota *platformUpdateQuotaReview `json:"data_quota,omitempty"`
 }
 
 type platformUpdateStartIntent struct {
@@ -168,6 +171,9 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 	if step, stepErr := platformPlanMigration(plan.DataFormat, parsed.Manifest.Data); stepErr != nil || !samePlatformMigration(step, plan.Migration) ||
 		(plan.Migration != nil && action != appplatform.ActionUpdate) {
 		return zero, nil, errAppPlatformStageEvidence
+	}
+	if err := platformCheckPlanQuota(e, expected.installationID, action, plan, parsed.Manifest); err != nil {
+		return zero, nil, err
 	}
 	platformFound := false
 	for _, platform := range parsed.Manifest.Backend.Platforms {

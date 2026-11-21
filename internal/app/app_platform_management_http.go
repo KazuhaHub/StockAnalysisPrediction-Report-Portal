@@ -186,6 +186,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_operation_conflict"
 	case errors.Is(err, errAppPlatformMigrationUnsettled):
 		status, code = 409, "app_platform_migration_unsettled"
+	case errors.Is(err, errAppPlatformQuotaRaiseUnsettled):
+		status, code = 409, "app_platform_quota_raise_unsettled"
 	case errors.Is(err, errAppPlatformRecoveryUnsettled):
 		status, code = 409, "app_platform_recovery_unsettled"
 	case errors.Is(err, errAppPlatformCredentialUnavailable):
@@ -471,6 +473,21 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 				"from": strconv.FormatInt(projection.Migration.From, 10), "to": strconv.FormatInt(projection.Migration.To, 10),
 				"wall_clock_seconds": strconv.FormatInt(projection.Migration.WallClockSeconds, 10),
 			}
+		}
+		if q := projection.DataQuota; q != nil {
+			// The quota the update raises before the new release starts, and the runner's answer whether it can hold it.
+			quota := map[string]any{
+				"current_bytes": strconv.FormatInt(q.CurrentBytes, 10), "current_inodes": strconv.FormatInt(q.CurrentInodes, 10),
+				"requested_bytes": strconv.FormatInt(q.RequestedBytes, 10), "requested_inodes": strconv.FormatInt(q.RequestedInodes, 10),
+				"new_bytes": strconv.FormatInt(q.NewBytes, 10), "new_inodes": strconv.FormatInt(q.NewInodes, 10),
+				"raise_applied": q.RaiseApplied, "capacity": q.Capacity,
+			}
+			if q.Capacity == "short" {
+				quota["capacity_dimension"] = q.CapacityDimension
+				quota["capacity_requested"] = strconv.FormatInt(q.CapacityRequested, 10)
+				quota["capacity_remaining"] = strconv.FormatInt(q.CapacityRemaining, 10)
+			}
+			reviewBody["data_quota"] = quota
 		}
 		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": reviewBody})
 	case "disable", "uninstall":

@@ -12,13 +12,29 @@ import (
 // have mounted data. The source remains the active generation, the installation
 // enters review-only recovery, and a separate reviewed restore is required.
 func (s *Server) finishPlatformManagedUpdateForReview(ctx context.Context, expected platformOperationLease) error {
-	return s.finishPlatformManagedUpdateWith(ctx, expected, nil)
+	return s.finishPlatformManagedUpdateWith(ctx, expected, nil, platformUpdateRecoveryCode)
 }
 
-// finishPlatformManagedUpdateWith ends the operation for review. effects, when set, settles the effect rows
-// the reason for ending belongs to in the same transaction. A migrate-data effect still in flight becomes
-// unknown: it is never sent again, and only a discard settles it.
-func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected platformOperationLease, effects func(e migExec, now int64) error) error {
+// platformUpdateRecoveryCode is the error code of an update that ended recovery_required for a reason the update
+// itself does not name.
+const platformUpdateRecoveryCode = "update_recovery_required"
+
+// platformUpdateRecoveryCodes are the error codes a managed update that ended recovery_required may carry. The
+// restore and retry reviews of a failed update accept any of them: what differs is only the reason shown, because the
+// recovery is the same. A raise of the data quota that the runner refused (data_quota_capacity) or failed for
+// good (data_quota_unavailable) names itself.
+func platformUpdateRecoveryCodes(code string) bool {
+	return code == platformUpdateRecoveryCode || code == "data_quota_capacity" || code == "data_quota_unavailable"
+}
+
+// finishPlatformManagedUpdateWith ends the operation for review with the given error code. effects, when set,
+// settles the effect rows the reason for ending belongs to in the same transaction. A migrate-data effect or a
+// quota raise still in flight becomes unknown: it is never sent as a new effect, and a migration is settled by a
+// discard, a raise by the convergence step.
+func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected platformOperationLease, effects func(e migExec, now int64) error, code string) error {
+	if !platformUpdateRecoveryCodes(code) {
+		return errAppPlatformStageEvidence
+	}
 	if expected.snapshot.Action != appplatform.ActionUpdate ||
 		!expected.snapshot.Managed || expected.id == "" ||
 		expected.snapshot.Stage == appplatform.StageComplete ||
@@ -82,7 +98,7 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		}
 	}
 	if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=?
-		WHERE operation_id=? AND kind='migrate-data' AND state='prepared'`, now, expected.id); err != nil {
+		WHERE operation_id=? AND kind IN ('migrate-data','set-data-quota') AND state='prepared'`, now, expected.id); err != nil {
 		return err
 	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
@@ -97,13 +113,13 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 	}
 	changed, err := e.exec(`UPDATE app_platform_operations
 		SET stage='recovery_required',state_revision=?,
-		row_revision=row_revision+1,error_code='update_recovery_required',
+		row_revision=row_revision+1,error_code=?,
 		completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
 		WHERE id=? AND installation_id=? AND controller_epoch=?
 		AND stage=? AND state_revision=? AND row_revision=? AND fence=?
 		AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>?
 		AND completed_ms IS NULL`,
-		int64(recovery.Snapshot().Revision), now, now, expected.id,
+		int64(recovery.Snapshot().Revision), code, now, now, expected.id,
 		expected.installationID, expected.controllerEpoch,
 		string(expected.snapshot.Stage), int64(expected.snapshot.Revision),
 		expected.rowRevision, expected.fence, expected.owner,

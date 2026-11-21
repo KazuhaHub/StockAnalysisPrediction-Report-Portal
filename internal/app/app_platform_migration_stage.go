@@ -22,6 +22,9 @@ import (
 // The migrate stage of an update whose plan declares a data migration. Effect 1 of the stage is the
 // source removal that stage always carried; effect 2 is the migrate-data command, sent only after the
 // removal is applied; effect 3, owned by settlement, is the discard that settles an unknown migration.
+// A plan that raises the quota adds one more, effect platformUpdateRaiseEffectNumber (4): it runs after the removal
+// and before effect 2, so the numbers do not ascend with time. Slot 3 is taken by the discard, which is why the
+// raise has the next free number and not the one that would read in order.
 //
 // An unknown migration is never sent again. Its outcome is read back under its own identity; a read that
 // shows the runner no longer working on it ends the operation for review, where only a discard settles it.
@@ -30,13 +33,14 @@ import (
 // as final yet. Neither is a failure: the same effect is read again.
 var errPlatformMigrationBusy = errors.New("the runner still holds the migration")
 
-// errPlatformMigrationEnded reports an update this attempt ended for review: nothing is left for the
-// scheduler to retry or finish, and the migration waits for settlement.
+// errPlatformMigrationEnded reports an operation this attempt ended for review: nothing is left for the
+// scheduler to retry or finish. A migration waits for settlement; a quota raise that the runner answered with a
+// definite failure or refusal was closed in the same transaction.
 var errPlatformMigrationEnded = errors.New("migration ended the update for review")
 
 // endPlatformMigration ends the leased update for review and reports it so the scheduler lets go.
 func (s *Server) endPlatformMigration(ctx context.Context, expected platformOperationLease, effects func(e migExec, now int64) error) error {
-	if err := s.finishPlatformManagedUpdateWith(ctx, expected, effects); err != nil {
+	if err := s.finishPlatformManagedUpdateWith(ctx, expected, effects, platformUpdateRecoveryCode); err != nil {
 		return err
 	}
 	return errPlatformMigrationEnded
@@ -593,14 +597,25 @@ func (i platformMigrateIntent) pendingReceiptNow(e migExec, operationID string) 
 // runPlatformMigrateStage runs the migrate stage of a managed update: the source removal, then, when the
 // reviewed plan declares a migration, the migrate-data effect.
 func (s *Server) runPlatformMigrateStage(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
-	var removal, migrate string
+	var removal, raise string
 	_ = s.st.queryRow(`SELECT COALESCE(MAX(CASE WHEN effect_number=1 THEN state END),''),
-		COALESCE(MAX(CASE WHEN effect_number=2 THEN state END),'')
-		FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate'`, expected.id).Scan(&removal, &migrate)
-	if removal == "applied" {
-		return s.dispatchPlatformMigrateData(ctx, expected, endpoint)
+		COALESCE(MAX(CASE WHEN effect_number=`+strconv.Itoa(platformUpdateRaiseEffectNumber)+` THEN state END),'')
+		FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate'`, expected.id).Scan(&removal, &raise)
+	if removal != "applied" {
+		return s.executePlatformManagedUpdateMigrate(ctx, expected, endpoint)
 	}
-	return s.executePlatformManagedUpdateMigrate(ctx, expected, endpoint)
+	// The raise runs after the removal and before the migration, whose payload carries the quota: the order of
+	// the stage's effects is 1, then the raise (slot 4), then 2.
+	if raise != "applied" {
+		declares, err := platformPlanDeclaresRaise(s.st.poolExec(), expected.id)
+		if err != nil {
+			return platformOperationLease{}, err
+		}
+		if declares {
+			return s.dispatchPlatformUpdateRaise(ctx, expected, endpoint)
+		}
+	}
+	return s.dispatchPlatformMigrateData(ctx, expected, endpoint)
 }
 
 type platformDiscardIntent struct {

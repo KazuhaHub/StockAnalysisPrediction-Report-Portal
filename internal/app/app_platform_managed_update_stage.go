@@ -484,8 +484,8 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
-	if expected.snapshot.Stage == appplatform.StageMigrate && admitted.plan.Migration != nil {
-		// The source is gone; the migration is still to run, so the operation stays at this stage.
+	if expected.snapshot.Stage == appplatform.StageMigrate && (admitted.plan.Migration != nil || admitted.plan.DataQuota != nil) {
+		// The source is gone; the quota raise or the migration is still to run, so the operation stays at this stage.
 		detail, _ := json.Marshal(struct {
 			ResourceID string `json:"resource_id"`
 			NativeID   string `json:"native_id"`
@@ -588,6 +588,14 @@ func (s *Server) runPlatformManagedUpdate(ctx context.Context, expected platform
 	switch expected.snapshot.Stage {
 	case appplatform.StageQueued, appplatform.StageValidate,
 		appplatform.StageDownload, appplatform.StageStage:
+		if expected.snapshot.Stage == appplatform.StageValidate {
+			// An update that raises the quota asks the runner again, before anything is stopped, whether it can hold
+			// the raise: the review's answer may be old, and a refusal after the source is stopped leaves the app down
+			// until the rollback.
+			if err := s.checkPlatformUpdateRaiseCapacity(ctx, expected, endpoint); err != nil {
+				return zero, err
+			}
+		}
 		return s.advancePlatformManagedUpdateStage(ctx, expected)
 	case appplatform.StageQuiesce:
 		if lease, handled, err := s.runPlatformRetryEvidenceStage(ctx, expected); handled || err != nil {

@@ -121,7 +121,11 @@ func readPlatformUpdateStartRegistrationRows(e migExec, lease platformOperationL
 		if err != nil {
 			return r, err
 		}
-		r.baseEffects += migrations
+		raises, err := platformAppliedRaiseCount(e, lease.id)
+		if err != nil {
+			return r, err
+		}
+		r.baseEffects += migrations + raises
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
 		r.baseEffects = 4

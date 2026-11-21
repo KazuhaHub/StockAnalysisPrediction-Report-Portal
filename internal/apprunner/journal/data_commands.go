@@ -396,6 +396,16 @@ func (s *Store) claimSetDataQuota(ctx context.Context, raw, signature []byte) (c
 			return command, nil, &CapacityRefusalError{Receipt: receipt}
 		}
 	}
+	// The journal keeps one row per (operation, stage, effect number): a raise under another effect id in a slot that
+	// holds one is a conflict, never a second claim. An update raises at most once, and a reviewed raise is one operation.
+	var holder string
+	switch err := tx.QueryRowContext(ctx, `SELECT effect_id FROM runner_commands WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id<>?`,
+		command.OperationID, command.Stage, mustDataInt(command.EffectNumber), command.EffectID).Scan(&holder); {
+	case err == nil:
+		return command, nil, fmt.Errorf("set data quota slot is held by another effect: %w", ErrCommandConflict)
+	case !errors.Is(err, sql.ErrNoRows):
+		return command, nil, err
+	}
 	if err := insertUnknownDataEffect(ctx, tx, command.CommandHeader, now); err != nil {
 		return command, nil, err
 	}

@@ -245,7 +245,12 @@ func (s *Server) settlePlatformMigrations(ctx context.Context, endpoint platform
 	}
 	// The enables and repairs whose start is open are settled by the same steps, from the same tick.
 	held, err := s.settlePlatformHeldStarts(ctx, endpoint)
-	return progressed + held, err
+	if err != nil {
+		return progressed + held, err
+	}
+	// So are the quota raises that ended with no verdict, whether a reviewed raise's or an update's.
+	raises, err := s.settlePlatformQuotaRaises(ctx, endpoint)
+	return progressed + held + raises, err
 }
 
 // settlePlatformMigration takes the next settlement step of one failed update, and reports whether it

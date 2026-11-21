@@ -305,6 +305,11 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 		return result, errAppPlatformPlanChanged
 	}
 	expected.RecoversOperationID = result.plan.RecoversOperationID
+	// What the review recorded about the runner's capacity cannot be rebuilt, and a review stored before the update
+	// raised the quota keeps its form: the update runs on with no raise.
+	if !platformKeepStoredQuotaAnswer(expected.DataQuota, result.plan.DataQuota) {
+		return result, errAppPlatformPlanChanged
+	}
 	expectedRaw, err := json.Marshal(expected)
 	if err != nil || string(expectedRaw) != raw {
 		return result, errAppPlatformPlanChanged
@@ -433,6 +438,7 @@ func (s *Server) loadPlatformFinalizedManagedUpdateAdmission(e migExec, lease pl
 		CurrentDataFormat:   finalized.DataFormat,
 		Migration:           finalized.Migration,
 		RecoversOperationID: finalized.RecoversOperationID,
+		DataQuota:           finalized.DataQuota,
 		Target: platformInstallProjection{
 			Format: sourcePlan.format, AppID: finalized.AppID,
 			PublisherID:     finalized.PublisherID,

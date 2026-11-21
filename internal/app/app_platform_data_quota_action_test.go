@@ -16,7 +16,9 @@ import (
 )
 
 type platformQuotaTestObservation struct {
-	receipt    journal.SetDataQuotaReceipt
+	receipt journal.SetDataQuotaReceipt
+	// status, when set, makes the answer a typed status (pending, orphaned, absent or failed) and not a receipt.
+	status     *journal.MigrateDataStatus
 	authority  control.Authority
 	endpoint   transport.CandidateReceiptEndpoint
 	receivedAt time.Time
@@ -24,10 +26,16 @@ type platformQuotaTestObservation struct {
 }
 
 func (o platformQuotaTestObservation) SetDataQuotaReceipt() (journal.SetDataQuotaReceipt, error) {
+	if o.status != nil {
+		return journal.SetDataQuotaReceipt{}, errors.New("a status is not a receipt")
+	}
 	return o.receipt, nil
 }
 func (o platformQuotaTestObservation) DataEffectStatus() (journal.MigrateDataStatus, error) {
-	return journal.MigrateDataStatus{}, errors.New("no status")
+	if o.status == nil {
+		return journal.MigrateDataStatus{}, errors.New("no status")
+	}
+	return *o.status, nil
 }
 func (o platformQuotaTestObservation) Controller() control.Authority { return o.authority }
 func (o platformQuotaTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
