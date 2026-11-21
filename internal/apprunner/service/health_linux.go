@@ -5,11 +5,11 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 // healthTimeout bounds the connect(): a runner that accepts into a full backlog must not hang the check.
@@ -37,10 +37,8 @@ func checkControlSocket(ctx context.Context, path string, uid, gid uint32) error
 		st.Uid != uid || st.Gid != gid {
 		return errors.New("the control socket is not a socket owned root:controller-gid with mode 0660")
 	}
-	dialer := net.Dialer{Timeout: healthTimeout}
-	conn, err := dialer.DialContext(ctx, "unix", path)
-	if err != nil {
-		return fmt.Errorf("the control socket does not accept connections")
+	if err := transport.ProbeControlSocket(ctx, path, healthTimeout); err != nil {
+		return errors.New("the control socket does not accept connections")
 	}
-	return conn.Close()
+	return nil
 }
