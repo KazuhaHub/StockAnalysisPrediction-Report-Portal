@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"strconv"
 	"time"
@@ -67,7 +68,7 @@ func loadPlatformStaticCandidate(e migExec, lease platformOperationLease, runtim
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN (`+platformInstallationNeutralEffectKinds+`)`, lease.id).Scan(&effects); err != nil {
 		return zero, err
 	}
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)`, lease.installationID, lease.installationID).Scan(&forbidden); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID).Scan(&forbidden); err != nil {
 		return zero, err
 	}
 	if effects != 1 || forbidden != 0 {
@@ -121,24 +122,53 @@ func loadPlatformStaticCandidate(e migExec, lease platformOperationLease, runtim
 	}
 	return result, nil
 }
-func insertPlatformInitialAudience(e migExec, installation string, audience []platformInstallAudience, now int64) error {
-	for _, p := range audience {
-		id, err := platformNewUUID()
-		if err != nil {
+
+// insertPlatformInitialAudience opens the installation to the OUs the review named, in the activation
+// transaction, as ordinary app_ou_access rows (doc 190, D7). An administrator may already have set a
+// row for the key while the installation was pending; the reviewed value wins, so the row is replaced.
+func insertPlatformInitialAudience(e migExec, installation, operation string, audience []platformInstallAudience, now int64) error {
+	key := platformAppKey(installation)
+	open := true
+	// The audit actor is the administrator who reviewed the plan, not the system: the rows are their
+	// decision, written in the same shape as an access edit through the console.
+	var actor string
+	var actorOU int64
+	if len(audience) > 0 {
+		if err := e.queryRow(`SELECT COALESCE(p.username,'') FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, operation).Scan(&actor); err != nil {
 			return err
 		}
-		var username, accountCreated, generation, groupID, groupCreated any
-		if p.Type == "user" {
-			username, accountCreated = p.Username, p.AccountCreated
-			generation, err = strconv.ParseInt(p.AccountGeneration, 10, 64)
-		} else {
-			groupID, err = strconv.ParseInt(p.GroupID, 10, 64)
-			groupCreated = p.GroupCreated
+		if actor != "" {
+			if err := e.queryRow(`SELECT COALESCE(group_id,0) FROM users WHERE username=?`, actor).Scan(&actorOU); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
-		if err != nil {
+	}
+	for _, p := range audience {
+		if p.Type != "ou" {
 			return errAppPlatformStageEvidence
 		}
-		if _, err := e.exec(`INSERT INTO app_platform_access_grants(id,installation_id,principal_type,username,account_created,account_generation,group_id,group_created,revision,created_ms,updated_ms) VALUES(?,?,?,?,?,?,?,?,1,?,?)`, id, installation, p.Type, username, accountCreated, generation, groupID, groupCreated, now, now); err != nil {
+		group, err := strconv.ParseInt(p.GroupID, 10, 64)
+		if err != nil || group < 1 {
+			return errAppPlatformStageEvidence
+		}
+		var from *bool
+		var previous int
+		switch err := e.queryRow(`SELECT enabled FROM app_ou_access WHERE app_key=? AND group_id=?`, key, group).Scan(&previous); {
+		case err == nil:
+			v := previous != 0
+			from = &v
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		if err := e.s.setAppAccessRow(e, key, group, &open); err != nil {
+			return err
+		}
+		if from != nil && *from {
+			continue
+		}
+		detail, _ := json.Marshal(map[string]any{"field": "access", "ou": group, "from": from, "to": true})
+		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,'app',?,?,'')`,
+			time.UnixMilli(now).UTC().Format(time.RFC3339), actor, actorOU, AuditAppAccess, key, string(detail)); err != nil {
 			return err
 		}
 	}
@@ -225,7 +255,8 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	if err != nil {
 		return zero, err
 	}
-	audienceJSON, _ := json.Marshal(candidate.audience)
+	// The proofs bind to the constant no-audience digest: access is an OU policy, not install evidence.
+	audienceSHA := platformNoAudienceSHA()
 	evidence, _ := json.Marshal(struct {
 		Format      string `json:"format"`
 		Epoch       string `json:"controller_epoch"`
@@ -235,9 +266,9 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 		FrontendSHA string `json:"frontend_sha256"`
 		DocumentSHA string `json:"document_sha256"`
 		AudienceSHA string `json:"audience_sha256"`
-	}{"portal.static-readiness/1-dev.1", expected.controllerEpoch, candidate.effectID, candidate.namespace, candidate.receiptSHA, candidate.frontendSHA, candidate.documentSHA, platformDigest(audienceJSON)})
+	}{"portal.static-readiness/1-dev.1", expected.controllerEpoch, candidate.effectID, candidate.namespace, candidate.receiptSHA, candidate.frontendSHA, candidate.documentSHA, audienceSHA})
 	if candidate.frontendOnly {
-		evidence = platformFrontendEvidence(candidate, expected.controllerEpoch, expected.installationID, platformDigest(audienceJSON), 1, 1)
+		evidence = platformFrontendEvidence(candidate, expected.controllerEpoch, expected.installationID, audienceSHA, 1, 1)
 	}
 	var namespace any = candidate.namespace
 	if candidate.frontendOnly {
@@ -249,7 +280,7 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms) VALUES(?,?,?,1,1,?,?,'active',?,?,?,?)`, activation, expected.installationID, candidate.releaseSHA, namespace, candidate.format, string(evidence), now, now, now); err != nil {
 		return zero, err
 	}
-	if err := insertPlatformInitialAudience(e, expected.installationID, candidate.audience, now); err != nil {
+	if err := insertPlatformInitialAudience(e, expected.installationID, expected.id, candidate.audience, now); err != nil {
 		return zero, err
 	}
 	if err := activatePlatformInstallCapabilities(e, expected.installationID, expected.id, now); err != nil {
@@ -279,7 +310,7 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	detail, _ := json.Marshal(struct {
 		Activation  string `json:"activation_id"`
 		AudienceSHA string `json:"audience_sha256"`
-	}{activation, platformDigest(audienceJSON)})
+	}{activation, audienceSHA})
 	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.install_activated','app_platform_installation',?,?,'')`, time.UnixMilli(now).UTC().Format(time.RFC3339), expected.installationID, string(detail)); err != nil {
 		return zero, err
 	}

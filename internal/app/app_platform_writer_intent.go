@@ -79,11 +79,11 @@ func loadPlatformWriterIntentSource(e migExec, lease platformOperationLease, run
 	var origin, owner, state string
 	var schema, quota, used, writer, revision, created, updated int64
 	var retained, deleted sql.NullInt64
-	var namespaces, effects, candidates, grants int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?),(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN (`+platformInstallationNeutralEffectKinds+`)),(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?),(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)`, lease.installationID, lease.installationID, lease.id, lease.installationID, lease.installationID).Scan(&namespaces, &effects, &candidates, &grants); err != nil {
+	var namespaces, effects, candidates int
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?),(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN (`+platformInstallationNeutralEffectKinds+`)),(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID, lease.installationID, lease.id, lease.installationID).Scan(&namespaces, &effects, &candidates); err != nil {
 		return zero, false, err
 	}
-	if namespaces != 1 || grants != 0 {
+	if namespaces != 1 {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	if err := e.queryRow(`SELECT id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID).Scan(&result.namespaceID, &origin, &owner, &state, &schema, &quota, &used, &writer, &revision, &retained, &deleted, &created, &updated); err != nil {

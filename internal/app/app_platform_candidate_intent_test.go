@@ -145,7 +145,7 @@ func testPlatformCandidateIntent(t *testing.T, pg bool) {
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE stage='start' AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`) != 1 {
 		t.Fatal("intent fabricated native success")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "start" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "start" {
 		t.Fatal("intent activated app")
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.candidate_intent' AND target_id=?`, lease.id) != 1 {

@@ -156,7 +156,7 @@ func testPlatformReviewedReinstallStartsEmpty(
 
 	_, installOperation := platformManagementReviewAndCommit(
 		t, mux, cookie,
-		platformManagementPlanBody(release, reader.username),
+		platformManagementPlanBody(t, s, release),
 		platformFixtureID(1311))
 	platformRunOperationToCompletion(t, s, worker, installOperation)
 	newInstallation := scalar[string](t, s.st,

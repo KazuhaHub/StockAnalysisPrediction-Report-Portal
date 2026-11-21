@@ -15,7 +15,7 @@ import (
 
 func testPlatformFrontendInstall(t *testing.T, pg bool) {
 	s, actor, release := platformInstallFixture(t, pg)
-	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestPlatformFrontendStorageInstallSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestPlatformFrontendStorageInstallSQLite(t *testing.T) {
 func platformFrontendQueuedFixture(t *testing.T, pg bool) (*Server, platformActorSession, string) {
 	t.Helper()
 	s, actor, release := platformInstallFixture(t, pg)
-	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestPlatformFrontendDefaultNoImplicitAdminSQLite(t *testing.T) {
 	if _, err = s.inspectPlatformLaunchAccess(actor, admitted.InstallationID); err == nil {
 		t.Fatal("administrator bypassed empty app audience")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 		t.Fatal("empty audience acquired implicit access")
 	}
 }
@@ -309,7 +309,7 @@ func TestPlatformFrontendHTTPWithoutRunnerSQLite(t *testing.T) {
 	if err != nil || len(directory.Items) != 1 || !directory.Items[0].Openable {
 		t.Fatal("no-data app not visible in authorized directory", err)
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=(SELECT installation_id FROM app_platform_operations WHERE id=?)`, id)
+	mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key=(SELECT 'platform:'||installation_id FROM app_platform_operations WHERE id=?)`, id)
 	if got := sessionTestRequest(mux, "GET", payload.Source, cookie, ""); got.Code != 404 {
 		t.Fatal("no-data document survived access revocation", got.Code)
 	}

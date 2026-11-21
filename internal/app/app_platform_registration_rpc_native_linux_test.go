@@ -149,7 +149,7 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate' AND state='applied' AND observed_fence=admitted_fence AND receipt_json<>'{}'`, lease.id) != 1 {
 		t.Fatal("Portal did not retain verified delivery receipt")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" {
 		t.Fatal("delivery activated application")
 	}
 	if old, err := s.preparePlatformBackendDelivery(ctx, lease); err == nil {

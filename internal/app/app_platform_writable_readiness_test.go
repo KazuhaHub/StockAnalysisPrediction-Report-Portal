@@ -155,7 +155,7 @@ func testPlatformWritableReadinessSource(t *testing.T, pg bool) {
 	if _, err := s.preparePlatformInstallCandidate(context.Background(), activated); err == nil {
 		t.Fatal("readonly source adopted writable readiness")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 {
 		t.Fatal("readiness source created activation/grant")
 	}
 }

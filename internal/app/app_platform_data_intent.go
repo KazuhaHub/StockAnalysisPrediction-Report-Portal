@@ -135,7 +135,7 @@ func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime pla
 	var forbidden, effects int
 	var planRaw string
 	var err error
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID, lease.installationID).Scan(&forbidden); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID).Scan(&forbidden); err != nil {
 		return zero, false, err
 	}
 	if forbidden != 0 {

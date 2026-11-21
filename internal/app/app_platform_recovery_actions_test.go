@@ -204,7 +204,7 @@ func TestRecoveryDisabledManagedInstallationIsUninstalledPortalSideOnly(t *testi
 	}
 	if scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE id=?`, namespace) != "deleted" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_recovery_sets WHERE installation_id=? AND state<>'deleted'`, installation) != 0 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, installation) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, installation) != 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.portal_side_uninstall' AND target_id=?`, installation) != 1 {
 		t.Fatal("the orphaned data, recovery sets and grants were not settled, or the removal left no audit row")
 	}

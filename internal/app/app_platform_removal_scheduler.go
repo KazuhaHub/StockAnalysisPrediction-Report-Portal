@@ -168,7 +168,7 @@ func (s *Store) advancePlatformFrontendUninstall(ctx context.Context, expected p
 			if _, err := e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, expected.installationID); err != nil {
 				return zero, err
 			}
-			if _, err := e.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, expected.installationID); err != nil {
+			if err := deletePlatformAppRows(e, expected.installationID); err != nil {
 				return zero, err
 			}
 		}

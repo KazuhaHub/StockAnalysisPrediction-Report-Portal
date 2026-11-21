@@ -618,11 +618,6 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 	if err != nil || grants != plan.GrantsSHA256 {
 		return zeroPlan, zeroSource, zeroRuntime, errAppPlatformStageEvidence
 	}
-	audience, err := platformInstallationAudienceSHA(
-		e, lease.installationID)
-	if err != nil || audience != plan.AudienceSHA256 {
-		return zeroPlan, zeroSource, zeroRuntime, errAppPlatformStageEvidence
-	}
 	var currentInstallationRevision int64
 	if err := e.queryRow(`SELECT revision FROM app_platform_installations
 		WHERE id=?`, lease.installationID).Scan(&currentInstallationRevision); err != nil ||

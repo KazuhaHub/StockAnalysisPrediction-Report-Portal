@@ -7,13 +7,16 @@ import "time"
 type platformPrincipalImpact struct{ installations, plans []string }
 
 func appPlatformPrincipalImpacts(e migExec, username string, groupID int64) (*platformPrincipalImpact, error) {
-	q := `SELECT installation_id FROM app_platform_access_grants WHERE username=?
-        UNION SELECT installation_id FROM app_platform_review_plans WHERE username=? AND installation_id IS NOT NULL ORDER BY installation_id`
-	args := []any{username, username}
+	// Who may use an installation is the OU policy (app_ou_access, doc 190 D7), not install evidence: a
+	// user holds no access row of their own, and deleting an OU deletes its rows without touching any
+	// installation's policy revision (moving it would orphan the capability grants and refuse every
+	// user until a capability review). Only what still is install evidence is invalidated: the plans a
+	// deleted user reviewed.
 	if username == "" {
-		q = `SELECT DISTINCT installation_id FROM app_platform_access_grants WHERE group_id=? ORDER BY installation_id`
-		args = []any{groupID}
+		return &platformPrincipalImpact{}, nil
 	}
+	q := `SELECT installation_id FROM app_platform_review_plans WHERE username=? AND installation_id IS NOT NULL ORDER BY installation_id`
+	args := []any{username}
 	rows, err := e.query(q, args...)
 	if err != nil {
 		return nil, err

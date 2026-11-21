@@ -28,7 +28,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if failed, err := s.runPlatformWritableInstall(ctx, lease, endpoint); err == nil || failed.lease != lease {
 		t.Fatal("worker lost activation rollback progress", err)
 	}
-	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" {
+	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" {
 		t.Fatal("failed activation partially exposed app")
 	}
 	if scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.stream'`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='notifications.publish'`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='reports.read'`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='secrets.use'`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='storage.files'`, lease.installationID) != 0 {
@@ -40,7 +40,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if err != nil {
 		t.Fatal("actual writable activation", err)
 	}
-	if finished.lease != (platformOperationLease{}) || activated.activationID != original.start.writer.resourceID || activated.snapshot.Stage != appplatform.StageComplete || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 1 {
+	if finished.lease != (platformOperationLease{}) || activated.activationID != original.start.writer.resourceID || activated.snapshot.Stage != appplatform.StageComplete || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 1 {
 		t.Fatal("activation replaced resource or failed reviewed audience")
 	}
 	configureNativeScheduledDigestSetup(
@@ -155,13 +155,8 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if _, err := s.st.SetPrimaryGroups([]string{actor.username}, child); err != nil {
 		t.Fatal(err)
 	}
-	created := scalar[string](t, s.st, `SELECT created_at FROM user_groups WHERE id=?`, parent)
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
-	grant, err := platformNewUUID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": grant, "installation_id": lease.installationID, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": parent, "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformCloseAccess(t, s, lease.installationID)
+	platformSetAccess(t, s, lease.installationID, int64(parent), true)
 	response, err = s.requestPlatformWritableBackend(ctx, actor, lease.installationID, "GET", "/v1/echo", nil, endpoint)
 	if err != nil {
 		t.Fatal("actual ancestor OU grant", err)

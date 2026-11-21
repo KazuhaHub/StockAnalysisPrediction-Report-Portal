@@ -69,7 +69,7 @@ func TestPlatformHTTPDocumentCurrentUserAndPolicy(t *testing.T) {
 	if got := sessionTestRequest(mux, "GET", payload.Source, "", ""); got.Code != 401 {
 		t.Fatal("anonymous document read")
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
+	platformCloseAccess(t, s, id)
 	if got := sessionTestRequest(mux, "GET", payload.Source, cookie, ""); got.Code != 404 || strings.Contains(got.Body.String(), "Fixture") {
 		t.Fatal("old URL survived audience revocation")
 	}

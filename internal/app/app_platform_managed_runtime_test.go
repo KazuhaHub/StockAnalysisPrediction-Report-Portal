@@ -30,7 +30,7 @@ func TestManagedRuntimeProfileDoesNotCreateAuthority(t *testing.T) {
 	if _, err := s.observePlatformManagedRuntime(context.Background(), session, e); err == nil {
 		t.Fatal("missing runtime fabricated profile")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != before || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != before || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 		t.Fatal("profile probe granted/installed app")
 	}
 }

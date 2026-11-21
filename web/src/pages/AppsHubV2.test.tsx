@@ -37,3 +37,18 @@ test('signed names and descriptions follow panel language without another direct
  prefs.lang='zh-TW';view.rerender(host());await screen.findByRole('button',{name:'筆記'});await screen.findByText('個人筆記');expect(fetch).toHaveBeenCalledTimes(calls)
  prefs.lang='en-US'
 })
+
+test('platform installations sit in the one saved order beside legacy apps, and an unnamed one follows', async () => {
+ const second = '00000000-0000-4000-8000-000000000002'
+ const third = '00000000-0000-4000-8000-000000000003'
+ vi.stubGlobal('fetch', vi.fn(async input => new Response(JSON.stringify(String(input) === '/api/apps'
+  ? { apps: [{ id: 'legacy', name: 'Legacy app' }], order: [`platform:${second}`, 'legacy', `platform:${id}`] }
+  : { items: [item, { ...item, installationId: second, applicationId: 'second-app' }, { ...item, installationId: third, applicationId: 'third-app' }], nextCursor: '' }), { status: 200 })))
+ render(host())
+ await screen.findByRole('button', { name: 'second-app' })
+ const names = screen.getAllByRole('button').map(b => b.textContent ?? '')
+ const at = (name: string) => names.findIndex(n => n.includes(name))
+ expect(at('second-app')).toBeLessThan(at('Legacy app'))
+ expect(at('Legacy app')).toBeLessThan(at('notes-sample'))
+ expect(at('notes-sample')).toBeLessThan(at('third-app'))
+})

@@ -113,11 +113,11 @@ func (s *Server) readPlatformInstallationStatus(ctx context.Context, session pla
 	if err = lockPlatformPublisherTrust(e); err != nil {
 		return result, err
 	}
-	chain, err := platformAudienceChain(e, account)
+	chain, err := platformAccessChain(e, account)
 	if err != nil {
 		return result, err
 	}
-	if err = platformAudienceGrant(e, account, installation, chain); err != nil {
+	if err = platformAudienceGrant(e, installation, chain); err != nil {
 		return platformInstallationStatus{}, err
 	}
 

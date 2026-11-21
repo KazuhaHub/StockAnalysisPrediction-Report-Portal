@@ -44,7 +44,7 @@ func testPlatformWritableActivationRefusals(t *testing.T, pg bool) {
 			case "plan":
 				mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_sha256=?`, platformDigest([]byte("foreign")))
 			case "audience":
-				mustExec(t, s.st, `UPDATE users SET active=0`)
+				mustExec(t, s.st, `UPDATE user_groups SET created_at='recreated-ou' WHERE is_default=1`)
 			case "runtime":
 				mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=0`)
 			case "unapplied":

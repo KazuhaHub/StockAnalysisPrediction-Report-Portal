@@ -58,32 +58,40 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	if err != nil {
 		return zero, err
 	}
-	chain, err := platformAudienceChain(e, account)
+	chain, err := platformAccessChain(e, account)
 	if err != nil {
 		return zero, err
 	}
 	// Filter before LIMIT so another audience's records cannot consume this
-	// reader's page or leak a cursor naming an unauthorized installation.
-	principals := []string{`(g.principal_type='user' AND g.username=? AND g.account_created=? AND g.account_generation=?)`}
-	args := []any{after, account.username, appplatform.AccountCreatedMarker(account.created), account.generation}
-	for _, group := range chain {
-		principals = append(principals, `(g.principal_type='ou' AND g.group_id=? AND g.group_created=?)`)
-		args = append(args, group.id, group.created)
+	// reader's page or leak a cursor naming an unauthorized installation. The
+	// filter is the OU policy: the installations whose key is open on the chain.
+	open, err := platformOpenInstallations(e, chain)
+	if err != nil {
+		return zero, err
 	}
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE OF i"
 	}
-	rows, err := e.query(`SELECT i.id,i.app_id,i.publisher_id,i.desired_state,i.phase,i.controller_epoch,i.runtime_id FROM app_platform_installations i WHERE i.id>? AND i.desired_state<>'removed' AND EXISTS(SELECT 1 FROM app_platform_access_grants g WHERE g.installation_id=i.id AND (`+strings.Join(principals, " OR ")+`)) ORDER BY i.id LIMIT 33`+lock, args...)
-	if err != nil {
-		return zero, err
+	var rows *sql.Rows
+	if len(open) > 0 {
+		args := []any{after}
+		marks := make([]string, 0, len(open))
+		for _, id := range open {
+			marks = append(marks, "?")
+			args = append(args, id)
+		}
+		rows, err = e.query(`SELECT i.id,i.app_id,i.publisher_id,i.desired_state,i.phase,i.controller_epoch,i.runtime_id FROM app_platform_installations i WHERE i.id>? AND i.desired_state<>'removed' AND i.id IN (`+strings.Join(marks, ",")+`) ORDER BY i.id LIMIT 33`+lock, args...)
+		if err != nil {
+			return zero, err
+		}
 	}
 	type candidate struct {
 		id, app, publisher, desired, phase, epoch string
 		runtime                                   sql.NullString
 	}
 	candidates := []candidate{}
-	for rows.Next() {
+	for rows != nil && rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.app, &c.publisher, &c.desired, &c.phase, &c.epoch, &c.runtime); err != nil {
 			rows.Close()
@@ -91,10 +99,12 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		}
 		candidates = append(candidates, c)
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return zero, err
+	if rows != nil {
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return zero, err
+		}
 	}
 	var epoch, paused sql.NullString
 	err = e.queryRow(`SELECT v FROM meta WHERE k='app_platform_controller_epoch'`).Scan(&epoch)
@@ -115,7 +125,7 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		if !platformValidUUID(c.id) || !platformDirectoryAppID.MatchString(c.app) {
 			return zero, errAppPlatformLaunchUnavailable
 		}
-		if err := platformAudienceGrant(e, account, c.id, chain); err != nil {
+		if err := platformAudienceGrant(e, c.id, chain); err != nil {
 			return zero, err
 		}
 		item := platformAppDirectoryItem{InstallationID: c.id, ApplicationID: c.app, State: "attention"}

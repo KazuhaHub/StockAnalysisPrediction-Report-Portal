@@ -70,8 +70,9 @@ func platformRemovalFixture(t *testing.T, postgres, managed bool) (*Server, plat
 		"data_format": 1, "quota_bytes": 256 << 20, "observed_bytes": 123, "writer_fence": 0, "revision": 1, "retained_ms": nil, "deleted_ms": nil, "created_ms": 1, "updated_ms": 1})
 	platformTestInsert(t, e, "activations", map[string]any{"id": platformFixtureID(7), "installation_id": platformFixtureID(1), "release_sha256": parsed.SHA256, "generation": 1, "policy_revision": 1,
 		"data_namespace_id": platformFixtureID(8), "data_format": 1, "state": "active", "readiness_evidence": "{}", "observed_ms": 1, "created_ms": 1, "updated_ms": 1})
-	platformTestInsert(t, e, "access_grants", map[string]any{"id": platformFixtureID(12), "installation_id": platformFixtureID(1), "principal_type": "user", "username": session.username,
-		"account_created": session.created, "account_generation": session.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	// The installation is open to the Default OU and has a position, the rows removal must delete.
+	platformOpenDefault(t, s, platformFixtureID(1))
+	mustExec(t, s.st, `INSERT INTO app_order(app_key,position) VALUES(?,1)`, platformAppKey(platformFixtureID(1)))
 	return s, session
 }
 
@@ -156,7 +157,6 @@ func testPlatformRemovalStaleReview(t *testing.T, postgres bool) {
 		{"policy", `UPDATE app_platform_installations SET policy_revision=policy_revision+1`, errAppPlatformPlanChanged},
 		{"trust", `UPDATE app_platform_publishers SET revision=revision+1`, errAppPlatformPlanChanged},
 		{"data", `UPDATE app_platform_data_namespaces SET revision=revision+1`, errAppPlatformPlanChanged},
-		{"audience", `UPDATE app_platform_access_grants SET revision=revision+1`, errAppPlatformPlanChanged},
 		{"json", `UPDATE app_platform_review_plans SET plan_json='{}'`, errAppPlatformPlanChanged},
 		{"demotion", `UPDATE users SET role='user' WHERE username='platform-review-actor'`, errAppPlatformActorUnavailable},
 	} {

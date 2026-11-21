@@ -171,8 +171,9 @@ function AccessEditor({
   const { t } = useTranslation()
   const { message } = App.useApp()
   const { token } = theme.useToken()
-  // No row for this OU means nothing was set anywhere above it: the built-in baseline, open.
-  const mine: AppAccessOU = app.access.find((a) => a.ou === group.id) ?? { ou: group.id, own: null, effective: true, source_ou: 0, inherited: false }
+  // No row for this OU means nothing was set anywhere above it: the baseline of the key's kind, open for a
+  // built-in or installed app and closed for a platform installation.
+  const mine: AppAccessOU = app.access.find((a) => a.ou === group.id) ?? { ou: group.id, own: null, effective: !app.platform, source_ou: 0, inherited: false }
   // null = no choice made yet. While inheriting, the radios show the effective value without that
   // being a choice; saving any choice writes an explicit override, which pins the OU against later
   // changes to its parent.

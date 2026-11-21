@@ -103,7 +103,6 @@ func platformRemovalGrantsDigestAt(e migExec, installation string, rebase int64)
 	h := sha256.New()
 	for queryIndex, q := range []string{
 		`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`,
-		`SELECT id,principal_type,username,account_created,account_generation,group_id,group_created,revision FROM app_platform_access_grants WHERE installation_id=? ORDER BY id`,
 		`SELECT id,name,credential_id,credential_value_revision,operation,state,policy_json,policy_revision,review_plan_id,revision,revoked_ms FROM app_platform_secret_bindings WHERE installation_id=? ORDER BY id`,
 	} {
 		h.Write([]byte(q))
@@ -573,11 +572,10 @@ func settlePlatformPortalSideUninstall(e migExec, installation string, now int64
 	}
 	for _, q := range []string{
 		`DELETE FROM app_platform_capability_grants WHERE installation_id=?`,
-		`DELETE FROM app_platform_access_grants WHERE installation_id=?`,
 	} {
 		if _, err := e.exec(q, installation); err != nil {
 			return err
 		}
 	}
-	return nil
+	return deletePlatformAppRows(e, installation)
 }

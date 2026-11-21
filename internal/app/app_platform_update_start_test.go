@@ -1197,7 +1197,7 @@ func platformUpdateTargetRemovalObservationFixture(intent platformUpdateTargetRe
 
 func TestPlatformUpdateStartRegistrationCommitSQLite(t *testing.T) {
 	s, lease, intent, endpoint, observation := platformUpdateStartRegistrationCommitFixture(t, false)
-	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID)
 	next, err := s.commitPlatformUpdateStartRegistration(
 		context.Background(), lease, intent, endpoint, observation)
 	if err != nil || next.snapshot.Stage != appplatform.StageActivate ||
@@ -1207,7 +1207,7 @@ func TestPlatformUpdateStartRegistrationCommitSQLite(t *testing.T) {
 	if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != "applied" ||
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" ||
 		scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, lease.installationID) != 1 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != grants {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != grants {
 		t.Fatal("registration advanced activation or grants")
 	}
 	applied, err := s.preparePlatformUpdateStartRegistration(context.Background(), next)
@@ -1650,7 +1650,7 @@ func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
 	}
 	applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
 	defer applied.registration.Close()
-	accessBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	accessBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID)
 	result, err := s.commitPlatformUpdateStartActivation(
 		context.Background(), next, applied, boot)
 	if err != nil || result.snapshot.Stage != appplatform.StageComplete ||
@@ -1662,7 +1662,7 @@ func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='retired' AND generation=1`, lease.installationID) != 1 ||
 		scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != 2 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision=2`, lease.installationID) == 0 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != accessBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != accessBefore ||
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "complete" {
 		t.Fatal("active generation tuple not committed atomically")
 	}

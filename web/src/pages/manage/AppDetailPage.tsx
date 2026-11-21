@@ -99,7 +99,8 @@ function AppDetail({ app }: { app: AdminApp }) {
       },
     }, t)
 
-  const facts: [string, ReactNode][] = [[t('apps.detail.type'), app.builtin ? t('apps.type.builtin') : t('apps.type.installed')]]
+  const typeLabel = app.builtin ? t('apps.type.builtin') : app.platform ? t('apps.type.platform') : t('apps.type.installed')
+  const facts: [string, ReactNode][] = [[t('apps.detail.type'), typeLabel]]
   if (app.version) facts.push([t('apps.version'), app.version])
   if (app.builtinDef) {
     facts.push([t('apps.detail.route'), app.builtinDef.to], [t('apps.detail.permission'), permLabel(app.builtinDef.perm)])
@@ -118,7 +119,7 @@ function AppDetail({ app }: { app: AdminApp }) {
               <Typography.Title level={4} style={{ margin: 0 }}>
                 {name}
               </Typography.Title>
-              <Typography.Text type="secondary">{app.builtin ? t('apps.type.builtin') : t('apps.type.installed')}</Typography.Text>
+              <Typography.Text type="secondary">{typeLabel}</Typography.Text>
             </div>
           </div>
           {description && <Typography.Paragraph type="secondary">{description}</Typography.Paragraph>}
@@ -157,7 +158,15 @@ function AppDetail({ app }: { app: AdminApp }) {
               )
             }
           />
-          {!app.builtin && (
+          {app.platform && (
+            <Section
+              title={t('apps.section.platform.title')}
+              hint={t('apps.section.platform.hint')}
+              value={t('apps.section.platform.value')}
+              onOpen={() => navigate(`/manage/apps/installations/${encodeURIComponent(app.installationId ?? '')}`)}
+            />
+          )}
+          {!app.builtin && !app.platform && (
             <>
               <Section
                 title={t('apps.section.credentials.title')}

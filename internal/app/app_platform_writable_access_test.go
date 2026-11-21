@@ -17,22 +17,14 @@ import (
 func platformWritableAppliedFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformWritableRegistrationIntent) {
 	t.Helper()
 	s, lease := platformWritableRegistrationFixture(t, pg)
-	actor := platformManagedFixtureSession(t, s)
-	nowAudience, err := platformDatabaseNow(s.st.poolExec())
-	if err != nil {
-		t.Fatal(err)
-	}
-	audience, err := platformAudienceUser(s.st.poolExec(), actor.username, nowAudience)
-	if err != nil {
-		t.Fatal(err)
-	}
+	audience := platformOpenAudience(t, s)
 	var plan platformInstallProjection
 	planID := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, lease.id)
 	original := scalar[string](t, s.st, `SELECT plan_json FROM app_platform_review_plans WHERE id=?`, planID)
 	if err := json.Unmarshal([]byte(original), &plan); err != nil {
 		t.Fatal(err)
 	}
-	plan.Audience = []platformInstallAudience{audience}
+	plan.Audience = audience
 	encodedPlan, _ := json.Marshal(plan)
 	planSHA := platformDigest(encodedPlan)
 	request, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, planSHA})
@@ -175,7 +167,7 @@ func testPlatformWritableAccessRefusals(t *testing.T, pg bool) {
 			case "fence":
 				mustExec(t, s.st, `UPDATE app_platform_installations SET control_fence=control_fence+1`)
 			case "grant":
-				mustExec(t, s.st, `DELETE FROM app_platform_access_grants`)
+				mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key LIKE 'platform:%'`)
 			case "session":
 				mustExec(t, s.st, `UPDATE user_sessions SET revoked=1 WHERE id=?`, actor.sessionID)
 			case "publisher":

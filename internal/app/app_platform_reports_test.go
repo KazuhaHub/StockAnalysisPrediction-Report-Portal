@@ -142,8 +142,7 @@ func TestPlatformReportsTwoOUsAndOldBinding(t *testing.T) {
 		if err := s.st.AddReportViewer(id, "2026-10-30", value.user, value.group); err != nil {
 			t.Fatal(err)
 		}
-		session := platformReportSession(t, s, value.user)
-		platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(700 + index), "installation_id": installation, "principal_type": "user", "username": value.user, "account_created": session.created, "account_generation": session.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+		platformSetAccess(t, s, installation, value.group, true)
 		ids[value.user] = id
 	}
 	a := platformReportSession(t, s, "report-ou-a")
@@ -187,6 +186,16 @@ func TestPlatformReportsNoAccessAndAdminDemotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindingMap := map[string]string{"generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}
+	// Access is an OU policy (doc 190, D7): open only the owner's own OU, so a user in the Default OU has none.
+	openOU, err := s.st.CreateUserGroup("reports-open", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetPrimaryGroup(installationOwner.username, openOU); err != nil {
+		t.Fatal(err)
+	}
+	platformCloseAccess(t, s, installation)
+	platformSetAccess(t, s, installation, openOU, true)
 	if err := s.st.UpsertUser(User{Username: "reports-no-access", PasswordHash: "fixture", Role: "user", Active: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -200,12 +209,11 @@ func TestPlatformReportsNoAccessAndAdminDemotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	demoted := platformReportSession(t, s, "reports-demoted-admin")
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(614), "installation_id": installation, "principal_type": "user", "username": demoted.username, "account_created": demoted.created, "account_generation": demoted.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
-	root := s.st.EnsureDefaultGroup()
-	group, err := s.st.CreateUserGroup("reports-demoted-group", "", int(root))
+	group, err := s.st.CreateUserGroup("reports-demoted-group", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	mustExec(t, s.st, `UPDATE user_groups SET parent_id=? WHERE id=?`, openOU, group)
 	s.st.SetGroupRestricted(group, true)
 	if err := s.st.SetPrimaryGroup(demoted.username, group); err != nil {
 		t.Fatal(err)

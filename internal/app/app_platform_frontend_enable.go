@@ -497,10 +497,6 @@ func platformLoadAdmittedFrontendEnable(e migExec, lease platformOperationLease,
 	if err != nil || grants != p.GrantsSHA256 {
 		return zero, errAppPlatformStageEvidence
 	}
-	audience, err := platformInstallationAudienceSHA(e, lease.installationID)
-	if err != nil || audience != p.AudienceSHA256 {
-		return zero, errAppPlatformStageEvidence
-	}
 	verified, err := platformVerifyStoredRelease(
 		e, p.SourceReleaseSHA256, p.TrustRevision, trust, now)
 	if err != nil || verified.appID != p.AppID ||

@@ -169,7 +169,7 @@ func testRefusedInstallIsUninstalled(t *testing.T, pg bool) {
 	if f.effects(t, lease.id, `kind='delete-data' AND state='applied'`) != 1 || f.effects(t, lease.id, `1=1`) != 1 {
 		t.Fatal("the uninstall must hold exactly the applied delete-data effect")
 	}
-	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, f.installation) != 0 ||
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, f.installation) != 0 ||
 		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, f.installation) != 0 {
 		t.Fatal("authority outlived the removal")
 	}

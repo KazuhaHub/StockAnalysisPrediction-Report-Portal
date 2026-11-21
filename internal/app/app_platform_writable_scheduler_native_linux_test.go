@@ -57,7 +57,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
-	planned := sessionTestRequest(mux, http.MethodPost, "/api/admin/app-platform/plans", cookie, fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","audience":[{"type":"user","username":%q}]}`, release.sha256, actor.username))
+	planned := sessionTestRequest(mux, http.MethodPost, "/api/admin/app-platform/plans", cookie, fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","open_to_ous":[%q]}`, release.sha256, strconv.FormatInt(platformOpenTargets(t, s)[0].ouID, 10)))
 	var plan struct {
 		ID     string `json:"plan_id"`
 		SHA256 string `json:"plan_sha256"`

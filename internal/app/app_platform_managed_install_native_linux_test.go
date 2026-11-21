@@ -113,7 +113,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='prepare_data' AND state='applied'`, admitted.OperationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_data_namespaces WHERE owner_installation_id=? AND state='active' AND revision=2`, admitted.InstallationID) != 1 {
 		t.Fatal("managed native data not settled")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, admitted.InstallationID)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?`, admitted.InstallationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, admitted.InstallationID) != "pending" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, admitted.InstallationID)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?`, admitted.InstallationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, admitted.InstallationID) != "pending" {
 		t.Fatal("data stage granted access")
 	}
 	if _, err := s.activatePlatformStaticInstall(ctx, next); err == nil {
@@ -154,7 +154,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if string(encoded) != stored {
 		t.Fatal("candidate replay replaced original native observation")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`, next.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, next.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, next.installationID) != "pending" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`, next.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, next.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, next.installationID) != "pending" {
 		t.Fatal("candidate start became readiness or access")
 	}
 	if _, err := s.dispatchPlatformInstallCandidate(ctx, next, endpoint); err == nil {
@@ -174,7 +174,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		if activated.snapshot.Stage != appplatform.StageActivate || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence<>'{}' AND observed_ms IS NOT NULL`, probe.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, probe.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, probe.installationID) != "pending" {
+		if activated.snapshot.Stage != appplatform.StageActivate || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence<>'{}' AND observed_ms IS NOT NULL`, probe.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, probe.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, probe.installationID) != "pending" {
 			t.Fatal("readiness granted use or lost evidence")
 		}
 		if _, err := s.activatePlatformStaticInstall(ctx, activated); err == nil {
@@ -209,7 +209,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if err != nil || !bytes.Equal(document, again) {
 			t.Fatal("registration retry changed key identity", err)
 		}
-		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, activated.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 {
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, activated.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, activated.installationID) != 0 {
 			t.Fatal("registration preparation granted authority")
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
@@ -278,7 +278,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, activated.installationID) != "removed:removed" ||
 			scalar[string](t, s.st, `SELECT state||':'||COALESCE(owner_installation_id,'') FROM app_platform_data_namespaces WHERE origin_installation_id=?`, activated.installationID) != "deleted:" ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND stage='complete' AND completed_ms IS NOT NULL`, removalCommit.OperationID) != 1 ||
-			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, activated.installationID) != 0 ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, activated.installationID) != 0 ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_event_subscriptions WHERE installation_id=?`, activated.installationID) != 0 ||
 			s.st.tableExists(pluginTable) ||
@@ -289,9 +289,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		t.Log("MANAGED_UNINSTALL_REMOVE_DATA")
 		reinstallPlan, err := s.createPlatformWritableInstallReview(
 			ctx, session, release.sha256, release.trustRevision,
-			[]platformAudienceTarget{{
-				kind: "user", username: session.username,
-			}}, endpoint)
+			platformOpenTargets(t, s), endpoint)
 		if err != nil {
 			t.Fatal("managed reinstall review", err)
 		}

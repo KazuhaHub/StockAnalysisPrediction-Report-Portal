@@ -101,7 +101,7 @@ func testPlatformWritableQueueRecovery(t *testing.T, pg bool) {
 			if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "recovery_required" || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "recovery_required" || scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='prepare_data' AND effect_number=1`, lease.id) != source {
 				t.Fatal("recovery lost evidence or hid effects")
 			}
-			if scalar[int64](t, s.st, `SELECT control_fence FROM app_platform_installations WHERE id=?`, lease.installationID) != lease.fence+1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+			if scalar[int64](t, s.st, `SELECT control_fence FROM app_platform_installations WHERE id=?`, lease.installationID) != lease.fence+1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 				t.Fatal("recovery granted authority or failed to fence")
 			}
 		})
@@ -171,7 +171,7 @@ func testPlatformWritableQueueAuthority(t *testing.T, pg bool) {
 					t.Fatal("revoked no-effect work not denied for review", err)
 				}
 			}
-			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 				t.Fatal("authority refusal created resources")
 			}
 		})

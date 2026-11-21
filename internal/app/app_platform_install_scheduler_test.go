@@ -45,7 +45,7 @@ func testPlatformInstallSchedulerRetries(t *testing.T, pg bool) {
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "recovery_required" || scalar[string](t, s.st, `SELECT error_code FROM app_platform_operations`) != "install_execution_review_required" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE lease_owner IS NULL AND lease_until_ms IS NULL AND completed_ms IS NOT NULL`) != 1 {
 		t.Fatal("review did not revoke worker ownership")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`) != 0 {
 		t.Fatal("failed worker exposed application")
 	}
 	before := dumpOf(t, s.st)

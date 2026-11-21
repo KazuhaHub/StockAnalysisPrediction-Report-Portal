@@ -11,12 +11,12 @@ import (
 	"time"
 
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 // Accounts that predate users.created_at have NULL there. Their stored identity
 // stays empty everywhere (sessions, storage owners, review plans); only viewer
-// derivation and user-principal grants use appplatform.AccountCreatedMarker.
+// derivation uses appplatform.AccountCreatedMarker. Access is the OU policy (doc 190, D7), which
+// never reads the creation time, so a legacy account opens an app like any other.
 
 func platformMakeLegacyUser(t *testing.T, s *Server, name string) platformActorSession {
 	t.Helper()
@@ -37,16 +37,29 @@ func platformMakeLegacyUser(t *testing.T, s *Server, name string) platformActorS
 	return session
 }
 
-func platformInsertLegacyUserGrant(t *testing.T, s *Server, session platformActorSession, id string, n int) {
+// platformLegacyGroup moves the user into a fresh OU and returns it.
+func platformLegacyGroup(t *testing.T, s *Server, username, name string) int64 {
 	t.Helper()
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(n), "installation_id": id, "principal_type": "user", "username": session.username, "account_created": appplatform.AccountCreatedMarker(session.created), "account_generation": session.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	group, err := s.st.CreateUserGroup(name, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.st.SetPrimaryGroups([]string{username}, 0)
+		_, _, _ = s.st.DeleteUserGroup(group)
+	})
+	if _, err := s.st.SetPrimaryGroups([]string{username}, group); err != nil {
+		t.Fatal(err)
+	}
+	return group
 }
 
 func testPlatformLegacyAccountViewer(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
 	mustExec(t, s.st, `UPDATE users SET created_at=NULL WHERE username=?`, reader.username)
 	reader.created = ""
-	platformInsertLegacyUserGrant(t, s, reader, id, 613)
+	platformCloseAccess(t, s, id)
+	platformSetAccess(t, s, id, platformLegacyGroup(t, s, reader.username, "Legacy viewer group"), true)
 	first, err := s.readPlatformLaunchViewerContext(context.Background(), reader, id)
 	if err != nil || len(first.Subject) != 64 {
 		t.Fatal("legacy account launch refused", err)
@@ -57,17 +70,18 @@ func testPlatformLegacyAccountViewer(t *testing.T, pg bool) {
 	}
 	stranger := platformMakeLegacyUser(t, s, "platform-legacy-stranger")
 	if v, err := s.readPlatformLaunchViewerContext(context.Background(), stranger, id); err == nil || !reflect.DeepEqual(v, protocol.Viewer{}) {
-		t.Fatal("ungranted legacy account launched")
+		t.Fatal("legacy account outside the open OU launched")
 	}
 }
 func TestPlatformLegacyAccountViewerSQLite(t *testing.T)   { testPlatformLegacyAccountViewer(t, false) }
 func TestPlatformLegacyAccountViewerPostgres(t *testing.T) { testPlatformLegacyAccountViewer(t, true) }
 
-// (ii) The grant is written by the real install activation, from the reviewed audience.
+// (ii) The OU row is written by the real install activation, from the reviewed open_to_ous.
 func testPlatformLegacyAccountActivationGrant(t *testing.T, pg bool) {
 	s, admin, release := platformInstallFixture(t, pg)
 	legacy := platformMakeLegacyUser(t, s, "platform-legacy-audience")
-	review, err := s.createPlatformNativeInstallAudienceReview(admin, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: legacy.username}})
+	group := platformLegacyGroup(t, s, legacy.username, "Legacy audience group")
+	review, err := s.createPlatformNativeInstallAudienceReview(admin, release.sha256, 1, []platformAudienceTarget{{kind: "ou", ouID: group}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,8 +89,8 @@ func testPlatformLegacyAccountActivationGrant(t *testing.T, pg bool) {
 	if _, err := s.activatePlatformStaticInstall(context.Background(), lease); err != nil {
 		t.Fatal(err)
 	}
-	if got := scalar[string](t, s.st, `SELECT account_created FROM app_platform_access_grants WHERE username=?`, legacy.username); got != appplatform.LegacyAccountCreated {
-		t.Fatal("grant recorded", got)
+	if got := scalar[int](t, s.st, `SELECT enabled FROM app_ou_access WHERE app_key=? AND group_id=?`, platformAppKey(lease.installationID), group); got != 1 {
+		t.Fatal("open row recorded", got)
 	}
 	if _, err := s.inspectPlatformLaunchAccess(legacy, lease.installationID); err != nil {
 		t.Fatal("legacy audience user cannot open", err)
@@ -86,7 +100,7 @@ func testPlatformLegacyAccountActivationGrant(t *testing.T, pg bool) {
 		t.Fatal("legacy audience viewer", err)
 	}
 	if _, err := s.inspectPlatformLaunchAccess(admin, lease.installationID); err == nil {
-		t.Fatal("installer bypassed the selected user audience")
+		t.Fatal("installer outside the opened OU can open")
 	}
 }
 func TestPlatformLegacyAccountActivationGrantSQLite(t *testing.T) {
@@ -96,24 +110,13 @@ func TestPlatformLegacyAccountActivationGrantPostgres(t *testing.T) {
 	testPlatformLegacyAccountActivationGrant(t, true)
 }
 
-// (iii) A legacy user reaches an app through an OU grant too.
+// (iii) A legacy user reaches an app opened to its OU.
 func testPlatformLegacyAccountOUGrant(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
 	mustExec(t, s.st, `UPDATE users SET created_at=NULL WHERE username=?`, reader.username)
 	reader.created = ""
-	group, err := s.st.CreateUserGroup("Legacy launch group", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = s.st.SetPrimaryGroups([]string{reader.username}, 0)
-		_, _, _ = s.st.DeleteUserGroup(group)
-	})
-	if _, err := s.st.SetPrimaryGroups([]string{reader.username}, group); err != nil {
-		t.Fatal(err)
-	}
-	created := scalar[string](t, s.st, `SELECT created_at FROM user_groups WHERE id=?`, group)
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(994), "installation_id": id, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": group, "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformCloseAccess(t, s, id)
+	platformSetAccess(t, s, id, platformLegacyGroup(t, s, reader.username, "Legacy launch group"), true)
 	v, err := s.readPlatformLaunchViewerContext(context.Background(), reader, id)
 	if err != nil || len(v.Subject) != 64 {
 		t.Fatal("OU-granted legacy user refused", err)
@@ -127,10 +130,8 @@ func TestPlatformLegacyAccountOUGrantPostgres(t *testing.T) {
 // (i) Storage ownership keeps the raw empty marker, so objects stay reachable.
 func testPlatformLegacyAccountObjects(t *testing.T, pg bool) {
 	s, _, reader, installation := platformObjectsFixturePG(t, pg)
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
 	mustExec(t, s.st, `UPDATE users SET created_at=NULL WHERE username=?`, reader.username)
 	reader.created = ""
-	platformInsertLegacyUserGrant(t, s, reader, installation, 614)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	create := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"first"}`))
 	var created struct {
@@ -181,7 +182,6 @@ func TestPlatformLegacyAdminSponsorPostgres(t *testing.T) { testPlatformLegacyAd
 func testPlatformLegacyAccountWritableLaunch(t *testing.T, pg bool) {
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE users SET role='user',created_at=NULL WHERE username=?`, actor.username)
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET account_created=? WHERE installation_id=?`, appplatform.LegacyAccountCreated, lease.installationID)
 	actor.created = ""
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
 	mux := http.NewServeMux()

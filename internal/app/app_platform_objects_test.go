@@ -171,11 +171,7 @@ func TestPlatformObjectsCrossAccountAndBindingIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := platformReportSession(t, s, "objects-second-reader")
-	grantID, err := platformNewUUID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": grantID, "installation_id": installation, "principal_type": "user", "username": second.username, "account_created": second.created, "account_generation": second.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformOpenDefault(t, s, installation)
 	secondBinding := platformObjectBindingMap(t, s, second, installation)
 	list := platformObjectCall(t, s, second, installation, map[string]any{"binding": secondBinding, "action": "list", "collection": "note"})
 	if list.Code != http.StatusOK || !bytes.Contains(list.Body.Bytes(), []byte(`"items":[]`)) {
@@ -342,6 +338,13 @@ func TestPlatformFrontendUninstallSchedulerClearsPluginDataAndAccess(t *testing.
 	// frontend uninstall lifecycle assertion.
 	mustExec(t, s.st, `UPDATE app_platform_activations SET data_namespace_id=NULL,data_format=0 WHERE installation_id=?`, installation)
 	mustExec(t, s.st, `DELETE FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+	// The installation has a position and an open OU row (doc 190, D7); the uninstall transaction
+	// must delete both, and the legacy audience table is neither read nor written.
+	mustExec(t, s.st, `INSERT INTO app_order(app_key,position) VALUES(?,1)`, platformAppKey(installation))
+	mustExec(t, s.st, `INSERT INTO app_order(app_key,position) VALUES('builtin:batch',2)`)
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key=?`, platformAppKey(installation)) == 0 {
+		t.Fatal("fixture has no OU access row to remove")
+	}
 	plan, err := s.createPlatformRemovalReview(admin, installation, appplatform.ActionUninstall)
 	if err != nil {
 		t.Fatal(err)
@@ -371,11 +374,21 @@ func TestPlatformFrontendUninstallSchedulerClearsPluginDataAndAccess(t *testing.
 		}
 		t.Fatalf("frontend uninstall did not complete: stage=%s state=%s status=%+v managed=%d source=%d target=%d opEpoch=%s installEpoch=%s runtime=%v", stage, state, scheduler.currentStatus(), managed, source, target, opEpoch, installationEpoch, runtime)
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, installation)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, installation) != 0 || s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, installation)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, installation) != 0 || s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 {
 		t.Fatal("uninstall retained access or plugin data")
 	}
 	if _, err := s.inspectPlatformLaunchAccess(reader, installation); err == nil {
 		t.Fatal("uninstalled app remained launchable")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_order WHERE app_key=?`, platformAppKey(installation)) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key=?`, platformAppKey(installation)) != 0 {
+		t.Fatal("uninstall left the installation's order or OU access rows")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_order WHERE app_key='builtin:batch'`) != 1 {
+		t.Fatal("uninstall removed another app's order row")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+		t.Fatal("the legacy audience table was written")
 	}
 }
 
@@ -508,7 +521,7 @@ func testPlatformFrontendUninstallResumesAfterExpiredWorker(t *testing.T, pg boo
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "complete" || scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "removed:removed" {
 		t.Fatal("resumed uninstall did not finish")
 	}
-	if s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, installation)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, installation) != 0 {
+	if s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, installation)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, installation) != 0 {
 		t.Fatal("resumed uninstall retained data or authority")
 	}
 }

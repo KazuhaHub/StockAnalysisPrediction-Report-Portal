@@ -10,7 +10,7 @@ import { useAuth } from '../auth'
 import { BUILTIN_APPS, BUILTIN_PIN_PREFIX, type BuiltinApp } from '../lib/builtinApps'
 import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
-import { useAppDirectory } from '../lib/appDirectoryV2'
+import { useAppDirectory, type AppDirectoryItem } from '../lib/appDirectoryV2'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 import { LoadingPlaceholder } from '../components/LoadGate'
@@ -54,7 +54,9 @@ function AppCard({ icon, title, desc, tag, onClick, disabled = false, status, fo
   )
 }
 
-type HubEntry = { kind: 'builtin'; app: BuiltinApp } | { kind: 'installed'; app: AppSummary }
+type HubEntry = { kind: 'builtin'; app: BuiltinApp } | { kind: 'installed'; app: AppSummary } | { kind: 'platform'; item: AppDirectoryItem }
+
+const PLATFORM_KEY_PREFIX = 'platform:'
 
 const registryKeys = () => BUILTIN_APPS.map((a) => BUILTIN_PIN_PREFIX + a.key)
 
@@ -91,17 +93,28 @@ export default function AppsHub() {
   // registry contract; can('') is false, so guard on it).
   const installed = resp?.apps ?? []
   const keys = resp ? (resp.order ?? [...registryKeys(), ...installed.map((a) => a.id)]) : registryKeys()
+  // A platform installation sits in the same sequence under `platform:<installation id>`. Its card comes
+  // from the directory (state, display); one the sequence does not name (an older server, or an
+  // installation opened after the list was read) follows the ordered ones.
   const entries: HubEntry[] = []
+  const placed = new Set<string>()
   for (const key of keys) {
     if (key.startsWith(BUILTIN_PIN_PREFIX)) {
       const app = BUILTIN_APPS.find((a) => a.key === key.slice(BUILTIN_PIN_PREFIX.length))
       if (app && (!app.perm || can(app.perm))) entries.push({ kind: 'builtin', app })
+    } else if (key.startsWith(PLATFORM_KEY_PREFIX)) {
+      const item = directory.items.find((a) => a.installationId === key.slice(PLATFORM_KEY_PREFIX.length))
+      if (item) {
+        placed.add(item.installationId)
+        entries.push({ kind: 'platform', item })
+      }
     } else {
       const app = installed.find((a) => a.id === key)
       if (app) entries.push({ kind: 'installed', app })
     }
   }
-  const isEmpty = entries.length === 0 && directory.items.length === 0
+  for (const item of directory.items) if (!placed.has(item.installationId)) entries.push({ kind: 'platform', item })
+  const isEmpty = entries.length === 0
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -127,39 +140,43 @@ export default function AppsHub() {
         <Empty description={t('apps.empty')} />
       ) : (
         <Row gutter={[16, 16]}>
-          {entries.map((e) =>
-            e.kind === 'builtin' ? (
-              <AppCard
-                key={BUILTIN_PIN_PREFIX + e.app.key}
-                icon={BUILTIN_ICONS[e.app.key] ?? <AppstoreOutlined />}
-                title={t(e.app.titleKey)}
-                desc={t(e.app.descKey)}
-                tag={t('apps.builtin')}
-                onClick={() => navigate(e.app.to)}
-              />
-            ) : (
-              <AppCard
-                key={e.app.id}
-                icon={e.app.icon ? <span style={{ fontSize: 28, lineHeight: 1 }}>{e.app.icon}</span> : <AppstoreOutlined />}
-                title={e.app.name}
-                desc={e.app.version ? `v${e.app.version}` : undefined}
-                onClick={() => navigate(`/apps/x/${e.app.id}`)}
-              />
-            ),
-          )}
-          {directory.items.map((a) => {
+          {entries.map((e) => {
+            if (e.kind === 'builtin') {
+              return (
+                <AppCard
+                  key={BUILTIN_PIN_PREFIX + e.app.key}
+                  icon={BUILTIN_ICONS[e.app.key] ?? <AppstoreOutlined />}
+                  title={t(e.app.titleKey)}
+                  desc={t(e.app.descKey)}
+                  tag={t('apps.builtin')}
+                  onClick={() => navigate(e.app.to)}
+                />
+              )
+            }
+            if (e.kind === 'installed') {
+              return (
+                <AppCard
+                  key={e.app.id}
+                  icon={e.app.icon ? <span style={{ fontSize: 28, lineHeight: 1 }}>{e.app.icon}</span> : <AppstoreOutlined />}
+                  title={e.app.name}
+                  desc={e.app.version ? `v${e.app.version}` : undefined}
+                  onClick={() => navigate(`/apps/x/${e.app.id}`)}
+                />
+              )
+            }
+            const a = e.item
             const copy = appDisplayText(a.applicationId, a.display, lang)
             return (
-            <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
-              tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
-              status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
-              footer={!a.openable
-                ? <Space wrap>
-                    <AppInstallationStatus installationId={a.installationId} name={copy.name} />
-                    {admin && <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>}
-                  </Space>
-                : undefined}
-              onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
+              <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
+                tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
+                status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
+                footer={!a.openable
+                  ? <Space wrap>
+                      <AppInstallationStatus installationId={a.installationId} name={copy.name} />
+                      {admin && <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>}
+                    </Space>
+                  : undefined}
+                onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
             )
           })}
         </Row>

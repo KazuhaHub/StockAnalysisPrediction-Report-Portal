@@ -156,7 +156,7 @@ func testPlatformManagedAccessRefusals(t *testing.T, pg bool) {
 			case "fence":
 				mustExec(t, s.st, `UPDATE app_platform_installations SET control_fence=control_fence+1`)
 			case "grant":
-				mustExec(t, s.st, `DELETE FROM app_platform_access_grants`)
+				mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key LIKE 'platform:%'`)
 			case "session":
 				mustExec(t, s.st, `UPDATE user_sessions SET revoked=1 WHERE id=?`, actor.sessionID)
 			case "publisher":

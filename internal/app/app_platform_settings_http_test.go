@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -38,8 +39,8 @@ func testPlatformInstallationSettingsHTTP(t *testing.T, pg bool) {
 		t.Fatalf("unexpected settings projection: %+v", settings)
 	}
 	if len(settings.Audience) != 1 ||
-		settings.Audience[0].Type != "user" ||
-		settings.Audience[0].ID != reader.username {
+		settings.Audience[0].Type != "ou" ||
+		settings.Audience[0].ID != strconv.FormatInt(platformOpenTargets(t, s)[0].ouID, 10) {
 		t.Fatalf("audience projection: %+v", settings.Audience)
 	}
 	if len(settings.Capabilities) != 1 ||
@@ -53,6 +54,28 @@ func testPlatformInstallationSettingsHTTP(t *testing.T, pg bool) {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("settings exposed %s: %s", forbidden, body)
 		}
+	}
+
+	// A large policy is capped, not refused; closed overrides are listed with their value, and the total is reported.
+	for i := int64(0); i < 130; i++ {
+		platformSetAccess(t, s, installation, 5000+i, i%2 == 0)
+	}
+	big := sessionTestRequest(mux, "GET", path, cookie, "")
+	var capped platformInstallationSettings
+	if big.Code != http.StatusOK || json.Unmarshal(big.Body.Bytes(), &capped) != nil {
+		t.Fatalf("a large access policy failed the settings read: %d %s", big.Code, big.Body.String())
+	}
+	closed := 0
+	for _, item := range capped.Audience {
+		if !item.Enabled {
+			closed++
+		}
+	}
+	if capped.AudienceTotal != 131 || len(capped.Audience) != platformSettingsAudienceMax || closed == 0 {
+		t.Fatalf("audience cap: total=%d listed=%d closed=%d", capped.AudienceTotal, len(capped.Audience), closed)
+	}
+	for i := int64(0); i < 130; i++ {
+		mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key=? AND group_id=?`, platformAppKey(installation), 5000+i)
 	}
 
 	readerCookie := s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())

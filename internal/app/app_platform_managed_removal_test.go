@@ -303,7 +303,7 @@ func testPlatformManagedRemovalSettlesStopAndRemoveCode(t *testing.T, pg bool) {
 		t.Fatal("managed stop settlement", removeLease.snapshot, err)
 	}
 	if scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != "active" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) == 0 {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) == 0 {
 		t.Fatal("stop settlement released retained namespace or authority early")
 	}
 
@@ -369,7 +369,7 @@ func testPlatformManagedRemovalSettlesStopAndRemoveCode(t *testing.T, pg bool) {
 		scalar[string](t, s.st, `SELECT state||':'||COALESCE(owner_installation_id,'') FROM app_platform_data_namespaces WHERE origin_installation_id=?`, lease.installationID) != "deleted:" ||
 		scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE id=?`, lease.id) != "complete:" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, lease.id) != 3 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, lease.installationID) != 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, lease.installationID) != 0 ||
 		s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 {
@@ -642,7 +642,7 @@ func testPlatformManagedRemovalCompletionRollback(t *testing.T, pg bool) {
 		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='remove_data'`, lease.id) != "prepared" ||
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "removed:pending" ||
 		scalar[string](t, s.st, `SELECT state||':'||owner_installation_id FROM app_platform_data_namespaces WHERE origin_installation_id=?`, lease.installationID) != "active:"+lease.installationID ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) == 0 {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) == 0 {
 		t.Fatal("failed managed completion partially released authority or namespace")
 	}
 	if pg {

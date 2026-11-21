@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -98,7 +97,7 @@ func testPlatformFrontendEnableRestoresSameTuple(t *testing.T, pg bool) {
 	}
 }
 
-func testPlatformFrontendEnableRefusesGrantDrift(t *testing.T, pg bool) {
+func testPlatformFrontendEnableIgnoresAccessEdits(t *testing.T, pg bool) {
 	s, actor, _, installation := platformFrontendDisabledFixture(t, pg)
 	review, err := s.createPlatformFrontendEnableReviewContext(
 		context.Background(), actor, installation)
@@ -115,26 +114,16 @@ func testPlatformFrontendEnableRefusesGrantDrift(t *testing.T, pg bool) {
 	if err != nil || selected.lease.id == "" {
 		t.Fatal("enable claim", selected, err)
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants
-		SET revision=revision+1 WHERE installation_id=?`, installation)
-	_, err = s.runPlatformFrontendEnable(context.Background(), selected.lease)
-	if !errors.Is(err, errAppPlatformStageEvidence) {
-		t.Fatalf("enable accepted grant drift: %v", err)
-	}
-	if err := s.finishPlatformFrontendEnableForReview(
-		context.Background(), selected.lease); err != nil {
-		t.Fatal("finish refused to close drifted enable", err)
+	// Who can use the app is an OU policy edited at any time (doc 190, D7), not enable evidence: an
+	// edit between the review and the run neither blocks nor is undone by the enable.
+	platformCloseAccess(t, s, installation)
+	if _, err = s.runPlatformFrontendEnable(context.Background(), selected.lease); err != nil {
+		t.Fatal("an access edit blocked the enable:", err)
 	}
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
-		FROM app_platform_installations WHERE id=?`, installation) != "disabled:disabled" ||
-		scalar[string](t, s.st, `SELECT stage||':'||error_code
-			FROM app_platform_operations WHERE id=?`, selected.lease.id) !=
-			"failed:frontend_enable_retry_exhausted" ||
-		scalar[int](t, s.st, `SELECT generation FROM app_platform_installations
-			WHERE id=?`, installation) != 2 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
-			WHERE installation_id=? AND state='active'`, installation) != 0 {
-		t.Fatal("grant drift exposed the disabled app")
+		FROM app_platform_installations WHERE id=?`, installation) != "enabled:ready" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key=?`, platformAppKey(installation)) != 0 {
+		t.Fatal("enable did not complete, or rewrote the access policy")
 	}
 }
 
@@ -180,10 +169,10 @@ func TestPlatformFrontendEnableRestoresSameTuplePostgres(t *testing.T) {
 	testPlatformFrontendEnableRestoresSameTuple(t, true)
 }
 
-func TestPlatformFrontendEnableRefusesGrantDriftSQLite(t *testing.T) {
-	testPlatformFrontendEnableRefusesGrantDrift(t, false)
+func TestPlatformFrontendEnableIgnoresAccessEditsSQLite(t *testing.T) {
+	testPlatformFrontendEnableIgnoresAccessEdits(t, false)
 }
 
-func TestPlatformFrontendEnableRefusesGrantDriftPostgres(t *testing.T) {
-	testPlatformFrontendEnableRefusesGrantDrift(t, true)
+func TestPlatformFrontendEnableIgnoresAccessEditsPostgres(t *testing.T) {
+	testPlatformFrontendEnableIgnoresAccessEdits(t, true)
 }

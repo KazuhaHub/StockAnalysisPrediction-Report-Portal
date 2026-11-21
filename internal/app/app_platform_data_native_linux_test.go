@@ -1049,7 +1049,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	}
 	s, session, release := platformInstallFixture(t, false)
 	bindPlatformFixtureRuntime(t, s, session, enrollment)
-	plan, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
+	plan, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1120,7 +1120,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if next.snapshot.Stage != appplatform.StageActivate || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "activate" || scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces`) != "active" || scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects`) != "applied" {
 		t.Fatal("native proof did not commit data/effect/stage")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations WHERE runtime_id IS NOT NULL OR phase<>'pending'`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations WHERE runtime_id IS NOT NULL OR phase<>'pending'`) != 0 {
 		t.Fatal("data stage activated app or created backend")
 	}
 	t.Log("DATA_STAGE_ACTIVATE")
@@ -1140,7 +1140,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if err != nil || len(document.Content) == 0 || document.DocumentSHA256 == "" {
 		t.Fatal("activated document cannot be served", err)
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE principal_type='user' AND username=?`, session.username) != 1 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%' AND enabled=1`) != 1 {
 		t.Fatal("activation did not apply exact audience")
 	}
 	t.Log("STATIC_ACTIVATION_READY")
@@ -1162,7 +1162,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullPlan, err := s.createPlatformNativeInstallAudienceReview(session, fullRelease.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
+	fullPlan, err := s.createPlatformNativeInstallAudienceReview(session, fullRelease.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}

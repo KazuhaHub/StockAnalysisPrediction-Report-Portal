@@ -118,7 +118,7 @@ func testPlatformBackendDeliveryIntent(t *testing.T, pg bool) {
 	if again.command.EffectID != intent.command.EffectID || again.command.PayloadSHA256 != intent.command.PayloadSHA256 || again.command.DocumentSHA256 != intent.command.DocumentSHA256 {
 		t.Fatal("renewal replaced logical effect")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 {
 		t.Fatal("delivery granted access or duplicated effect")
 	}
 	before := dumpOf(t, s.st)

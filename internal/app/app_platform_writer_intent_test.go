@@ -53,7 +53,7 @@ func testPlatformWriterIntent(t *testing.T, pg bool) {
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`, lease.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writer_intent' AND target_id=?`, lease.id) != 1 {
 		t.Fatal("writer intent not exact/idempotent")
 	}
-	if i.applied || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE id=?`, i.namespaceID) != 2 {
+	if i.applied || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE id=?`, i.namespaceID) != 2 {
 		t.Fatal("intent fabricated writer/access")
 	}
 	before := dumpOf(t, s.st)

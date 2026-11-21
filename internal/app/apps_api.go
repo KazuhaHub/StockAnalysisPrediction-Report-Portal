@@ -60,8 +60,10 @@ func appJSON(a App) map[string]any {
 //   - builtin_apps: the open built-in app slugs, in order. The SPA hides the ones missing from this
 //     list; the server refuses a closed app's own routes only where the feature owns them (Scheduled
 //     tasks), not the routes the run dialog and the queue share.
-//   - order: both of the above as one sequence of keys (`builtin:<slug>` or an installed id), which
-//     is how the hub interleaves the two kinds.
+//   - order: all of the above as one sequence of keys (`builtin:<slug>`, an installed id, or
+//     `platform:<installation_id>` for a platform installation open to the caller), which is how the
+//     hub interleaves the kinds. The platform cards themselves come from GET /api/app-platform/apps,
+//     which carries their state and display; this sequence only places them.
 //
 // Administrators resolve through the OU chain like everyone else (doc 190, D2a); the console reads
 // every app, open or not, from GET /api/admin/apps/layout instead.
@@ -77,6 +79,11 @@ func (s *Server) apiApps(w http.ResponseWriter, r *http.Request, user string) {
 		return
 	}
 	installed := s.st.ListApps()
+	platform, err := s.st.platformInstallations()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "database error")
+		return
+	}
 	byID := map[string]App{}
 	for _, a := range installed {
 		byID[a.ID] = a
@@ -84,14 +91,14 @@ func (s *Server) apiApps(w http.ResponseWriter, r *http.Request, user string) {
 	out := make([]map[string]any, 0, len(installed))
 	builtins := []string{}
 	keys := []string{}
-	for _, key := range orderAppKeys(appLayoutKeys(installed), order) {
+	for _, key := range orderAppKeys(appLayoutKeys(installed, platformInstallationKeys(platform)), order) {
 		if !view.open(key) {
 			continue
 		}
 		keys = append(keys, key)
 		if slug, ok := strings.CutPrefix(key, builtinAppPrefix); ok {
 			builtins = append(builtins, slug)
-		} else {
+		} else if !strings.HasPrefix(key, platformAppPrefix) {
 			out = append(out, appJSON(byID[key]))
 		}
 	}
