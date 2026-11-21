@@ -52,7 +52,8 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	}
 	// Plan and admit through the console routes, as an administrator installing from the catalogue does: the
 	// plan they create must be one the operation engine runs (the v2026.47.6 managed-format install never ran).
-	s.platformBackendEndpoint.Store(&endpoint)
+	// The routes read the bound endpoint; restore what was bound before, since later steps bind it themselves.
+	previous := s.platformBackendEndpoint.Swap(&endpoint)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
@@ -75,6 +76,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	if committed.Code != http.StatusAccepted || json.Unmarshal(committed.Body.Bytes(), &admitted) != nil {
 		t.Fatal("admit background install", committed.Code, committed.Body.String())
 	}
+	s.platformBackendEndpoint.Store(previous)
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, admitted.OperationID) != "queued" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, admitted.OperationID) != 0 {
 		t.Fatal("background fixture did not start clean")
 	}
