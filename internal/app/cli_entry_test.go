@@ -189,6 +189,33 @@ func TestAddUserCLI(t *testing.T) {
 	}
 }
 
+// AddUser closes the store it opened. An open store keeps its WAL maintenance goroutine running, which
+// in the test binary outlives the test and races with any later test that changes sqliteJournalSizeLimit.
+// Closing the last connection checkpoints the log and removes the -wal file, so its absence proves it.
+func TestAddUserClosesItsStore(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "portal.db")
+	cfgPath := writeTestConfig(t, db)
+	if err := AddUser(cfgPath, "admin", "correct-horse-battery", true); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if _, err := os.Stat(db + "-wal"); !os.IsNotExist(err) {
+		t.Fatalf("AddUser left %s-wal behind (err %v): the store is still open", db, err)
+	}
+	// Where the filesystem check keeps WAL off there is never a -wal file, and the check above proves nothing.
+	c, err := config.EnsureConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := OpenStore(c.DBDriver, c.DBSource())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if st.walPath == "" {
+		t.Skip("WAL is off on this filesystem")
+	}
+}
+
 // RecomputeKinds re-derives stored report kinds from the current taxonomy rules.
 func TestRecomputeKindsCLI(t *testing.T) {
 	cfgPath := writeTestConfig(t, filepath.Join(t.TempDir(), "portal.db"))

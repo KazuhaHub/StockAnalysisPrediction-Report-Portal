@@ -579,6 +579,7 @@ func AddUser(cfgPath, name, pw string, admin bool) error {
 	if err != nil {
 		return err
 	}
+	defer st.Close()
 	h, _ := bcrypt.GenerateFromPassword([]byte(pw), 12)
 	role := "user"
 	if admin {
