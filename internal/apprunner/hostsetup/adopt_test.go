@@ -387,3 +387,25 @@ func TestAdoptAcceptsAnOperatorMountedPartition(t *testing.T) {
 		t.Fatal("a partition-backed volume caused a change")
 	}
 }
+
+// daemon-reload follows a fstab change that was made, and only that: lines added by someone else between the plan
+// and the apply leave nothing to write and nothing to reload.
+func TestNoReloadWhenTheFstabNeedsNothingAtApply(t *testing.T) {
+	h, _, cfg := adopted(t)
+	complete := "/dev/sda1 / ext4 defaults 0 1\n" +
+		exampleData + " " + cfg["data_root"].(string) + " xfs loop,prjquota,nodev,nosuid,noexec,nofail 0 0\n" +
+		exampleCheckpoint + " " + cfg["checkpoint_root"].(string) + " xfs loop,prjquota,nodev,nosuid,noexec,nofail 0 0\n"
+	h.write("/etc/fstab", "/dev/sda1 / ext4 defaults 0 1\n", 0o644)
+	lock := h.env.LockDataRoot
+	h.env.LockDataRoot = func(dir string) (func(), error) {
+		h.write("/etc/fstab", complete, 0o644) // the operator fixed it while host-setup was starting
+		return lock(dir)
+	}
+	code, out := h.run(h.adoptOptions(true))
+	if code != ExitOK {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if h.ran("systemctl") != 0 || h.ran("findmnt") != 0 || h.exists("/etc/fstab.before-portal-app-runner") {
+		t.Fatalf("a fstab that needed nothing was rewritten or reloaded: %v", h.mutating())
+	}
+}

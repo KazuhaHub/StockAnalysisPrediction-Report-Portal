@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // staleFixture is a control root as host-setup makes it (owner:gid 0750) holding the socket a killed runner
@@ -153,15 +155,35 @@ func TestStaleSocketUnderAnUnsafeParentIsLeftAlone(t *testing.T) {
 	}
 }
 
-// The exported entry point takes the journal store as the proof that the owner lock is held: without one it
-// does nothing at all, so a second runner (which cannot open the journal) never reaches the removal.
+// The entry point takes the journal store as the proof that the owner lock is held: without one it does nothing
+// at all, so a second runner (which cannot open the journal) never reaches the removal. With the lock really held,
+// the same socket is removed.
 func TestRemoveStaleControlSocketNeedsTheJournalLock(t *testing.T) {
 	f := newStaleFixture(t)
 	f.leave(t, 0o660)
-	if err := RemoveStaleControlSocket(f.socket, f.gid, nil); !errors.Is(err, ErrUnsafeEndpoint) {
+	if err := removeStaleUnderLock(f.socket, f.uid, f.gid, nil); !errors.Is(err, ErrUnsafeEndpoint) {
 		t.Fatalf("without the lock: %v", err)
 	}
 	if !exists(f.socket) {
 		t.Fatal("the socket was removed without the journal lock")
+	}
+	if err := RemoveStaleControlSocket(f.socket, f.gid, nil); !errors.Is(err, ErrUnsafeEndpoint) || !exists(f.socket) {
+		t.Fatalf("the exported entry point without the lock: %v", err)
+	}
+	directory := filepath.Join(filepath.Dir(f.dir), "journal")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	// A second owner of the same journal cannot get a store, so it can never reach the removal.
+	if _, err := journal.Open(directory); !errors.Is(err, journal.ErrInUse) {
+		t.Fatalf("a second journal owner: %v", err)
+	}
+	if err := removeStaleUnderLock(f.socket, f.uid, f.gid, store); err != nil || exists(f.socket) {
+		t.Fatalf("with the lock held: %v", err)
 	}
 }

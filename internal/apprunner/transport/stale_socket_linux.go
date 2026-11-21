@@ -22,10 +22,15 @@ import (
 //
 // Anything else at the path is left in place and reported as ErrUnsafeEndpoint. A missing path is not an error.
 func RemoveStaleControlSocket(path string, controllerGID uint32, held *journal.Store) error {
+	return removeStaleUnderLock(path, 0, controllerGID, held)
+}
+
+// removeStaleUnderLock is RemoveStaleControlSocket for an owner other than root, which is how tests run it.
+func removeStaleUnderLock(path string, uid, gid uint32, held *journal.Store) error {
 	if held == nil {
 		return ErrUnsafeEndpoint
 	}
-	return removeStaleControlSocket(path, 0, controllerGID)
+	return removeStaleControlSocket(path, uid, gid)
 }
 
 func removeStaleControlSocket(path string, uid, gid uint32) error {
