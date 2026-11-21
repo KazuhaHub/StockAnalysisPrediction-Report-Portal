@@ -71,6 +71,25 @@ class RunnerServiceTests(unittest.TestCase):
         self.assertNotRegex(portal, r'portal:latest\s*$')
 
 
+class RunnerImageTests(unittest.TestCase):
+    def read(self, name):
+        with open(os.path.join(HERE, '..', name)) as f:
+            return f.read()
+
+    def test_the_runner_image_pins_the_same_base_as_the_portal_image(self):
+        digest = lambda text: re.findall(r'^FROM (?:--platform=\S+ )?(debian:bookworm-slim@sha256:[0-9a-f]{64})', text, re.M)
+        runner = digest(self.read('Dockerfile.app-runner'))
+        self.assertEqual(len(runner), 1, runner)
+        self.assertIn(runner[0], digest(self.read('Dockerfile.release')))
+
+    def test_the_image_runs_only_through_the_entry_and_has_no_user(self):
+        text = '\n'.join(l for l in self.read('Dockerfile.app-runner').splitlines() if not l.startswith('#'))
+        self.assertIn('ENTRYPOINT ["/usr/local/bin/portal-app-runner-entry"]', text)
+        self.assertNotRegex(text, r'(?m)^USER\b')
+        self.assertNotIn('xfsprogs', text)
+        self.assertIn('COPY --chmod=0755 bin/linux-${TARGETARCH}/app-runner /usr/local/bin/app-runner', text)
+
+
 class PortalServiceTests(unittest.TestCase):
     def setUp(self):
         self.portal = service(compose(), 'report-portal')
