@@ -175,11 +175,20 @@ func (r *run) appendFstab(ctx context.Context, wanted [][2]string) error {
 		cleanup()
 		return err
 	}
-	// The logical path: the tool runs on the host, where Prefix is empty.
-	logical := fstabPath + ".portal-app-runner.new"
-	if out, err := r.env.Provision.Exec.Run(ctx, "findmnt", "--verify", "--tab-file", logical); !findmntAccepts(out, err) {
+	// Judge only what host-setup adds. The table as a whole may already carry errors of its own (a CI worker's
+	// does), which are the operator's and say nothing about our lines, so a separate file holding just the new
+	// lines is verified. The full table is still written beside the original and renamed over it.
+	verifyPath := path + ".portal-app-runner.verify"
+	os.Remove(verifyPath)
+	if err := os.WriteFile(verifyPath, []byte(strings.Join(add, "\n")+"\n"), 0o600); err != nil {
 		cleanup()
-		return fmt.Errorf("findmnt --verify rejected the new fstab; /etc/fstab is unchanged: %v", err)
+		return err
+	}
+	defer os.Remove(verifyPath)
+	// The logical path: the tool runs on the host, where Prefix is empty.
+	if out, err := r.env.Provision.Exec.Run(ctx, "findmnt", "--verify", "--tab-file", fstabPath+".portal-app-runner.verify"); !findmntAccepts(out, err) {
+		cleanup()
+		return fmt.Errorf("findmnt --verify rejected the lines to add; /etc/fstab is unchanged: %v", err)
 	}
 	backup := r.env.path(fstabBackup)
 	if _, err := os.Lstat(backup); os.IsNotExist(err) && statErr == nil {

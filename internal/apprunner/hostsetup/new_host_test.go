@@ -1,6 +1,7 @@
 package hostsetup
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -441,5 +442,43 @@ func TestPathsNeedingFstabEscapingAreRefused(t *testing.T) {
 	}
 	if h.snapshot() != before {
 		t.Fatal("a refused run changed the host")
+	}
+}
+
+// The check judges only what host-setup adds: an /etc/fstab that already has an error of its own (a CI worker's
+// does) must not stop the run, and the verified table holds just the new lines. The write stays atomic and the
+// existing lines are kept byte for byte.
+func TestFstabVerifyJudgesOnlyTheAddedLines(t *testing.T) {
+	h := newHost(t)
+	existing := "# /etc/fstab\n/dev/sda1 / ext4 defaults 0 1\nBROKEN line with an error\n"
+	h.write("/etc/fstab", existing, 0o644)
+	opts := h.options(true)
+	opts.Enrollment = h.enrollmentFile(enrollmentDoc(1))
+	code, out := h.run(opts)
+	if code != ExitOK {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if len(h.verified) != 1 || strings.Contains(h.verified[0], "BROKEN") || strings.Contains(h.verified[0], "/dev/sda1") ||
+		!strings.Contains(h.verified[0], dataImage) || !strings.Contains(h.verified[0], checkpointImage) {
+		t.Fatalf("the verified table is not just the added lines: %q", h.verified)
+	}
+	fstab := h.read("/etc/fstab")
+	if !strings.HasPrefix(fstab, existing) || !strings.Contains(fstab, dataImage) {
+		t.Fatalf("the existing lines were not kept, or the new ones not added:\n%s", fstab)
+	}
+	if h.exists("/etc/fstab.portal-app-runner.new") || h.exists("/etc/fstab.portal-app-runner.verify") {
+		t.Fatal("a temporary file was left behind")
+	}
+	// An error in what host-setup adds still refuses and leaves /etc/fstab alone.
+	h2 := newHost(t)
+	h2.write("/etc/fstab", existing, 0o644)
+	h2.findmntOut, h2.findmntErr = "0 parse errors, 2 errors, 0 warnings\n", errors.New("exit status 1")
+	opts = h2.options(true)
+	opts.Enrollment = h2.enrollmentFile(enrollmentDoc(1))
+	if code, out := h2.run(opts); code != ExitFailed || !strings.Contains(out, "findmnt") {
+		t.Fatalf("an error in the new lines: exit %d\n%s", code, out)
+	}
+	if h2.read("/etc/fstab") != existing {
+		t.Fatal("fstab changed after a failed verification")
 	}
 }

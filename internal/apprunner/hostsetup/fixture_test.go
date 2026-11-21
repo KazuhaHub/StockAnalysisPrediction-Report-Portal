@@ -56,6 +56,7 @@ type host struct {
 	verifyErr    map[string]error
 	fsKinds      map[string]string
 	nextLoop     int
+	verified     []string // every table findmnt --verify was given
 }
 
 func newHost(t *testing.T) *host {
@@ -320,6 +321,13 @@ func (e fakeExec) Run(ctx context.Context, name string, args ...string) (string,
 		h.mounts = append(h.mounts, provision.Mount{Point: args[5], FSType: "xfs", Source: args[4], Options: options})
 		return "", nil
 	case "findmnt":
+		// Like the real tool, judge the table it is given: a line starting with BROKEN is an error in it.
+		if raw, err := os.ReadFile(h.p(args[len(args)-1])); err == nil {
+			h.verified = append(h.verified, string(raw))
+			if strings.Contains(string(raw), "BROKEN") {
+				return "0 parse errors, 1 error, 4 warnings\n", errors.New("exit status 1")
+			}
+		}
 		return h.findmntOut, h.findmntErr
 	}
 	return "", nil
