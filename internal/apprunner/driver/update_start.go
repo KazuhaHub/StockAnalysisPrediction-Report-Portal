@@ -17,11 +17,28 @@ type UpdateStartBinding struct {
 	PolicyRevision                                                             string
 }
 
+// UpdateStartSourceOrigin says which start produced the stopped backend an enable or repair start replaces. The
+// backend carries the labels of that start, so its removal is planned the way that start planned it.
+type UpdateStartSourceOrigin string
+
+const (
+	// UpdateStartSourceUpdate is the backend of an update, enable or restore start (the zero value).
+	UpdateStartSourceUpdate UpdateStartSourceOrigin = ""
+	// UpdateStartSourceCandidate is the install's own read-only backend: generation 1, writer fence 1.
+	UpdateStartSourceCandidate UpdateStartSourceOrigin = "candidate"
+	// UpdateStartSourceWritable is the install's own writable backend: generation 1, writer fence 1.
+	UpdateStartSourceWritable UpdateStartSourceOrigin = "writable"
+)
+
 type UpdateStartSource struct {
 	OperationID, ResourceID, NativeID                    string
 	ReleaseSHA256, Generation, ControlFence, WriterFence string
 	Binding                                              UpdateStartBinding
 	SandboxProfile                                       string
+	// Origin and Writable are set only for the install's own backend. Binding then stays empty: the install's
+	// backend has no update-start binding, and a writable one is identified by Writable.
+	Origin   UpdateStartSourceOrigin
+	Writable *WritableCandidateBinding
 }
 
 type UpdateStartLaunchRequest struct {
@@ -174,19 +191,34 @@ func validUpdateStartSource(s UpdateStartSource, r UpdateStartLaunchRequest) boo
 		return containerUUID.MatchString(id) &&
 			id != "00000000-0000-0000-0000-000000000000"
 	}
-	return validID(s.OperationID) && validID(s.ResourceID) &&
+	common := validID(s.OperationID) && validID(s.ResourceID) &&
 		s.ResourceID != r.Identity.ResourceID &&
 		containerSHA.MatchString(s.NativeID) &&
 		containerSHA.MatchString(s.ReleaseSHA256) &&
 		s.ReleaseSHA256 == r.Identity.ReleaseSHA256 &&
-		positiveContainerCounter(s.Generation) &&
-		s.Generation != "1" &&
 		positiveContainerCounter(s.ControlFence) &&
-		positiveContainerCounter(s.WriterFence) &&
-		s.WriterFence != "1" &&
-		validUpdateStartBinding(s.Binding) &&
-		(s.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
-			s.SandboxProfile == UpdateStartWritableSandboxProfile)
+		positiveContainerCounter(s.WriterFence)
+	switch s.Origin {
+	case UpdateStartSourceUpdate:
+		return common && s.Writable == nil &&
+			positiveContainerCounter(s.Generation) &&
+			s.Generation != "1" &&
+			s.WriterFence != "1" &&
+			validUpdateStartBinding(s.Binding) &&
+			(s.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
+				s.SandboxProfile == UpdateStartWritableSandboxProfile)
+	case UpdateStartSourceCandidate:
+		return common && s.Writable == nil && s.Generation == "1" &&
+			s.WriterFence == "1" && s.Binding == (UpdateStartBinding{}) &&
+			s.SandboxProfile == UpdateStartReadOnlySandboxProfile
+	case UpdateStartSourceWritable:
+		return common && s.Writable != nil &&
+			validWritableCandidateBinding(*s.Writable) &&
+			s.Generation == "1" && s.WriterFence == "1" &&
+			s.Binding == (UpdateStartBinding{}) &&
+			s.SandboxProfile == UpdateStartWritableSandboxProfile
+	}
+	return false
 }
 
 func updateStartSeccompSHA(profile string) string {

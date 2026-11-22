@@ -175,14 +175,14 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 		installationGeneration == sourceGeneration
 	if allowDisabled {
 		generationMatches := installationGeneration == sourceGeneration+1 ||
-			(expected.snapshot.Action == appplatform.ActionRepair &&
+			(platformCheckpointRecoveryReview(expected.snapshot) &&
 				(phase == "recovery_required" ||
 					phase == "review_required") &&
 				installationGeneration == sourceGeneration)
 		validInstallationState =
 			((desired == "disabled" &&
 				(phase == "disabled" ||
-					(expected.snapshot.Action == appplatform.ActionRepair &&
+					(platformCheckpointRecoveryReview(expected.snapshot) &&
 						(phase == "recovery_required" ||
 							phase == "review_required")))) ||
 				(desired == "enabled" && phase == "pending")) &&
@@ -627,4 +627,12 @@ func validPlatformCheckpointObservation(observation platformCheckpointObservatio
 		return journal.CheckpointReceipt{}, false
 	}
 	return receipt, true
+}
+
+// platformCheckpointRecoveryReview is whether the operation may read its source from a disabled installation that is
+// in recovery_required or review_required. A repair is reviewed from there; an enable, a repair or an import that
+// failed with its start held is settled from there, and its lease is then at the recovery stage.
+func platformCheckpointRecoveryReview(snapshot appplatform.OperationSnapshot) bool {
+	return snapshot.Action == appplatform.ActionRepair ||
+		(platformSameReleaseLifecycle(snapshot.Action) && snapshot.Stage == appplatform.StageRecoveryRequired)
 }

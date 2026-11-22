@@ -494,30 +494,12 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		SandboxProfile: c.Payload.SandboxProfile,
 	}
 	if c.Kind == "enable-start" {
-		source := f.source.source.update
-		if source == nil || source.Claim.Preflight == nil {
-			return zero, fmt.Errorf(
-				"%w: update-start disabled source",
-				ErrFenceReconciliation)
+		source, err := enableStartNativeSource(f.source.source)
+		if err != nil {
+			return zero, err
 		}
 		request.ReplaceSource = true
-		request.Source = &driver.UpdateStartSource{
-			OperationID:   source.OperationID,
-			ResourceID:    source.Claim.ResourceID,
-			NativeID:      source.NativeID,
-			ReleaseSHA256: source.TargetReleaseSHA256,
-			Generation:    source.TargetGeneration,
-			ControlFence:  source.ControlFence,
-			WriterFence:   source.TargetWriterFence,
-			Binding: driver.UpdateStartBinding{
-				EffectID: source.Claim.EffectID, ClaimID: source.Claim.ClaimID,
-				PayloadSHA256:           source.Claim.PayloadSHA256,
-				OwnershipSHA256:         source.Claim.OwnershipSHA256,
-				CheckpointReceiptSHA256: source.Claim.CheckpointReceiptSHA256,
-				PolicyRevision:          source.Claim.PolicyRevision,
-			},
-			SandboxProfile: source.Claim.SandboxProfile,
-		}
+		request.Source = source
 	}
 	if !validUpdateStartClaimMarker(marker) || !updateStartClaimMatches(f, marker) {
 		return zero, fmt.Errorf("%w: update-start claim",
@@ -1062,4 +1044,61 @@ func settleEnableSourceAbsent(ctx context.Context, tx *sql.Tx, installationID, s
 		}
 	}
 	return releaseHeldReservationExactly(ctx, tx, sourceID, now)
+}
+
+// enableStartNativeSource names the stopped backend an enable or repair start replaces: the backend of whichever start
+// produced the checkpoint it enables from. An update's own backend is bound by its update-start claim. An installation
+// whose latest lifecycle operation is its install has the install's backend, the candidate (or writable candidate) that
+// carries generation 1 and writer fence 1 and the labels of that claim.
+func enableStartNativeSource(source checkpointSource) (*driver.UpdateStartSource, error) {
+	if update := source.update; update != nil {
+		if update.Claim.Preflight == nil {
+			return nil, fmt.Errorf("%w: update-start disabled source", ErrFenceReconciliation)
+		}
+		return &driver.UpdateStartSource{
+			OperationID:   update.OperationID,
+			ResourceID:    update.Claim.ResourceID,
+			NativeID:      update.NativeID,
+			ReleaseSHA256: update.TargetReleaseSHA256,
+			Generation:    update.TargetGeneration,
+			ControlFence:  update.ControlFence,
+			WriterFence:   update.TargetWriterFence,
+			Binding: driver.UpdateStartBinding{
+				EffectID: update.Claim.EffectID, ClaimID: update.Claim.ClaimID,
+				PayloadSHA256:           update.Claim.PayloadSHA256,
+				OwnershipSHA256:         update.Claim.OwnershipSHA256,
+				CheckpointReceiptSHA256: update.Claim.CheckpointReceiptSHA256,
+				PolicyRevision:          update.Claim.PolicyRevision,
+			},
+			SandboxProfile: update.Claim.SandboxProfile,
+		}, nil
+	}
+	install := &driver.UpdateStartSource{
+		OperationID:  source.command.Payload.SourceOperationID,
+		ControlFence: strconv.FormatInt(source.sourceFence, 10),
+		Generation:   "1",
+		// The install's backend was started under its data receipt's writer fence, which is what its labels carry.
+		WriterFence: source.data.WriterFence,
+	}
+	switch {
+	case source.writable != nil && source.writable.Claim.Preflight != nil:
+		receipt := source.writable
+		install.Origin = driver.UpdateStartSourceWritable
+		install.ResourceID, install.NativeID = receipt.Claim.ResourceID, receipt.NativeID
+		install.ReleaseSHA256 = source.command.Payload.ReleaseSHA256
+		install.SandboxProfile = driver.UpdateStartWritableSandboxProfile
+		install.Writable = &driver.WritableCandidateBinding{
+			EffectID: receipt.Claim.EffectID, ClaimID: receipt.Claim.ClaimID,
+			PayloadSHA256: receipt.Claim.PayloadSHA256, OwnershipSHA256: receipt.Claim.OwnershipSHA256,
+			DataReceiptSHA256: receipt.Claim.DataReceiptSHA256, WriterReceiptSHA256: receipt.Claim.WriterReceiptSHA256,
+		}
+	case source.source.Claim.Preflight != nil:
+		install.Origin = driver.UpdateStartSourceCandidate
+		install.ResourceID, install.NativeID = source.source.Claim.ResourceID, source.source.NativeID
+		install.ReleaseSHA256 = source.source.ReleaseSHA256
+		install.SandboxProfile = driver.UpdateStartReadOnlySandboxProfile
+	default:
+		return nil, fmt.Errorf("%w: update-start disabled source", ErrFenceReconciliation)
+	}
+	return install, nil
 }

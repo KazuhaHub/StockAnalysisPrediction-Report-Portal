@@ -61,9 +61,20 @@ func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, r
 		ControlFence:    request.Source.ControlFence,
 		WriterFence:     request.Source.WriterFence,
 	}
-	plan, err := planUpdateStartContainer(
-		request.Descriptor, image, owner, r.roots, request.Source.Binding,
-		request.Source.SandboxProfile)
+	var plan containerPlan
+	switch request.Source.Origin {
+	case UpdateStartSourceCandidate:
+		plan, err = planCandidateContainer(request.Descriptor, image, owner, r.roots)
+	case UpdateStartSourceWritable:
+		if request.Source.Writable == nil {
+			return ErrInvalidResponse
+		}
+		plan, err = planWritableCandidateContainer(request.Descriptor, image, owner, r.roots, *request.Source.Writable)
+	default:
+		plan, err = planUpdateStartContainer(
+			request.Descriptor, image, owner, r.roots, request.Source.Binding,
+			request.Source.SandboxProfile)
+	}
 	if err != nil {
 		return err
 	}
