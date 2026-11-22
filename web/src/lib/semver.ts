@@ -35,3 +35,26 @@ export function compareVersions(a: string, b: string): number {
   }
   return x.pre.length < y.pre.length ? -1 : x.pre.length > y.pre.length ? 1 : 0
 }
+
+/** True for a version with a prerelease part (`1.0.0-beta.1`). */
+export const isPrerelease = (version: string): boolean => version.split('+', 1)[0].includes('-')
+
+/**
+ * The version a catalogue offers by default, the way Docker's `latest` works: the newest stable version when
+ * one exists, otherwise the newest prerelease. The order of `versions` does not matter.
+ */
+export function latestVersion(versions: readonly string[]): string | undefined {
+  const newest = (list: string[]) => list.reduce<string | undefined>((best, v) => (best === undefined || compareVersions(v, best) > 0 ? v : best), undefined)
+  return newest(versions.filter(v => !isPrerelease(v))) ?? newest([...versions])
+}
+
+/**
+ * The version an installed app should be offered as an update, if any: the catalogue's latest when it is newer
+ * than the installed one and either stable or the installed version is itself a prerelease. A stable install is
+ * never nudged toward a prerelease.
+ */
+export function offeredUpdate(installed: string, versions: readonly string[]): string | undefined {
+  const latest = latestVersion(versions)
+  if (!latest || compareVersions(latest, installed) <= 0) return undefined
+  return !isPrerelease(latest) || isPrerelease(installed) ? latest : undefined
+}

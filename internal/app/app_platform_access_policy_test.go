@@ -302,6 +302,7 @@ func testAppListsMergeBuiltinAndPlatformInOrder(t *testing.T, pg bool) {
 	key := platformAppKey(e.id)
 	layout := func() []struct {
 		Key, Kind, Name, State string
+		PublisherID            string `json:"publisher_id"`
 		Access                 []struct {
 			OU        int64 `json:"ou"`
 			Effective bool  `json:"effective"`
@@ -310,6 +311,7 @@ func testAppListsMergeBuiltinAndPlatformInOrder(t *testing.T, pg bool) {
 		var out struct {
 			Apps []struct {
 				Key, Kind, Name, State string
+				PublisherID            string `json:"publisher_id"`
 				Access                 []struct {
 					OU        int64 `json:"ou"`
 					Effective bool  `json:"effective"`
@@ -335,7 +337,7 @@ func testAppListsMergeBuiltinAndPlatformInOrder(t *testing.T, pg bool) {
 		if a.Key != key {
 			continue
 		}
-		if a.Kind != "platform" || a.Name != "Notes" || a.State != "installed" {
+		if a.Kind != "platform" || a.Name != "Notes" || a.State != "installed" || a.PublisherID != "fixture-publisher" {
 			t.Fatalf("platform entry = %+v", a)
 		}
 		for _, row := range a.Access {

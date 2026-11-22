@@ -14,6 +14,7 @@ export interface AdminApp {
   platform: boolean
   installationId?: string
   appId?: string // a platform installation's application id
+  publisherId?: string // and its publisher: an application id is only unique within one publisher
   state?: string // a platform installation's control state
   builtinDef?: BuiltinApp
   name: string // an installed app's declared name; a built-in app's slug until translated
@@ -61,6 +62,7 @@ function merge(entry: AppLayoutEntry): AdminApp {
     platform: entry.kind === 'platform',
     installationId: entry.installation_id,
     appId: entry.app_id,
+    publisherId: entry.publisher_id,
     state: entry.state,
     builtinDef: def,
     name: entry.name,

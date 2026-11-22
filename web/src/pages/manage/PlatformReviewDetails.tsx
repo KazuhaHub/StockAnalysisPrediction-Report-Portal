@@ -2,6 +2,7 @@ import { Alert, Descriptions, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../prefs'
 import { appDisplayText } from '../../lib/appDisplayV2'
+import { joinList } from '../../lib/joinList'
 import type { PlatformRelease } from '../../api/appPlatform'
 import { formatBytes } from './AppNetworkProxyPanel'
 import type { Review, Subject } from './platformLifecycle'
@@ -29,7 +30,7 @@ export default function PlatformReviewDetails({ review, release, groups, expired
       removed: previous.filter(capability => !target.includes(capability)),
     }
   })() : null
-  const permissionList = (values?: string[]) => values?.length ? values.map(capabilityLabel).join('、') : t('appPlatform.none')
+  const permissionList = (values?: string[]) => values?.length ? joinList(values.map(capabilityLabel), lang) : t('appPlatform.none')
   const compatibility = release?.compatibility ? `${release.compatibility.platform_api} · ${release.compatibility.runner_protocol}` : '—'
   const resources = release?.backend && release.resources ? t('appPlatform.resourceSummary', {
     platforms: release.platforms?.length ? release.platforms.join(', ') : t('appPlatform.none'),
@@ -53,7 +54,7 @@ export default function PlatformReviewDetails({ review, release, groups, expired
     { key: 'release', label: t('appPlatform.releaseDigest'), children: <Typography.Text code copyable style={{ wordBreak: 'break-all' }}>{review.review.release_sha256}</Typography.Text> },
     { key: 'compatibility', label: t('appPlatform.compatibility'), children: compatibility },
     { key: 'resources', label: t('appPlatform.resources'), children: resources },
-    ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.open_to_ous.length ? review.review.open_to_ous.map(audienceLabel).join('、') : t('appPlatform.noAudience') }] : review.review.action === 'update' || review.review.action === 'enable' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
+    ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.open_to_ous.length ? joinList(review.review.open_to_ous.map(audienceLabel), lang) : t('appPlatform.noAudience') }] : review.review.action === 'update' || review.review.action === 'enable' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
     ...(uninstallReview ? [] : [
       { key: 'requiredPermissions', label: t('appPlatform.requiredPermissions'), children: permissionList(release?.required_capabilities) },
       { key: 'optionalPermissions', label: t('appPlatform.optionalPermissions'), children: permissionList(release?.optional_capabilities) },

@@ -3444,8 +3444,6 @@
   "apps.title": "应用",
   "apps.breadcrumb": "路径",
   "apps.reorder": "调整顺序",
-  "apps.install": "安装应用",
-  "apps.fromMarket": "从应用市场安装",
   "apps.search": "搜索应用",
   "apps.type.builtin": "内置",
   "apps.type.installed": "已安装",
@@ -4315,7 +4313,6 @@
   "appStore.fromCatalogue": "从应用目录安装",
   "appStore.source": "来源",
   "appStore.sourceNone": "没有可用的应用目录",
-  "appStore.sourceBuiltin": "内置",
   "appStore.customTitle": "自定义目录",
   "appStore.customPrompt": "目录地址（https）",
   "appStore.customOpen": "打开目录",
@@ -4345,5 +4342,8 @@
   "appStore.noDescription": "此应用没有描述。",
   "appStore.catalogueEmpty": "这个目录里没有可安装的新应用。",
   "appStore.noMatches": "没有匹配的应用",
-  "appStore.retry": "重试"
+  "appStore.retry": "重试",
+  "appStore.switchTo": "切换到此版本",
+  "appStore.alreadyInstalled": "此版本已安装",
+  "appStore.platformNotReady": "应用平台尚未初始化。请先在“来源与信任”中完成初始化。"
 }

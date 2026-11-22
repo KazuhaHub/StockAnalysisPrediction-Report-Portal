@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../../api/client'
+import { api, ApiError, errText } from '../../api/client'
 import { useAuth } from '../../auth'
 import { parsePlatformMarket, parsePlatformMarketApps, type PlatformMarketApp, type PlatformMarketHint, type PlatformRelease } from '../../api/appPlatform'
 import { platformRoot } from './platformLifecycle'
@@ -23,11 +23,14 @@ export interface CatalogueState {
   error: string
 }
 export interface MarketSource { url: string; name: string; official: boolean }
+/** What is known of the sources: still reading, read, the platform is not set up yet, or the read failed. */
+export type SourcesState = 'loading' | 'ready' | 'uninitialised' | 'failed'
 export type Staging = { appId: string; version: string } | null
 /** The result of a download-and-verify: the verified release, or the reason it failed. null means it was not attempted. */
 export type StageResult = { release: PlatformRelease } | { error: string } | null
 
-export function usePlatformMarket() {
+/** `visible` is false while the page that shows the sources is hidden; the sources are read again when it shows. */
+export function usePlatformMarket(visible: boolean = true) {
   const { t } = useTranslation()
   const { user } = useAuth()
   const owner = useRef(user)
@@ -36,7 +39,7 @@ export function usePlatformMarket() {
   const generation = useRef<object>({})
   const staging = useRef(false)
   const [official, setOfficial] = useState<OfficialSource | null>(null)
-  const [sourcesLoaded, setSourcesLoaded] = useState(false)
+  const [sourcesState, setSourcesState] = useState<SourcesState>('loading')
   const [custom, setCustom] = useState<string[]>([])
   const [selected, setSelected] = useState('')
   const [catalogues, setCatalogues] = useState<Record<string, CatalogueState>>({})
@@ -50,20 +53,26 @@ export function usePlatformMarket() {
     const epoch = {}
     generation.current = epoch
     staging.current = false
+    setOfficial(null); setSourcesState('loading')
     setCustom([]); setSelected(''); setCatalogues({}); setStagingNow(null); setUploading(false); setStageError('')
     return () => { mounted.current = false; generation.current = {} }
   }, [user])
 
   useEffect(() => {
+    if (!visible) return
     const abort = new AbortController()
-    setOfficial(null); setSourcesLoaded(false)
-    // The built-in catalogue is a preset only; a failed read leaves custom addresses as the way in.
+    // The built-in catalogue is a preset only. A platform that is not set up yet answers 503; any other failure
+    // leaves custom addresses as the way in. The read repeats whenever the page shows again, because the switch
+    // that turns the official catalogue on or off lives on another tab.
     api.get<unknown>(`${platformRoot}/market/sources`, { signal: abort.signal })
-      .then(value => { if (!abort.signal.aborted) setOfficial(parseSources(value)) })
-      .catch(() => {})
-      .finally(() => { if (!abort.signal.aborted) setSourcesLoaded(true) })
+      .then(value => { if (!abort.signal.aborted) { setOfficial(parseSources(value)); setSourcesState('ready') } })
+      .catch(e => {
+        if (abort.signal.aborted) return
+        setOfficial(null)
+        setSourcesState(e instanceof ApiError && e.code === 'app_platform_unavailable' ? 'uninitialised' : 'failed')
+      })
     return () => abort.abort()
-  }, [user])
+  }, [user, visible])
 
   const sources: MarketSource[] = [
     ...(official?.enabled ? [{ url: official.url, name: official.name, official: true }] : []),
@@ -149,7 +158,7 @@ export function usePlatformMarket() {
   }
 
   return {
-    official, sourcesLoaded, sources, active, setActive: setSelected, addCustom,
+    official, sourcesState, sources, active, setActive: setSelected, addCustom,
     catalogue: catalogues[active] as CatalogueState | undefined, catalogues,
     reload: () => { if (active) void load(active) },
     stage, stageOffline, staging: stagingNow, uploading, stageError, clearStageError: () => setStageError(''),

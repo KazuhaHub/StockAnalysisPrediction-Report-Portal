@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { clickable } from '../../lib/clickable'
-import { compareVersions } from '../../lib/semver'
+import { compareVersions, latestVersion, offeredUpdate } from '../../lib/semver'
 import type { PlatformMarketApp } from '../../api/appPlatform'
 import { appPath, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
@@ -46,8 +46,9 @@ export interface InstalledCardProps {
 /** One installed app, the way Dify lists an installed plugin: wide, with version, state and a menu. */
 export function InstalledCard({ app, name, description, publisher, source, catalogue, uninstallable, busy, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledCardProps) {
   const { t } = useTranslation()
-  const newest = catalogue?.versions[0]?.version
-  const updatable = !!(app.platform && app.version && newest && compareVersions(newest, app.version) > 0)
+  // Only a newer stable version is an update for a stable install (a prerelease never is), as with Docker's latest.
+  const newest = app.platform && app.version && catalogue ? offeredUpdate(app.version, catalogue.versions.map(v => v.version)) : undefined
+  const updatable = !!newest
   const state = app.platform ? platformStateTone(app.state) : null
   const lifecycleOK = app.platform && !!app.installationId && LIFECYCLE_STATES.includes(app.state ?? '')
   const versionLabel = app.version ? `v${app.version}` : ''
@@ -90,7 +91,7 @@ export function InstalledCard({ app, name, description, publisher, source, catal
               : <Tag className="rp-app-version">{versionLabel}</Tag>)}
             {state && <StatusTag tone={state.tone}>{state.key ? t(state.key) : state.raw}</StatusTag>}
           </div>
-          {description && <Typography.Paragraph type="secondary" ellipsis={{ rows: 1, tooltip: description }} className="rp-app-card-desc">{description}</Typography.Paragraph>}
+          {description && <Typography.Paragraph type="secondary" ellipsis={{ rows: 1 }} className="rp-app-card-desc">{description}</Typography.Paragraph>}
           <div className="rp-app-card-status">
             <ServiceStatus app={app} />
             {updatable && newest && <Button size="small" type="primary" ghost loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); onSwitchVersion(newest) }}>{t('appStore.updateTo', { version: newest })}</Button>}
@@ -128,6 +129,8 @@ export function MarketCard({ app, name, description, onOpen }: { app: PlatformMa
 
 export interface MarketDetailProps {
   app: PlatformMarketApp | null
+  /** The installed app this catalogue entry is, if any: the button then switches version instead of installing. */
+  installed?: { version?: string }
   lang: string
   /** The version being downloaded for this app, if any. */
   stagingVersion: string | null
@@ -140,11 +143,13 @@ export interface MarketDetailProps {
 }
 
 /** The catalogue detail of one app: version choice and Install on top, description and facts below. */
-export function MarketDetailModal({ app, lang, stagingVersion, blocked, error, onClose, onInstall, onOpenTrust }: MarketDetailProps) {
+export function MarketDetailModal({ app, installed, lang, stagingVersion, blocked, error, onClose, onInstall, onOpenTrust }: MarketDetailProps) {
   const { t } = useTranslation()
   const [chosen, setChosen] = useState('')
-  const newest = app?.versions[0]?.version ?? ''
-  const version = app?.versions.some(v => v.version === chosen) ? chosen : newest
+  const latest = app ? latestVersion(app.versions.map(v => v.version)) ?? '' : ''
+  const version = app?.versions.some(v => v.version === chosen) ? chosen : latest
+  const isCurrent = !!installed && !!installed.version && version === installed.version
+  const actionLabel = !installed ? t('appStore.installAction') : installed.version && compareVersions(version, installed.version) > 0 ? t('appStore.updateTo', { version }) : t('appStore.switchTo')
   const copy = app ? appDisplayText(app.app_id, app.display, lang) : { name: '', description: '' }
   const trusted = !!app?.publisher_trusted
   const staging = stagingVersion !== null
@@ -158,10 +163,12 @@ export function MarketDetailModal({ app, lang, stagingVersion, blocked, error, o
         </div>
         <Space wrap className="rp-market-detail-actions">
           <Select size="middle" aria-label={t('appStore.versions')} value={version} disabled={staging} onChange={setChosen} popupMatchSelectWidth={false}
-            options={app.versions.map((v, i) => ({ value: v.version, label: <Space size={6}>v{v.version}{i === 0 && <Tag>{t('appStore.latest')}</Tag>}</Space> }))} style={{ minWidth: 150 }} />
-          <Button type="primary" loading={staging} disabled={!trusted || blocked} onClick={() => onInstall(version)}>
-            {staging ? t('appStore.staging') : t('appStore.installAction')}
-          </Button>
+            options={app.versions.map(v => ({ value: v.version, label: <Space size={6}>{v.version}{v.version === latest && <Tag>{t('appStore.latest')}</Tag>}</Space> }))} style={{ minWidth: 150 }} />
+          {isCurrent
+            ? <Typography.Text type="secondary">{t('appStore.alreadyInstalled')}</Typography.Text>
+            : <Button type="primary" loading={staging} disabled={!trusted || blocked} onClick={() => onInstall(version)}>
+                {staging ? t('appStore.staging') : actionLabel}
+              </Button>}
         </Space>
       </div>}>
       {app && <div className="rp-market-detail-body">
@@ -176,7 +183,7 @@ export function MarketDetailModal({ app, lang, stagingVersion, blocked, error, o
         <aside className="rp-market-detail-side">
           <Typography.Text strong>{t('appStore.versions')}</Typography.Text>
           <ul className="rp-market-versions">
-            {app.versions.map((v, i) => <li key={v.version}>v{v.version}{i === 0 && <> <Tag>{t('appStore.latest')}</Tag></>}</li>)}
+            {app.versions.map(v => <li key={v.version}>{v.version}{v.version === latest && <> <Tag>{t('appStore.latest')}</Tag></>}{installed?.version === v.version && <> <Tag>{t('appStore.current')}</Tag></>}</li>)}
           </ul>
           <Typography.Text strong>{t('appPlatform.publisher')}</Typography.Text>
           <div>{app.publisher_id}</div>

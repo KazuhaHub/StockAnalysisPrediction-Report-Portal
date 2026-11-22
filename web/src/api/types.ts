@@ -1231,6 +1231,7 @@ export interface AppLayoutEntry {
   // A platform installation: its id, application id and control state (the directory's states).
   installation_id?: string
   app_id?: string
+  publisher_id?: string
   state?: string
   // An installed app's manifest detail, sent for every app whether or not it is open for the caller.
   version?: string

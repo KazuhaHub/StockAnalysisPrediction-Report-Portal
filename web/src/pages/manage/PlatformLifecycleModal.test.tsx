@@ -6,14 +6,15 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MemoryRouter } from 'react-router'
+import { ApiError } from '../../api/client'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
 import { usePlatformLifecycle, type LifecycleAction } from './platformLifecycle'
 import type { PlatformRelease } from '../../api/appPlatform'
 
-const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), user: 'admin', t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key }))
+const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), user: 'admin', lang: 'zh-CN', t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: { get: mock.get, post: mock.post }, errText: (e: unknown) => e instanceof Error ? e.message : String(e) }))
 vi.mock('../../auth', () => ({ useAuth: () => ({ user: mock.user }) }))
-vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'zh-CN' }) }))
+vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: mock.lang }) }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: mock.t }) }))
 
 const operation = '11111111-1111-4111-8111-111111111111'
@@ -128,7 +129,7 @@ const closed = () => waitFor(() => { const d = screen.queryByRole('dialog'); exp
 async function preview() { const user = await start(); await screen.findByRole('document'); return user }
 
 beforeEach(() => {
-  sessionStorage.clear(); mock.user = 'admin'; mock.t = translate; mock.get.mockReset(); mock.post.mockReset(); changes = 0
+  sessionStorage.clear(); mock.lang = 'zh-CN'; mock.user = 'admin'; mock.t = translate; mock.get.mockReset(); mock.post.mockReset(); changes = 0
   mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? finished : { items: [], next_cursor: '' }))
   mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? review() : { operation_id: operation }))
 })
@@ -552,5 +553,100 @@ describe('opening an installation to organizational units', () => {
     await start(false)
     await screen.findByRole('document')
     expect(mock.get.mock.calls.some(([url]) => String(url).includes('kind=ou'))).toBe(false)
+  })
+})
+
+describe('permission lists', () => {
+  const item = { ...base, required_capabilities: ['background.run', 'tasks.schedule'], optional_capabilities: [] }
+  it('are joined with a comma and a space in English', async () => {
+    mock.lang = 'en-US'
+    mount(item)
+    await start(false)
+    expect(await screen.findByText('background.run, tasks.schedule')).toBeTruthy()
+  })
+  it('are joined with the enumeration mark in Chinese', async () => {
+    mount(item)
+    await start(false)
+    expect(await screen.findByText('background.run、tasks.schedule')).toBeTruthy()
+  })
+})
+
+describe('a rejected or interrupted confirmation', () => {
+  for (const [action, build, confirmName] of [
+    ['update', updateReview, 'appPlatform.confirmUpdate'],
+    ['disable', disableReview, 'appPlatform.confirmDisable'],
+    ['enable', enableReview, 'appPlatform.confirmEnable'],
+    ['uninstall', uninstallReview, 'appPlatform.confirmUninstall'],
+  ] as const) {
+    it(`reviews a ${action} again after the server definitively refused it, with a new plan for the same target`, async () => {
+      let plans = 0
+      mock.post.mockImplementation((url: string) => {
+        if (url.endsWith('/plans')) { plans++; return Promise.resolve(build()) }
+        return Promise.reject(new ApiError(409, 'plan changed'))
+      })
+      mount(installed({ current_release_sha256: release, installed: true, enableable: true, updateable: true }), action)
+      const user = await start(false)
+      await user.click(await screen.findByRole('button', { name: confirmName }))
+      await screen.findByText('plan changed')
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewAgain' }))
+      await waitFor(() => expect(plans).toBe(2))
+      expect(sessionStorage.getItem(storageKey)).toBeNull()
+      expect(await screen.findByRole('button', { name: confirmName })).toBeTruthy()
+      expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/plans')).map(([, body]) => body.action)).toEqual([action, action])
+    })
+  }
+
+  it('remembers the action, so a flow resumed after a reload says what it is confirming', async () => {
+    mock.post.mockImplementation((url: string) => url.endsWith('/plans') ? Promise.resolve(uninstallReview()) : Promise.reject(new Error('offline')))
+    const first = mount(installed({ current_release_sha256: release, installed: true }), 'uninstall')
+    const user = await start(false)
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.confirmUninstall' }))
+    await screen.findByText('offline')
+    expect(JSON.parse(sessionStorage.getItem(storageKey)!)).toMatchObject({ action: 'uninstall', app_id: 'notes' })
+    first.unmount()
+    mock.post.mockImplementation(() => Promise.resolve({ operation_id: operation }))
+    mount()
+    expect(await screen.findByText('appPlatform.confirmUninstallTitle')).toBeTruthy()
+    const retry = screen.getByRole('button', { name: 'appPlatform.retrySame' })
+    expect(retry.className).toContain('ant-btn-dangerous')
+    expect(screen.queryByText('appPlatform.step.audience')).toBeNull()
+    await user.click(retry)
+    await screen.findByRole('button', { name: 'appPlatform.done' })
+    // Only the request identity is sent, never the remembered action.
+    expect(operations()[operations().length - 1][1]).toEqual({ plan_id: plan, plan_sha256: digest, idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/) })
+  })
+
+  it('keeps the install steps for a resumed install, and reads an entry saved before the action was kept', async () => {
+    sessionStorage.setItem(storageKey, JSON.stringify({ plan_id: plan, plan_sha256: digest, idempotency_key: operation, action: 'install', app_id: 'notes' }))
+    const view = mount()
+    expect(await screen.findByText('appPlatform.confirmTitle')).toBeTruthy()
+    expect(screen.getByText('appPlatform.step.audience')).toBeTruthy()
+    view.unmount()
+    cleanup()
+    sessionStorage.setItem(storageKey, JSON.stringify({ plan_id: plan, plan_sha256: digest, idempotency_key: operation }))
+    mount()
+    expect(await screen.findByRole('button', { name: 'appPlatform.retrySame' })).toBeTruthy()
+  })
+})
+
+describe('the organizational unit directory', () => {
+  it('discards a cursor response overtaken by a reload of the directory', async () => {
+    let resolve!: (value: unknown) => void
+    let fresh = false
+    mock.get.mockImplementation((url: string) => url.includes('kind=ou&after=')
+      ? new Promise(done => { resolve = done })
+      : Promise.resolve(url.includes('kind=ou') ? { items: [{ id: fresh ? '2' : '1', name: fresh ? 'Fresh' : 'First' }], next_cursor: '1' } : url.includes('/operations/') ? finished : { items: [], next_cursor: '' }))
+    const page = mount()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'start' }))
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.moreGroups' }))
+    fresh = true
+    mock.t = key => key
+    page.rerender(tree())
+    await act(async () => { resolve({ items: [{ id: '9', name: 'Stale' }], next_cursor: '' }) })
+    await waitFor(() => expect((screen.getByRole('combobox', { name: 'appPlatform.audience' }) as HTMLInputElement).disabled).toBe(false))
+    await user.click(screen.getByRole('combobox', { name: 'appPlatform.audience' }))
+    await screen.findByText('Fresh (2)')
+    expect(screen.queryByText('Stale (9)')).toBeNull()
   })
 })

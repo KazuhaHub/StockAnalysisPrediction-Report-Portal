@@ -62,14 +62,30 @@ func platformMarketGroupApps(releases []appplatform.CatalogueRelease) []*platfor
 
 type platformMarketPreview struct{ descriptor, signature []byte }
 
+// platformMarketTrustedPublishers is the set of publishers that are registered and enabled in a trust snapshot.
+func platformMarketTrustedPublishers(trust appplatform.PublisherTrust) map[string]bool {
+	trusted := map[string]bool{}
+	for _, publisher := range trust.Publishers {
+		if publisher.Enabled {
+			trusted[publisher.ID] = true
+		}
+	}
+	return trusted
+}
+
 // platformMarketFetchPreviews downloads the newest descriptor and signature of each of the first apps, a few at
 // a time and within one budget. A failure leaves that app without a preview.
-func platformMarketFetchPreviews(ctx context.Context, client *platformMarketClient, apps []*platformMarketApp) map[*platformMarketApp]platformMarketPreview {
+func platformMarketFetchPreviews(ctx context.Context, client *platformMarketClient, apps []*platformMarketApp, trusted map[string]bool) map[*platformMarketApp]platformMarketPreview {
 	ctx, cancel := context.WithTimeout(ctx, platformMarketPreviewBudget)
 	defer cancel()
-	if len(apps) > platformMarketPreviewApps {
-		apps = apps[:platformMarketPreviewApps]
+	// A publisher nobody trusts gets no request at all: its display could never be shown.
+	candidates := make([]*platformMarketApp, 0, len(apps))
+	for _, app := range apps {
+		if trusted[app.PublisherID] && len(candidates) < platformMarketPreviewApps {
+			candidates = append(candidates, app)
+		}
 	}
+	apps = candidates
 	var mu sync.Mutex
 	previews := map[*platformMarketApp]platformMarketPreview{}
 	slots := make(chan struct{}, platformMarketPreviewConcurrency)
@@ -100,10 +116,7 @@ func platformMarketFetchPreviews(ctx context.Context, client *platformMarketClie
 // platformMarketApplyTrust marks each app's publisher as trusted or not and attaches the display block of
 // every preview that verifies against the given trust snapshot and names the catalogue entry it came from.
 func platformMarketApplyTrust(apps []*platformMarketApp, previews map[*platformMarketApp]platformMarketPreview, trust appplatform.PublisherTrust, nowMS int64) {
-	known := map[string]bool{}
-	for _, publisher := range trust.Publishers {
-		known[publisher.ID] = true
-	}
+	known := platformMarketTrustedPublishers(trust)
 	for _, app := range apps {
 		app.PublisherTrusted = known[app.PublisherID]
 		preview, ok := previews[app]

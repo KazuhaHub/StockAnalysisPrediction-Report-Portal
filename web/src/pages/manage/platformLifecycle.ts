@@ -14,6 +14,10 @@ export type LifecycleAction = 'install' | 'update' | 'enable' | 'disable' | 'uni
 export type Subject = { id: string; name: string; default?: boolean }
 type Page<T> = { items: T[]; next_cursor: string }
 type Commit = { plan_id: string; plan_sha256: string; idempotency_key: string }
+// What is kept in sessionStorage: the request identity, and what it was for, so a flow resumed after a reload
+// still says what it is confirming. Only the three Commit fields are ever sent to the server.
+export type PendingIntent = Commit & { action?: LifecycleAction; app_id?: string }
+const ACTIONS: readonly string[] = ['install', 'update', 'enable', 'disable', 'uninstall']
 export type InstallReview = { action: 'install'; app_id: string; publisher_id: string; release_sha256: string; declined_capabilities: string[]; open_to_ous: string[] }
 export type UpdateReview = {
   action: 'update'
@@ -90,10 +94,16 @@ export const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const sha = /^[0-9a-f]{64}$/
 export const platformRoot = '/api/admin/app-platform'
 
-function readIntent(key: string): Commit | null {
+function readIntent(key: string): PendingIntent | null {
   try {
-    const value = JSON.parse(sessionStorage.getItem(key) ?? 'null') as Commit | null
-    return value && uuid.test(value.plan_id) && sha.test(value.plan_sha256) && uuid.test(value.idempotency_key) ? value : null
+    const value = JSON.parse(sessionStorage.getItem(key) ?? 'null') as (Commit & { action?: unknown; app_id?: unknown }) | null
+    if (!value || !uuid.test(value.plan_id) || !sha.test(value.plan_sha256) || !uuid.test(value.idempotency_key)) return null
+    // An entry written before the action was kept has neither: it resumes as a bare request.
+    return {
+      plan_id: value.plan_id, plan_sha256: value.plan_sha256, idempotency_key: value.idempotency_key,
+      ...(typeof value.action === 'string' && ACTIONS.includes(value.action) ? { action: value.action as LifecycleAction } : null),
+      ...(typeof value.app_id === 'string' ? { app_id: value.app_id } : null),
+    }
   } catch { return null }
 }
 
@@ -126,7 +136,7 @@ export function usePlatformLifecycle(onChange?: () => void) {
   const [selected, setSelected] = useState<string[]>([])
   const [review, setReview] = useState<Review | null>(null)
   const [expired, setExpired] = useState(false)
-  const [intent, setIntent] = useState<Commit | null>(null)
+  const [intent, setIntent] = useState<PendingIntent | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [progressError, setProgressError] = useState('')
   const [refresh, setRefresh] = useState(0)
@@ -201,9 +211,9 @@ export function usePlatformLifecycle(onChange?: () => void) {
     finally { if (live(account, epoch)) { writing.current = false; setBusy(false) } }
   }
 
-  const plan = async (current: LifecycleTarget, openToOUs: string[]) => {
+  const plan = async (current: LifecycleTarget, openToOUs: string[], ignoreIntent = false) => {
     const { release, action } = current
-    if (writing.current || intent) return
+    if (writing.current || (intent && !ignoreIntent)) return
     if (action !== 'install' && !release.installation_id) return
     writing.current = true; setBusy(true); setActionError('')
     const account = user
@@ -236,7 +246,7 @@ export function usePlatformLifecycle(onChange?: () => void) {
 
   const confirm = async () => {
     if (writing.current || (!intent && (!review || expired))) return
-    const request = intent ?? { plan_id: review!.plan_id, plan_sha256: review!.plan_sha256, idempotency_key: crypto.randomUUID() }
+    const request: PendingIntent = intent ?? { plan_id: review!.plan_id, plan_sha256: review!.plan_sha256, idempotency_key: crypto.randomUUID(), action: review!.review.action, app_id: review!.review.app_id }
     writing.current = true; setBusy(true); setActionError('')
     const account = user
     const epoch = generation.current
@@ -245,7 +255,7 @@ export function usePlatformLifecycle(onChange?: () => void) {
       // A lost response/reload must retry this exact operation, even after expiry.
       sessionStorage.setItem(storageKey, JSON.stringify(request))
       setIntent(request)
-      const result = await api.post<{ operation_id: string }>(`${platformRoot}/operations`, request)
+      const result = await api.post<{ operation_id: string }>(`${platformRoot}/operations`, { plan_id: request.plan_id, plan_sha256: request.plan_sha256, idempotency_key: request.idempotency_key })
       if (!live(account, epoch)) return
       if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       sessionStorage.removeItem(storageKey)
@@ -263,6 +273,9 @@ export function usePlatformLifecycle(onChange?: () => void) {
   const clearRejected = () => {
     if (!definitive || busy) return
     sessionStorage.removeItem(storageKey); setIntent(null); setReview(null); setDefinitive(false); setActionError('')
+    // The rejected plan is spent. Another action reviews the same target again at once; an install is back at its
+    // audience step, and a flow resumed after a reload has no target left to review, so it simply ends.
+    if (target && target.action !== 'install') void plan(target, [], true)
   }
   /** Back from the review to the audience choice of an install. */
   const back = () => { if (!busy && !intent) { setReview(null); setActionError('') } }
@@ -276,9 +289,10 @@ export function usePlatformLifecycle(onChange?: () => void) {
     setTimeout(() => { if (trigger.current?.isConnected) trigger.current.focus(); trigger.current = null }, 0)
   }
 
+  const action: LifecycleAction | undefined = target?.action ?? review?.review.action ?? intent?.action
   const step: LifecycleStep | null = operation ? 'progress' : review || intent ? 'review' : target ? (target.action === 'install' ? 'audience' : 'review') : null
   return {
-    target, step, open: step !== null && !hidden, hiddenPending: !!intent && hidden, reopen: () => setHidden(false),
+    target, action, step, open: step !== null && !hidden, hiddenPending: !!intent && hidden, reopen: () => setHidden(false),
     groups, groupCursor, groupsLoading, groupsError, loadMoreGroups, selected, setSelected,
     review, expired, intent, definitive, busy, actionError,
     operation, progress, progressError, refreshProgress: () => setRefresh(v => v + 1),

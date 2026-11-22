@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../prefs'
 import { appDisplayText } from '../../lib/appDisplayV2'
+import { joinList } from '../../lib/joinList'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import PlatformReviewDetails, { reviewBlocked } from './PlatformReviewDetails'
 import type { PlatformLifecycle } from './platformLifecycle'
@@ -20,8 +21,8 @@ export default function PlatformLifecycleModal({ lifecycle }: { lifecycle: Platf
   const { t } = useTranslation()
   const { lang } = usePrefs()
   const { target, step, review, intent, busy, expired, progress, progressError, actionError, groups } = lifecycle
-  const action = review?.review.action ?? target?.action ?? 'install'
-  const install = (target?.action ?? review?.review.action) === 'install'
+  const action = lifecycle.action ?? 'install'
+  const install = action === 'install'
   // The review fetched for a flow that was resumed after a reload has no release; the review is then the only record.
   const release = target?.release
   const copy = release ? appDisplayText(release.app_id, release.display, lang) : null
@@ -73,15 +74,15 @@ export default function PlatformLifecycleModal({ lifecycle }: { lifecycle: Platf
   return <Modal className="rp-platform-review-modal" open={lifecycle.open} title={t(TITLE[action])} footer={footer()} mask={{ closable: false }} closable={!busy} keyboard={!busy} onCancel={lifecycle.close} destroyOnHidden>
     <div className="rp-lifecycle-body">
       <Steps size="small" current={stepIndex} items={stepItems} />
-      {copy && <Typography.Text strong>{copy.name} · {release?.version}</Typography.Text>}
+      {copy ? <Typography.Text strong>{copy.name} · {release?.version}</Typography.Text> : intent?.app_id && <Typography.Text strong>{intent.app_id}</Typography.Text>}
       {actionError && <Alert type="error" title={actionError} />}
       {intent && <Alert type="warning" title={t('appPlatform.uncertain')} action={lifecycle.definitive ? <Button disabled={busy} onClick={lifecycle.clearRejected}>{t('appPlatform.reviewAgain')}</Button> : undefined} />}
       {step === 'audience' && <Space orientation="vertical" style={{ width: '100%' }}>
         {release && <Descriptions column={1} size="small" items={[
           { key: 'publisher', label: t('appPlatform.publisher'), children: release.publisher_id },
           { key: 'version', label: t('appPlatform.version'), children: release.version },
-          { key: 'required', label: t('appPlatform.requiredPermissions'), children: release.required_capabilities?.length ? release.required_capabilities.map(c => t(`appPlatform.capability.${c}`, { defaultValue: c })).join('、') : t('appPlatform.none') },
-          { key: 'optional', label: t('appPlatform.optionalPermissions'), children: release.optional_capabilities?.length ? release.optional_capabilities.map(c => t(`appPlatform.capability.${c}`, { defaultValue: c })).join('、') : t('appPlatform.none') },
+          { key: 'required', label: t('appPlatform.requiredPermissions'), children: release.required_capabilities?.length ? joinList(release.required_capabilities.map(c => t(`appPlatform.capability.${c}`, { defaultValue: c })), lang) : t('appPlatform.none') },
+          { key: 'optional', label: t('appPlatform.optionalPermissions'), children: release.optional_capabilities?.length ? joinList(release.optional_capabilities.map(c => t(`appPlatform.capability.${c}`, { defaultValue: c })), lang) : t('appPlatform.none') },
           { key: 'resources', label: t('appPlatform.resources'), children: release.backend && release.resources ? t('appPlatform.resourceSummary', { platforms: release.platforms?.join(', ') ?? t('appPlatform.none'), memory: release.resources.memory_mib, cpu: release.resources.cpu_millis, pids: release.resources.pids }) : t('appPlatform.frontendOnly') },
         ]} />}
         <Typography.Text strong>{t('appPlatform.audience')}</Typography.Text>

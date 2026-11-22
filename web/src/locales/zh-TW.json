@@ -3444,8 +3444,6 @@
   "apps.title": "應用",
   "apps.breadcrumb": "路徑",
   "apps.reorder": "調整順序",
-  "apps.install": "安裝應用",
-  "apps.fromMarket": "從應用市場安裝",
   "apps.search": "搜尋應用",
   "apps.type.builtin": "內建",
   "apps.type.installed": "已安裝",
@@ -4315,7 +4313,6 @@
   "appStore.fromCatalogue": "從應用目錄安裝",
   "appStore.source": "來源",
   "appStore.sourceNone": "沒有可用的應用目錄",
-  "appStore.sourceBuiltin": "內建",
   "appStore.customTitle": "自訂目錄",
   "appStore.customPrompt": "目錄位址（https）",
   "appStore.customOpen": "開啟目錄",
@@ -4345,5 +4342,8 @@
   "appStore.noDescription": "此應用沒有描述。",
   "appStore.catalogueEmpty": "這個目錄裡沒有可安裝的新應用。",
   "appStore.noMatches": "沒有符合的應用",
-  "appStore.retry": "重試"
+  "appStore.retry": "重試",
+  "appStore.switchTo": "切換到此版本",
+  "appStore.alreadyInstalled": "此版本已安裝",
+  "appStore.platformNotReady": "應用平台尚未初始化。請先在「來源與信任」中完成初始化。"
 }

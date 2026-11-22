@@ -3444,8 +3444,6 @@
   "apps.title": "Apps",
   "apps.breadcrumb": "Breadcrumb",
   "apps.reorder": "Reorder",
-  "apps.install": "Install app",
-  "apps.fromMarket": "From app market",
   "apps.search": "Search apps",
   "apps.type.builtin": "Built-in",
   "apps.type.installed": "Installed",
@@ -4315,7 +4313,6 @@
   "appStore.fromCatalogue": "Install from the catalogue",
   "appStore.source": "Source",
   "appStore.sourceNone": "No catalogue is available",
-  "appStore.sourceBuiltin": "Built-in",
   "appStore.customTitle": "Custom catalogue",
   "appStore.customPrompt": "Catalogue address (https)",
   "appStore.customOpen": "Open catalogue",
@@ -4345,5 +4342,8 @@
   "appStore.noDescription": "This app has no description.",
   "appStore.catalogueEmpty": "This catalogue has no new apps to install.",
   "appStore.noMatches": "No matching apps",
-  "appStore.retry": "Retry"
+  "appStore.retry": "Retry",
+  "appStore.switchTo": "Switch to this version",
+  "appStore.alreadyInstalled": "This version is already installed",
+  "appStore.platformNotReady": "The application platform is not initialised yet. Set it up in Sources and trust first."
 }
