@@ -185,31 +185,40 @@ at most 16 KiB decoded, square, 64 to 256 pixels per side. The catalogue offers
 only the descriptor and signature before install, so the image has to ride in
 the signed descriptor.
 
-The parser (`appplatform.CanonicalIcon`, run wherever a descriptor is parsed or
-verified) checks, in order: the encoded length bound, the strict alphabet (no
+The descriptor parser (`appplatform.ValidateIcon`, run wherever a descriptor is
+parsed or verified) checks, in order: the encoded length bound, the strict alphabet (no
 whitespace, URL alphabet or missing padding), canonical base64, the PNG magic,
 the dimensions from `png.DecodeConfig` before any pixel data is inflated, a full
-decode, then re-encodes the image canonically. Ancillary chunks and trailing
-bytes do not survive. The SHA-256 is taken over the re-encoded bytes.
+decode. It never encodes. `appplatform.CanonicalIcon` re-encodes the image
+canonically only where a hash is produced (ancillary chunks and trailing bytes do
+not survive), memoised by the hash of the input in a small bounded cache. The
+SHA-256 is taken over the re-encoded bytes.
 
 ### Serving
 
 JSON responses never carry the bytes. Catalogue items, directory items, layout
-entries, staged releases, launch documents and installation settings carry
-`display.icon_sha256`. The image is served at
+entries, staged releases and launch documents carry `display.icon_sha256`. The image is served at
 `GET /api/app-platform/icons/{sha}.png` to signed-in users from a bounded
 in-memory cache (256 entries, least recently used). The cache is filled when a
-catalogue, directory, layout, staged-release, launch or settings response is built
-from a verified descriptor, so a restart empties it until the next listing; an
+catalogue, directory, layout, staged-release or launch response is built from a
+verified descriptor, so a restart empties it until the next listing; an
 unknown hash answers 404 and the UI falls back to the built-in icon. Responses
 carry `Content-Type: image/png`, `X-Content-Type-Options: nosniff`,
 `Content-Security-Policy: default-src 'none'; sandbox`,
 `Cross-Origin-Resource-Policy: same-origin` and
 `Cache-Control: private, max-age=31536000, immutable` (the body is immutable per
-hash). Nothing is stored in the database.
+hash). Nothing is stored in the database. The installation settings response
+parses the stored release without verifying its signature, so it carries neither
+the icon hash nor `publisher_name`.
 
 ### Deploy ordering
 
-Deploy the Portal that understands these fields before publishing any package
-that uses them: an older Portal rejects the unknown fields, so the release would
-fail to parse there instead of degrading to the built-in icon.
+Upgrade both the Portal and the app-runner (`internal/apprunner`, which parses
+descriptors with `DisallowUnknownFields`) before publishing any package that uses
+these fields: an older Portal or runner rejects the unknown fields, so the release
+would fail to parse there instead of degrading to the built-in icon.
+
+`icon_sha256` is taken over the bytes Go's PNG encoder produces, so it may change
+when the Go toolchain is upgraded. Image URLs stay correct because every response
+is built with the hash its own process computed, and the cache is refilled from
+verified descriptors.
