@@ -114,7 +114,7 @@ type ResolveReview = {
   release_sha256: string
   observed_bytes: string
   checkpoint_recovery_set_id: string
-  abandoned_effects: { effect_id: string; stage: string; kind: string }[]
+  abandoned_effects: { operation_id: string; effect_id: string; stage: string; kind: string; recovery_set_id?: string }[]
   keeps_data: true
   keeps_checkpoint: boolean
   runs_rollback: false

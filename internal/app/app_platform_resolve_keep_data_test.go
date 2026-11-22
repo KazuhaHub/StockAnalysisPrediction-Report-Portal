@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 // platformResolveKeepDataFixture is the state a failed import leaves in production: the data was imported, the start did
@@ -21,13 +22,67 @@ type platformResolveKeepDataState struct {
 	runner       *platformFakeMigrationRunner
 	target       *platformManagedInstallTarget
 	runtime      platformRuntimeRegistration
+	first        string
 }
 
 func platformResolveKeepDataFixture(t *testing.T) platformResolveKeepDataState {
 	t.Helper()
+	return platformResolveKeepDataFixtureWith(t, false)
+}
+
+// platformResolveKeepDataFixtureWith, when earlier is set, first runs an import that fails after its snapshot was
+// prepared and before the runner took it, as production's first attempt did: the operation failed, and its
+// snapshot effect and the recovery set it opened stay behind.
+func platformResolveKeepDataFixtureWith(t *testing.T, earlier bool) platformResolveKeepDataState {
+	t.Helper()
 	s, actor, enabled, target, runtime, _ := platformImportDisabledFixture(t, false)
 	installation := enabled.installationID
 	endpoint := platformCheckpointEndpointFixture()
+	var firstOperation string
+	if earlier {
+		review, err := s.createPlatformManagedImportDataReviewWithRuntimeContext(context.Background(), actor, installation, platformTestArchiveSHA, target, runtime, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		commit, err := s.consumePlatformManagedSameReleaseReviewWithRuntimeContext(context.Background(), actor, review.ID, review.SHA256, platformFixtureID(1460), target, runtime, appplatform.ActionImportData)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected, err := s.claimNextPlatformManagedSameRelease(context.Background(), platformFixtureID(1461), appplatform.ActionImportData)
+		if err != nil || selected.lease.id != commit.OperationID {
+			t.Fatal(err)
+		}
+		current := selected.lease
+		if current, err = s.advancePlatformManagedEnableStage(context.Background(), current); err != nil {
+			t.Fatal(err)
+		}
+		if current, err = s.validatePlatformImportData(context.Background(), current, endpoint); err != nil {
+			t.Fatal(err)
+		}
+		if current, err = s.advancePlatformManagedEnableStage(context.Background(), current); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.preparePlatformCheckpoint(context.Background(), current); err != nil {
+			t.Fatal(err)
+		}
+		// The runner refused the snapshot before admitting it, and the attempt ended failed.
+		if err := s.finishPlatformManagedSameReleaseForReview(context.Background(), current); err != nil {
+			t.Fatal(err)
+		}
+		if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "failed" ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind='snapshot' AND state='prepared'`, commit.OperationID) != 1 ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing'`, commit.OperationID) != 1 {
+			t.Fatal("the fixture is not the first failed attempt")
+		}
+		firstOperation = commit.OperationID
+		// Long before the second attempt.
+		if _, err := s.st.exec(`UPDATE app_platform_operations SET completed_ms=completed_ms-7200000 WHERE id=?`, firstOperation); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.st.exec(`UPDATE app_platform_operation_effects SET created_ms=created_ms-7200000,updated_ms=updated_ms-7200000 WHERE operation_id=?`, firstOperation); err != nil {
+			t.Fatal(err)
+		}
+	}
 	review, err := s.createPlatformManagedImportDataReviewWithRuntimeContext(context.Background(), actor, installation, platformTestArchiveSHA, target, runtime, endpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +142,12 @@ func platformResolveKeepDataFixture(t *testing.T) platformResolveKeepDataState {
 		return nil, errPlatformMigrationAbsent
 	}
 	s.platformMigration = runner
-	return platformResolveKeepDataState{s: s, actor: actor, installation: installation, operation: commit.OperationID, endpoint: endpoint, runner: runner, target: target, runtime: runtime}
+	previousRead := platformCheckpointReceiptRead
+	platformCheckpointReceiptRead = func(context.Context, platformRuntimeEndpoint, platformCheckpointIntent) (transport.WritableLifecycleObservation, error) {
+		return transport.WritableLifecycleObservation{}, errors.New("the runner holds no such checkpoint")
+	}
+	t.Cleanup(func() { platformCheckpointReceiptRead = previousRead })
+	return platformResolveKeepDataState{s: s, actor: actor, installation: installation, operation: commit.OperationID, endpoint: endpoint, runner: runner, target: target, runtime: runtime, first: firstOperation}
 }
 
 func (f platformResolveKeepDataState) review(t *testing.T) (platformRemovalReview, error) {
@@ -286,4 +346,87 @@ func TestPlatformResolveKeepDataMakesRepairEligibleSQLite(t *testing.T) {
 			t.Fatalf("a repair is not offered after the resolution at generation %d: %v %v", generation, settings.RepairEligible, err)
 		}
 	}
+}
+
+// The production state exactly: an earlier import failed with its snapshot prepared and never taken by the runner, and a
+// later one failed after its import with its rollback prepared and never taken. One action resolves both, listing both
+// in its review, and the earlier attempt's orphaned recovery set is closed with its snapshot.
+func TestPlatformResolveKeepDataResolvesBothUnadmittedEffectsSQLite(t *testing.T) {
+	f := platformResolveKeepDataFixtureWith(t, true)
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE state IN ('prepared','unknown')`) != 2 {
+		t.Fatal("the fixture does not hold the two unsettled effects")
+	}
+	review, err := f.review(t)
+	if err != nil {
+		t.Fatal("review", err)
+	}
+	var plan platformResolveKeepDataPlan
+	if err := json.Unmarshal([]byte(review.JSON), &plan); err != nil || len(plan.AbandonedEffects) != 2 {
+		t.Fatalf("the review does not list both effects: %+v %v", plan.AbandonedEffects, err)
+	}
+	kinds := map[string]string{}
+	for _, effect := range plan.AbandonedEffects {
+		kinds[effect.Kind] = effect.OperationID
+	}
+	if kinds["snapshot"] != f.first || kinds["restore"] != f.operation {
+		t.Fatalf("the effects are not those of the two attempts: %v", kinds)
+	}
+	set := scalar[string](t, f.s.st, `SELECT id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing'`, f.first)
+	result, err := f.confirm(t, review, platformFixtureID(1500))
+	if err != nil || result.Abandoned != 2 {
+		t.Fatal("confirm", result, err)
+	}
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE state IN ('prepared','unknown')`) != 0 ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE state='reverted' AND receipt_json=? AND operation_id IN (?,?)`, platformAbandonedReceipt, f.first, f.operation) != 2 {
+		t.Fatal("the effects were not closed as abandoned")
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_recovery_sets WHERE id=?`, set) != "deleted" {
+		t.Fatal("the orphaned recovery set of the first attempt was left behind")
+	}
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_recovery_sets WHERE operation_id=? AND state='verified'`, f.operation) != 1 {
+		t.Fatal("the pre-import checkpoint of the second attempt did not stay")
+	}
+	settings, err := f.s.platformInstallationSettings(f.actor, f.installation)
+	if err != nil || settings.OperationPending || settings.Recovery.Pending && settings.Recovery.State == "preparing" {
+		t.Fatalf("something is still pending after the resolution: %v %+v %v", settings.OperationPending, settings.Recovery, err)
+	}
+}
+
+func TestPlatformResolveKeepDataRefusesAnEarlierSnapshotItCannotProveSQLite(t *testing.T) {
+	t.Run("the runner returns a receipt for it", func(t *testing.T) {
+		f := platformResolveKeepDataFixtureWith(t, true)
+		platformCheckpointReceiptRead = func(context.Context, platformRuntimeEndpoint, platformCheckpointIntent) (transport.WritableLifecycleObservation, error) {
+			return transport.WritableLifecycleObservation{}, nil
+		}
+		if _, err := f.review(t); err == nil {
+			t.Fatal("a snapshot the runner holds a receipt for was abandoned")
+		}
+	})
+	t.Run("the command is not the one the effect records", func(t *testing.T) {
+		f := platformResolveKeepDataFixtureWith(t, true)
+		if _, err := f.s.st.exec(`UPDATE app_platform_operation_effects SET payload_sha256=? WHERE operation_id=? AND kind='snapshot'`, platformTestArchiveSHA, f.first); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.review(t); err == nil {
+			t.Fatal("a snapshot whose command could not be rebuilt was abandoned")
+		}
+	})
+	t.Run("no later snapshot was settled by the runner", func(t *testing.T) {
+		f := platformResolveKeepDataFixtureWith(t, true)
+		if _, err := f.s.st.exec(`UPDATE app_platform_operation_effects SET created_ms=created_ms-100000000 WHERE operation_id=? AND kind='snapshot'`, f.operation); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.review(t); !errors.Is(err, errAppPlatformOperationConflict) {
+			t.Fatalf("an earlier snapshot was abandoned with nothing after it: %v", err)
+		}
+	})
+	t.Run("another effect of the earlier attempt is unsettled", func(t *testing.T) {
+		f := platformResolveKeepDataFixtureWith(t, true)
+		if _, err := f.s.st.exec(`UPDATE app_platform_operation_effects SET observed_fence=3 WHERE operation_id=? AND kind='snapshot'`, f.first); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.review(t); !errors.Is(err, errAppPlatformOperationConflict) {
+			t.Fatalf("a snapshot the runner observed was abandoned: %v", err)
+		}
+	})
 }

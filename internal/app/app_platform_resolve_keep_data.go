@@ -50,10 +50,15 @@ const (
 var errPlatformResolveKeepDataUnavailable = errors.New("no failed operation of this installation can be resolved by keeping its data")
 
 type platformResolveKeepDataEffect struct {
-	EffectID string `json:"effect_id"`
-	Stage    string `json:"stage"`
-	Number   int64  `json:"effect_number"`
-	Kind     string `json:"kind"`
+	OperationID string `json:"operation_id"`
+	Action      string `json:"operation_action"`
+	CompletedMS int64  `json:"operation_completed_ms"`
+	EffectID    string `json:"effect_id"`
+	Stage       string `json:"stage"`
+	Number      int64  `json:"effect_number"`
+	Kind        string `json:"kind"`
+	// RecoverySetID is the 'preparing' recovery set a never-admitted snapshot left, closed with the effect.
+	RecoverySetID string `json:"recovery_set_id,omitempty"`
 }
 
 type platformResolveKeepDataPlan struct {
@@ -170,7 +175,7 @@ func loadPlatformResolveKeepDataPlan(e migExec, installation string, control pla
 	}
 	p.AbandonedEffects = []platformResolveKeepDataEffect{}
 	for rows.Next() {
-		var f platformResolveKeepDataEffect
+		f := platformResolveKeepDataEffect{OperationID: p.OperationID, Action: p.OperationAction, CompletedMS: p.CompletedMS}
 		var state, receipt string
 		var observed int64
 		if err := rows.Scan(&f.Stage, &f.Number, &f.EffectID, &f.Kind, &state, &observed, &receipt); err != nil {
@@ -195,6 +200,70 @@ func loadPlatformResolveKeepDataPlan(e migExec, installation string, control pla
 		return p, err
 	}
 	rows.Close()
+	// An earlier attempt that failed before it did anything may have left its snapshot prepared and never admitted,
+	// with the recovery set it opened for it. Nothing else of such an operation may be unsettled.
+	failed, err := e.query(`SELECT o.id,o.action,o.completed_ms,p.source_release_sha256,p.target_release_sha256
+		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.stage='failed' AND o.managed=1 AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+		AND o.action IN ('import_data','enable','repair') ORDER BY o.completed_ms,o.id`, installation)
+	if err != nil {
+		return p, err
+	}
+	type earlier struct {
+		id, action, source, target string
+		completed                  int64
+	}
+	var earlierOperations []earlier
+	for failed.Next() {
+		var o earlier
+		var source, target sql.NullString
+		if err := failed.Scan(&o.id, &o.action, &o.completed, &source, &target); err != nil {
+			failed.Close()
+			return p, err
+		}
+		o.source, o.target = source.String, target.String
+		earlierOperations = append(earlierOperations, o)
+	}
+	if err := failed.Err(); err != nil {
+		failed.Close()
+		return p, err
+	}
+	failed.Close()
+	for _, o := range earlierOperations {
+		effects, err := e.query(`SELECT stage,effect_number,effect_id,kind,state,observed_fence,receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown')`, o.id)
+		if err != nil {
+			return p, err
+		}
+		var found []platformResolveKeepDataEffect
+		for effects.Next() {
+			f := platformResolveKeepDataEffect{OperationID: o.id, Action: o.action, CompletedMS: o.completed}
+			var state, receipt string
+			var observed int64
+			if err := effects.Scan(&f.Stage, &f.Number, &f.EffectID, &f.Kind, &state, &observed, &receipt); err != nil {
+				effects.Close()
+				return p, err
+			}
+			if state != "prepared" || f.Kind != "snapshot" || f.Number != 1 || f.Stage != platformSameReleaseCheckpointEffectStage(appplatform.Action(o.action)) ||
+				observed != 0 || receipt != "{}" || o.source != p.ReleaseSHA256 || o.target != p.ReleaseSHA256 {
+				effects.Close()
+				return p, errAppPlatformOperationConflict
+			}
+			found = append(found, f)
+		}
+		if err := effects.Err(); err != nil {
+			effects.Close()
+			return p, err
+		}
+		effects.Close()
+		for _, f := range found {
+			var set sql.NullString
+			if err := e.queryRow(`SELECT id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing' AND manifest_sha256 IS NULL AND bytes=0`, o.id).Scan(&set); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return p, err
+			}
+			f.RecoverySetID = set.String
+			p.AbandonedEffects = append(p.AbandonedEffects, f)
+		}
+	}
 	// No other unsettled effect of the installation is counted: they would keep it unsafe after this action.
 	unsafe, err := platformUnresolvedOperationEffectCount(e, installation)
 	if err != nil {
@@ -302,20 +371,35 @@ func (s *Server) signPlatformImportRollbackRead(ctx context.Context, operation s
 	return intent, nil
 }
 
-// proveRollbackNotAdmitted asks the runner about each abandoned rollback and accepts only its typed absence.
+// proveRollbackNotAdmitted asks the runner about each abandoned effect and accepts only what proves it never took it.
 func (s *Server) proveRollbackNotAdmitted(ctx context.Context, endpoint platformRuntimeEndpoint, plan platformResolveKeepDataPlan) error {
-	if len(plan.AbandonedEffects) == 0 {
-		return nil
+	for _, f := range plan.AbandonedEffects {
+		if time.Now().UnixMilli() <= platformResolveKeepDataQuiet(f.CompletedMS) {
+			return errAppPlatformOperationConflict
+		}
+		var err error
+		switch f.Kind {
+		case "restore":
+			err = s.proveRestoreNotAdmitted(ctx, endpoint, plan, f)
+		case "snapshot":
+			err = s.proveSnapshotNotAdmitted(ctx, endpoint, plan, f)
+		default:
+			err = errAppPlatformOperationConflict
+		}
+		if err != nil {
+			return err
+		}
 	}
-	if time.Now().UnixMilli() <= platformResolveKeepDataQuiet(plan.CompletedMS) {
-		return errAppPlatformOperationConflict
-	}
-	intent, err := s.signPlatformImportRollbackRead(ctx, plan.OperationID)
+	return nil
+}
+
+func (s *Server) proveRestoreNotAdmitted(ctx context.Context, endpoint platformRuntimeEndpoint, plan platformResolveKeepDataPlan, f platformResolveKeepDataEffect) error {
+	intent, err := s.signPlatformImportRollbackRead(ctx, f.OperationID)
 	if err != nil {
 		return err
 	}
 	runner := s.platformMigrationRunner()
-	if err := runner.CheckRoot(ctx, plan.OperationID, intent.runtime, intent.authority, endpoint); err != nil {
+	if err := runner.CheckRoot(ctx, f.OperationID, intent.runtime, intent.authority, endpoint); err != nil {
 		return err
 	}
 	_, err = runner.ReadRestore(ctx, endpoint, intent)
@@ -327,6 +411,121 @@ func (s *Server) proveRollbackNotAdmitted(ctx context.Context, endpoint platform
 	}
 	// A receipt, a pending or an orphaned status: the runner holds the restore.
 	return errAppPlatformOperationConflict
+}
+
+// platformCheckpointReceiptRead reads a checkpoint effect back from the runner; tests replace it.
+var platformCheckpointReceiptRead = platformReadCheckpointReceipt
+
+// proveSnapshotNotAdmitted shows that the runner never took the snapshot an earlier failed attempt prepared.
+//
+// The runner has no typed absence for a checkpoint read: it answers a receipt or fails, whatever the reason. So the
+// proof is composed of what can be shown, each part of which the action requires:
+//
+//   - the effect was never observed by the Portal, and the operation ended before the read (the command expired);
+//   - the very command is rebuilt from the effect row and its digest equals the effect's, so the read below asks about
+//     exactly the effect the row records;
+//   - the runner admitted and settled a later snapshot of the same installation (the operation being resolved): it
+//     refuses any checkpoint while a prepared or unknown command of the installation exists, so none was unsettled then;
+//   - a read of the rebuilt command, with the runner reachable (its root answers just before), returns no receipt,
+//     twice: it was not applied either.
+func (s *Server) proveSnapshotNotAdmitted(ctx context.Context, endpoint platformRuntimeEndpoint, plan platformResolveKeepDataPlan, f platformResolveKeepDataEffect) error {
+	var later int
+	if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operation_effects
+		WHERE operation_id=? AND state='applied' AND kind='snapshot' AND created_ms>?`, plan.OperationID, platformResolveKeepDataQuiet(f.CompletedMS)).Scan(&later); err != nil {
+		return err
+	}
+	if later == 0 {
+		return errAppPlatformOperationConflict
+	}
+	intent, err := s.signPlatformFailedSnapshotRead(ctx, f)
+	if err != nil {
+		return err
+	}
+	runner := s.platformMigrationRunner()
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := runner.CheckRoot(ctx, f.OperationID, intent.runtime, intent.authority, endpoint); err != nil {
+			return err
+		}
+		if observation, readErr := platformCheckpointReceiptRead(ctx, endpoint, intent); readErr == nil {
+			_ = observation
+			return errAppPlatformOperationConflict
+		}
+	}
+	return nil
+}
+
+// signPlatformFailedSnapshotRead rebuilds the snapshot command of an earlier failed attempt, as the Portal that sent it
+// built it, and proves it is the command the effect row records. The command was built before the writer fence of a
+// disabled install source was corrected, so both fences it may have carried are tried; the digest decides.
+func (s *Server) signPlatformFailedSnapshotRead(ctx context.Context, f platformResolveKeepDataEffect) (platformCheckpointIntent, error) {
+	var zero platformCheckpointIntent
+	dek, err := s.dek()
+	if err != nil {
+		return zero, err
+	}
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err := lockOUMutation(e); err != nil {
+		return zero, err
+	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	var installation, epoch, digest, checkpointID string
+	var admitted, generation int64
+	if err := e.queryRow(`SELECT o.installation_id,o.controller_epoch,o.target_generation,fe.admitted_fence,fe.payload_sha256
+		FROM app_platform_operations o JOIN app_platform_operation_effects fe ON fe.operation_id=o.id
+		WHERE o.id=? AND fe.effect_id=? AND fe.state='prepared' AND fe.observed_fence=0 AND fe.receipt_json='{}'`, f.OperationID, f.EffectID).
+		Scan(&installation, &epoch, &generation, &admitted, &digest); err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	if err := e.queryRow(`SELECT checkpoint_id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing'`, f.OperationID).Scan(&checkpointID); err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	runtime, seed, err := s.platformDataRuntime(e, epoch, dek)
+	if err != nil {
+		return zero, err
+	}
+	defer clear(seed)
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		return zero, err
+	}
+	lease := platformOperationLease{id: f.OperationID, installationID: installation, controllerEpoch: epoch, fence: admitted,
+		snapshot: appplatform.OperationSnapshot{Action: appplatform.Action(f.Action), Managed: true, Generation: uint64(generation), Revision: 1, Stage: appplatform.StageRecoveryRequired}}
+	source, err := loadPlatformCheckpointSourceMode(e, lease, runtime, now, true, 0)
+	if err != nil {
+		return zero, err
+	}
+	fences := []string{source.writerFence}
+	if source.currentWriterFence != "" {
+		fences = append(fences, source.currentWriterFence)
+	}
+	for _, fence := range fences {
+		candidate := source
+		candidate.writerFence = fence
+		command, err := platformCheckpointCommand(lease, runtime, candidate, checkpointID, f.EffectID)
+		if err != nil || command.PayloadSHA256 != digest {
+			continue
+		}
+		issued := time.Now().UnixMilli()
+		command.IssuedMS, command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
+		intent := platformCheckpointIntent{effectID: f.EffectID, runtime: runtime, authority: platformRuntimeAuthority(runtime), command: command, source: candidate}
+		key := ed25519.NewKeyFromSeed(seed)
+		defer clear(key)
+		if intent.raw, intent.signature, err = control.SignCheckpoint(command, key, intent.authority, issued); err != nil {
+			return zero, err
+		}
+		if err := tx.Commit(); err != nil {
+			return zero, err
+		}
+		return intent, nil
+	}
+	return zero, errors.Join(errAppPlatformStageEvidence, errors.New("the snapshot command is not the one the effect records"))
 }
 
 func (s *Server) createPlatformResolveKeepDataReview(ctx context.Context, session platformActorSession, installation string, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
@@ -469,9 +668,18 @@ func (s *Server) consumePlatformResolveKeepDataReview(ctx context.Context, sessi
 		for _, f := range fresh.AbandonedEffects {
 			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
 				WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id=? AND kind=? AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`,
-				platformAbandonedReceipt, now, fresh.OperationID, f.Stage, f.Number, f.EffectID, f.Kind)
+				platformAbandonedReceipt, now, f.OperationID, f.Stage, f.Number, f.EffectID, f.Kind)
 			if err := platformLeaseCAS(changed, err); err != nil {
 				return err
+			}
+			if f.RecoverySetID != "" {
+				// The set a never-admitted snapshot opened holds no checkpoint at the runner: it is closed as a deleted one,
+				// the state every other settled-away set takes, so it no longer reads as a recovery point.
+				changed, err := e.exec(`UPDATE app_platform_recovery_sets SET state='deleted',deleted_ms=?,updated_ms=?
+					WHERE id=? AND operation_id=? AND state='preparing' AND manifest_sha256 IS NULL AND bytes=0`, now, now, f.RecoverySetID, f.OperationID)
+				if err := platformLeaseCAS(changed, err); err != nil {
+					return err
+				}
 			}
 		}
 		// The marker a completed update retry writes: launch and settings read it as the operation being resolved.

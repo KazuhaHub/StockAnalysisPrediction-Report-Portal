@@ -1001,7 +1001,7 @@ func platformDataQuotaManagementResponse(review platformRemovalReview, p platfor
 func platformResolveKeepDataManagementResponse(review platformRemovalReview, p platformResolveKeepDataPlan) map[string]any {
 	effects := make([]map[string]any, 0, len(p.AbandonedEffects))
 	for _, f := range p.AbandonedEffects {
-		effects = append(effects, map[string]any{"effect_id": f.EffectID, "stage": f.Stage, "kind": f.Kind})
+		effects = append(effects, map[string]any{"operation_id": f.OperationID, "effect_id": f.EffectID, "stage": f.Stage, "kind": f.Kind, "recovery_set_id": f.RecoverySetID})
 	}
 	return map[string]any{
 		"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
