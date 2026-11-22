@@ -117,7 +117,14 @@ func TestPublicAssertionBindsRequestAndNeverVerifiesAsViewer(t *testing.T) {
 			return e
 		},
 		"tampered": func() error {
-			_, e := VerifyPublicAssertion(signer, token[:len(token)-2]+"AA", "/v1/public/history?from=a", now)
+			// Change one character inside the MAC so the token always differs; replacing a suffix with a fixed
+			// value is a no-op whenever the random MAC already ends with it.
+			i := len(token) - 3
+			r := byte('A')
+			if token[i] == r {
+				r = 'B'
+			}
+			_, e := VerifyPublicAssertion(signer, token[:i]+string(r)+token[i+1:], "/v1/public/history?from=a", now)
 			return e
 		},
 		"no prefix": func() error {
