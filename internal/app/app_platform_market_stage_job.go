@@ -108,7 +108,11 @@ func (t *platformMarketStageJobs) start(key, sha string, actor platformActorSess
 		}
 		if j.finished.IsZero() {
 			if j.sha == sha {
-				if len(j.actors) < platformMarketStageActors {
+				known := false
+				for _, a := range j.actors {
+					known = known || a.sessionID == actor.sessionID
+				}
+				if !known && len(j.actors) < platformMarketStageActors {
 					j.actors = append(j.actors, actor)
 				}
 				return j, nil
@@ -202,12 +206,16 @@ func (t *platformMarketStageJobs) view(sha string) (platformMarketStageView, boo
 	return platformMarketStageView{}, false
 }
 
-// stopPlatformStageJobs cancels the downloads and waits for them on a grace of its own, so a job is gone before
-// the store closes however long the other workers took.
-func (s *Server) stopPlatformStageJobs(context.Context) {
-	grace, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	s.platformStageJobs.stop(grace)
+// stopPlatformStageJobs cancels the downloads at once and waits for them for what is left of the shutdown's
+// time (ctx), so a job is gone before the store closes and the whole stop stays inside the orchestrator's grace.
+// Without a deadline it waits at most 5 seconds.
+func (s *Server) stopPlatformStageJobs(ctx context.Context) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+	s.platformStageJobs.stop(ctx)
 }
 
 func platformStagedBody(staged platformStagedRelease) map[string]any {

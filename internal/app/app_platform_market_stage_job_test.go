@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -191,6 +192,11 @@ func TestMarketStageRechecksAuthorityWhenTheDownloadFinishes(t *testing.T) {
 	if h.releases(t) != 0 {
 		t.Fatal("a release was staged for an actor who lost authority")
 	}
+	// Losing authority says nothing about the bytes: the finished download stays for the next request.
+	store, _ := h.s.platformImages()
+	if info, err := os.Stat(store.partialPath("catalogue:https://127.0.0.1/app.portalapp")); err != nil || info.Size() != int64(len(h.remote.pkg)) {
+		t.Fatal("the complete partial was discarded after an authority failure", err)
+	}
 	_, body := h.status(t)
 	if body.State != "failed" || body.ErrorCode != "app_platform_permission_required" {
 		t.Fatal(body)
@@ -327,5 +333,30 @@ func TestMarketStageJobsBoundRunningDownloads(t *testing.T) {
 	}
 	if _, err := jobs.start("kx", strings.Repeat("f", 64), platformActorSession{}, nil, run); !errors.Is(err, errPlatformManagementBusy) {
 		t.Fatal("a download over the bound started", err)
+	}
+}
+
+// Fails if one session joining twice is remembered twice, which would crowd other requesters out of the bound.
+func TestMarketStageJobsRememberEachSessionOnce(t *testing.T) {
+	var jobs platformMarketStageJobs
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block); jobs.stop(context.Background()) })
+	run := func(ctx context.Context, _ *platformMarketStageJob) (platformStagedRelease, error) {
+		select {
+		case <-block:
+		case <-ctx.Done():
+		}
+		return platformStagedRelease{}, nil
+	}
+	a, b := platformActorSession{sessionID: "a"}, platformActorSession{sessionID: "b"}
+	var job *platformMarketStageJob
+	for _, who := range []platformActorSession{a, a, b, a, b} {
+		var err error
+		if job, err = jobs.start("k", strings.Repeat("1", 64), who, nil, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := jobs.requesters(job); len(got) != 2 || got[0].sessionID != "a" || got[1].sessionID != "b" {
+		t.Fatal(got)
 	}
 }
