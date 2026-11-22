@@ -3,6 +3,8 @@ package app
 import (
 	"database/sql"
 	"errors"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 type platformAudienceOU struct {
@@ -71,7 +73,7 @@ func platformAudienceGrant(e migExec, account platformActorAccount, installation
 		lock = " FOR SHARE"
 	}
 	var grant string
-	err := e.queryRow(`SELECT id FROM app_platform_access_grants WHERE installation_id=? AND principal_type='user' AND username=? AND account_created=? AND account_generation=? LIMIT 1`+lock, installationID, account.username, account.created, account.generation).Scan(&grant)
+	err := e.queryRow(`SELECT id FROM app_platform_access_grants WHERE installation_id=? AND principal_type='user' AND username=? AND account_created=? AND account_generation=? LIMIT 1`+lock, installationID, account.username, appplatform.AccountCreatedMarker(account.created), account.generation).Scan(&grant)
 	if err == nil {
 		return nil
 	}

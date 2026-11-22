@@ -121,6 +121,7 @@ func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user
 		return nil
 	})
 	if err != nil {
+		logPlatformRefusal(r, err)
 		platformDocumentFailure(w)
 		return
 	}

@@ -346,6 +346,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		return err
 	})
 	if err != nil || ctx.Err() != nil {
+		logPlatformRefusal(r, err)
 		platformDocumentFailure(w)
 		return
 	}
@@ -367,6 +368,7 @@ func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, use
 	defer cancel()
 	document, err := s.readPlatformLaunchDocumentContext(ctx, session, expected)
 	if err != nil || ctx.Err() != nil {
+		logPlatformRefusal(r, err)
 		platformDocumentFailure(w)
 		return
 	}

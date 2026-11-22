@@ -65,7 +65,7 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	// Filter before LIMIT so another audience's records cannot consume this
 	// reader's page or leak a cursor naming an unauthorized installation.
 	principals := []string{`(g.principal_type='user' AND g.username=? AND g.account_created=? AND g.account_generation=?)`}
-	args := []any{after, account.username, account.created, account.generation}
+	args := []any{after, account.username, appplatform.AccountCreatedMarker(account.created), account.generation}
 	for _, group := range chain {
 		principals = append(principals, `(g.principal_type='ou' AND g.group_id=? AND g.group_created=?)`)
 		args = append(args, group.id, group.created)

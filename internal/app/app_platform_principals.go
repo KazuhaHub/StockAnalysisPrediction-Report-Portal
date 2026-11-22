@@ -302,7 +302,7 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		if !ok {
 			continue
 		}
-		allowed := grantedUsers[accountKey{name, created, generation}]
+		allowed := grantedUsers[accountKey{name, appplatform.AccountCreatedMarker(created), generation}]
 		if !allowed {
 			for _, id := range chain {
 				if want, ok := grantedOUs[id]; ok && graph.nodes[id].created == want {
@@ -314,7 +314,7 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		if !allowed {
 			continue
 		}
-		value, err := deriver.Account(appplatform.ViewerAccountIdentity{Name: name, Created: created, Generation: generation})
+		value, err := deriver.Account(appplatform.ViewerAccountIdentity{Name: name, Created: appplatform.AccountCreatedMarker(created), Generation: generation})
 		if err != nil {
 			continue
 		}
