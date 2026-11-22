@@ -10,7 +10,7 @@ import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import { useAuth } from '../../auth'
-import type { AppSummary, AppsResp, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
+import type { AppLayoutResp, AppSummary, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
 import { difyModeKind } from '../../lib/batchUi'
 import { DragHandle, SortableItem, useSortableSensors } from './dnd'
 import { LINK_ICON_OPTIONS, linkIconComponent } from '../../components/linkIcons'
@@ -80,7 +80,12 @@ export default function LinksPage() {
   }, [retryKey])
 
   useEffect(() => {
-    api.get<AppsResp>('/api/apps').then((r) => setAppList(r.apps || [])).catch(() => {})
+    // The administrator's layout, not the reader listing: closing an app for the administrator's own OU
+    // must not remove it from the entry-button picker.
+    api
+      .get<AppLayoutResp>('/api/admin/apps/layout')
+      .then((r) => setAppList((r.apps || []).filter((a) => !a.builtin).map((a) => ({ id: a.key, name: a.name }))))
+      .catch(() => {})
     if (canRun) {
       api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setBatchTargets(r.targets || [])).catch(() => {})
       api.get<{ targets: ChatTarget[] }>('/api/chat/targets').then((r) => setChatTargets(r.targets || [])).catch(() => {})

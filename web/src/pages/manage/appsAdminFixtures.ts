@@ -16,7 +16,16 @@ export const acc = (ou: number, own: boolean | null, effective: boolean, source_
 
 export const layout = (): AppLayoutEntry[] => [
   // Installed app, closed in both OUs.
-  { key: 'hello', name: 'Hello', builtin: false, access: [acc(1, false, false, 1), acc(2, null, false, 1)] },
+  {
+    key: 'hello',
+    name: 'Hello',
+    builtin: false,
+    icon: 'H',
+    version: '1.2.0',
+    entry: 'index.html',
+    scopes: ['query', 'extension.read'],
+    access: [acc(1, false, false, 1), acc(2, null, false, 1)],
+  },
   // Built-in, open everywhere through the system default.
   { key: 'builtin:batch', name: 'batch', builtin: true, access: [acc(1, null, true, 0), acc(2, null, true, 0)] },
   // Built-in, open on Default, overridden closed on Research.

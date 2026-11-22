@@ -114,13 +114,14 @@ describe('App detail: installed app', () => {
     expect(screen.getByRole('button', { name: /apps\.section\.uninstall\.title/ })).toBeTruthy()
   })
 
-  it('does not claim the app has no permissions when the installed list could not be read', async () => {
+  it('shows the installed app detail from the admin layout alone, without the reader listing', async () => {
     apiMock.get.mockImplementation(async (url: string) => {
       if (url === '/api/admin/apps/layout') return { apps: layout() }
-      throw new Error('boom')
+      throw new Error('the console must not read ' + url)
     })
     renderAt('/manage/apps/hello')
-    expect(await screen.findByText('apps.detail.installedFailed')).toBeTruthy()
+    expect(await screen.findByText('1.2.0')).toBeTruthy()
+    expect(screen.getByText('apps.scopeQuery')).toBeTruthy()
     expect(screen.queryByText('apps.permNone')).toBeNull()
   })
 

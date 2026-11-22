@@ -6,9 +6,11 @@ import LinksPage from './LinksPage'
 // Smoke test: the reworked LinksPage (single drag list of group headers + links) must mount
 // without crashing and render both a group header and a link. Guards against a render/hook
 // regression in the group rework.
+const requested: string[] = []
 vi.mock('../../api/client', () => ({
   api: {
     get: (url: string) => {
+      requested.push(url)
       if (url === '/api/admin/links')
         return Promise.resolve({
           links: [
@@ -42,6 +44,19 @@ describe('LinksPage', () => {
     expect(screen.getByText('External')).toBeTruthy()
     // The add-group action is present.
     expect(screen.getByText('links.addGroup')).toBeTruthy()
+  })
+})
+
+describe('the entry-button app picker', () => {
+  it('reads the administrator layout, never the reader listing that follows the switches', async () => {
+    render(
+      <App>
+        <LinksPage />
+      </App>,
+    )
+    await screen.findByText('GitHub')
+    expect(requested).toContain('/api/admin/apps/layout')
+    expect(requested).not.toContain('/api/apps')
   })
 })
 

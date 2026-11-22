@@ -145,9 +145,17 @@ func TestAppAccessResolution(t *testing.T) {
 	if open("rita", "beta") {
 		t.Fatal("a closed Default OU must close every OU below it")
 	}
-	// administrators are exempt from every row
-	if !open("admin", "alpha") || !open("admin", "beta") || !open("admin", "builtin:quotes") {
-		t.Fatal("administrators must always see every app")
+	// administrators resolve like everyone else (doc 190, D2a): the Default OU's closed row reaches
+	// an administrator who has no OU of their own, while rows on other OUs do not.
+	if open("admin", "beta") {
+		t.Fatal("a closed Default OU must close the app for an administrator too")
+	}
+	if !open("admin", "alpha") || !open("admin", "builtin:quotes") {
+		t.Fatal("rows on an OU the administrator is not in must not reach them")
+	}
+	e.putUserInOU("admin")
+	if open("admin", "builtin:quotes") {
+		t.Fatal("an administrator inside the closed OU must be closed out of the app")
 	}
 	// a Default row set back to null means open
 	e.mustSetAccess("beta", def, "null")
@@ -202,15 +210,23 @@ func TestClosedInstalledAppRefusesTokenAndAssetsAndLeavesTheListing(t *testing.T
 	if w := e.do("bob", "POST", "/api/apps/alpha/token", ""); w.Code != http.StatusOK {
 		t.Fatalf("bob (Default OU, no row) = %d", w.Code)
 	}
-	// administrators are exempt
+	// an administrator outside the closed OU resolves through the Default OU, where alpha is open
 	if w := e.do("admin", "POST", "/api/apps/alpha/token", ""); w.Code != http.StatusOK {
-		t.Fatalf("an administrator must still open a closed app: %d %s", w.Code, w.Body.String())
+		t.Fatalf("an administrator outside the closed OU must open the app: %d %s", w.Code, w.Body.String())
 	}
 	if w := e.do("admin", "GET", "/app-assets/alpha/index.html", ""); w.Code != http.StatusOK {
-		t.Fatalf("an administrator must still be served a closed app: %d", w.Code)
+		t.Fatalf("an administrator outside the closed OU must be served the app: %d", w.Code)
+	}
+	// administrators follow the switches: inside the closed OU the same requests are refused
+	e.putUserInOU("admin")
+	if w := e.do("admin", "POST", "/api/apps/alpha/token", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("an administrator in a closed OU minted a token: %d %s", w.Code, w.Body.String())
+	}
+	if w := e.do("admin", "GET", "/app-assets/alpha/index.html", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("an administrator in a closed OU was served the bundle: %d", w.Code)
 	}
 	apps, _, _ = e.listed("admin")
-	if !slices.Contains(apps, "alpha") {
+	if slices.Contains(apps, "alpha") {
 		t.Fatalf("admin listing = %v", apps)
 	}
 	// reopening restores access
@@ -230,16 +246,21 @@ func TestAnAnonymousAssetRequestIsStillServed(t *testing.T) {
 	}
 }
 
-func TestClosedBuiltinKeyIsReportedNotServerGated(t *testing.T) {
+// Quotes has no route of its own, so closing it only hides the entry; nothing is refused by the server.
+func TestClosedBuiltinKeyWithoutOwnedRoutesIsHiddenNotServerGated(t *testing.T) {
 	e := newAppsEnv(t)
 	e.mustSetAccess("builtin:quotes", e.ou, "false")
 	_, builtins, order := e.listed("rita")
 	if slices.Contains(builtins, "quotes") || slices.Contains(order, "builtin:quotes") || !slices.Contains(builtins, "batch") {
 		t.Fatalf("builtins %v order %v", builtins, order)
 	}
-	_, builtins, _ = e.listed("admin")
+	_, builtins, _ = e.listed("admin") // outside the closed OU, so the Default OU governs
 	if !slices.Contains(builtins, "quotes") {
-		t.Fatal("admin must see every built-in app")
+		t.Fatal("an administrator outside the closed OU must still see the app")
+	}
+	e.putUserInOU("admin")
+	if _, builtins, _ = e.listed("admin"); slices.Contains(builtins, "quotes") {
+		t.Fatal("an administrator in the closed OU is bound by the switch like everyone else")
 	}
 }
 

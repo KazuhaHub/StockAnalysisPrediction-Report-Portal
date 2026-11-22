@@ -18,6 +18,12 @@ import (
 
 const builtinAppPrefix = "builtin:"
 
+// appKeyRecurring is the one built-in key whose feature owns server routes (every
+// /api/admin/batch/recurring* route), which the OU switch therefore gates (routes.go). Batch and Quotes
+// have no route of their own: their pages share routes with the run dialog and the queue, so closing
+// them only hides the entry.
+const appKeyRecurring = builtinAppPrefix + "recurring"
+
 // builtinAppKeys is the compiled-in apps, in the order the hub has always listed them. The SPA owns
 // their names, routes and permissions (web/src/lib/builtinApps.ts); the server only needs the keys,
 // to validate an ordering or an access change and to report which are open.
@@ -183,8 +189,6 @@ func (s *Store) setAppAccessRow(e migExec, key string, ou int64, enabled *bool) 
 
 // appAccessView answers "may this user open this app" from one OU snapshot and one read of the rows.
 type appAccessView struct {
-	// admin is exempt: an administrator sees and opens every app, which is how they manage them.
-	admin bool
 	// deny closes everything, for an account that is unknown or deactivated.
 	deny  bool
 	chain []int64
@@ -206,9 +210,6 @@ func (v appAccessView) open(key string) bool {
 	if v.deny {
 		return false
 	}
-	if v.admin {
-		return true
-	}
 	return resolveAppAccess(v.chain, v.rows[key]).Effective
 }
 
@@ -220,9 +221,6 @@ func (s *Store) appAccessFor(user string) (appAccessView, error) {
 	}
 	if !sub.Active {
 		return appAccessView{deny: true}, nil
-	}
-	if can(sub.Role, PermManage) {
-		return appAccessView{admin: true}, nil
 	}
 	chain, err := snap.graph.policyChain(sub.EffectiveOU)
 	if err != nil {
@@ -242,14 +240,13 @@ func (s *Store) appAccessFor(user string) (appAccessView, error) {
 var appAccessSnapshotLoads atomic.Int64
 
 // appOpenForKey answers "may user open this one app" as cheaply as the answer allows. A user who no
-// longer exists or is deactivated is definitely closed (false, nil). An administrator is exempt, known
-// from the user row alone. An app with no access rows at all is open for everyone, which one indexed
+// longer exists or is deactivated is definitely closed (false, nil). Administrators follow the switches
+// like everyone else (doc 190, D2a). An app with no access rows at all is open for everyone, which one indexed
 // lookup on the primary key's prefix settles. Only an app with rows pays for the OU snapshot. A store
 // failure is the one error return.
 func (s *Store) appOpenForKey(user, key string) (bool, error) {
-	var role string
 	var active int
-	switch err := s.queryRow(`SELECT COALESCE(role,'user'),COALESCE(active,1) FROM users WHERE username=?`, user).Scan(&role, &active); {
+	switch err := s.queryRow(`SELECT COALESCE(active,1) FROM users WHERE username=?`, user).Scan(&active); {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
@@ -257,9 +254,6 @@ func (s *Store) appOpenForKey(user, key string) (bool, error) {
 	}
 	if active == 0 {
 		return false, nil
-	}
-	if can(role, PermManage) {
-		return true, nil
 	}
 	var one int
 	switch err := s.queryRow(`SELECT 1 FROM app_ou_access WHERE app_key=? LIMIT 1`, key).Scan(&one); {
@@ -393,10 +387,15 @@ type appAccessOU struct {
 }
 
 type appLayoutEntry struct {
-	Key     string        `json:"key"`
-	Name    string        `json:"name"`
-	Builtin bool          `json:"builtin"`
-	Icon    string        `json:"icon,omitempty"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Builtin bool   `json:"builtin"`
+	Icon    string `json:"icon,omitempty"`
+	// Version, Entry and Scopes describe an installed app. The console reads them here rather than
+	// from the reader listing, which shows an administrator only what the switches leave open.
+	Version string        `json:"version,omitempty"`
+	Entry   string        `json:"entry,omitempty"`
+	Scopes  []string      `json:"scopes,omitempty"`
 	Access  []appAccessOU `json:"access"`
 }
 
@@ -437,7 +436,11 @@ func (s *Server) appLayout() ([]appLayoutEntry, error) {
 		if slug, ok := strings.CutPrefix(key, builtinAppPrefix); ok {
 			e.Name, e.Builtin = slug, true
 		} else {
-			e.Name, e.Icon = byID[key].Name, byID[key].Icon
+			a := byID[key]
+			e.Name, e.Icon, e.Version, e.Entry, e.Scopes = a.Name, a.Icon, a.Version, a.Entry, a.Scopes
+			if e.Scopes == nil {
+				e.Scopes = []string{}
+			}
 		}
 		for _, id := range ous {
 			chain, ok := chains[id]

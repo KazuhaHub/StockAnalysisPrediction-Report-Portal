@@ -70,6 +70,27 @@ func (s *Server) sessionGated(mux *http.ServeMux, gate, pattern string, h handle
 	s.routeGated(mux, pattern, authSession, "", gate, s.requireUserJSON(h))
 }
 
+// gateFeaturePrefix marks a route that only one built-in feature uses; the rest of the gate string is
+// that feature's app key. The feature's per-OU switch is enforced on the route itself (doc 190, D2),
+// in addition to its credential guard. Shared routes carry no such gate.
+const gateFeaturePrefix = "app:"
+
+// featureGate answers 403 app_closed (503 if the policy cannot be read) when the feature is switched
+// off for the caller. It runs after the credential guard, so an unauthenticated or unauthorized caller
+// still meets that guard's answer first.
+func (s *Server) featureGate(key string, h handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, user string) {
+		if _, done := s.appOpenFor(w, user, key); done {
+			return
+		}
+		h(w, r, user)
+	}
+}
+
+func (s *Server) permFeature(mux *http.ServeMux, pattern, perm, key string, h handler) {
+	s.routeGated(mux, pattern, authPerm, perm, gateFeaturePrefix+key, s.requirePermJSON(perm, s.featureGate(key, h)))
+}
+
 func (s *Server) public(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
 	s.route(mux, pattern, authPublic, "", h)
 }
@@ -421,13 +442,13 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// ---- Recurring tasks (scheduled tasks; docs/adr/0018-recurring-tasks.md) ----
 	// PermRunBatch (operators schedule their own recurring runs, not admin-only); every handler
 	// checks ownership in-line (a non-admin sees/edits only their own tasks, an admin all).
-	s.perm(mux, "GET /api/admin/batch/recurring", PermRunBatch, s.apiRecurringList)
-	s.perm(mux, "POST /api/admin/batch/recurring", PermRunBatch, s.apiRecurringCreate)
-	s.perm(mux, "GET /api/admin/batch/recurring/{id}", PermRunBatch, s.apiRecurringDetail)
-	s.perm(mux, "PUT /api/admin/batch/recurring/{id}", PermRunBatch, s.apiRecurringUpdate)
-	s.perm(mux, "POST /api/admin/batch/recurring/{id}/enable", PermRunBatch, s.apiRecurringEnable)
-	s.perm(mux, "POST /api/admin/batch/recurring/{id}/run", PermRunBatch, s.apiRecurringRunNow)
-	s.perm(mux, "DELETE /api/admin/batch/recurring/{id}", PermRunBatch, s.apiRecurringDelete)
+	s.permFeature(mux, "GET /api/admin/batch/recurring", PermRunBatch, appKeyRecurring, s.apiRecurringList)
+	s.permFeature(mux, "POST /api/admin/batch/recurring", PermRunBatch, appKeyRecurring, s.apiRecurringCreate)
+	s.permFeature(mux, "GET /api/admin/batch/recurring/{id}", PermRunBatch, appKeyRecurring, s.apiRecurringDetail)
+	s.permFeature(mux, "PUT /api/admin/batch/recurring/{id}", PermRunBatch, appKeyRecurring, s.apiRecurringUpdate)
+	s.permFeature(mux, "POST /api/admin/batch/recurring/{id}/enable", PermRunBatch, appKeyRecurring, s.apiRecurringEnable)
+	s.permFeature(mux, "POST /api/admin/batch/recurring/{id}/run", PermRunBatch, appKeyRecurring, s.apiRecurringRunNow)
+	s.permFeature(mux, "DELETE /api/admin/batch/recurring/{id}", PermRunBatch, appKeyRecurring, s.apiRecurringDelete)
 
 	// ---- Storage cleanup console (docs/adr/0017-storage-cleanup.md): admin-only (PermManage) ----
 	s.admin(mux, "GET /api/admin/cleanup/config", s.apiCleanupConfigGet)
