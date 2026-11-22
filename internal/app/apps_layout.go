@@ -646,11 +646,11 @@ func (s *Server) platformLayoutDisplays(rows []platformInstallationRow) map[stri
 		if err != nil || record == nil {
 			continue
 		}
-		item := platformLayoutDisplay{version: record.version}
-		if display, name, ok := record.verified(trust, now, r.appID, record.publisher); ok {
-			item.display, item.publisherName = display, name
+		display, name, ok := record.verified(trust, now, r.appID, record.publisher)
+		if !ok {
+			continue
 		}
-		out[r.id] = item
+		out[r.id] = platformLayoutDisplay{version: record.version, display: display, publisherName: name}
 	}
 	return out
 }

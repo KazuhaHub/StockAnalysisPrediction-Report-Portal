@@ -40,7 +40,7 @@ func platformReadDisplayRecordFor(e migExec, installation string, current bool) 
 	var generation, policy, currentGeneration, currentPolicy int64
 	pick := ` AND a.state='active'`
 	if current {
-		pick = ` AND a.id=(SELECT id FROM app_platform_activations WHERE installation_id=i.id ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END,generation DESC,updated_ms DESC,id DESC LIMIT 1)`
+		pick = ` AND a.id=(SELECT id FROM app_platform_activations WHERE installation_id=i.id AND state<>'candidate' ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END,generation DESC,updated_ms DESC,id DESC LIMIT 1)`
 	}
 	err := e.queryRow(`SELECT r.sha256,r.app_id,r.publisher_id,r.verification_key_id,r.frontend_sha256,r.version,r.descriptor,r.signature,r.managed,a.state,a.generation,a.policy_revision,i.generation,i.policy_revision FROM app_platform_activations a JOIN app_platform_releases r ON r.sha256=a.release_sha256 JOIN app_platform_installations i ON i.id=a.installation_id WHERE a.installation_id=?`+pick+lock, installation).Scan(&record.release, &record.app, &record.publisher, &record.key, &record.frontend, &record.version, &record.raw, &record.signature, &record.managed, &state, &generation, &policy, &currentGeneration, &currentPolicy)
 	if errors.Is(err, sql.ErrNoRows) {

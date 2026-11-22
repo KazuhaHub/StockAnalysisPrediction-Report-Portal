@@ -55,7 +55,7 @@ func TestLayoutDisabledInstallationWithRevokedKeyFallsBackToAppID(t *testing.T) 
 	disablePlatformFixture(t, s, id)
 	mustExec(t, s.st, `UPDATE app_platform_publisher_keys SET revoked_ms=1`)
 	got := disabledLayoutEntry(t, s, id)
-	if got.Name != got.AppID || got.Display != nil || got.PublisherName != "" {
+	if got.Name != got.AppID || got.Display != nil || got.PublisherName != "" || got.Version != "" {
 		t.Fatalf("unverified release leaked its display: %+v", got)
 	}
 }
