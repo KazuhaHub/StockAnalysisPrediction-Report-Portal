@@ -31,6 +31,14 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]{0,63}$"
         },
+        "publisher_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Self-declared publisher display name. Display only; trust stays keyed on publisher. The strict parser requires NFC, no control or format characters, no surrounding or doubled spaces."
+        },
         "compatibility": {
           "$ref": "#/$defs/Compatibility"
         },
@@ -638,6 +646,15 @@
             "tool",
             "experiment"
           ]
+        },
+        "icon_png": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 21848,
+          "x-go-name": "IconPNG",
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Optional strict standard base64 PNG (at most 16 KiB decoded, square, 64-256 px). icon stays required as the fallback."
         },
         "texts": {
           "type": "array",

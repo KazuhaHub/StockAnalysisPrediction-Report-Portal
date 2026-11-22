@@ -105,6 +105,9 @@ func validManifest(m Manifest) bool {
 		strings.TrimSpace(m.Compatibility.PlatformAPI) == "" || strings.TrimSpace(m.Compatibility.RunnerProtocol) == "" {
 		return false
 	}
+	if !validPublisherName(m.PublisherName) {
+		return false
+	}
 	p := m.Presentation
 	if p.Display != nil && !validAppDisplay(*p.Display) {
 		return false

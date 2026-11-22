@@ -3,13 +3,14 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "7d0b5fcc91778b3a3ff456c6f368b5e21de0487a138e0b331d07c77920f6eb5e"
+const descriptorContractSHA256 = "7d987fb45b3233fd8daa2f45b3ff2a948959ce8055f5beeafb00b3705d6011a1"
 
 type Manifest struct {
 	Format        string            `json:"format"`
 	ID            string            `json:"id"`
 	Version       string            `json:"version"`
 	Publisher     string            `json:"publisher"`
+	PublisherName *string           `json:"publisher_name,omitempty"`
 	Compatibility Compatibility     `json:"compatibility"`
 	Presentation  Presentation      `json:"presentation"`
 	Frontend      Artifact          `json:"frontend"`
@@ -88,8 +89,9 @@ type DataMigration struct {
 	WallClockSeconds *int     `json:"wall_clock_seconds,omitempty"`
 }
 type AppDisplay struct {
-	Icon  string           `json:"icon"`
-	Texts []AppDisplayText `json:"texts"`
+	Icon    string           `json:"icon"`
+	IconPNG *string          `json:"icon_png,omitempty"`
+	Texts   []AppDisplayText `json:"texts"`
 }
 type AppDisplayText struct {
 	Locale      string `json:"locale"`
