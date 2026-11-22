@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Alert, Button, Card, Dropdown, Modal, Progress, Select, Space, Tag, Typography } from 'antd'
 import { ArrowUpOutlined, EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
@@ -36,7 +36,8 @@ export interface InstalledActionProps {
   uninstallable?: boolean
   busy: boolean
   onSwitchVersion: (version: string) => void
-  onLifecycle: (action: LifecycleAction) => void
+  /** `opener` is the more-actions button, where focus returns when the flow ends (the menu item itself is gone by then). */
+  onLifecycle: (action: LifecycleAction, opener?: HTMLElement | null) => void
   onViewInCatalogue: () => void
 }
 
@@ -48,6 +49,7 @@ export function updateOffer(app: AdminApp, catalogue?: PlatformMarketApp): strin
 /** Small icon buttons for an installed app: update, switch version, and the more menu. Used by the card and the list. */
 export function InstalledControls({ app, catalogue, uninstallable, busy, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
   const { t } = useTranslation()
+  const more = useRef<HTMLButtonElement>(null)
   const newest = updateOffer(app, catalogue)
   const lifecycleOK = app.platform && !!app.installationId && LIFECYCLE_STATES.includes(app.state ?? '')
   const recoveryUninstall = !lifecycleOK && app.platform && !!app.installationId && RECOVERY_STATES.includes(app.state ?? '') && !!uninstallable
@@ -79,8 +81,8 @@ export function InstalledControls({ app, catalogue, uninstallable, busy, onSwitc
         </Dropdown>
       )}
       {lifecycleItems.length > 0 && (
-        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction) } }} disabled={busy}>
-          <Button size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} title={t('appStore.more')} onClick={e => e.stopPropagation()} />
+        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction, more.current) } }} disabled={busy}>
+          <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} title={t('appStore.more')} onClick={e => e.stopPropagation()} />
         </Dropdown>
       )}
     </span>

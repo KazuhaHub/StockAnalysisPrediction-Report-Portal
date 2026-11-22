@@ -19,6 +19,9 @@ export const sourceName = (name: string, url: string, official: boolean) => {
 // app only when both match.
 export const sameApp = (a: AdminApp, c: { publisher_id: string; app_id: string }) => a.platform && !!a.publisherId && a.publisherId === c.publisher_id && a.appId === c.app_id
 
+/** The control that has focus right now, if it is one: what a flow returns focus to when it ends. */
+const focusedControl = (): HTMLElement | null => document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+
 /**
  * What the installed page and the install page share: the lifecycle flow, the catalogue, and the steps that turn
  * a catalogue entry or an offline package into a flow (download and verify, then review). Nothing an earlier
@@ -58,25 +61,26 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
   // A staged release goes to the lifecycle modal: as an install, as an update when it is for an installed app, as
   // an enable when it is the disabled installation's own release, or as an uninstall when that is all it allows.
   // Returns why not, when it cannot.
-  const openStaged = (release: PlatformRelease, installation?: string): string => {
+  const openStaged = (release: PlatformRelease, installation?: string, opener?: HTMLElement | null): string => {
     if (release.installed) return t('appStore.alreadyInstalled')
     const target = installation ?? release.installation_id
-    if (release.uninstallable && target) { lifecycle.begin({ ...release, installation_id: target }, 'uninstall'); return '' }
-    if (release.enableable && target) { lifecycle.begin({ ...release, installation_id: target }, 'enable'); return '' }
+    if (release.uninstallable && target) { lifecycle.begin({ ...release, installation_id: target }, 'uninstall', opener); return '' }
+    if (release.enableable && target) { lifecycle.begin({ ...release, installation_id: target }, 'enable', opener); return '' }
     // A version chosen for an installed app is always an update: the server, not this page, refuses a downgrade.
-    if (installation) { lifecycle.begin({ ...release, installation_id: installation }, 'update'); return '' }
-    if (release.installable) { lifecycle.begin(release, 'install'); return '' }
-    if (target) { lifecycle.begin({ ...release, installation_id: target }, 'update'); return '' }
+    if (installation) { lifecycle.begin({ ...release, installation_id: installation }, 'update', opener); return '' }
+    if (release.installable) { lifecycle.begin(release, 'install', opener); return '' }
+    if (target) { lifecycle.begin({ ...release, installation_id: target }, 'update', opener); return '' }
     return t(`appPlatform.reason.${release.reason}`, { defaultValue: t('appMarket.verificationChanged') })
   }
 
   /** Downloads and verifies one version, then opens its flow. Resolves to the failure text, '' for success, null if nothing happened. */
   const stageAndOpen = async (app: PlatformMarketApp, version: string, installation?: string): Promise<string | null> => {
+    const opener = focusedControl()
     const account = user, epoch = generation.current
     const result = await market.stage(app, version)
     if (!live(account, epoch) || !result) return null
     if ('error' in result) return result.error
-    return openStaged(result.release, installation)
+    return openStaged(result.release, installation, opener)
   }
 
   const installFromDetail = async (app: PlatformMarketApp, version: string) => {
@@ -110,13 +114,14 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     } finally { if (live(account, epoch)) setActing('') }
   }
 
-  const act = async (a: AdminApp, action: LifecycleAction) => {
+  const act = async (a: AdminApp, action: LifecycleAction, from?: HTMLElement | null) => {
     if (!a.installationId) return
+    const opener = from ?? focusedControl()
     const account = user, epoch = generation.current
     setActing(a.key)
     try {
       const release = await loadInstalledRelease(a.installationId, t)
-      if (live(account, epoch)) lifecycle.begin(release, action)
+      if (live(account, epoch)) lifecycle.begin(release, action, opener)
     } catch (e) { if (live(account, epoch)) notifyError(errText(e, t)) }
     finally { if (live(account, epoch)) setActing('') }
   }
@@ -125,10 +130,11 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     const chosen = e.target.files?.[0]
     e.target.value = ''
     if (!chosen) return
+    const opener = focusedControl()
     const account = user, epoch = generation.current
     const result = await market.stageOffline(chosen)
     if (!live(account, epoch) || !result) return
-    const problem = 'error' in result ? result.error : openStaged(result.release)
+    const problem = 'error' in result ? result.error : openStaged(result.release, undefined, opener)
     if (problem) notifyError(problem)
   }
 

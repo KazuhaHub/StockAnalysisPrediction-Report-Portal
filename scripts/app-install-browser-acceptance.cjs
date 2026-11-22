@@ -26,10 +26,16 @@ const desktopZoom200 = {
   zoom: 200,
 };
 
-function startFixture(scenario = "install") {
+function startFixture(scenario = "install", market = false) {
   const fixture = spawn(
     "python3",
-    ["-B", "scripts/app-install-browser-fixture.py", "--scenario", scenario],
+    [
+      "-B",
+      "scripts/app-install-browser-fixture.py",
+      "--scenario",
+      scenario,
+      ...(market ? ["--market"] : []),
+    ],
     {
       cwd: root,
       env: {
@@ -241,29 +247,70 @@ async function contrastStates(page, violations) {
     }), targets);
 }
 
-async function openReview(
-  page,
-  selectNoAudience = true,
-  rowText = "fixture-publisher",
-  buttonIndex = 0,
-) {
-  await page.getByRole("tab").nth(1).click();
-  await page.getByText(rowText, { exact: false }).first().waitFor({
-    timeout: 20_000,
-  });
-  const row = page
-    .getByRole("row")
-    .filter({ hasText: rowText })
+// Client-side navigation keeps the language, theme and session the page already has.
+async function navigateClient(page, pathname) {
+  await page.evaluate((target) => {
+    window.history.pushState({}, "", target);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, pathname);
+}
+
+// An installed platform app's card: the one that carries the more-actions menu (built-in apps have none).
+function installedCard(page) {
+  return page
+    .locator(".rp-app-card")
+    .filter({ has: page.locator(".rp-app-controls button:has(.anticon-ellipsis)") })
     .first();
-  await row.waitFor({ timeout: 20_000 });
-  if (selectNoAudience) {
-    await page.getByRole("checkbox").first().click();
+}
+
+// Opens the lifecycle dialog of one kind from the console and waits for its review. Resolves to the dialog and
+// the control that opened it, which must get focus back when the dialog closes.
+//   install: the catalogue page's Install button, then "Open to" -> Next (nothing selected keeps the app closed)
+//   update:  the installed card's update button (the catalogue offers a newer version)
+//   disable / uninstall / enable: the installed card's more-actions menu
+async function openReview(page, options) {
+  const kind = options.kind;
+  let trigger;
+  if (kind === "install") {
+    await navigateClient(page, "/manage/apps/install");
+    trigger = page.locator(".rp-market-card .rp-app-controls .ant-btn-primary").first();
+    await trigger.waitFor({ timeout: 20_000 });
+    await page.waitForFunction(
+      () => !document.querySelector(".rp-market-card .rp-app-controls .ant-btn-primary")?.disabled,
+    );
+    await trigger.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor({ timeout: 30_000 });
+    // Step one: who the app is open to. Closed to everyone is the default, so Next goes on.
+    await page.waitForTimeout(400);
+    await assertDialogViewport(page, `${options.name} audience step`);
+    await dialog.locator(".ant-modal-footer .ant-btn-primary").click();
+    await dialog.locator(".rp-platform-review").waitFor({ timeout: 20_000 });
+    return { dialog, trigger };
   }
-  const reviewButton = row.getByRole("button").nth(buttonIndex);
-  await reviewButton.click();
+  await navigateClient(page, "/manage/apps");
+  const card = installedCard(page);
+  await card.waitFor({ timeout: 20_000 });
+  if (kind === "update") {
+    trigger = card.locator(".rp-app-update");
+    await trigger.waitFor({ timeout: 20_000 });
+    await trigger.click();
+  } else {
+    trigger = card.locator(".rp-app-controls button:has(.anticon-ellipsis)");
+    await trigger.click();
+    const label = { disable: "Disable", enable: "Enable", uninstall: "Uninstall" }[kind];
+    await page.getByRole("menuitem", { name: label, exact: true }).click();
+  }
   const dialog = page.getByRole("dialog");
-  await dialog.waitFor();
-  return { dialog, reviewButton };
+  await dialog.waitFor({ timeout: 30_000 });
+  await dialog.locator(".rp-platform-review").waitFor({ timeout: 20_000 });
+  return { dialog, trigger };
+}
+
+async function seriousViolations(audit) {
+  return (await audit).filter(
+    (violation) => violation.impact === "critical" || violation.impact === "serious",
+  );
 }
 
 async function scenario(browser, url, options) {
@@ -277,7 +324,7 @@ async function scenario(browser, url, options) {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    if (message.type() === "error") errors.push(`${message.text()} ${message.location().url}`);
   });
   try {
     await page.goto(url, { waitUntil: "networkidle" });
@@ -285,13 +332,8 @@ async function scenario(browser, url, options) {
     if (options.dark) {
       await page.getByRole("button", { name: "Toggle theme", exact: true }).click();
     }
-    await page.getByRole("tab").nth(1).waitFor();
-    const { dialog, reviewButton } = await openReview(
-      page,
-      options.selectNoAudience !== false,
-      options.rowText,
-      options.buttonIndex ?? 0,
-    );
+    await page.getByRole("tab").first().waitFor();
+    const { dialog, trigger } = await openReview(page, options);
     await page.waitForTimeout(400);
     await assertDialogViewport(page, options.name);
     const violations = await auditDialog(page);
@@ -313,16 +355,19 @@ async function scenario(browser, url, options) {
         `axe violations in ${options.name}: ${JSON.stringify(serious)} ${JSON.stringify(footerStyles)}`,
       );
     }
+    const text = (await dialog.innerText()).toLowerCase().replace(/\s+/g, " ");
+    for (const expected of options.reviewText ?? []) {
+      if (!text.includes(expected.toLowerCase())) {
+        throw new Error(`${options.name} review is missing "${expected}": ${text}`);
+      }
+    }
     const base = path.join(output, options.name);
     await page.screenshot({ path: `${base}-review.png`, fullPage: false });
-    await dialog.getByRole("button").first().click();
+    await dialog.locator(".ant-modal-footer button").first().click();
     await dialog.waitFor({ state: "hidden" });
-    if (
-      !(await reviewButton.evaluate(
-        (element) => document.activeElement === element,
-      ))
-    ) {
-      throw new Error(`${options.name} did not restore trigger focus`);
+    if (!(await trigger.evaluate((element) => document.activeElement === element))) {
+      const active = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 200));
+      throw new Error(`${options.name} did not restore trigger focus (active: ${active})`);
     }
     if (errors.length) {
       throw new Error(`${options.name} console/page errors: ${errors.join(" | ")}`);
@@ -350,33 +395,49 @@ async function installScenario(browser, url) {
   page.setDefaultTimeout(20_000);
   try {
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByRole("tab").nth(1).click();
-    const row = page
-      .getByRole("row")
-      .filter({ hasText: "fixture-publisher" });
-    await page.getByRole("checkbox").first().click();
-    await row.getByRole("button").first().click();
+    // The way in is the console's own Install button, which opens the catalogue page.
+    await page.getByRole("button", { name: "Install app", exact: true }).click();
+    await page.waitForURL(/\/manage\/apps\/install$/);
+    const install = page.locator(".rp-market-card .rp-app-controls .ant-btn-primary").first();
+    await install.waitFor();
+    await page.waitForFunction(
+      () => !document.querySelector(".rp-market-card .rp-app-controls .ant-btn-primary")?.disabled,
+    );
+    await install.click();
     const dialog = page.getByRole("dialog");
-    await dialog.waitFor();
-    await dialog.getByRole("button").last().click();
+    await dialog.waitFor({ timeout: 30_000 });
+    await dialog.getByRole("button", { name: "Next", exact: true }).click();
+    await dialog.locator(".rp-platform-review").waitFor();
+    await dialog.getByRole("button", { name: "Confirm installation", exact: true }).click();
     await page.waitForURL(/[?&]operation=[0-9a-f-]{36}(?:&|$)/);
-    await page.getByText("Operation complete", { exact: true }).waitFor({
+    await dialog.getByText("Operation complete", { exact: true }).waitFor({
       timeout: 60_000,
     });
-    const installedRow = page
-      .getByRole("row")
-      .filter({ hasText: "fixture-publisher" });
-    await installedRow
-      .getByRole("button", { name: "Review disable" })
-      .waitFor();
-    if (await installedRow.getByRole("button", { name: "Review installation" }).count()) {
+    await dialog.getByRole("button", { name: "Done", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    // Installed now: the catalogue no longer offers it, and its card on the console offers disable, not install.
+    // The empty-catalogue notice says the grid has loaded and holds nothing left to install.
+    await page.getByText("This catalogue has no new apps to install.", { exact: true }).waitFor();
+    if (await page.locator(".rp-market-card").count()) {
       throw new Error("completed operation still offered installation");
     }
+    await navigateClient(page, "/manage/apps");
+    const card = installedCard(page);
+    await card.waitFor();
+    if (await card.getByRole("button", { name: "Install", exact: true }).count()) {
+      throw new Error("installed card still offered installation");
+    }
+    await card.locator(".rp-app-controls button:has(.anticon-ellipsis)").click();
+    await page.getByRole("menuitem", { name: "Disable", exact: true }).waitFor();
+    if (await page.getByRole("menuitem", { name: "Install", exact: true }).count()) {
+      throw new Error("installed app's menu offered installation");
+    }
+    await page.keyboard.press("Escape");
     await page.screenshot({
       path: path.join(output, "install-complete-1440-en-light.png"),
       fullPage: true,
     });
-    return { operation: new URL(page.url()).searchParams.get("operation") };
+    return { installed: true };
   } catch (error) {
     await page.screenshot({
       path: path.join(output, "install-complete-1440-en-light-failure.png"),
@@ -391,7 +452,8 @@ async function installScenario(browser, url) {
   }
 }
 
-async function uninstallScenario(browser, url) {
+// Disable and uninstall state their data boundary in the review; this reads those words from the real dialog.
+async function boundaryScenario(browser, url, { kind, name, expected }) {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
   });
@@ -399,93 +461,27 @@ async function uninstallScenario(browser, url) {
   page.setDefaultTimeout(20_000);
   try {
     await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByRole("tab").nth(1).click();
-    const row = page
-      .getByRole("row")
-      .filter({ hasText: "fixture-publisher" })
-      .first();
-    await row.waitFor();
-    const trigger = row
-      .getByRole("button")
-      .filter({ hasText: "Review uninstall" });
-    await trigger.click();
-    const dialog = page.getByRole("dialog");
-    await dialog.waitFor();
+    const { dialog, trigger } = await openReview(page, { kind, name });
     await page.waitForTimeout(400);
-    const text = await dialog.innerText();
-    const normalized = text.toLowerCase().replace(/\s+/g, " ");
-    if (
-      !normalized.includes("other plugins are unaffected") ||
-      !normalized.includes("no other installation uses it")
-    ) {
-      throw new Error(
-        `uninstall review did not state its isolation boundary: ${text}`,
-      );
+    const text = (await dialog.innerText()).toLowerCase().replace(/\s+/g, " ");
+    for (const phrase of expected) {
+      if (!text.includes(phrase)) {
+        throw new Error(`${name} did not state its boundary "${phrase}": ${text}`);
+      }
     }
-    await assertDialogViewport(page, "uninstall review");
-    const violations = (await auditDialog(page)).filter(
-      (violation) =>
-        violation.impact === "critical" || violation.impact === "serious",
-    );
+    await assertDialogViewport(page, name);
+    const violations = await seriousViolations(auditDialog(page));
     if (violations.length) {
-      throw new Error(`uninstall review axe: ${JSON.stringify(violations)}`);
+      throw new Error(`${name} axe: ${JSON.stringify(violations)}`);
     }
     await page.screenshot({
-      path: path.join(output, "uninstall-review-1440-en-light.png"),
+      path: path.join(output, `${name}-1440-en-light.png`),
       fullPage: false,
     });
-    await dialog.getByRole("button").first().click();
+    await dialog.locator(".ant-modal-footer button").first().click();
     await dialog.waitFor({ state: "hidden" });
     if (!(await trigger.evaluate((element) => document.activeElement === element))) {
-      throw new Error("uninstall review did not restore trigger focus");
-    }
-    return { violations };
-  } finally {
-    await context.close();
-  }
-}
-
-async function disableScenario(browser, url) {
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-  });
-  const page = await context.newPage();
-  page.setDefaultTimeout(20_000);
-  try {
-    await page.goto(url, { waitUntil: "networkidle" });
-    await page.getByRole("tab").nth(1).click();
-    const row = page
-      .getByRole("row")
-      .filter({ hasText: "fixture-publisher" })
-      .first();
-    await row.waitFor();
-    const trigger = row
-      .getByRole("button")
-      .filter({ hasText: "Review disable" });
-    await trigger.click();
-    const dialog = page.getByRole("dialog");
-    await dialog.waitFor();
-    await page.waitForTimeout(400);
-    const text = await dialog.innerText();
-    if (!text.includes("data is retained")) {
-      throw new Error("disable review did not state the retained-data boundary");
-    }
-    await assertDialogViewport(page, "disable review");
-    const violations = (await auditDialog(page)).filter(
-      (violation) =>
-        violation.impact === "critical" || violation.impact === "serious",
-    );
-    if (violations.length) {
-      throw new Error(`disable review axe: ${JSON.stringify(violations)}`);
-    }
-    await page.screenshot({
-      path: path.join(output, "disable-review-1440-en-light.png"),
-      fullPage: false,
-    });
-    await dialog.getByRole("button").first().click();
-    await dialog.waitFor({ state: "hidden" });
-    if (!(await trigger.evaluate((element) => document.activeElement === element))) {
-      throw new Error("disable review did not restore trigger focus");
+      throw new Error(`${name} did not restore trigger focus`);
     }
     return { violations };
   } finally {
@@ -503,16 +499,21 @@ async function progressScenario(browser, url, expected, name, options = {}) {
   page.setDefaultTimeout(20_000);
   try {
     await page.goto(url, { waitUntil: "networkidle" });
-    const status = page.locator('div[role="status"]');
+    // Progress is the third step of the lifecycle dialog, resumed from ?operation=.
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor();
+    const status = dialog.locator('div[role="status"]');
     await status.waitFor();
-    await page.getByText("Operation progress", { exact: true }).waitFor();
+    await page.getByText(expected, { exact: true }).waitFor();
     const text = await status.innerText();
     if (!text.includes(expected)) {
       throw new Error(`progress state ${expected} missing: ${text}`);
     }
-    if (await page.getByRole("link", { name: "Go to applications" }).count()) {
-      throw new Error(`nonterminal progress exposed completion link: ${expected}`);
+    if (await dialog.getByRole("link").count()) {
+      throw new Error(`nonterminal progress exposed a completion link: ${expected}`);
     }
+    await page.waitForTimeout(400);
+    await assertDialogViewport(page, name);
     const geometry = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       width: window.innerWidth,
@@ -520,7 +521,7 @@ async function progressScenario(browser, url, expected, name, options = {}) {
     if (geometry.scrollWidth > geometry.width + 1) {
       throw new Error(`progress state overflowed: ${expected}`);
     }
-    const violations = (await auditPage(page)).filter(
+    const violations = (await auditDialog(page)).filter(
       (violation) =>
         violation.impact === "critical" || violation.impact === "serious",
     );
@@ -685,6 +686,8 @@ async function settingsScenario(browser, url, options) {
       await dialog.locator(".ant-modal-footer button").first().click();
       await dialog.waitFor({ state: "hidden" });
     }
+    // Colour transitions (the theme switch fades the tab bar too) must finish before contrast is measured.
+    await page.waitForTimeout(600);
     const violations = (await auditPage(page)).filter(
       (violation) =>
         violation.impact === "critical" || violation.impact === "serious",
@@ -710,7 +713,12 @@ async function settingsScenario(browser, url, options) {
 async function main() {
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      ...(process.env.APP_INSTALL_BROWSER_EXECUTABLE
+        ? { executablePath: process.env.APP_INSTALL_BROWSER_EXECUTABLE }
+        : {}),
+    });
     const report = {
       gitCommit: execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: root,
@@ -721,100 +729,125 @@ async function main() {
       disable: null,
       uninstall: null,
     };
-    async function withFixture(mode, run) {
-      const { fixture, outputLog } = startFixture(mode);
+    // `market` serves the owned synthetic catalogue: the install scenario offers a new app, the updateable
+    // scenario offers the newer version of the installed one.
+    async function withFixture(mode, run, market = false) {
+      const { fixture, outputLog } = startFixture(mode, market);
       try {
         return await run(await fixtureUrl(fixture, outputLog));
       } finally {
         await closeFixture(fixture);
       }
     }
-    await withFixture("install", async (url) => {
-      for (const options of [
-        {
-          name: "install-review-1440-en-light",
-          language: "English",
-          dark: false,
-          viewport: { width: 1440, height: 900 },
-        },
-        {
-          name: "install-review-320-zh-cn-dark",
-          language: "Simplified Chinese",
-          dark: true,
-          viewport: { width: 320, height: 800 },
-        },
-        {
-          name: "install-review-390-zh-tw-light",
-          language: "Traditional Chinese",
-          dark: false,
-          viewport: { width: 390, height: 844 },
-        },
-      ]) {
-        report.scenarios.push(await scenario(browser, url, options));
-      }
-      report.scenarios.push(
-        await scenario(browser, url, {
-          name: "install-review-1440-en-light-zoom-200",
-          language: "English",
-          dark: false,
-          ...desktopZoom200,
-        }),
-      );
-      report.install = await installScenario(browser, url);
-      report.scenarios.push(
-        await scenario(browser, url, {
-          name: "disable-review-1440-en-light-zoom-200",
-          language: "English",
-          dark: false,
-          selectNoAudience: false,
-          ...desktopZoom200,
-        }),
-        await scenario(browser, url, {
-          name: "uninstall-review-1440-en-light-zoom-200",
-          language: "English",
-          dark: false,
-          selectNoAudience: false,
-          buttonIndex: 1,
-          ...desktopZoom200,
-        }),
-      );
-      report.disable = await disableScenario(browser, url);
-      report.uninstall = await uninstallScenario(browser, url);
-    });
-    await withFixture("updateable", async (url) => {
-      report.scenarios.push(
-        await scenario(browser, url, {
-          name: "update-review-1440-en-light",
-          language: "English",
-          dark: false,
-          viewport: { width: 1440, height: 900 },
-          selectNoAudience: false,
-          rowText: "1.0.0-beta.2",
-        }),
-        await scenario(browser, url, {
-          name: "update-review-1440-en-light-zoom-200",
-          language: "English",
-          dark: false,
-          selectNoAudience: false,
-          rowText: "1.0.0-beta.2",
-          ...desktopZoom200,
-        }),
-      );
-    });
+    await withFixture(
+      "install",
+      async (url) => {
+        for (const options of [
+          {
+            name: "install-review-1440-en-light",
+            language: "English",
+            dark: false,
+            viewport: { width: 1440, height: 900 },
+          },
+          {
+            name: "install-review-320-zh-cn-dark",
+            language: "Simplified Chinese",
+            dark: true,
+            viewport: { width: 320, height: 800 },
+          },
+          {
+            name: "install-review-390-zh-tw-light",
+            language: "Traditional Chinese",
+            dark: false,
+            viewport: { width: 390, height: 844 },
+          },
+        ]) {
+          report.scenarios.push(
+            await scenario(browser, url, { kind: "install", ...options }),
+          );
+        }
+        report.scenarios.push(
+          await scenario(browser, url, {
+            kind: "install",
+            name: "install-review-1440-en-light-zoom-200",
+            language: "English",
+            dark: false,
+            ...desktopZoom200,
+          }),
+        );
+        report.install = await installScenario(browser, url);
+        report.scenarios.push(
+          await scenario(browser, url, {
+            kind: "disable",
+            name: "disable-review-1440-en-light-zoom-200",
+            language: "English",
+            dark: false,
+            ...desktopZoom200,
+          }),
+          await scenario(browser, url, {
+            kind: "uninstall",
+            name: "uninstall-review-1440-en-light-zoom-200",
+            language: "English",
+            dark: false,
+            ...desktopZoom200,
+          }),
+        );
+        report.disable = await boundaryScenario(browser, url, {
+          kind: "disable",
+          name: "disable-review",
+          expected: ["data is retained"],
+        });
+        report.uninstall = await boundaryScenario(browser, url, {
+          kind: "uninstall",
+          name: "uninstall-review",
+          expected: [
+            "other plugins are unaffected",
+            "no other installation uses it",
+          ],
+        });
+      },
+      true,
+    );
+    await withFixture(
+      "updateable",
+      async (url) => {
+        report.scenarios.push(
+          await scenario(browser, url, {
+            kind: "update",
+            name: "update-review-1440-en-light",
+            // The card's update button must open an update review, for the staged version.
+            reviewText: ["Confirm update plan", "1.0.0-beta.2"],
+            language: "English",
+            dark: false,
+            viewport: { width: 1440, height: 900 },
+          }),
+          await scenario(browser, url, {
+            kind: "update",
+            name: "update-review-1440-en-light-zoom-200",
+            // The card's update button must open an update review, for the staged version.
+            reviewText: ["Confirm update plan", "1.0.0-beta.2"],
+            language: "English",
+            dark: false,
+            ...desktopZoom200,
+          }),
+        );
+      },
+      true,
+    );
     await withFixture("disabled", async (url) => {
       report.scenarios.push(
         await scenario(browser, url, {
+          kind: "enable",
           name: "enable-review-1440-en-light",
           language: "English",
           dark: false,
           viewport: { width: 1440, height: 900 },
-          selectNoAudience: false,
         }),
         await scenario(browser, url, {
+          kind: "enable",
           name: "enable-review-1440-en-light-zoom-200",
           language: "English",
           dark: false,
-          selectNoAudience: false,
           ...desktopZoom200,
         }),
       );

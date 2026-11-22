@@ -234,9 +234,11 @@ export function usePlatformLifecycle(onChange?: () => void) {
   }
 
   /** Starts a flow. An install first asks who can use the app; every other action goes straight to its review. */
-  const begin = (release: PlatformRelease, action: LifecycleAction) => {
+  // `opener` is the control the person used, captured before any download: it may have lost focus by now (a button
+  // is disabled while a package downloads), and it is where focus returns when the flow ends.
+  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null) => {
     if (writing.current || intent) return
-    trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     const next = { release, action }
     setTarget(next); setSelected([]); setReview(null); setActionError(''); setHidden(false)
     if (action !== 'install') void plan(next, [])

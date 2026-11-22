@@ -3336,6 +3336,15 @@ body {
 .rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover { background: #003eb3; border-color: #003eb3; }
 .rp-platform-review-modal .ant-btn-dangerous { background: #a8071a; border-color: #a8071a; }
 .rp-platform-review-modal .ant-btn-dangerous:not(:disabled):hover { background: #820014; border-color: #820014; }
+/* The progress step's status tag: antd's filled tones fall short of 4.5:1 on the modal surface, so each tone gets a darker text colour. */
+.rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-processing { color: #0958d9; background: #e6f4ff; border-color: #91caff; }
+.rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-success { color: #237804; background: #f6ffed; border-color: #b7eb8f; }
+.rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-warning { color: #ad4e00; background: #fffbe6; border-color: #ffe58f; }
+.rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-error { color: #a8071a; background: #fff2f0; border-color: #ffccc7; }
+:root[data-theme='dark'] .rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-processing { color: #69b1ff; background: #111a2c; border-color: #15325b; }
+:root[data-theme='dark'] .rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-success { color: #73d13d; background: #162312; border-color: #274916; }
+:root[data-theme='dark'] .rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-warning { color: #ffc53d; background: #2b2111; border-color: #594214; }
+:root[data-theme='dark'] .rp-platform-review-modal .ant-tag.ant-tag-filled.ant-tag-error { color: #ff7875; background: #2a1215; border-color: #58181c; }
 .rp-platform-review-modal .ant-modal-footer .ant-btn-default,
 .rp-platform-review-modal .ant-modal-footer .ant-btn-default > span { color: var(--ant-color-text) !important; border-color: var(--ant-color-primary); }
 .rp-platform-review-modal { top: 24px; width: min(640px, calc(100vw - 24px)) !important; padding-bottom: 24px; }
@@ -3431,3 +3440,7 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 @media (prefers-reduced-motion: reduce) {
   .rp-app-card { transition: none; }
 }
+
+/* The apps console tabs: antd's dark primary is too dark for the active tab's label on a black surface (below 4.5:1). */
+:root[data-theme='dark'] .rp-apps-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn,
+:root[data-theme='dark'] .rp-apps-tabs > .ant-tabs-nav .ant-tabs-tab:hover .ant-tabs-tab-btn { color: #69b1ff; }

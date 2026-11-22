@@ -26,7 +26,7 @@ export const appsTabPath = (tab: AppsTab) => (tab === 'apps' ? '/manage/apps' : 
 export default function AppsConsoleTabs({ active, onChange, panes }: { active: AppsTab; onChange?: (tab: AppsTab) => void; panes?: Partial<Record<AppsTab, ReactNode>> }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  return <Tabs activeKey={active} onTabClick={(key) => { const tab = key as AppsTab; if (onChange) onChange(tab); else navigate(appsTabPath(tab)) }}
+  return <Tabs className="rp-apps-tabs" activeKey={active} onTabClick={(key) => { const tab = key as AppsTab; if (onChange) onChange(tab); else navigate(appsTabPath(tab)) }}
     items={APPS_TABS.map((key) => ({ key, label: t(LABELS[key]), children: panes?.[key] }))} />
 }
 

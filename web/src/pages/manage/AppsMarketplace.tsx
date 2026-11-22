@@ -82,7 +82,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
       uninstallable: !!a.installationId && uninstallable[a.installationId],
       busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
       onSwitchVersion: (version: string) => { if (cat && !busy) void flow.switchVersion(a, cat, version) },
-      onLifecycle: (action: Parameters<typeof flow.act>[1]) => { if (!busy) void flow.act(a, action) },
+      onLifecycle: (action: Parameters<typeof flow.act>[1], opener?: HTMLElement | null) => { if (!busy) void flow.act(a, action, opener) },
       onViewInCatalogue: () => { if (cat) flow.openDetail(cat) },
     }
   }
