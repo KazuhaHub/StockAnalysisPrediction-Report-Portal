@@ -102,6 +102,9 @@ export default function AppsHub() {
   // A platform installation sits in the same sequence under `platform:<installation id>`. Its card comes
   // from the directory (state, display); one the sequence does not name (an older server, or an
   // installation opened after the list was read) follows the ordered ones.
+  // The launcher lists what this reader can use. A disabled app is never listed (it is managed in the
+  // console); an administrator still sees one that needs setup or attention, with its recovery link.
+  const listed = directory.items.filter((a) => a.openable || (admin && a.state !== 'disabled'))
   const entries: HubEntry[] = []
   const placed = new Set<string>()
   for (const key of keys) {
@@ -109,7 +112,7 @@ export default function AppsHub() {
       const app = BUILTIN_APPS.find((a) => a.key === key.slice(BUILTIN_PIN_PREFIX.length))
       if (app && (!app.perm || can(app.perm))) entries.push({ kind: 'builtin', app })
     } else if (key.startsWith(PLATFORM_KEY_PREFIX)) {
-      const item = directory.items.find((a) => a.installationId === key.slice(PLATFORM_KEY_PREFIX.length))
+      const item = listed.find((a) => a.installationId === key.slice(PLATFORM_KEY_PREFIX.length))
       if (item) {
         placed.add(item.installationId)
         entries.push({ kind: 'platform', item })
@@ -119,7 +122,7 @@ export default function AppsHub() {
       if (app) entries.push({ kind: 'installed', app })
     }
   }
-  for (const item of directory.items) if (!placed.has(item.installationId)) entries.push({ kind: 'platform', item })
+  for (const item of listed) if (!placed.has(item.installationId)) entries.push({ kind: 'platform', item })
   const isEmpty = entries.length === 0
 
   return (

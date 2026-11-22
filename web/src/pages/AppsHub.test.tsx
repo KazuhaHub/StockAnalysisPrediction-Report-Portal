@@ -96,7 +96,7 @@ describe('AppsHub', () => {
     expect(await screen.findByText('apps.empty')).toBeTruthy()
   })
 
-  it('shows truthful directory states and an admin recovery link without exposing internals', async () => {
+  it('shows an administrator the states that need action, but never a disabled app', async () => {
     directoryState.items = [
       { installationId: '11111111-1111-4111-8111-111111111111', applicationId: 'setup-app', state: 'setup_required', openable: false },
       { installationId: '22222222-2222-4222-8222-222222222222', applicationId: 'disabled-app', state: 'disabled', openable: false },
@@ -105,16 +105,16 @@ describe('AppsHub', () => {
     apiMock.get.mockResolvedValue({ apps: [], builtin_apps: [], order: [] })
     renderHub()
     expect(await screen.findByText('apps.v2Hint.setup_required')).toBeTruthy()
-    expect(screen.getByText('apps.v2Hint.disabled')).toBeTruthy()
+    expect(screen.queryByText('disabled-app')).toBeNull()
+    expect(screen.queryByText('apps.v2Hint.disabled')).toBeNull()
     expect(screen.getByText('apps.v2Hint.attention')).toBeTruthy()
-    expect(screen.getAllByRole('link', { name: /apps\.v2Manage/ })).toHaveLength(3)
+    expect(screen.getAllByRole('link', { name: /apps\.v2Manage/ })).toHaveLength(2)
     expect(screen.getAllByRole('link', { name: /apps\.v2Manage/ }).map((link) => link.getAttribute('href'))).toEqual([
       '/manage/apps/installations/11111111-1111-4111-8111-111111111111',
-      '/manage/apps/installations/22222222-2222-4222-8222-222222222222',
       '/manage/apps/installations/33333333-3333-4333-8333-333333333333',
     ])
     const statusButtons = screen.getAllByRole('button', { name: 'apps.status.openFor' })
-    expect(statusButtons).toHaveLength(3)
+    expect(statusButtons).toHaveLength(2)
     for (const button of statusButtons) {
       expect((button as HTMLButtonElement).disabled).toBe(false)
       expect(button.getAttribute('aria-disabled')).toBeNull()
@@ -130,14 +130,17 @@ describe('AppsHub', () => {
     expect(result.violations).toEqual([])
   })
 
-  it('does not expose the management action to a non-admin reader', async () => {
+  it('shows a reader only the apps they can open', async () => {
     authState.admin = false
     directoryState.items = [
       { installationId: '11111111-1111-4111-8111-111111111111', applicationId: 'disabled-app', state: 'disabled', openable: false },
+      { installationId: '22222222-2222-4222-8222-222222222222', applicationId: 'setup-app', state: 'setup_required', openable: false },
+      { installationId: '33333333-3333-4333-8333-333333333333', applicationId: 'broken-app', state: 'attention', openable: false },
     ]
     apiMock.get.mockResolvedValue({ apps: [], builtin_apps: [], order: [] })
     renderHub()
-    expect(await screen.findByText('apps.v2Hint.disabled')).toBeTruthy()
+    expect(await screen.findByText('apps.empty')).toBeTruthy()
+    for (const name of ['disabled-app', 'setup-app', 'broken-app']) expect(screen.queryByText(name)).toBeNull()
     expect(screen.queryByRole('link', { name: /apps\.v2Manage/ })).toBeNull()
   })
 
