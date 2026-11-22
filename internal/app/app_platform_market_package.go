@@ -76,6 +76,11 @@ func (c *platformMarketClient) fetchPartToFile(ctx context.Context, client *http
 	if offset > limit {
 		return false, 0, truncateAndFail(file)
 	}
+	if offset == limit {
+		// A held file of exactly the expected size (an OCI layer's pinned size) is complete: nothing to ask for.
+		// Its digest or its signed content is verified by the caller.
+		return true, offset, nil
+	}
 	request := (&http.Request{Method: http.MethodGet, URL: target, Header: make(http.Header), Host: target.Host}).WithContext(ctx)
 	request.Header.Set("Accept-Encoding", "identity")
 	if token != "" {
@@ -120,6 +125,11 @@ func (c *platformMarketClient) fetchPartToFile(ctx context.Context, client *http
 		}
 		total = all
 	case http.StatusRequestedRangeNotSatisfiable:
+		// "bytes */N" names the size of the file. A held file of exactly that size is the whole file (a staging
+		// that failed after the download, or a download whose last step was lost), so it is kept and verified.
+		if offset > 0 && parseMarketUnsatisfiedRange(response.Header.Get("Content-Range")) == offset {
+			return true, offset, nil
+		}
 		// The held prefix does not fit the file as it is now: start again from nothing.
 		return false, 0, truncateAndFail(file)
 	default:
@@ -147,6 +157,19 @@ func (c *platformMarketClient) fetchPartToFile(ctx context.Context, client *http
 		return false, 0, errPlatformMarketFetch
 	}
 	return true, size, nil
+}
+
+// parseMarketUnsatisfiedRange reads the size from the "bytes */N" of a 416 answer, or -1.
+func parseMarketUnsatisfiedRange(value string) int64 {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(value), "bytes */")
+	if !ok {
+		return -1
+	}
+	n, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || n < 0 {
+		return -1
+	}
+	return n
 }
 
 func truncateAndFail(file *os.File) error {
@@ -177,8 +200,9 @@ func platformPackageKey(entry appplatform.CatalogueRelease) string {
 }
 
 // fetchAndStagePlatformPackageAdmitted is fetchAndStagePlatformPackage with admit, when set, called before the
-// verification and storage step: it takes the slot that step needs, or refuses.
-func (s *Server) fetchAndStagePlatformPackageAdmitted(ctx context.Context, actor platformActorSession, client *platformMarketClient, entry appplatform.CatalogueRelease, descriptor, signature []byte, admit func() (func(), error)) (platformStagedRelease, error) {
+// verification and storage step: it takes the slot that step needs and names the actor the step runs as (one
+// whose authority still holds), or refuses.
+func (s *Server) fetchAndStagePlatformPackageAdmitted(ctx context.Context, actor platformActorSession, client *platformMarketClient, entry appplatform.CatalogueRelease, descriptor, signature []byte, admit func(context.Context) (platformActorSession, func(), error)) (platformStagedRelease, error) {
 	var zero platformStagedRelease
 	store, err := s.platformImages()
 	if err != nil {
@@ -221,14 +245,14 @@ func (s *Server) fetchAndStagePlatformPackageAdmitted(ctx context.Context, actor
 		if err != nil {
 			return zero, err
 		}
-		release := func() {}
+		release, stageActor := func() {}, actor
 		if admit != nil {
-			if release, err = admit(); err != nil {
+			if stageActor, release, err = admit(ctx); err != nil {
 				file.Close()
 				return zero, err
 			}
 		}
-		staged, err := s.stagePlatformPackageFile(ctx, actor, file, size, same)
+		staged, err := s.stagePlatformPackageFile(ctx, stageActor, file, size, same)
 		release()
 		file.Close()
 		if err == nil {

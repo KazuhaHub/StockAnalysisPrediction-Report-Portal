@@ -50,6 +50,8 @@ type Server struct {
 	// platformStageJobs holds the background package downloads of the catalogue staging route
 	// (app_platform_market_stage_job.go).
 	platformStageJobs platformMarketStageJobs
+	// platformStageWaitFor overrides how long the staging route waits for a download; zero is the default.
+	platformStageWaitFor time.Duration
 	// platformBuiltinPublishers and platformOfficialCatalogue are the built-in official sources (doc 189). The
 	// production constructor sets them; a bare test Server has none.
 	platformBuiltinPublishers []platformBuiltinPublisher

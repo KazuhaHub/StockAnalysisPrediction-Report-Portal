@@ -103,18 +103,31 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     active.current = true; setBusy('stage'); setError(''); setReady(false)
     setVerifiedRelease(null); reportBusy.current(true)
     try {
-      let result = parsePlatformStageStatus(await api.post<unknown>(`${root}/market/stage`, { catalogue_url: requested, release_sha256: entry.descriptor_sha256 }))
+      const start = async () => parsePlatformStageStatus(await api.post<unknown>(`${root}/market/stage`, { catalogue_url: requested, release_sha256: entry.descriptor_sha256 }))
+      let result = await start()
       if (!live(account, epoch)) return
-      // A slow package answers "downloading"; ask after it until it is staged or has failed.
+      // A slow package answers "downloading"; ask after it until it is staged or has failed. A poll that fails
+      // for a passing reason is asked again a few times with a growing pause; a download the server no longer
+      // knows (it restarted) is joined again once, which resumes the partial.
+      let failures = 0, rejoined = false
       while (result?.state === 'downloading' && result.release_sha256 === entry.descriptor_sha256) {
         setDownloading(result)
-        await wait(stagePollMs)
+        await wait(stagePollMs * (1 + failures))
         if (!live(account, epoch)) return
-        result = parsePlatformStageStatus(await api.get<unknown>(`${root}/market/stage?release_sha256=${entry.descriptor_sha256}`))
+        try {
+          result = parsePlatformStageStatus(await api.get<unknown>(`${root}/market/stage?release_sha256=${entry.descriptor_sha256}`))
+          failures = 0
+        } catch (e) {
+          if (!live(account, epoch)) return
+          const { status, code } = e as { status?: number; code?: string }
+          if (code === 'app_platform_stage_unknown' && !rejoined) { rejoined = true; result = await start() }
+          else if ((status === undefined || status >= 500 || status === 429) && ++failures <= 3) continue
+          else throw e
+        }
         if (!live(account, epoch)) return
       }
       setDownloading(null)
-      if (result?.state === 'failed') { setError(t(`err.${result.error_code}`, { defaultValue: t('common.error') })); return }
+      if (result?.state === 'failed') { setError(t(`err.${result.error_code}`, { defaultValue: t('err.app_platform_unavailable') })); return }
       if (result?.state !== 'staged' || result.release_sha256 !== entry.descriptor_sha256) throw new Error(t('appMarket.verificationChanged'))
       // Read current verified metadata by exact digest; a newly staged package
       // may be beyond the directory's first cursor page. Catalogue copy is never

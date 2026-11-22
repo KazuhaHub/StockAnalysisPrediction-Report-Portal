@@ -76,6 +76,7 @@ func (r *platformPackageRemote) servePackage(w http.ResponseWriter, req *http.Re
 	if rng := req.Header.Get("Range"); rng != "" && (req.Header.Get("If-Range") == "" || req.Header.Get("If-Range") == r.etag) {
 		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(rng, "bytes="), "-"))
 		if err != nil || n >= len(r.pkg) {
+			w.Header().Set("Content-Range", "bytes */"+strconv.Itoa(len(r.pkg)))
 			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 			return
 		}
@@ -267,5 +268,30 @@ func TestCatalogueManagedReleaseNeedsItsPackageURL(t *testing.T) {
 	}
 	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 0 {
 		t.Fatal("a release row exists")
+	}
+}
+
+// Fails if a complete partial (a download whose staging step was lost) is thrown away and fetched again because
+// the range request for the bytes after its end is answered 416.
+func TestCatalogueCompletePartialIsReusedWithoutDownloadingAgain(t *testing.T) {
+	f := newPlatformCatalogueFixture(t)
+	store, _ := f.s.platformImages()
+	key := "catalogue:https://127.0.0.1/app.portalapp"
+	if err := os.WriteFile(store.partialPath(key), f.remote.pkg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.validatorPath(key), []byte(f.remote.etag), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := f.install(context.Background())
+	if err != nil || staged.sha256 != platformDigest(f.parts.descriptor) {
+		t.Fatal(err)
+	}
+	f.remote.mu.Lock()
+	defer f.remote.mu.Unlock()
+	for _, r := range f.remote.ranges {
+		if r == "" {
+			t.Fatalf("the package was downloaded from zero again: %v", f.remote.ranges)
+		}
 	}
 }

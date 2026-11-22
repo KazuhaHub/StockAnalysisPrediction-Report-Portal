@@ -69,7 +69,7 @@ bounded JSON and no-store response policy from the management routes.
 | --- | --- | --- |
 | /api/admin/app-platform/market/catalogue | catalogue_url | catalogue_sha256, releases, publisher_verified=false |
 | POST /api/admin/app-platform/market/stage | catalogue_url, release_sha256 | 200: verified staged release identity, current trust_revision, reused. 202: `{state:"downloading", release_sha256, bytes_done, bytes_total}` |
-| GET /api/admin/app-platform/market/stage?release_sha256= | none | `state` of `downloading`, `failed` (with `error_code`, reported once) or `staged`; 404 `app_platform_stage_unknown` otherwise |
+| GET /api/admin/app-platform/market/stage?release_sha256= | none | `state` of `downloading`, `failed` (with `error_code`, readable until the job expires or a new POST restarts it) or `staged`; 404 `app_platform_stage_unknown` otherwise |
 
 A managed package comes down in a background job detached from the request (one job per
 package, joined by concurrent requests, bounded by the download timeout and cancelled at

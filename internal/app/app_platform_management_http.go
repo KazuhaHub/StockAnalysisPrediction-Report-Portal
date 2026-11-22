@@ -60,10 +60,10 @@ func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handle
 			}
 		}
 		timeout := platformManagementTimeout
-		if r.URL.Path == "/api/admin/app-platform/market/stage" {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/admin/app-platform/market/stage" {
 			// The synchronous checks are capped at 45s; the wait for the background download comes on top
 			// and the whole answer stays well under the 100s a proxy in front allows.
-			timeout = platformMarketStageSyncLimit + platformMarketStageWait
+			timeout = platformMarketStageSyncLimit + s.platformStageWait()
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()

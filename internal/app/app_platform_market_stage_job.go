@@ -17,16 +17,28 @@ import (
 // proxy in front of the portal cuts any answer at 100 seconds. So the request starts (or joins) a background
 // download and waits only a short while for it; a slower one is answered 202 and read by polling.
 
-// platformMarketStageWait is how long a request waits for the background download before answering 202.
-var platformMarketStageWait = 15 * time.Second
+// platformMarketStageWaitDefault is how long a request waits for the background download before answering 202.
+const platformMarketStageWaitDefault = 15 * time.Second
+
+func (s *Server) platformStageWait() time.Duration {
+	if s.platformStageWaitFor > 0 {
+		return s.platformStageWaitFor
+	}
+	return platformMarketStageWaitDefault
+}
 
 const (
+	// platformMarketStageRunning bounds the downloads in flight at once; each holds staging space and a socket.
+	platformMarketStageRunning = 2
+	// platformMarketStageActors bounds the requesters a job remembers.
+	platformMarketStageActors = 8
 	// platformMarketStageJobsMax bounds the table: running downloads plus finished ones not yet read.
 	platformMarketStageJobsMax = 32
 	// platformMarketStageKeep is how long a finished job stays readable.
 	platformMarketStageKeep = 10 * time.Minute
-	// platformMarketStageJobLimit bounds one job: the download timeout plus a minute to verify and store.
-	platformMarketStageJobLimit = platformPackageDownloadTimeout + time.Minute
+	// platformMarketStageJobLimit is the whole budget of one job: the two download attempts the package step may
+	// make (the second starts from nothing after a damaged partial), plus a minute to verify and store.
+	platformMarketStageJobLimit = 2*platformPackageDownloadTimeout + time.Minute
 )
 
 type platformMarketStageJob struct {
@@ -34,6 +46,9 @@ type platformMarketStageJob struct {
 	store    *platformImageStore
 	progress platformDownloadProgress
 	done     chan struct{}
+	// actors are the sessions of the requests that started or joined the job, first one first; guarded by the
+	// table's lock. The final step runs as the first whose authority still holds.
+	actors []platformActorSession
 	// result, err and finished are written once, before done is closed, under the table's lock.
 	result   platformStagedRelease
 	err      error
@@ -75,7 +90,7 @@ func (t *platformMarketStageJobs) running() int {
 // start runs the download for key in the background, or joins the one already running for it. Concurrent
 // requests for one package share one download; a finished job is replaced, so a later request restarts a failed
 // one (the partial resumes).
-func (t *platformMarketStageJobs) start(key, sha string, store *platformImageStore, run func(context.Context) (platformStagedRelease, error)) (*platformMarketStageJob, error) {
+func (t *platformMarketStageJobs) start(key, sha string, actor platformActorSession, store *platformImageStore, run func(context.Context, *platformMarketStageJob) (platformStagedRelease, error)) (*platformMarketStageJob, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
@@ -93,12 +108,24 @@ func (t *platformMarketStageJobs) start(key, sha string, store *platformImageSto
 		}
 		if j.finished.IsZero() {
 			if j.sha == sha {
+				if len(j.actors) < platformMarketStageActors {
+					j.actors = append(j.actors, actor)
+				}
 				return j, nil
 			}
 			// One package, two different releases: the running one owns the partial file.
 			return nil, errAppPlatformOperationConflict
 		}
 		delete(t.jobs, k)
+	}
+	running := 0
+	for _, j := range t.jobs {
+		if j.finished.IsZero() {
+			running++
+		}
+	}
+	if running >= platformMarketStageRunning {
+		return nil, errPlatformManagementBusy
 	}
 	if len(t.jobs) >= platformMarketStageJobsMax {
 		var oldest string
@@ -115,7 +142,7 @@ func (t *platformMarketStageJobs) start(key, sha string, store *platformImageSto
 	if t.root == nil {
 		t.root, t.cancel = context.WithCancel(context.Background())
 	}
-	job := &platformMarketStageJob{key: key, sha: sha, store: store, done: make(chan struct{})}
+	job := &platformMarketStageJob{key: key, sha: sha, store: store, done: make(chan struct{}), actors: []platformActorSession{actor}}
 	if t.jobs == nil {
 		t.jobs = make(map[string]*platformMarketStageJob)
 	}
@@ -125,7 +152,7 @@ func (t *platformMarketStageJobs) start(key, sha string, store *platformImageSto
 		defer t.wg.Done()
 		ctx, cancel := context.WithTimeout(t.root, platformMarketStageJobLimit)
 		defer cancel()
-		result, err := run(context.WithValue(ctx, platformDownloadProgressKey{}, &job.progress))
+		result, err := run(context.WithValue(ctx, platformDownloadProgressKey{}, &job.progress), job)
 		t.mu.Lock()
 		job.result, job.err, job.finished = result, err, time.Now()
 		t.mu.Unlock()
@@ -150,8 +177,16 @@ func (t *platformMarketStageJobs) stop(ctx context.Context) {
 	}
 }
 
-// view returns the job of a release. A failed one is removed when consume is set: its failure is reported once.
-func (t *platformMarketStageJobs) view(sha string, consume bool) (platformMarketStageView, bool) {
+// requesters returns the sessions of the requests behind a job.
+func (t *platformMarketStageJobs) requesters(job *platformMarketStageJob) []platformActorSession {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]platformActorSession(nil), job.actors...)
+}
+
+// view returns the job of a release. A finished job, failed or not, stays readable until it expires or a new
+// request replaces it, so every poller sees the same answer.
+func (t *platformMarketStageJobs) view(sha string) (platformMarketStageView, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for k, j := range t.jobs {
@@ -162,24 +197,18 @@ func (t *platformMarketStageJobs) view(sha string, consume bool) (platformMarket
 			delete(t.jobs, k)
 			return platformMarketStageView{}, false
 		}
-		if !j.finished.IsZero() && j.err != nil && consume {
-			delete(t.jobs, k)
-		}
 		return platformMarketStageView{job: j, running: j.finished.IsZero(), result: j.result, err: j.err}, true
 	}
 	return platformMarketStageView{}, false
 }
 
-// forget removes a job whose failure the caller reports itself.
-func (t *platformMarketStageJobs) forget(job *platformMarketStageJob) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.jobs[job.key] == job {
-		delete(t.jobs, job.key)
-	}
+// stopPlatformStageJobs cancels the downloads and waits for them on a grace of its own, so a job is gone before
+// the store closes however long the other workers took.
+func (s *Server) stopPlatformStageJobs(context.Context) {
+	grace, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.platformStageJobs.stop(grace)
 }
-
-func (s *Server) stopPlatformStageJobs(ctx context.Context) { s.platformStageJobs.stop(ctx) }
 
 func platformStagedBody(staged platformStagedRelease) map[string]any {
 	return map[string]any{"release_sha256": staged.sha256, "app_id": staged.appID, "publisher_id": staged.publisherID, "trust_revision": strconv.FormatInt(staged.trustRevision, 10), "reused": staged.reused}
@@ -216,7 +245,7 @@ func (s *Server) apiPlatformMarketStageStatus(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, err)
 		return
 	}
-	if v, ok := s.platformStageJobs.view(digest, true); ok {
+	if v, ok := s.platformStageJobs.view(digest); ok {
 		switch {
 		case v.running:
 			writeJSON(w, v.job.downloading())

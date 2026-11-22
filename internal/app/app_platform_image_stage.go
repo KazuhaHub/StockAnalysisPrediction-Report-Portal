@@ -249,7 +249,7 @@ func (s *Server) stagePlatformPackageFile(ctx context.Context, actor platformAct
 		if store, err = s.platformImages(); err != nil {
 			return zero, err
 		}
-		if added, err = s.storePlatformImageBlobs(store, envelope); err != nil {
+		if added, err = s.storePlatformImageBlobs(ctx, store, envelope); err != nil {
 			// A write that failed part-way leaves the blobs this call already wrote: remove the unpinned ones.
 			if pinned, pinErr := s.platformPinnedBlobSet(ctx, store); pinErr == nil {
 				store.removeUnpinned(added, pinned)
@@ -271,7 +271,7 @@ func (s *Server) stagePlatformPackageFile(ctx context.Context, actor platformAct
 
 // storePlatformImageBlobs puts the blobs of a verified package into the blob store. It returns the digests it
 // wrote itself.
-func (s *Server) storePlatformImageBlobs(store *platformImageStore, envelope appplatform.OfflineEnvelope) ([]string, error) {
+func (s *Server) storePlatformImageBlobs(ctx context.Context, store *platformImageStore, envelope appplatform.OfflineEnvelope) ([]string, error) {
 	var blobs []appplatform.ImageBlob
 	for _, plan := range envelope.Images {
 		blobs = append(blobs, plan.Blobs()...)
@@ -296,6 +296,10 @@ func (s *Server) storePlatformImageBlobs(store *platformImageStore, envelope app
 			continue
 		}
 		seen[blob.Digest] = true
+		// A background staging must not write into a store that is being closed.
+		if err := ctx.Err(); err != nil {
+			return added, err
+		}
 		if file, err := store.openBlob(blob); err == nil {
 			file.Close()
 			continue

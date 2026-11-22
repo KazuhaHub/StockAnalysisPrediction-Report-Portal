@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,12 +40,8 @@ func newPlatformStageHarness(t *testing.T) *platformStageHarness {
 	})
 	f.s.platformAdminRoute(mux, "GET /api/admin/app-platform/market/stage", f.s.apiPlatformMarketStageStatus)
 	cookie := f.s.managedCookie(*f.s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
-	old := platformMarketStageWait
-	platformMarketStageWait = 150 * time.Millisecond
-	t.Cleanup(func() {
-		platformMarketStageWait = old
-		f.s.stopPlatformStageJobs(context.Background())
-	})
+	f.s.platformStageWaitFor = 150 * time.Millisecond
+	t.Cleanup(func() { f.s.stopPlatformStageJobs(context.Background()) })
 	body := `{"catalogue_url":"https://127.0.0.1/index.json","release_sha256":"` + platformDigest(f.parts.descriptor) + `"}`
 	return &platformStageHarness{platformCatalogueFixture: f, mux: mux, cookie: cookie, body: body}
 }
@@ -143,9 +140,9 @@ func TestMarketStageJoinsARunningDownload(t *testing.T) {
 	}
 }
 
-// Fails if a failed background download is not reported with a public code exactly once, or if a later request
+// Fails if a failed background download is not readable by every poller with a public code, or if a later request
 // cannot restart it from the partial.
-func TestMarketStageFailureIsReportedOnceAndRestartable(t *testing.T) {
+func TestMarketStageFailureStaysReadableAndRestartable(t *testing.T) {
 	h := newPlatformStageHarness(t)
 	h.remote.gate, h.remote.failAfterGate = make(chan struct{}), true
 	if code, _ := h.post(t); code != 202 {
@@ -156,8 +153,8 @@ func TestMarketStageFailureIsReportedOnceAndRestartable(t *testing.T) {
 	if body.ErrorCode != "app_platform_unavailable" {
 		t.Fatal(body)
 	}
-	if code, _ := h.status(t); code != 404 {
-		t.Fatal("a failure was reported twice", code)
+	if code, again := h.status(t); code != 200 || again.State != "failed" || again.ErrorCode != body.ErrorCode {
+		t.Fatal("a second poller did not see the failure", code, again)
 	}
 	h.remote.mu.Lock()
 	h.remote.gate, h.remote.failAfterGate, h.remote.ranges = nil, false, nil
@@ -203,7 +200,7 @@ func TestMarketStageRechecksAuthorityWhenTheDownloadFinishes(t *testing.T) {
 // Fails if a quick package still goes through the 202 path.
 func TestMarketStageFastPathAnswersOK(t *testing.T) {
 	h := newPlatformStageHarness(t)
-	platformMarketStageWait = 15 * time.Second
+	h.s.platformStageWaitFor = 15 * time.Second
 	code, body := h.post(t)
 	if code != 200 || body.Release != platformDigest(h.parts.descriptor) || body.AppID == "" || body.Reused || body.State != "" {
 		t.Fatal(code, body)
@@ -246,5 +243,89 @@ func TestMarketStageJobsStopAtShutdown(t *testing.T) {
 	close(h.remote.gate)
 	if code, _ := h.post(t); code == 202 {
 		t.Fatal("a job started after shutdown")
+	}
+}
+
+// Fails if the finished download is thrown away because both document slots were busy when it was time to stage.
+func TestMarketStageWaitsForADocumentSlotInsteadOfFailingBusy(t *testing.T) {
+	h := newPlatformStageHarness(t)
+	h.remote.gate = make(chan struct{})
+	if code, _ := h.post(t); code != 202 {
+		t.Fatal(code)
+	}
+	var held []func()
+	for {
+		release, ok := h.s.platformDocuments.acquire()
+		if !ok {
+			break
+		}
+		held = append(held, release)
+	}
+	close(h.remote.gate)
+	time.Sleep(400 * time.Millisecond)
+	if _, body := h.status(t); body.State != "downloading" {
+		t.Fatal("the job gave up while no slot was free", body)
+	}
+	for _, release := range held {
+		release()
+	}
+	h.until(t, "staged", func(_ int, b platformStageBody) bool { return b.State == "staged" })
+	if n := h.packets(); n != 1 {
+		t.Fatalf("%d package requests: the download was repeated", n)
+	}
+}
+
+// Fails if a joined request's authority is ignored when the first requester has lost theirs by the end.
+func TestMarketStageFinishesAsAJoinedRequesterWhenTheFirstLostAuthority(t *testing.T) {
+	h := newPlatformStageHarness(t)
+	second := platformSecondAdminActor(t, h.s, "second-admin")
+	secondCookie := h.s.managedCookie(*h.s.st.GetUser(second.username), second.sessionID, second.expires.Unix())
+	h.remote.gate = make(chan struct{})
+	if code, _ := h.post(t); code != 202 {
+		t.Fatal(code)
+	}
+	w := sessionTestRequest(h.mux, "POST", "/api/admin/app-platform/market/stage", secondCookie, h.body)
+	if w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	mustExec(t, h.s.st, `UPDATE users SET role='user' WHERE username=?`, h.actor.username)
+	close(h.remote.gate)
+	deadline := time.Now().Add(5 * time.Second)
+	for h.s.platformStageJobs.running() > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the job never ended")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if h.releases(t) != 1 {
+		t.Fatal("the joined, still authorised requester did not get the release staged")
+	}
+	if got := scalar[string](t, h.s.st, `SELECT actor FROM audit_log WHERE action='app_platform.release_staged'`); got != second.username {
+		t.Fatalf("audited as %q", got)
+	}
+}
+
+// Fails if more downloads than the bound run at once, or a join counts against it.
+func TestMarketStageJobsBoundRunningDownloads(t *testing.T) {
+	var jobs platformMarketStageJobs
+	block := make(chan struct{})
+	run := func(ctx context.Context, _ *platformMarketStageJob) (platformStagedRelease, error) {
+		select {
+		case <-block:
+		case <-ctx.Done():
+		}
+		return platformStagedRelease{}, nil
+	}
+	t.Cleanup(func() { close(block); jobs.stop(context.Background()) })
+	for i := 0; i < platformMarketStageRunning; i++ {
+		if _, err := jobs.start("k"+strconv.Itoa(i), strings.Repeat(strconv.Itoa(i), 64), platformActorSession{}, nil, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := jobs.start("k0", strings.Repeat("0", 64), platformActorSession{}, nil, run); err != nil {
+		t.Fatal("joining a running download was refused", err)
+	}
+	if _, err := jobs.start("kx", strings.Repeat("f", 64), platformActorSession{}, nil, run); !errors.Is(err, errPlatformManagementBusy) {
+		t.Fatal("a download over the bound started", err)
 	}
 }

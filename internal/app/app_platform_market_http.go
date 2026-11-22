@@ -110,15 +110,23 @@ func (s *Server) apiPlatformMarketStageClient(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, err)
 		return
 	}
-	job, err := s.platformStageJobs.start(platformPackageKey(pkg.entry), digest, store, func(ctx context.Context) (platformStagedRelease, error) {
+	job, err := s.platformStageJobs.start(platformPackageKey(pkg.entry), digest, actor, store, func(ctx context.Context, job *platformMarketStageJob) (platformStagedRelease, error) {
 		defer client.close()
-		// The verification and storage step takes a slot of its own, so a long download does not hold one.
-		admit := func() (func(), error) {
-			slot, ok := s.platformDocuments.acquire()
-			if !ok {
-				return nil, errPlatformManagementBusy
+		// The verification and storage step waits for a slot of its own, so a long download does not hold one and
+		// a finished one is never thrown away for want of one. It runs as the first requester still authorised.
+		admit := func(ctx context.Context) (platformActorSession, func(), error) {
+			slot, err := s.platformDocumentsWait(ctx)
+			if err != nil {
+				return platformActorSession{}, nil, err
 			}
-			return slot, nil
+			var last error = errAppPlatformActorUnavailable
+			for _, who := range s.platformStageJobs.requesters(job) {
+				if last = s.withPlatformTrustActorContext(ctx, who, func(migExec, platformActorFacts, platformActorControl, appplatform.PublisherTrust) error { return nil }); last == nil {
+					return who, slot, nil
+				}
+			}
+			slot()
+			return platformActorSession{}, nil, last
 		}
 		return s.fetchAndStagePlatformPackageAdmitted(ctx, actor, client, pkg.entry, pkg.descriptor, pkg.signature, admit)
 	})
@@ -126,13 +134,12 @@ func (s *Server) apiPlatformMarketStageClient(w http.ResponseWriter, r *http.Req
 		platformManagementError(w, err)
 		return
 	}
-	timer := time.NewTimer(platformMarketStageWait)
+	timer := time.NewTimer(s.platformStageWait())
 	defer timer.Stop()
 	select {
 	case <-job.done:
-		if v, ok := s.platformStageJobs.view(digest, false); ok && v.job == job && !v.running {
+		if v, ok := s.platformStageJobs.view(digest); ok && v.job == job && !v.running {
 			if v.err != nil {
-				s.platformStageJobs.forget(job)
 				platformManagementError(w, v.err)
 				return
 			}
@@ -143,4 +150,19 @@ func (s *Server) apiPlatformMarketStageClient(w http.ResponseWriter, r *http.Req
 	case <-r.Context().Done():
 	}
 	writeJSONStatus(w, http.StatusAccepted, job.downloading())
+}
+
+// platformDocumentsWait takes a document slot, waiting for one until ctx ends. Only two exist and user routes
+// share them, so a background step that needs one must wait rather than fail a finished download.
+func (s *Server) platformDocumentsWait(ctx context.Context) (func(), error) {
+	for {
+		if slot, ok := s.platformDocuments.acquire(); ok {
+			return slot, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }

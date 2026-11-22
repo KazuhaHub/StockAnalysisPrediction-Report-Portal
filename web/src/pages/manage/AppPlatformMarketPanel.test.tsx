@@ -267,6 +267,35 @@ describe('remote application catalogue', () => {
       expect(ready).not.toHaveBeenCalled()
     })
 
+    it('keeps polling through a transient poll error', async () => {
+      const replies: unknown[] = [Object.assign(new Error('bad gateway'), { status: 502 }), { state: 'staged', release_sha256: digest }]
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/catalogue') ? discovery : downloading('0')))
+      mock.get.mockImplementation((url: string) => {
+        if (!String(url).includes('/market/stage')) return Promise.resolve({ items: [verified], next_cursor: '' })
+        const next = replies.shift()
+        return next instanceof Error ? Promise.reject(next) : Promise.resolve(next)
+      })
+      const ready = vi.fn()
+      await startStage(ready)
+      await tick()
+      expect(screen.queryByText('bad gateway')).toBeNull()
+      await tick()
+      await tick()
+      expect(ready).toHaveBeenCalledWith(verified)
+    })
+
+    it('joins the download again once when the server no longer knows it', async () => {
+      const unknown = Object.assign(new Error('gone'), { status: 404, code: 'app_platform_stage_unknown' })
+      let starts = 0
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/catalogue') ? discovery : ++starts === 1 ? downloading('0') : { release_sha256: digest }))
+      mock.get.mockImplementation((url: string) => String(url).includes('/market/stage') ? Promise.reject(unknown) : Promise.resolve({ items: [verified], next_cursor: '' }))
+      const ready = vi.fn()
+      await startStage(ready)
+      await tick()
+      expect(starts).toBe(2)
+      expect(ready).toHaveBeenCalledWith(verified)
+    })
+
     it('stops polling when the panel goes away', async () => {
       mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/catalogue') ? discovery : downloading('0')))
       mock.get.mockResolvedValue(downloading('10'))
