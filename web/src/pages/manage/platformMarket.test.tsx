@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { loadInstalledRelease, usePlatformMarket } from './platformMarket'
 import type { PlatformMarketApp } from '../../api/appPlatform'
+import { ApiError } from '../../api/client'
 
 const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), postBytes: vi.fn(), user: 'admin' }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: { get: mock.get, post: mock.post, postBytes: mock.postBytes }, errText: (e: unknown) => e instanceof Error ? e.message : String(e) }))
@@ -107,6 +108,59 @@ describe('downloading and verifying a catalogue version', () => {
     expect(second).toBeNull()
     await act(async () => { slow.resolve({ release_sha256: digest }); await first })
     expect(mock.post.mock.calls.filter(([path]) => path.endsWith('/stage'))).toHaveLength(1)
+  })
+
+  it('polls a download that answers "downloading" until it is staged, and shows its progress', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const view = renderHook(() => usePlatformMarket())
+      await waitFor(() => expect(view.result.current.catalogue?.status).toBe('ready'))
+      mock.post.mockImplementation(async (path: string) => path.endsWith('/stage') ? { state: 'downloading', release_sha256: digest, bytes_done: '0', bytes_total: '' } : catalogueFor('notes'))
+      const polls = [
+        { state: 'downloading', release_sha256: digest, bytes_done: '1048576', bytes_total: '4194304' },
+        { state: 'staged', release_sha256: digest },
+      ]
+      mock.get.mockImplementation(async (path: string) => path.startsWith(`${root}/market/stage?`) ? polls.shift() : path === `${root}/market/sources` ? { official: { name: 'Hub', url, enabled: true } } : { items: [verified], next_cursor: '' })
+      let pending!: Promise<unknown>
+      act(() => { pending = view.result.current.stage(app, '1.0.0') })
+      await waitFor(() => expect(view.result.current.staging).toEqual({ appId: 'notes', version: '1.0.0', bytesDone: 0, bytesTotal: undefined }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      await waitFor(() => expect(view.result.current.staging).toEqual({ appId: 'notes', version: '1.0.0', bytesDone: 1048576, bytesTotal: 4194304 }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      await act(async () => { expect(await pending).toEqual({ release: verified }) })
+      expect(mock.get).toHaveBeenCalledWith(`${root}/market/stage?release_sha256=${digest}`)
+      expect(view.result.current.staging).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('reports a failed download by its code, on the hook and in the result', async () => {
+    const view = renderHook(() => usePlatformMarket())
+    await waitFor(() => expect(view.result.current.catalogue?.status).toBe('ready'))
+    mock.post.mockImplementation(async (path: string) => path.endsWith('/stage') ? { state: 'failed', release_sha256: digest, error_code: 'app_platform_busy' } : catalogueFor('notes'))
+    let result: unknown
+    await act(async () => { result = await view.result.current.stage(app, '1.0.0') })
+    expect(result).toEqual({ error: 'err.app_platform_busy' })
+    expect(view.result.current.stageError).toBe('err.app_platform_busy')
+    expect(mock.get.mock.calls.some(([path]) => String(path).includes('/releases?'))).toBe(false)
+  })
+
+  it('joins a download again once when the server no longer knows it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const view = renderHook(() => usePlatformMarket())
+      await waitFor(() => expect(view.result.current.catalogue?.status).toBe('ready'))
+      const starts = [{ state: 'downloading', release_sha256: digest, bytes_done: '0', bytes_total: '' }, { release_sha256: digest }]
+      mock.post.mockImplementation(async (path: string) => path.endsWith('/stage') ? starts.shift() : catalogueFor('notes'))
+      mock.get.mockImplementation(async (path: string) => {
+        if (path.startsWith(`${root}/market/stage?`)) throw new ApiError(404, 'unknown', 'app_platform_stage_unknown')
+        return path === `${root}/market/sources` ? { official: { name: 'Hub', url, enabled: true } } : { items: [verified], next_cursor: '' }
+      })
+      let pending!: Promise<unknown>
+      act(() => { pending = view.result.current.stage(app, '1.0.0') })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      await act(async () => { expect(await pending).toEqual({ release: verified }) })
+      expect(mock.post.mock.calls.filter(([path]) => String(path).endsWith('/stage'))).toHaveLength(2)
+    } finally { vi.useRealTimers() }
   })
 })
 

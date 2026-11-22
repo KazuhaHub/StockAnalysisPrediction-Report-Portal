@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
 import { useAuth } from '../../auth'
-import { parsePlatformMarket, parsePlatformMarketApps, type PlatformMarketApp, type PlatformMarketHint, type PlatformRelease } from '../../api/appPlatform'
+import { parsePlatformMarket, parsePlatformMarketApps, parsePlatformStageStatus, type PlatformMarketApp, type PlatformMarketHint, type PlatformRelease } from '../../api/appPlatform'
 import { platformRoot } from './platformLifecycle'
 
 // The catalogues the marketplace can browse and the download-and-verify step that turns a catalogue entry into a
@@ -25,7 +25,11 @@ export interface CatalogueState {
 export interface MarketSource { url: string; name: string; official: boolean }
 /** What is known of the sources: still reading, read, the platform is not set up yet, or the read failed. */
 export type SourcesState = 'loading' | 'ready' | 'uninitialised' | 'failed'
-/** The download in progress. The byte counts are for progress, which a later server version will report. */
+// A package that is not staged within a moment comes down in the background; this is how often it is asked after.
+export const STAGE_POLL_MS = 2000
+const wait = (ms: number) => new Promise<void>(done => { setTimeout(done, ms) })
+
+/** The download in progress, with the byte counts once the server reports them (the total once it knows the size). */
 export type Staging = { appId: string; version: string; bytesDone?: number; bytesTotal?: number } | null
 /** The result of a download-and-verify: the verified release, or the reason it failed. null means it was not attempted. */
 export type StageResult = { release: PlatformRelease } | { error: string } | null
@@ -130,14 +134,37 @@ export function usePlatformMarket(visible: boolean = true) {
     const account = user, epoch = generation.current
     staging.current = true; setStagingNow({ appId: app.app_id, version }); setStageError('')
     try {
-      const result = await api.post<{ release_sha256: string }>(`${platformRoot}/market/stage`, { catalogue_url: url, release_sha256: chosen.descriptor_sha256 })
+      const digest = chosen.descriptor_sha256
+      const start = async () => parsePlatformStageStatus(await api.post<unknown>(`${platformRoot}/market/stage`, { catalogue_url: url, release_sha256: digest }))
+      let result = await start()
       if (!live(account, epoch)) return null
-      if (result.release_sha256 !== chosen.descriptor_sha256) throw new Error(t('appMarket.verificationChanged'))
+      // A slow package answers "downloading"; ask after it until it is staged or has failed. A poll that fails for a
+      // passing reason is asked again a few times with a growing pause; a download the server no longer knows (it
+      // restarted) is joined again once, which resumes the partial.
+      let failures = 0, rejoined = false
+      while (result?.state === 'downloading' && result.release_sha256 === digest) {
+        setStagingNow({ appId: app.app_id, version, bytesDone: result.bytes_done, bytesTotal: result.bytes_total ?? undefined })
+        await wait(STAGE_POLL_MS * (1 + failures))
+        if (!live(account, epoch)) return null
+        try {
+          result = parsePlatformStageStatus(await api.get<unknown>(`${platformRoot}/market/stage?release_sha256=${digest}`))
+          failures = 0
+        } catch (e) {
+          if (!live(account, epoch)) return null
+          const { status, code } = e as { status?: number; code?: string }
+          if (code === 'app_platform_stage_unknown' && !rejoined) { rejoined = true; result = await start() }
+          else if ((status === undefined || status >= 500 || status === 429) && ++failures <= 3) continue
+          else throw e
+        }
+        if (!live(account, epoch)) return null
+      }
+      if (result?.state === 'failed') throw new Error(t(`err.${result.error_code}`, { defaultValue: t('err.app_platform_unavailable') }))
+      if (result?.state !== 'staged' || result.release_sha256 !== digest) throw new Error(t('appMarket.verificationChanged'))
       // A newly staged package may be beyond the directory's first cursor page, so read it by exact digest.
-      const response = await api.get<{ items: PlatformRelease[]; next_cursor: string }>(`${platformRoot}/releases?release_sha256=${chosen.descriptor_sha256}`)
+      const response = await api.get<{ items: PlatformRelease[]; next_cursor: string }>(`${platformRoot}/releases?release_sha256=${digest}`)
       if (!live(account, epoch)) return null
       const verified = response.items?.length === 1 ? response.items[0] : undefined
-      if (!verified || verified.release_sha256 !== chosen.descriptor_sha256 || verified.app_id !== app.app_id || verified.publisher_id !== app.publisher_id || verified.version !== version) throw new Error(t('appMarket.verificationChanged'))
+      if (!verified || verified.release_sha256 !== digest || verified.app_id !== app.app_id || verified.publisher_id !== app.publisher_id || verified.version !== version) throw new Error(t('appMarket.verificationChanged'))
       return { release: verified }
     } catch (e) {
       const error = errText(e, t)

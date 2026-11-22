@@ -3414,6 +3414,7 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-market-detail-title { display: flex; flex: 1 1 160px; flex-direction: column; min-width: 0; }
 .rp-market-detail-actions { margin-inline-start: auto; }
 .rp-market-detail-error { flex: 1 1 100%; font-weight: 400; }
+.rp-market-detail-progress { flex: 1 1 100%; margin: 0; }
 .rp-market-detail-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 24px; }
 .rp-market-detail-body > div { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .rp-market-detail-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

@@ -129,8 +129,8 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           : <CardTable<AdminApp> className="rp-app-list" rowKey="key" dataSource={shown} columns={columns} pagination={false} size="small" filtered={!!search.trim()} onClearFilters={() => setSearch('')} />}
     </section>
 
-    <MarketDetailModal app={flow.detail} installed={flow.detail ? flow.installedOf(flow.detail) : undefined} lang={lang} stagingVersion={market.staging && flow.detail && market.staging.appId === flow.detail.app_id ? market.staging.version : null}
-      blocked={busy} error={flow.detailError || market.stageError} onClose={() => { if (!market.staging) flow.setDetail(null) }}
+    <MarketDetailModal app={flow.detail} installed={flow.detail ? flow.installedOf(flow.detail) : undefined} lang={lang} staging={market.staging && flow.detail && market.staging.appId === flow.detail.app_id ? market.staging : null}
+      blocked={busy} error={flow.detailError || market.stageError} onClose={() => flow.setDetail(null)}
       onInstall={version => flow.detail && void flow.installFromDetail(flow.detail, version)} onOpenTrust={() => { flow.setDetail(null); onOpenTrust() }} />
 
     <PlatformLifecycleModal lifecycle={lifecycle} />

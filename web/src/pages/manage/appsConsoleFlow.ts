@@ -35,7 +35,10 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
   const generation = useRef<object>({})
   const live = (account: string | null, epoch: object) => mounted.current && owner.current === account && generation.current === epoch
   const [acting, setActing] = useState('')
-  const [detail, setDetail] = useState<PlatformMarketApp | null>(null)
+  const [detail, setDetailState] = useState<PlatformMarketApp | null>(null)
+  // The dialog can be closed while its download runs on; a failure then goes to the app's card.
+  const detailOpen = useRef<PlatformMarketApp | null>(null)
+  const setDetail = (app: PlatformMarketApp | null) => { detailOpen.current = app; setDetailState(app) }
   const [detailError, setDetailError] = useState('')
   // A failed Install on a catalogue card is said on that card, not far away in a notification.
   const [cardErrors, setCardErrors] = useState<Record<string, string>>({})
@@ -81,8 +84,10 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     const account = user, epoch = generation.current
     const problem = await stageAndOpen(app, version, installedOf(app)?.installationId)
     if (problem === null || !live(account, epoch)) return
-    if (problem) setDetailError(problem)
-    else setDetail(null)
+    const stillOpen = detailOpen.current === app
+    if (problem && stillOpen) setDetailError(problem)
+    else if (problem) setCardErrors(v => ({ ...v, [`${app.publisher_id}/${app.app_id}`]: problem }))
+    else if (stillOpen) setDetail(null)
   }
 
   /** The Install button on a catalogue card: the default version, with a failure reported as a notification. */

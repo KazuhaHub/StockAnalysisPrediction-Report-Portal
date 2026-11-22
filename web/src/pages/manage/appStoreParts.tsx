@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Alert, Button, Card, Dropdown, Modal, Select, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Dropdown, Modal, Progress, Select, Space, Tag, Typography } from 'antd'
 import { ArrowUpOutlined, EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { compareVersions, latestVersion, offeredUpdate } from '../../lib/semver'
@@ -10,6 +11,7 @@ import type { PlatformMarketApp } from '../../api/appPlatform'
 import { appPath, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import type { LifecycleAction } from './platformLifecycle'
+import type { Staging } from './platformMarket'
 
 /** A platform installation's control state as a status: the words are ours for the states the server defines. */
 export function platformStateTone(state: string | undefined): { tone: StatusTone; key?: string; raw?: string } {
@@ -130,12 +132,26 @@ export function InstalledCard({ name, description, publisher, source, ...actions
   )
 }
 
+const MiB = 1024 * 1024
+/** How far a download is, as a whole percent below 100, once the server has said how big the package is. */
+export function stagingPercent(staging: Staging): number | undefined {
+  if (!staging?.bytesTotal || staging.bytesDone === undefined) return undefined
+  return Math.min(99, Math.floor(staging.bytesDone * 100 / staging.bytesTotal))
+}
+/** The words for a download in progress: the MiB counts once the size is known, else "downloading and verifying". */
+export function stagingText(staging: Staging, t: TFunction): string {
+  if (!staging?.bytesTotal || staging.bytesDone === undefined) return t('appStore.staging')
+  return t('appStore.downloadProgress', { done: Math.floor(staging.bytesDone / MiB), total: Math.ceil(staging.bytesTotal / MiB) })
+}
+
 /**
  * One catalogue app at the same size: icon, name, publisher, description, and a small Install button top right.
  * The name is a real button whose ::after covers the card, so a click anywhere else opens the details.
  */
-export function MarketCard({ app, name, description, installing, blocked, error, onOpen, onInstall }: { app: PlatformMarketApp; name: string; description: string; installing: boolean; blocked: boolean; error?: string; onOpen: () => void; onInstall: () => void }) {
+export function MarketCard({ app, name, description, staging, blocked, error, onOpen, onInstall }: { app: PlatformMarketApp; name: string; description: string; staging: Staging; blocked: boolean; error?: string; onOpen: () => void; onInstall: () => void }) {
   const { t } = useTranslation()
+  const installing = !!staging
+  const percent = stagingPercent(staging)
   return (
     <Card hoverable className="rp-app-card rp-market-card" size="small">
       <div className="rp-app-card-row">
@@ -150,7 +166,7 @@ export function MarketCard({ app, name, description, installing, blocked, error,
             : <div className="rp-app-card-desc">{description || '\u00a0'}</div>}
         </div>
         <span className="rp-app-controls">
-          <Button size="small" type="primary" loading={installing} disabled={!app.publisher_trusted || blocked} title={app.publisher_trusted ? undefined : t('appStore.untrusted')} onClick={onInstall}>{t('appStore.installAction')}</Button>
+          <Button size="small" type="primary" loading={installing} disabled={!app.publisher_trusted || blocked} title={installing ? stagingText(staging, t) : app.publisher_trusted ? undefined : t('appStore.untrusted')} onClick={onInstall}>{percent !== undefined ? `${percent}%` : t('appStore.installAction')}</Button>
         </span>
       </div>
     </Card>
@@ -162,8 +178,8 @@ export interface MarketDetailProps {
   /** The installed app this catalogue entry is, if any: the button then switches version instead of installing. */
   installed?: { version?: string }
   lang: string
-  /** The version being downloaded for this app, if any. */
-  stagingVersion: string | null
+  /** The download running for this app, if any. */
+  staging: Staging
   /** Another download or upload is running. */
   blocked: boolean
   error: string
@@ -173,7 +189,7 @@ export interface MarketDetailProps {
 }
 
 /** The catalogue detail of one app: version choice and Install on top, description and facts below. */
-export function MarketDetailModal({ app, installed, lang, stagingVersion, blocked, error, onClose, onInstall, onOpenTrust }: MarketDetailProps) {
+export function MarketDetailModal({ app, installed, lang, staging: download, blocked, error, onClose, onInstall, onOpenTrust }: MarketDetailProps) {
   const { t } = useTranslation()
   const [chosen, setChosen] = useState('')
   const latest = app ? latestVersion(app.versions.map(v => v.version)) ?? '' : ''
@@ -185,7 +201,8 @@ export function MarketDetailModal({ app, installed, lang, stagingVersion, blocke
   const actionLabel = !installed ? t('appStore.installAction') : installed.version && compareVersions(version, installed.version) > 0 ? t('appStore.updateTo', { version }) : t('appStore.switchTo')
   const copy = app ? appDisplayText(app.app_id, app.display, lang) : { name: '', description: '' }
   const trusted = !!app?.publisher_trusted
-  const staging = stagingVersion !== null
+  const staging = !!download
+  const percent = stagingPercent(download)
   return (
     <Modal open={!!app} onCancel={onClose} footer={null} width={760} destroyOnHidden afterOpenChange={open => { if (!open) setChosen('') }}
       title={app && <div className="rp-market-detail-head">
@@ -195,14 +212,15 @@ export function MarketDetailModal({ app, installed, lang, stagingVersion, blocke
           <Typography.Text type="secondary" ellipsis>{t('appStore.publishedBy', { publisher: app.publisher_id })}</Typography.Text>
         </div>
         <Space wrap className="rp-market-detail-actions">
-          <Select size="middle" aria-label={t('appStore.versions')} value={version} disabled={staging} onChange={setChosen} popupMatchSelectWidth={false}
+          <Select size="middle" aria-label={t('appStore.versions')} value={download?.version ?? version} disabled={staging} onChange={setChosen} popupMatchSelectWidth={false}
             options={app.versions.map(v => ({ value: v.version, label: <Space size={6}>{v.version}{v.version === latest && <Tag>{t('appStore.latest')}</Tag>}</Space> }))} style={{ minWidth: 150 }} />
           {isCurrent
             ? <Typography.Text type="secondary">{t('appStore.alreadyInstalled')}</Typography.Text>
             : <Button type="primary" loading={staging} disabled={!trusted || blocked} onClick={() => onInstall(version)}>
-                {staging ? t('appStore.staging') : actionLabel}
+                {staging ? stagingText(download, t) : actionLabel}
               </Button>}
         </Space>
+        {percent !== undefined && <Progress className="rp-market-detail-progress" percent={percent} size="small" aria-label={stagingText(download, t)} />}
         {error && <Alert className="rp-market-detail-error" type="error" showIcon title={error} />}
       </div>}>
       {app && <div className="rp-market-detail-body">

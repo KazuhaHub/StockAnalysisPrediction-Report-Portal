@@ -51,7 +51,7 @@ function InstallBody({ apps, reload }: { apps: AdminApp[]; reload: (opts?: { qui
         const copy = appDisplayText(c.app_id, c.display, lang)
         const key = `${c.publisher_id}/${c.app_id}`
         return <MarketCard key={key} app={c} name={copy.name} description={copy.description} error={flow.cardErrors[key]}
-          installing={market.staging?.appId === c.app_id} blocked={busy} onOpen={() => flow.openDetail(c)} onInstall={() => void flow.quickInstall(c)} />
+          staging={market.staging?.appId === c.app_id ? market.staging : null} blocked={busy} onOpen={() => flow.openDetail(c)} onInstall={() => void flow.quickInstall(c)} />
       })}
     </div>
   }
@@ -74,8 +74,8 @@ function InstallBody({ apps, reload }: { apps: AdminApp[]; reload: (opts?: { qui
 
     <section aria-label={t('appStore.install')}>{body()}</section>
 
-    <MarketDetailModal app={flow.detail} installed={flow.detail ? flow.installedOf(flow.detail) : undefined} lang={lang} stagingVersion={market.staging && flow.detail && market.staging.appId === flow.detail.app_id ? market.staging.version : null}
-      blocked={busy} error={flow.detailError || market.stageError} onClose={() => { if (!market.staging) flow.setDetail(null) }}
+    <MarketDetailModal app={flow.detail} installed={flow.detail ? flow.installedOf(flow.detail) : undefined} lang={lang} staging={market.staging && flow.detail && market.staging.appId === flow.detail.app_id ? market.staging : null}
+      blocked={busy} error={flow.detailError || market.stageError} onClose={() => flow.setDetail(null)}
       onInstall={version => flow.detail && void flow.installFromDetail(flow.detail, version)} onOpenTrust={() => { flow.setDetail(null); goTrust() }} />
 
     <Modal open={customOpen} title={t('appStore.customTitle')} okText={t('appStore.customOpen')} cancelText={t('appPlatform.cancel')} okButtonProps={{ disabled: !customValid }} onOk={openCustom} onCancel={() => setCustomOpen(false)} destroyOnHidden>

@@ -86,6 +86,37 @@ describe('Install from the catalogue', () => {
     expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/plans`)).toHaveLength(0)
   })
 
+  it('shows a slow download\'s progress on the Install button, on the dialog and on the card', async () => {
+    const base = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation(async (url: string, body: unknown) => url === `${root}/market/stage`
+      ? { state: 'downloading', release_sha256: sha('c'), bytes_done: String(1024 * 1024), bytes_total: String(4 * 1024 * 1024) }
+      : base(url, body))
+    apiMock.get.mockImplementation(((get) => async (url: string, ...rest: unknown[]) => url.startsWith(`${root}/market/stage?`) ? new Promise(() => undefined) : get(url, ...rest))(apiMock.get.getMockImplementation()!))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Charts' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'appStore.installAction' }))
+    expect(await within(dialog).findByRole('button', { name: /appStore\.downloadProgress:\{"done":1,"total":4\}/ })).toBeTruthy()
+    expect(within(dialog).getByRole('progressbar')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /25%/ })).toBeTruthy()
+  })
+
+  it('lets the dialog close while a download runs on, and says a later failure on the card', async () => {
+    const base = apiMock.post.getMockImplementation()!
+    let finish!: (v: unknown) => void
+    apiMock.post.mockImplementation(async (url: string, body: unknown) => url === `${root}/market/stage` ? new Promise(done => { finish = done }) : base(url, body))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'Charts' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'appStore.installAction' }))
+    await waitFor(() => expect(finish).toBeTypeOf('function'))
+    await user.click(within(dialog).getByRole('button', { name: /close/i }))
+    await act(async () => { finish({ state: 'failed', release_sha256: sha('c'), error_code: 'app_platform_busy' }) })
+    await waitFor(() => expect(document.querySelector('.rp-market-card [role="alert"]')?.textContent).toContain('err.app_platform_busy'))
+  })
+
   it('installs an older version when it is chosen in the dialog', async () => {
     fx.releaseRows[sha('e')] = verifiedRow('e', '2.0.0-beta.1')
     const user = userEvent.setup()
