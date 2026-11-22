@@ -529,7 +529,7 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			result.RepairEligible = true
 		}
 		if !result.ControlPaused {
-			if _, resolveErr := loadPlatformResolveKeepDataPlan(e, installation, control); resolveErr == nil {
+			if _, resolveErr := loadPlatformResolveKeepDataPlan(e, installation, control, false); resolveErr == nil {
 				result.ResolveKeepDataEligible = true
 			}
 		}

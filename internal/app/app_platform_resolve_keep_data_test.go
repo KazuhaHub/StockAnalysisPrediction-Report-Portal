@@ -420,6 +420,15 @@ func TestPlatformResolveKeepDataRefusesAnEarlierSnapshotItCannotProveSQLite(t *t
 			t.Fatalf("an earlier snapshot was abandoned with nothing after it: %v", err)
 		}
 	})
+	t.Run("the later snapshot is of another runtime", func(t *testing.T) {
+		f := platformResolveKeepDataFixtureWith(t, true)
+		if _, err := f.s.st.exec(`UPDATE app_platform_operation_effects SET runtime_id=NULL WHERE operation_id=? AND kind='snapshot'`, f.operation); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.review(t); !errors.Is(err, errAppPlatformOperationConflict) {
+			t.Fatalf("an earlier snapshot was abandoned on the word of another runtime: %v", err)
+		}
+	})
 	t.Run("another effect of the earlier attempt is unsettled", func(t *testing.T) {
 		f := platformResolveKeepDataFixtureWith(t, true)
 		if _, err := f.s.st.exec(`UPDATE app_platform_operation_effects SET observed_fence=3 WHERE operation_id=? AND kind='snapshot'`, f.first); err != nil {

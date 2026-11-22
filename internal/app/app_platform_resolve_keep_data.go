@@ -91,13 +91,15 @@ func platformPlanIsResolveKeepData(planRaw string) bool {
 }
 
 // loadPlatformResolveKeepDataPlan rebuilds the review's facts from the Portal's rows. It changes nothing and asks nobody.
-func loadPlatformResolveKeepDataPlan(e migExec, installation string, control platformActorControl) (platformResolveKeepDataPlan, error) {
+func loadPlatformResolveKeepDataPlan(e migExec, installation string, control platformActorControl, forUpdate bool) (platformResolveKeepDataPlan, error) {
 	var p platformResolveKeepDataPlan
 	if !platformValidUUID(installation) {
 		return p, errAppPlatformPlanChanged
 	}
+	// Only the review and the confirmation lock the installation row; the settings read that decides whether to offer
+	// the action does not.
 	lock := ""
-	if e.s.driver == "postgres" {
+	if forUpdate && e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
 	}
 	var desired, phase string
@@ -257,7 +259,7 @@ func loadPlatformResolveKeepDataPlan(e migExec, installation string, control pla
 		effects.Close()
 		for _, f := range found {
 			var set sql.NullString
-			if err := e.queryRow(`SELECT id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing' AND manifest_sha256 IS NULL AND bytes=0`, o.id).Scan(&set); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if err := e.queryRow(`SELECT id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing' AND manifest_sha256 IS NULL AND bytes=0 ORDER BY created_ms,id LIMIT 1`, o.id).Scan(&set); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return p, err
 			}
 			f.RecoverySetID = set.String
@@ -277,7 +279,7 @@ func loadPlatformResolveKeepDataPlan(e migExec, installation string, control pla
 		return p, errPlatformResolveKeepDataUnavailable
 	}
 	var set sql.NullString
-	if err := e.queryRow(`SELECT id FROM app_platform_recovery_sets WHERE operation_id=? AND state='verified'`, p.OperationID).Scan(&set); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := e.queryRow(`SELECT id FROM app_platform_recovery_sets WHERE operation_id=? AND state='verified' ORDER BY created_ms,id LIMIT 1`, p.OperationID).Scan(&set); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return p, err
 	}
 	p.CheckpointRecoverySt = set.String
@@ -429,9 +431,14 @@ var platformCheckpointReceiptRead = platformReadCheckpointReceipt
 //   - a read of the rebuilt command, with the runner reachable (its root answers just before), returns no receipt,
 //     twice: it was not applied either.
 func (s *Server) proveSnapshotNotAdmitted(ctx context.Context, endpoint platformRuntimeEndpoint, plan platformResolveKeepDataPlan, f platformResolveKeepDataEffect) error {
+	// The later snapshot is evidence about the runner that was asked about the earlier one: the same runtime binding.
+	var runtimeID sql.NullString
+	if err := s.st.queryRowContext(ctx, `SELECT runtime_id FROM app_platform_operation_effects WHERE operation_id=? AND effect_id=?`, f.OperationID, f.EffectID).Scan(&runtimeID); err != nil || !runtimeID.Valid {
+		return errAppPlatformOperationConflict
+	}
 	var later int
 	if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operation_effects
-		WHERE operation_id=? AND state='applied' AND kind='snapshot' AND created_ms>?`, plan.OperationID, platformResolveKeepDataQuiet(f.CompletedMS)).Scan(&later); err != nil {
+		WHERE operation_id=? AND state='applied' AND kind='snapshot' AND created_ms>? AND runtime_id=?`, plan.OperationID, platformResolveKeepDataQuiet(f.CompletedMS), runtimeID.String).Scan(&later); err != nil {
 		return err
 	}
 	if later == 0 {
@@ -483,7 +490,7 @@ func (s *Server) signPlatformFailedSnapshotRead(ctx context.Context, f platformR
 		Scan(&installation, &epoch, &generation, &admitted, &digest); err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	if err := e.queryRow(`SELECT checkpoint_id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing'`, f.OperationID).Scan(&checkpointID); err != nil {
+	if err := e.queryRow(`SELECT checkpoint_id FROM app_platform_recovery_sets WHERE operation_id=? AND state='preparing' AND manifest_sha256 IS NULL AND bytes=0 ORDER BY created_ms,id LIMIT 1`, f.OperationID).Scan(&checkpointID); err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
 	runtime, seed, err := s.platformDataRuntime(e, epoch, dek)
@@ -532,7 +539,7 @@ func (s *Server) createPlatformResolveKeepDataReview(ctx context.Context, sessio
 	var plan platformResolveKeepDataPlan
 	if err := s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl, _ appplatform.PublisherTrust) error {
 		var err error
-		plan, err = loadPlatformResolveKeepDataPlan(e, installation, control)
+		plan, err = loadPlatformResolveKeepDataPlan(e, installation, control, true)
 		return err
 	}); err != nil {
 		return platformRemovalReview{}, err
@@ -542,7 +549,7 @@ func (s *Server) createPlatformResolveKeepDataReview(ctx context.Context, sessio
 	}
 	var result platformRemovalReview
 	err := s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl, _ appplatform.PublisherTrust) error {
-		fresh, err := loadPlatformResolveKeepDataPlan(e, installation, control)
+		fresh, err := loadPlatformResolveKeepDataPlan(e, installation, control, true)
 		if err != nil {
 			return err
 		}
@@ -654,7 +661,7 @@ func (s *Server) consumePlatformResolveKeepDataReview(ctx context.Context, sessi
 			epoch != control.epoch || platformDigest([]byte(stored)) != planSHA {
 			return errAppPlatformPlanChanged
 		}
-		fresh, err := loadPlatformResolveKeepDataPlan(e, installation.String, control)
+		fresh, err := loadPlatformResolveKeepDataPlan(e, installation.String, control, true)
 		freshRaw, _ := json.Marshal(fresh)
 		if err != nil || string(freshRaw) != stored {
 			return errAppPlatformPlanChanged
