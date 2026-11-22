@@ -20,9 +20,14 @@ body,
 #root {
   margin: 0;
   height: 100%;
-  /* Never let the page itself scroll sideways on mobile — inner strips keep their
-     own overflow-x:auto. `clip` (not `hidden`) doesn't create a scroll container,
-     so the sticky header keeps working. */
+}
+/* Never let the page itself scroll sideways on mobile — inner strips keep their own overflow-x:auto.
+   `clip` (not `hidden`) doesn't create a scroll container, so the sticky header keeps working.
+   Not on <html>: any overflow there stops <body>'s from reaching the viewport, and then the
+   `overflow-y: hidden` a drawer or dialog puts on <body> turns the 100%-tall body into its own scroll
+   box and the page jumps to the top (scrollLock.test.ts). */
+body,
+#root {
   overflow-x: clip;
 }
 body {
@@ -1788,6 +1793,82 @@ body {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+}
+
+/* The header bell's preview of the latest notifications (NotificationBell). */
+.rp-inbox-preview {
+  width: 360px;
+  max-width: calc(100vw - 24px);
+}
+/* On a phone the panel is shifted back into the window (NotificationBell's align), which puts its
+   positioned root flush against the left edge. A transparent gutter on that root keeps the card 12px
+   from both edges: 12px before it, and 4px after it on a root that is then 8px narrower than the
+   window (a root as wide as the window is not shifted at all). */
+@media (max-width: 575px) {
+  .rp-inbox-popover.ant-popover { padding-inline: 12px 4px; }
+}
+.rp-inbox-preview__head,
+.rp-inbox-preview__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+}
+.rp-inbox-preview__head { border-bottom: 1px solid var(--ant-color-border-secondary); }
+.rp-inbox-preview__foot {
+  justify-content: center;
+  padding: 8px 16px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+.rp-inbox-preview__list {
+  max-height: min(420px, 60vh);
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.rp-inbox-preview__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 8px 10px 12px;
+  border-radius: var(--ant-border-radius);
+  transition: background-color 0.2s;
+}
+.rp-inbox-preview__item:hover { background: var(--ant-color-fill-tertiary); }
+.rp-inbox-preview__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+}
+.rp-inbox-preview__item--unread .rp-inbox-preview__dot { background: var(--ant-color-primary); }
+.rp-inbox-preview__body {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.rp-inbox-preview__subject,
+.rp-inbox-preview__text {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.rp-inbox-preview__subject { color: var(--ant-color-text-secondary); }
+.rp-inbox-preview__item--unread .rp-inbox-preview__subject { color: var(--ant-color-text); font-weight: 600; }
+.rp-inbox-preview__text { color: var(--ant-color-text-secondary); font-size: 13px; }
+.rp-inbox-preview__time.ant-typography { font-size: 12px; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-inbox-preview__item { transition: none; }
+  /* antd zooms popovers open and closed; under reduced motion they appear and go at once. */
+  .ant-popover { animation-duration: 0.01ms !important; }
 }
 
 /* The menu belongs to the primary run control, so a subtle theme-colored border connects

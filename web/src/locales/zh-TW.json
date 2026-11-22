@@ -2789,6 +2789,7 @@
   "notify.principal.user": "帳號",
   "notify.principal.group": "組織單元",
   "inbox.title": "站內通知",
+  "inbox.viewAll": "檢視全部",
   "inbox.readAll": "全部標為已讀",
   "inbox.preferences": "通知偏好",
   "inbox.empty": "暫無可查看的通知。",

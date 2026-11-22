@@ -2789,6 +2789,7 @@
   "notify.principal.user": "Account",
   "notify.principal.group": "OU",
   "inbox.title": "Notifications",
+  "inbox.viewAll": "View all",
   "inbox.readAll": "Mark all as read",
   "inbox.preferences": "Notification preferences",
   "inbox.empty": "No notifications available.",

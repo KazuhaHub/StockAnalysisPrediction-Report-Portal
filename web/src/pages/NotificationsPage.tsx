@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Empty, Modal, Space, Switch, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Flex, Modal, Space, Switch, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { notificationInbox, type InboxItem } from '../api/notifications'
 import { errText } from '../api/client'
@@ -40,7 +40,9 @@ export default function NotificationsPage() {
     try { await task(); if (refresh) { await load(); window.dispatchEvent(new Event(INBOX_CHANGED)) } } catch (e) { notifyError(errText(e, t)) } finally { setBusy(false) }
   }
   return <LoadGate loading={!loaded} error={error} onRetry={() => load()}>
-    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 1000, marginInline: 'auto' }}>
+    {/* A block-level Flex, not a Space: Space is inline-flex, which ignores the auto margins that
+        centre this column (centering.test.ts). */}
+    <Flex vertical gap="large" style={{ width: '100%', maxWidth: 1000, marginInline: 'auto' }}>
       <Space wrap><Typography.Title level={3} style={{ margin: 0 }}>{t('inbox.title')}</Typography.Title><Button disabled={busy} onClick={() => run(() => load(), false)}>{t('common.refresh')}</Button><Button disabled={busy} onClick={() => run(async () => setSnapshot(await notificationInbox.snapshot()), false)}>{t('inbox.readAll')}</Button><Button disabled={busy} onClick={() => run(async () => setPreferences((await notificationInbox.preferences()).preferences), false)}>{t('inbox.preferences')}</Button></Space>
       {!items.length && <Empty description={t('inbox.empty')} />}
       {items.map(item => <Card key={item.id} styles={{ header: { paddingBlock: 12 }, title: { whiteSpace: 'normal', overflowWrap: 'anywhere' } }} title={<div>{!item.read_at && <Tag color="blue">{t('inbox.unread')}</Tag>}{item.subject}</div>}>
@@ -49,7 +51,7 @@ export default function NotificationsPage() {
         <Space>{!item.read_at && <Button disabled={busy} onClick={() => run(() => notificationInbox.update(item.id, 'read'))}>{t('inbox.read')}</Button>}<Button disabled={busy} onClick={() => run(() => notificationInbox.update(item.id, 'dismiss'))}>{t('inbox.dismiss')}</Button></Space>
       </Card>)}
       {next && <Button disabled={busy} onClick={() => run(() => load(true), false)}>{t('notify.more')}</Button>}
-    </Space>
+    </Flex>
     <Modal open={!!snapshot} title={t('inbox.readAll')} onCancel={() => setSnapshot(undefined)} confirmLoading={busy} onOk={() => snapshot && run(async () => { await notificationInbox.readAll(snapshot.token); setSnapshot(undefined) })}>
       <Typography.Paragraph>{t('inbox.snapshotHelp', { count: snapshot?.count })}</Typography.Paragraph>
     </Modal>
