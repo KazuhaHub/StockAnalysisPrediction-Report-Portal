@@ -10,12 +10,15 @@ import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import { useAuth } from '../../auth'
-import type { AppLayoutResp, AppSummary, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
+import type { AppLayoutEntry, AppLayoutResp, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
 import { difyModeKind } from '../../lib/batchUi'
 import { DragHandle, SortableItem, useSortableSensors } from './dnd'
 import { LINK_ICON_OPTIONS, linkIconComponent } from '../../components/linkIcons'
 import LoadGate from '../../components/LoadGate'
-import { APP_SHORTCUTS, builtinAppOptions, linkDisplayLabel, shortcutOfUrl, shortcutUrl, type ShortcutKey } from '../../lib/shortcuts'
+import { APP_SHORTCUTS, PLATFORM_PIN_PREFIX, builtinAppOptions, linkDisplayLabel, shortcutOfUrl, shortcutUrl, type ShortcutKey } from '../../lib/shortcuts'
+import { platformPinOptions } from '../../lib/appPins'
+import { usePrefs } from '../../prefs'
+import StatusTag from '../../components/StatusTag'
 import { BUILTIN_PIN_PREFIX } from '../../lib/builtinApps'
 import useFormDraft from './useFormDraft'
 import { notifyError } from '../../lib/notify'
@@ -52,7 +55,12 @@ export default function LinksPage() {
   const groupDraft = useFormDraft(groupForm, groupOpen, groupSaving, () => setGroupOpen(false))
   const [batchTargets, setBatchTargets] = useState<BatchTarget[]>([])
   const [chatTargets, setChatTargets] = useState<ChatTarget[]>([])
-  const [appList, setAppList] = useState<AppSummary[]>([])
+  // The administrator's layout, once read: null until then, so a pin is not called uninstalled while it loads.
+  const [layoutApps, setLayoutApps] = useState<AppLayoutEntry[] | null>(null)
+  const { lang } = usePrefs()
+  const platformOptions = useMemo(() => platformPinOptions(layoutApps ?? [], lang), [layoutApps, lang])
+  // What a blank entry pinned to a platform app shows: its display name.
+  const platformNames = useMemo(() => Object.fromEntries(platformOptions.map((o) => [o.value, o.label])), [platformOptions])
   // Same sensors as SortableWrapper, from the same place: this page has its own DndContext (see the
   // comment at the list below), and a second hand-rolled sensor list is how the two quietly diverge.
   const sensors = useSortableSensors()
@@ -84,7 +92,7 @@ export default function LinksPage() {
     // must not remove it from the entry-button picker.
     api
       .get<AppLayoutResp>('/api/admin/apps/layout')
-      .then((r) => setAppList((r.apps || []).filter((a) => !a.builtin).map((a) => ({ id: a.key, name: a.name }))))
+      .then((r) => setLayoutApps(r.apps || []))
       .catch(() => {})
     if (canRun) {
       api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setBatchTargets(r.targets || [])).catch(() => {})
@@ -95,8 +103,8 @@ export default function LinksPage() {
   const targetOptionsFor = (key?: string): { value: string; label: string }[] => {
     if (key === 'run-analysis') return batchTargets.filter((tg) => difyModeKind(tg.mode) !== 'agent').map((tg) => ({ value: String(tg.id), label: tg.name }))
     if (key === 'chat') return chatTargets.map((tg) => ({ value: String(tg.id), label: tg.name }))
-    // Built-in apps and installed downloadable apps are pinnable alike (built-in first).
-    if (key === 'apps') return [...builtinAppOptions((k) => t(k)), ...appList.map((a) => ({ value: a.id, label: a.name }))]
+    // Built-in features first, then the platform installations (the retired v1 apps are not offered).
+    if (key === 'apps') return [...builtinAppOptions((k) => t(k)), ...platformOptions]
     return []
   }
 
@@ -258,7 +266,7 @@ export default function LinksPage() {
     // clear it so a stale value can't be saved (e.g. an apps `builtin:recurring` left on run-analysis
     // would serialize to a malformed pin).
     if ('shortcut' in changed) form.setFieldValue('shortcutTarget', undefined)
-    // Picking a Dify target or downloadable app pre-fills its name, since that name is admin data
+    // Picking a Dify target or platform app pre-fills its name, since that name is admin data
     // with no translation anyway. A built-in app is left blank so the button follows the language.
     const target = changed.shortcutTarget
     if (typeof target === 'string' && target && !target.startsWith(BUILTIN_PIN_PREFIX) && !form.getFieldValue('label')) {
@@ -287,12 +295,17 @@ export default function LinksPage() {
           {u}
         </a>
       )
-    const suffix = res.param ? ` · ${targetOptionsFor(res.shortcut.key).find((o) => o.value === res.param)?.label ?? '#' + res.param}` : ''
+    // A pin to a platform installation that the layout no longer lists was uninstalled: say so, so it can be cleaned up.
+    const gone = !!layoutApps && res.shortcut.key === 'apps' && !!res.param?.startsWith(PLATFORM_PIN_PREFIX) && !platformNames[res.param]
+    const suffix = res.param && !gone ? ` · ${targetOptionsFor(res.shortcut.key).find((o) => o.value === res.param)?.label ?? '#' + res.param}` : ''
     return (
-      <Tag color="blue">
-        {t('links.shortcutTag', { name: t(res.shortcut.labelKey) })}
-        {suffix}
-      </Tag>
+      <Space size={6} wrap>
+        <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+          {t('links.shortcutTag', { name: t(res.shortcut.labelKey) })}
+          {suffix}
+        </Tag>
+        {gone && <StatusTag tone="warning">{t('links.appUninstalled')}</StatusTag>}
+      </Space>
     )
   }
 
@@ -358,7 +371,7 @@ export default function LinksPage() {
         <DragHandle label={t('common.reorder')} />
         <Icon />
         <Typography.Text style={{ minWidth: 0, flex: '0 1 auto' }} ellipsis>
-          {linkDisplayLabel(l, t)}
+          {linkDisplayLabel(l, t, platformNames)}
         </Typography.Text>
         {!l.label.trim() && <Tag style={{ flexShrink: 0 }}>{t('links.labelAuto')}</Tag>}
         <span style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{urlDisplay(l.url)}</span>
@@ -452,7 +465,7 @@ export default function LinksPage() {
             {({ getFieldValue }) => {
               const isShortcut = getFieldValue('kind') === 'shortcut'
               const key = getFieldValue('shortcut') as ShortcutKey | undefined
-              const auto = isShortcut && key ? linkDisplayLabel({ label: '', url: shortcutUrl(key, getFieldValue('shortcutTarget')) }, t) : ''
+              const auto = isShortcut && key ? linkDisplayLabel({ label: '', url: shortcutUrl(key, getFieldValue('shortcutTarget')) }, t, platformNames) : ''
               return (
                 <Form.Item name="label" label={t('links.label')} rules={[{ required: !isShortcut }]} extra={isShortcut ? t('links.labelAutoHint') : undefined}>
                   <Input placeholder={auto} />

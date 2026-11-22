@@ -24,6 +24,19 @@ function Probe({ keys }: { keys: string[] }) {
   return <div>{a.ready ? keys.map((k) => `${k}=${a.isOpen(k)}`).join(',') : 'loading'}</div>
 }
 
+describe('a platform installation key', () => {
+  const id = '33333333-3333-4333-8333-333333333333'
+  it('is open exactly when the server listed it, and closed for an installation that is not listed or is gone', async () => {
+    apiMock.get.mockResolvedValue({ ...answer, order: ['builtin:batch', `platform:${id}`] })
+    render(
+      <AppAccessProvider user="rita">
+        <Probe keys={[`platform:${id}`, 'platform:44444444-4444-4444-8444-444444444444', 'platform:']} />
+      </AppAccessProvider>,
+    )
+    expect(await screen.findByText(`platform:${id}=true,platform:44444444-4444-4444-8444-444444444444=false,platform:=false`)).toBeTruthy()
+  })
+})
+
 describe('useAppAccess', () => {
   it('is open for everything without a provider, so a bare page is unrestricted', () => {
     render(<Probe keys={['builtin:quotes']} />)

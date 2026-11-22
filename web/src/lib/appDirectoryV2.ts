@@ -37,8 +37,9 @@ export function parseAppDirectory(value: unknown): Page | null {
   return { items, nextCursor: v.nextCursor }
 }
 
-export function useAppDirectory(owner: string | null) {
-  const [state, setState] = useState({ owner, items: [] as AppDirectoryItem[], nextCursor: '', loading: true, failed: false })
+/** `enabled` false keeps the directory unread (a page that only sometimes needs it). */
+export function useAppDirectory(owner: string | null, enabled = true) {
+  const [state, setState] = useState({ owner, items: [] as AppDirectoryItem[], nextCursor: '', loading: enabled, failed: false })
   const request = useRef<AbortController | null>(null)
   const epoch = useRef(0)
   const load = useCallback((after = '') => {
@@ -62,9 +63,10 @@ export function useAppDirectory(owner: string | null) {
     epoch.current++
   }, [])
   useEffect(() => {
+    if (!enabled) return
     load()
     return cancel
-  }, [load, cancel])
+  }, [load, cancel, enabled])
   // Hide a previous account's cards during render, before the new effect runs.
   return { ...(state.owner === owner ? state : { owner, items: [], nextCursor: '', loading: true, failed: false }), load }
 }

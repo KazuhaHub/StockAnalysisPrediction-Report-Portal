@@ -117,6 +117,12 @@ async function requestForm<T>(method: string, url: string, body: FormData): Prom
   return responseJSON<T>(res)
 }
 
+// A raw body with its own content type, for the one endpoint that takes a package rather than JSON.
+async function requestBytes<T>(url: string, body: Blob, contentType: string): Promise<T> {
+  const res = await checkedFetch(url, { method: 'POST', headers: { 'Content-Type': contentType }, body, credentials: 'same-origin' })
+  return responseJSON<T>(res)
+}
+
 export const api = {
   get: <T = any>(url: string, options?: {signal?: AbortSignal}) => request<T>('GET', url, undefined, undefined, options?.signal),
   post: <T = any>(url: string, body?: unknown, options?: {signal?: AbortSignal}) => request<T>('POST', url, body ?? {}, undefined, options?.signal),
@@ -131,6 +137,7 @@ export const api = {
   stepUp: <T = any>(method: 'POST' | 'DELETE', url: string, proof: string, body?: unknown) =>
     request<T>(method, url, method === 'POST' ? (body ?? {}) : body, { 'X-Step-Up-Proof': proof }),
   upload: <T = any>(url: string, body: FormData) => requestForm<T>('POST', url, body),
+  postBytes: <T = any>(url: string, body: Blob, contentType: string) => requestBytes<T>(url, body, contentType),
 }
 
 // qs builds a query string from a filter object (skipping empty values).

@@ -31,8 +31,10 @@ func (s *Server) apiPlatformMarketCatalogueClient(w http.ResponseWriter, r *http
 		platformManagementError(w, err)
 		return
 	}
-	if err = s.withPlatformTrustActorContext(r.Context(), actor, func(e migExec, facts platformActorFacts, control platformActorControl, _ appplatform.PublisherTrust) error {
+	var first appplatform.PublisherTrust
+	if err = s.withPlatformTrustActorContext(r.Context(), actor, func(e migExec, facts platformActorFacts, control platformActorControl, current appplatform.PublisherTrust) error {
 		_, err := platformRefreshActor(e, actor, facts, control)
+		first = current
 		return err
 	}); err != nil {
 		platformManagementError(w, err)
@@ -53,15 +55,22 @@ func (s *Server) apiPlatformMarketCatalogueClient(w http.ResponseWriter, r *http
 		platformManagementError(w, errPlatformMarketFetch)
 		return
 	}
-	// Recheck authority after network IO before publishing discovery hints.
-	if err = s.withPlatformTrustActorContext(r.Context(), actor, func(e migExec, facts platformActorFacts, control platformActorControl, _ appplatform.PublisherTrust) error {
-		_, err := platformRefreshActor(e, actor, facts, control)
+	apps := platformMarketGroupApps(catalogue.Releases)
+	previews := platformMarketFetchPreviews(r.Context(), client, apps, platformMarketTrustedPublishers(first))
+	// Recheck authority after network IO before publishing discovery hints. The trust read here is also what
+	// the previews are verified against, so a display never outlives a revocation.
+	var trust appplatform.PublisherTrust
+	var now int64
+	if err = s.withPlatformTrustActorContext(r.Context(), actor, func(e migExec, facts platformActorFacts, control platformActorControl, current appplatform.PublisherTrust) error {
+		refreshed, err := platformRefreshActor(e, actor, facts, control)
+		trust, now = current, refreshed.nowMS
 		return err
 	}); err != nil {
 		platformManagementError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"catalogue_sha256": catalogue.SHA256, "releases": catalogue.Releases, "publisher_verified": false})
+	platformMarketApplyTrust(apps, previews, trust, now)
+	writeJSON(w, map[string]any{"catalogue_sha256": catalogue.SHA256, "releases": catalogue.Releases, "apps": apps, "publisher_verified": false})
 }
 
 func (s *Server) apiPlatformMarketStage(w http.ResponseWriter, r *http.Request, user string) {

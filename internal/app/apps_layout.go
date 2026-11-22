@@ -66,12 +66,12 @@ func appLayoutKeys(installed []App, platform []string) []string {
 
 // platformInstallationRow is one platform installation that is not removed.
 type platformInstallationRow struct {
-	id, appID, desired, phase string
+	id, appID, publisherID, desired, phase string
 }
 
 // platformInstallations lists the installations whose desired state is not removed, oldest first.
 func (s *Store) platformInstallations() ([]platformInstallationRow, error) {
-	rows, err := s.query(`SELECT id,app_id,desired_state,phase FROM app_platform_installations WHERE desired_state<>'removed' ORDER BY created_ms,id`)
+	rows, err := s.query(`SELECT id,app_id,publisher_id,desired_state,phase FROM app_platform_installations WHERE desired_state<>'removed' ORDER BY created_ms,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (s *Store) platformInstallations() ([]platformInstallationRow, error) {
 	out := []platformInstallationRow{}
 	for rows.Next() {
 		var r platformInstallationRow
-		if err := rows.Scan(&r.id, &r.appID, &r.desired, &r.phase); err != nil {
+		if err := rows.Scan(&r.id, &r.appID, &r.publisherID, &r.desired, &r.phase); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -489,6 +489,7 @@ type appLayoutEntry struct {
 	// the signed display metadata when it verifies.
 	InstallationID string                  `json:"installation_id,omitempty"`
 	AppID          string                  `json:"app_id,omitempty"`
+	PublisherID    string                  `json:"publisher_id,omitempty"`
 	State          string                  `json:"state,omitempty"`
 	Display        *appplatform.AppDisplay `json:"display,omitempty"`
 	// Version, Entry and Scopes describe an installed app. The console reads them here rather than
@@ -545,7 +546,7 @@ func (s *Server) appLayout() ([]appLayoutEntry, error) {
 		if slug, ok := strings.CutPrefix(key, builtinAppPrefix); ok {
 			e.Name, e.Builtin, e.Kind = slug, true, "builtin"
 		} else if p, ok := platformByKey[key]; ok {
-			e.Kind, e.InstallationID, e.AppID, e.State = "platform", p.id, p.appID, platformLayoutState(p)
+			e.Kind, e.InstallationID, e.AppID, e.PublisherID, e.State = "platform", p.id, p.appID, p.publisherID, platformLayoutState(p)
 			e.Name = p.appID
 			if d, ok := displays[p.id]; ok {
 				e.Version, e.Display = d.version, d.display

@@ -21,7 +21,7 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	var s *Server
 	var actor platformActorSession
 	var mux *http.ServeMux
-	var operation, installation string
+	var operation, installation, updateTarget string
 	scenario := os.Getenv("APP_INSTALL_HTTP_SCENARIO")
 	switch scenario {
 	case "progress", "paused", "recovery":
@@ -48,7 +48,9 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 			mustExec(t, s.st, `UPDATE app_platform_installations SET phase='recovery_required',revision=revision+1,control_fence=control_fence+1,updated_ms=? WHERE id=(SELECT installation_id FROM app_platform_operations WHERE id=?)`, now, operation)
 		}
 	case "updateable":
-		s, actor, _, _ = platformUpdateFixture(t, []int{1})
+		var target platformStagedRelease
+		s, actor, _, target = platformUpdateFixture(t, []int{1})
+		updateTarget = target.sha256
 		mux = http.NewServeMux()
 		s.wireRoutes(mux)
 	case "disabled":
@@ -96,7 +98,11 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 		}
 	}
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
-		mux = platformMarketBrowserMux(t, s, mux)
+		release := platformMarketSyntheticRelease(t)
+		if scenario == "updateable" {
+			release = platformMarketStagedRelease(t, s, updateTarget)
+		}
+		mux = platformMarketBrowserMux(t, s, mux, release)
 	}
 	if scenario != "updateable" && scenario != "disabled" &&
 		scenario != "progress" && scenario != "settings" &&
@@ -227,7 +233,13 @@ func platformRepairBrowserMux(
 	return fixture
 }
 
-func platformMarketBrowserMux(t *testing.T, s *Server, original *http.ServeMux) *http.ServeMux {
+// platformMarketBrowserRelease is one signed release a synthetic catalogue serves.
+type platformMarketBrowserRelease struct {
+	descriptor, signature, archive []byte
+}
+
+// platformMarketSyntheticRelease is the default catalogue entry: a new app that is not installed yet.
+func platformMarketSyntheticRelease(t *testing.T) platformMarketBrowserRelease {
 	t.Helper()
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.1-beta.1")
 	var manifest appplatform.Manifest
@@ -241,7 +253,30 @@ func platformMarketBrowserMux(t *testing.T, s *Server, original *http.ServeMux) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	signature := platformSignTestDescriptor(t, raw)
+	return platformMarketBrowserRelease{raw, platformSignTestDescriptor(t, raw), archive}
+}
+
+// platformMarketStagedRelease serves a release that is already staged, so the catalogue offers it as an update.
+func platformMarketStagedRelease(t *testing.T, s *Server, sha256 string) platformMarketBrowserRelease {
+	t.Helper()
+	var descriptor, frontend []byte
+	if err := s.st.queryRow(`SELECT r.descriptor,f.content FROM app_platform_releases r
+		JOIN app_platform_frontend_artifacts f ON f.sha256=r.frontend_sha256
+		WHERE r.sha256=?`, sha256).Scan(&descriptor, &frontend); err != nil {
+		t.Fatal(err)
+	}
+	return platformMarketBrowserRelease{descriptor, platformSignTestDescriptor(t, descriptor), frontend}
+}
+
+func platformMarketBrowserMux(t *testing.T, s *Server, original *http.ServeMux, release platformMarketBrowserRelease) *http.ServeMux {
+	t.Helper()
+	raw, signature, archive := release.descriptor, release.signature, release.archive
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	// The catalogue is the official source, so every page of the console reads it without a custom address.
+	s.platformOfficialCatalogue = "https://127.0.0.1/index.json"
 	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index.json":

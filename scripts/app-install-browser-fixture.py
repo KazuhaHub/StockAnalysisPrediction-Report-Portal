@@ -25,8 +25,10 @@ parser.add_argument("--scenario", choices=("install", "progress", "paused", "rec
 args = parser.parse_args()
 if args.market and args.fresh:
     parser.error("--fresh and --market are mutually exclusive")
-if args.scenario != "install" and (args.market or args.fresh):
-    parser.error("lifecycle scenarios cannot combine --market or --fresh")
+if args.scenario != "install" and args.fresh:
+    parser.error("lifecycle scenarios cannot combine --fresh")
+if args.scenario not in ("install", "updateable") and args.market:
+    parser.error("--market is only available for the install and updateable scenarios")
 
 with tempfile.TemporaryDirectory(prefix="portal-install-browser-") as directory:
     target = Path(directory)
@@ -35,10 +37,9 @@ with tempfile.TemporaryDirectory(prefix="portal-install-browser-") as directory:
     source.write_text("import " + json.dumps(str(WEB / "src/index.css")) + ";\n" + """import React from 'react';import {createRoot} from 'react-dom/client';
 import {BrowserRouter,Routes,Route} from 'react-router';
 import {ConfigProvider,App} from 'antd';
-import {AuthProvider,useAuth} from """ + json.dumps(str(WEB / "src/auth.tsx")) + ";\nimport {PrefsProvider,usePrefs} from " + json.dumps(str(WEB / "src/prefs.tsx")) + ";\nimport AppsAdminPage from " + json.dumps(str(WEB / "src/pages/manage/AppsAdminPage.tsx")) + """;
+import {AuthProvider,useAuth} from """ + json.dumps(str(WEB / "src/auth.tsx")) + ";\nimport {PrefsProvider,usePrefs} from " + json.dumps(str(WEB / "src/prefs.tsx")) + ";\nimport {appsRoutes} from " + json.dumps(str(WEB / "src/pages/manage/appsRoutes.tsx")) + """;
 import {portalTheme} from """ + json.dumps(str(WEB / "src/theme/portal.ts")) + """;
-import AppPlatformSettingsPage from """ + json.dumps(str(WEB / "src/pages/manage/AppPlatformSettingsPage.tsx")) + """;
-function Host(){const prefs=usePrefs();const auth=useAuth();return <ConfigProvider locale={prefs.antd} theme={portalTheme(prefs.dark)}><App><main style={{minHeight:'100vh',padding:24,background:prefs.dark?'#000':'#fff',color:prefs.dark?'#fff':'#000'}}><nav><button onClick={()=>prefs.setLang('en-US')}>English</button><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle theme</button></nav>{!auth.loading&&auth.admin&&<BrowserRouter><Routes><Route path='/manage/apps' element={<AppsAdminPage/>}/><Route path='/manage/apps/installations/:installation' element={<AppPlatformSettingsPage/>}/><Route path='/apps' element={<p>Application hub destination</p>}/><Route path='/apps/v2/:installation' element={<p>Application destination</p>}/><Route path='/manage/apps/:key/credentials' element={<p>Credential destination</p>}/></Routes></BrowserRouter>}</main></App></ConfigProvider>}
+function Host(){const prefs=usePrefs();const auth=useAuth();return <ConfigProvider locale={prefs.antd} theme={portalTheme(prefs.dark)}><App><main style={{minHeight:'100vh',padding:24,background:prefs.dark?'#000':'#fff',color:prefs.dark?'#fff':'#000'}}><nav><button onClick={()=>prefs.setLang('en-US')}>English</button><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle theme</button></nav>{!auth.loading&&auth.admin&&<BrowserRouter><Routes><Route path='/manage'>{appsRoutes}</Route><Route path='/apps' element={<p>Application hub destination</p>}/><Route path='/apps/v2/:installation' element={<p>Application destination</p>}/></Routes></BrowserRouter>}</main></App></ConfigProvider>}
 createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider><Host/></AuthProvider></PrefsProvider>);
 """)
     config = target / "vite.config.mjs"
@@ -101,11 +102,11 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                     return
                 path = urlsplit(self.path).path
                 set_cookie = None
-                if path in ("/", "/manage/apps", "/apps") or path.startswith("/manage/apps/installations/"):
+                if path in ("/", "/manage/apps", "/apps") or path.startswith(("/manage/apps/", "/apps/")):
                     cookie = fixture_cookie(state["cookieName"], state["cookie"])
                     set_cookie = cookie
                     cookie_script = f"<script>document.cookie={json.dumps(cookie)}</script>"
-                    data = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="stylesheet" href="/style.css"></head><body><div id="host"></div>' + cookie_script + '<script src="/host.js"></script></body></html>').encode()
+                    data = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css"></head><body><div id="host"></div>' + cookie_script + '<script src="/host.js"></script></body></html>').encode()
                     mime = "text/html; charset=utf-8"
                 elif path in ("/host.js", "/style.css"):
                     data = (target / "built" / path[1:]).read_bytes()

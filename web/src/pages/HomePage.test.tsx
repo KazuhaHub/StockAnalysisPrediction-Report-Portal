@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import type { ReactNode } from 'react'
 import HomePage from './HomePage'
 import type { Group, HomeResp } from '../api/types'
@@ -20,7 +20,8 @@ import type { Group, HomeResp } from '../api/types'
 
 type Deferred = { url: string; resolve: (v: unknown) => void; reject: (e: unknown) => void }
 
-const state: { resp: Partial<HomeResp>; urls: string[]; quotes: Deferred[] } = { resp: {}, urls: [], quotes: [] }
+const state: { resp: Partial<HomeResp>; urls: string[]; quotes: Deferred[]; directory: unknown } = { resp: {}, urls: [], quotes: [], directory: { items: [], nextCursor: '' } }
+const access = vi.hoisted(() => ({ isOpen: (_key: string): boolean => true }))
 
 vi.mock('../api/client', () => ({
   api: {
@@ -34,6 +35,7 @@ vi.mock('../api/client', () => ({
           state.quotes.push({ url: u, resolve, reject })
         })
       }
+      if (u.startsWith('/api/app-platform/apps')) return state.directory instanceof Error ? Promise.reject(state.directory) : Promise.resolve(state.directory)
       // A COPY, not the object itself: the server answers a poll with an equal-but-new body, and
       // setState bails out of re-rendering when the next value is Object.is-equal to the current
       // one. Handing back the same reference would hide the very re-render the batch has to
@@ -49,6 +51,7 @@ vi.mock('../api/client', () => ({
 }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 vi.mock('../auth', () => ({ useAuth: () => ({ can: () => true }) }))
+vi.mock('../appAccess', () => ({ useAppAccess: () => ({ ready: true, isOpen: (key: string) => access.isOpen(key) }) }))
 vi.mock('../site', () => ({ useSite: () => ({ title: 'Portal' }), SiteLogo: () => null }))
 // The real Omnibox is an antd Input, whose affix wrapper takes focus on any click inside it. React
 // events from the popover's portal bubble to that wrapper, so the mock records what reaches it.
@@ -180,6 +183,8 @@ beforeEach(() => {
   state.resp = { ...base }
   state.urls = []
   state.quotes = []
+  state.directory = { items: [], nextCursor: '' }
+  access.isOpen = () => true
 })
 
 afterEach(() => {
@@ -622,6 +627,83 @@ describe('the report categories on a card', () => {
     expect(screen.queryByText('kind-four')).toBeNull()
     expect(screen.queryByText('kind-five')).toBeNull()
     expect(screen.getByText('+2')).toBeTruthy()
+  })
+})
+
+function Where() {
+  return <div data-testid="where">{useLocation().pathname}</div>
+}
+
+describe('an entry button pinned to a platform app', () => {
+  const id = '33333333-3333-4333-8333-333333333333'
+  const key = `platform:${id}`
+  const texts = ['zh-CN', 'zh-TW', 'en-US'].map((locale) => ({ locale, name: 'Notes', description: 'Personal notes' }))
+  const item = (extra: Record<string, unknown> = {}) => ({ installationId: id, applicationId: 'notes', state: 'installed', openable: true, display: { icon: 'file-text', texts }, ...extra })
+  const pin = { id: 9, label: '', url: `rp:apps:${key}`, ord: 0 }
+  const mount = () =>
+    render(
+      <MemoryRouter>
+        <HomePage />
+        <Where />
+      </MemoryRouter>,
+    )
+  const platformRequests = () => state.urls.filter((u) => u.startsWith('/api/app-platform/apps'))
+
+  it('shows the app’s display name and opens the launch route the apps hub uses', async () => {
+    state.resp = { ...base, links: [pin] }
+    state.directory = { items: [item()], nextCursor: '' }
+    mount()
+    await userEvent.click(await screen.findByText('Notes'))
+    expect(screen.getByTestId('where').textContent).toBe(`/apps/v2/${id}`)
+  })
+
+  it('keeps written text as written', async () => {
+    state.resp = { ...base, links: [{ ...pin, label: 'My notes' }] }
+    state.directory = { items: [item()], nextCursor: '' }
+    mount()
+    expect(await screen.findByText('My notes')).toBeTruthy()
+  })
+
+  it('is hidden from a reader whose OU has closed the app', async () => {
+    state.resp = { ...base, links: [pin, { id: 10, label: 'Other', url: 'https://example.com', ord: 1 }] }
+    state.directory = { items: [item()], nextCursor: '' }
+    access.isOpen = (k) => k !== key
+    mount()
+    await screen.findByText('Other')
+    await waitFor(() => expect(platformRequests().length).toBeGreaterThan(0))
+    expect(screen.queryByText('Notes')).toBeNull()
+  })
+
+  it('disappears when the installation is gone, even if the access list still fails open', async () => {
+    state.resp = { ...base, links: [pin, { id: 10, label: 'Other', url: 'https://example.com', ord: 1 }] }
+    state.directory = { items: [], nextCursor: '' }
+    mount()
+    await screen.findByText('Other')
+    await waitFor(() => expect(platformRequests().length).toBeGreaterThan(0))
+    expect(screen.queryByText(/^(Notes|nav\.apps)$/)).toBeNull()
+  })
+
+  it('is hidden while the app cannot be launched', async () => {
+    state.resp = { ...base, links: [pin, { id: 10, label: 'Other', url: 'https://example.com', ord: 1 }] }
+    state.directory = { items: [item({ state: 'disabled', openable: false })], nextCursor: '' }
+    mount()
+    await screen.findByText('Other')
+    await waitFor(() => expect(platformRequests().length).toBeGreaterThan(0))
+    expect(screen.queryByText('Notes')).toBeNull()
+  })
+
+  it('falls back to the access list alone when the directory cannot be read', async () => {
+    state.resp = { ...base, links: [{ ...pin, label: 'My notes' }] }
+    state.directory = new Error('unavailable')
+    mount()
+    expect(await screen.findByText('My notes')).toBeTruthy()
+  })
+
+  it('asks for the directory only when an entry is pinned to a platform app', async () => {
+    state.resp = { ...base, links: [{ id: 1, label: '', url: 'rp:apps:builtin:batch', ord: 0 }] }
+    mount()
+    await screen.findByText('nav.batch')
+    expect(platformRequests()).toHaveLength(0)
   })
 })
 

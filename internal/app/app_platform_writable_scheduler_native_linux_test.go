@@ -252,15 +252,15 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t, s, actor, endpoint, admitted.InstallationID)
 }
 
-func assertNativePlatformUserGrant(
+func assertNativePlatformReaderAccess(
 	t *testing.T, s *Server, installation, username, stage string,
 ) {
 	t.Helper()
-	if count := scalar[int](t, s.st, `SELECT COUNT(*)
-		FROM app_platform_access_grants WHERE installation_id=?
-		AND principal_type='user' AND username=?`,
-		installation, username); count != 1 {
-		t.Fatalf("native managed %s lost the reader grant", stage)
+	// Access is the OU policy (doc 190, D7): the reader keeps it while the installation's key stays open on
+	// the reader's OU chain.
+	account := platformActorAccount{username: username, groupID: scalar[int64](t, s.st, `SELECT COALESCE(group_id,0) FROM users WHERE username=?`, username)}
+	if err := platformLaunchAudience(s.st.poolExec(), account, installation); err != nil {
+		t.Fatalf("native managed %s lost the reader's access: %v", stage, err)
 	}
 }
 
@@ -783,27 +783,16 @@ func testNativeManagedDisableEnable(
 		t.Fatal("native managed enable reader", err)
 	}
 	reader := platformReportSession(t, s, readerName)
-	grantID, err := platformNewUUID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{
-		"id": grantID, "installation_id": installation,
-		"principal_type": "user", "username": reader.username,
-		"account_created":    reader.created,
-		"account_generation": reader.generation,
-		"group_id":           nil, "group_created": nil,
-		"revision": 1, "created_ms": 1, "updated_ms": 1,
-	})
+	// The reader's access is the installation opened to the Default OU (doc 190, D7).
+	platformOpenDefault(t, s, installation)
 	generationBefore := scalar[int64](t, s.st, `SELECT generation
 		FROM app_platform_installations WHERE id=?`, installation)
 	releaseBefore := scalar[string](t, s.st, `SELECT release_sha256
 		FROM app_platform_activations
 		WHERE installation_id=? AND state='active'`, installation)
 	grantsBefore := scalar[int](t, s.st, `SELECT COUNT(*)
-		FROM app_platform_access_grants WHERE installation_id=?
-		AND principal_type='user' AND username=?`, installation,
-		reader.username)
+		FROM app_ou_access WHERE app_key=?`,
+		platformAppKey(installation))
 	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
@@ -871,7 +860,7 @@ func testNativeManagedDisableEnable(
 	if disabled.lease.id == "" {
 		t.Fatal("native package revocation did not stop its installation")
 	}
-	assertNativePlatformUserGrant(
+	assertNativePlatformReaderAccess(
 		t, s, installation, reader.username, "disable")
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`,
@@ -884,9 +873,8 @@ func testNativeManagedDisableEnable(
 			FROM app_platform_data_namespaces
 			WHERE owner_installation_id=?`, installation) != "active" ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
-			FROM app_platform_access_grants WHERE installation_id=?
-			AND principal_type='user' AND username=?`,
-			installation, reader.username) != grantsBefore ||
+			FROM app_ou_access WHERE app_key=?`,
+			platformAppKey(installation)) != grantsBefore ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_capability_grants WHERE installation_id=?`,
 			installation) != capabilitiesBefore {
@@ -934,7 +922,7 @@ func testNativeManagedDisableEnable(
 		ctx, enableClaim.lease, endpoint); err != nil {
 		t.Fatal("native managed enable execution", err)
 	}
-	assertNativePlatformUserGrant(
+	assertNativePlatformReaderAccess(
 		t, s, installation, reader.username, "enable")
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`,
@@ -947,9 +935,8 @@ func testNativeManagedDisableEnable(
 			WHERE installation_id=? AND state='active'`,
 			installation) != releaseBefore ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
-			FROM app_platform_access_grants WHERE installation_id=?
-			AND principal_type='user' AND username=?`,
-			installation, reader.username) != grantsBefore ||
+			FROM app_ou_access WHERE app_key=?`,
+			platformAppKey(installation)) != grantsBefore ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_capability_grants WHERE installation_id=?`,
 			installation) != capabilitiesBefore {
@@ -1064,7 +1051,7 @@ func testNativeManagedDisableEnable(
 			repairOperationID)
 		t.Log("NATIVE_REPAIR_BROWSER_COMPLETE")
 	}
-	assertNativePlatformUserGrant(
+	assertNativePlatformReaderAccess(
 		t, s, installation, reader.username, "repair")
 	actualState := scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`, installation)

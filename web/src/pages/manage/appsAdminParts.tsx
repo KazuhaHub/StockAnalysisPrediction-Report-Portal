@@ -47,7 +47,7 @@ export function ServiceStatus({ app }: { app: AdminApp }) {
 /** Apps › name › (page). The ancestors are links; the last item is the current page. */
 export function AppsBreadcrumb({ app, name, page }: { app?: AdminApp; name?: string; page?: string }) {
   const { t } = useTranslation()
-  const items: { title: React.ReactNode }[] = [{ title: app ? <Link to="/manage/apps">{t('apps.title')}</Link> : t('apps.title') }]
+  const items: { title: React.ReactNode }[] = [{ title: app || page ? <Link to="/manage/apps">{t('apps.title')}</Link> : t('apps.title') }]
   if (app && name) items.push({ title: page ? <Link to={appPath(app.key)}>{name}</Link> : name })
   if (page) items.push({ title: page })
   return <Breadcrumb aria-label={t('apps.breadcrumb')} items={items} style={{ marginBottom: 16 }} />

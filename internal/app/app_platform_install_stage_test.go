@@ -285,8 +285,8 @@ func testPlatformFailedInstallStageNeverExposesCandidate(
 				WHERE installation_id=? AND state='active'`,
 				installation) != 0 ||
 				scalar[int](t, s.st, `SELECT COUNT(*)
-					FROM app_platform_access_grants
-					WHERE installation_id=?`, installation) != 0 {
+					FROM app_ou_access
+					WHERE app_key=?`, platformAppKey(installation)) != 0 {
 				t.Fatalf("%s failure exposed activation or access", stage)
 			}
 			if scalar[int](t, s.st, `SELECT COUNT(*)
