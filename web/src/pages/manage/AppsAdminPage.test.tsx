@@ -308,6 +308,22 @@ describe('Deep links', () => {
   })
 })
 
+describe('The tab bar', () => {
+  for (const [tab, label] of [['publishers', 'appTrust.tab'], ['tasks', 'appPlatform.tasks.tab'], ['subscriptions', 'appPlatform.events.tab']]) {
+    it(`opens the ${tab} tab from ?tab=${tab}`, async () => {
+      renderPage(`/manage/apps?tab=${tab}`)
+      expect(screen.getByRole('tablist')).toBeTruthy()
+      expect(screen.getByRole('tab', { name: label }).getAttribute('aria-selected')).toBe('true')
+      expect(screen.getByRole('tab', { name: 'nav.apps' }).getAttribute('aria-selected')).toBe('false')
+    })
+  }
+
+  it('opens Apps for an unknown ?tab=', async () => {
+    renderPage('/manage/apps?tab=nope')
+    expect(screen.getByRole('tab', { name: 'nav.apps' }).getAttribute('aria-selected')).toBe('true')
+  })
+})
+
 describe('Sources and trust', () => {
   it('holds the official catalogue switch and the image storage status', async () => {
     const user = userEvent.setup()

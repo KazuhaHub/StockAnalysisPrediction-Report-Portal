@@ -7,6 +7,7 @@ import { AnnouncementsProvider } from './announcements'
 import { FavoritesProvider } from './favorites'
 import { AppAccessProvider, RequireAppOpen } from './appAccess'
 import { lazyRetry } from './lib/lazyRetry'
+import { appsRoutes } from './pages/manage/appsRoutes'
 import { portalTheme } from './theme/portal'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -62,12 +63,6 @@ const QuotesApp = lazyRetry(() => import('./pages/QuotesApp'))
 const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
 const AppViewV2 = lazyRetry(() => import('./pages/AppViewV2'))
-const AppsAdminPage = lazyRetry(() => import('./pages/manage/AppsAdminPage'))
-const AppsInstallPage = lazyRetry(() => import('./pages/manage/AppsInstallPage'))
-const AppDetailPage = lazyRetry(() => import('./pages/manage/AppDetailPage'))
-const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
-const AppCredentialsPage = lazyRetry(() => import('./pages/manage/AppCredentialsPage'))
-const AppPlatformSettingsPage = lazyRetry(() => import('./pages/manage/AppPlatformSettingsPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
 const RecurringEditor = lazyRetry(() => import('./pages/RecurringEditor'))
@@ -264,13 +259,7 @@ function AppRoutes() {
           <Route path="runqueue" element={<RunQueueSettingsPage />} />
           <Route path="rundefaults" element={<RunDefaultsPage />} />
           <Route path="assistant" element={<ChatAdminPage />} />
-          <Route path="apps" element={<AppsAdminPage />} />
-          {/* Declared before apps/:key so "install" is never read as an app key. */}
-          <Route path="apps/install" element={<AppsInstallPage />} />
-          <Route path="apps/:key" element={<AppDetailPage />} />
-          <Route path="apps/installations/:installation" element={<AppPlatformSettingsPage />} />
-          <Route path="apps/:key/access" element={<AppAccessPage />} />
-          <Route path="apps/:key/credentials" element={<AppCredentialsPage />} />
+          {appsRoutes}
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="quotes" element={<QuoteSourcesPage />} />

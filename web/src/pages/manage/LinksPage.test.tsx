@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { DESCRIPTOR_LOCALES } from '../../lib/descriptor-contract.generated'
 import { App } from 'antd'
 import LinksPage from './LinksPage'
 
@@ -7,6 +9,7 @@ import LinksPage from './LinksPage'
 // without crashing and render both a group header and a link. Guards against a render/hook
 // regression in the group rework.
 const requested: string[] = []
+const live = vi.hoisted(() => ({ extraLinks: [] as unknown[], layout: [] as unknown[], gate: null as Promise<void> | null }))
 vi.mock('../../api/client', () => ({
   api: {
     get: (url: string) => {
@@ -16,9 +19,11 @@ vi.mock('../../api/client', () => ({
           links: [
             { id: 1, label: 'GitHub', url: 'https://github.com', icon: '', newTab: true, groupId: 5, ord: 0 },
             { id: 2, label: '', url: 'rp:apps:builtin:batch', icon: '', newTab: false, groupId: 0, ord: 1 },
+            ...live.extraLinks,
           ],
           groups: [{ id: 5, name: 'External', mode: 'expand', showLabel: true, ord: 0 }],
         })
+      if (url === '/api/admin/apps/layout') return (live.gate ?? Promise.resolve()).then(() => ({ apps: live.layout }))
       return Promise.resolve({ apps: [], targets: [] })
     },
     post: () => Promise.resolve({}),
@@ -27,6 +32,7 @@ vi.mock('../../api/client', () => ({
   },
 }))
 vi.mock('../../auth', () => ({ useAuth: () => ({ can: () => true }) }))
+vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, o?: Record<string, unknown>) => (o ? `${k}:${JSON.stringify(o)}` : k) }),
 }))
@@ -69,5 +75,69 @@ describe('a shortcut entry left blank', () => {
     )
     expect(await screen.findByText('nav.batch')).toBeTruthy()
     expect(screen.getByText('links.labelAuto')).toBeTruthy()
+  })
+})
+
+describe('entry buttons pinned to a platform app', () => {
+  const live1 = '33333333-3333-4333-8333-333333333333'
+  const gone = '44444444-4444-4444-8444-444444444444'
+  const display = (name: string) => ({ icon: 'file-text', texts: DESCRIPTOR_LOCALES.map(locale => ({ locale, name, description: 'd' })) })
+  const layout = () => [
+    { key: 'builtin:batch', kind: 'builtin', name: 'batch', builtin: true, access: [] },
+    { key: 'hello', kind: 'app', name: 'Retired v1', builtin: false, access: [] },
+    { key: `platform:${live1}`, kind: 'platform', name: 'Notes', builtin: false, installation_id: live1, app_id: 'notes', state: 'installed', display: display('Notes'), access: [] },
+  ]
+  const mount = () => render(<App><LinksPage /></App>)
+
+  it('lists such a pin under the app’s name, without calling it uninstalled', async () => {
+    live.layout = layout()
+    live.extraLinks = [{ id: 3, label: '', url: `rp:apps:platform:${live1}`, icon: '', newTab: false, groupId: 0, ord: 2 }]
+    mount()
+    expect(await screen.findByText('Notes')).toBeTruthy()
+    expect(screen.queryByText('links.appUninstalled')).toBeNull()
+  })
+
+  it('says an entry pinned to an uninstalled app is uninstalled, so it can be cleaned up', async () => {
+    live.layout = layout()
+    live.extraLinks = [{ id: 4, label: 'Old notes', url: `rp:apps:platform:${gone}`, icon: '', newTab: false, groupId: 0, ord: 2 }]
+    mount()
+    expect(await screen.findByText('links.appUninstalled')).toBeTruthy()
+  })
+
+  it('does not call a pin uninstalled before the layout has been read', async () => {
+    live.layout = layout()
+    live.extraLinks = [{ id: 4, label: 'Old notes', url: `rp:apps:platform:${gone}`, icon: '', newTab: false, groupId: 0, ord: 2 }]
+    let open!: () => void
+    live.gate = new Promise<void>(resolve => { open = resolve })
+    try {
+      mount()
+      expect(await screen.findByText('Old notes')).toBeTruthy()
+      expect(screen.queryByText('links.appUninstalled')).toBeNull()
+      open()
+      expect(await screen.findByText('links.appUninstalled')).toBeTruthy()
+    } finally { live.gate = null }
+  })
+
+  it('offers the platform apps after the built-in ones when picking a target, and fills in the label', async () => {
+    live.layout = layout()
+    live.extraLinks = []
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('GitHub')
+    await user.click(screen.getAllByRole('button', { name: /common\.add/ })[0])
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByText('links.typeShortcut'))
+    await user.click(within(dialog).getByRole('combobox', { name: 'links.shortcut' }))
+    await user.click(await screen.findByText('nav.apps', { selector: '.ant-select-item-option-content' }))
+    await user.click(within(dialog).getByRole('combobox', { name: 'links.shortcutTarget' }))
+    const options = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content')).map(o => o.textContent)
+      expect(found).toContain('Notes')
+      return found
+    })
+    expect(options.indexOf('Notes')).toBeGreaterThan(options.indexOf('nav.batch'))
+    expect(options).not.toContain('Retired v1')
+    await user.click(screen.getByText('Notes', { selector: '.ant-select-item-option-content' }))
+    expect((within(dialog).getByRole('textbox', { name: 'links.label' }) as HTMLInputElement).value).toBe('Notes')
   })
 })

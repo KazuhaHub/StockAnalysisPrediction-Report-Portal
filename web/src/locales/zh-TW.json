@@ -4351,5 +4351,6 @@
   "appStore.view.list": "列表",
   "appStore.col.app": "應用",
   "appStore.col.status": "狀態",
-  "appStore.col.access": "開放範圍"
+  "appStore.col.access": "開放範圍",
+  "links.appUninstalled": "已解除安裝"
 }

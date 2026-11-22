@@ -4351,5 +4351,6 @@
   "appStore.view.list": "列表",
   "appStore.col.app": "应用",
   "appStore.col.status": "状态",
-  "appStore.col.access": "开放范围"
+  "appStore.col.access": "开放范围",
+  "links.appUninstalled": "已卸载"
 }

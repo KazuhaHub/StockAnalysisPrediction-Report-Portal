@@ -1232,6 +1232,8 @@ export interface AppLayoutEntry {
   installation_id?: string
   app_id?: string
   publisher_id?: string
+  // A platform installation's signed display metadata, when it verifies (parse it with parseAppDisplay).
+  display?: unknown
   state?: string
   // An installed app's manifest detail, sent for every app whether or not it is open for the caller.
   version?: string

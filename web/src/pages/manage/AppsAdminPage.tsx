@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { Space, Tabs } from 'antd'
-import { useTranslation } from 'react-i18next'
+import { Space } from 'antd'
 import LoadGate from '../../components/LoadGate'
 import { useAppsCatalog } from './appsAdminModel'
+import AppsConsoleTabs, { isAppsTab, type AppsTab } from './AppsConsoleTabs'
 import AppsMarketplace from './AppsMarketplace'
 import OfficialCatalogueSwitch from './OfficialCatalogueSwitch'
 import AppPlatformStorageStatus from './AppPlatformStorageStatus'
@@ -18,23 +18,18 @@ import AppPlatformEventSubscriptionsPanel from './AppPlatformEventSubscriptionsP
 // `?installation=` links from an app's own page land here, on the marketplace tab, where the modal
 // resumes the operation.
 export default function AppsAdminPage() {
-  const { t } = useTranslation()
   const { apps, loading, error, reload } = useAppsCatalog()
   const [runtimeReload, setRuntimeReload] = useState(0)
-  // `?tab=publishers` opens Sources and trust, the way another page asks to be sent there.
+  // `?tab=<key>` opens that tab, the way another page asks to be sent to Sources and trust or the tasks.
   const [params] = useSearchParams()
-  const [activeTab, setActiveTab] = useState(params.get('tab') === 'publishers' ? 'publishers' : 'apps')
+  const [activeTab, setActiveTab] = useState<AppsTab>(() => { const tab = params.get('tab'); return isAppsTab(tab) ? tab : 'apps' })
 
-  return <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
-    {
-      key: 'apps',
-      label: t('nav.apps'),
-      children: <LoadGate loading={loading} error={error} onRetry={reload}>
-        <AppsMarketplace apps={apps} reload={reload} active={activeTab === 'apps'} onOpenTrust={() => setActiveTab('publishers')} />
-      </LoadGate>,
-    },
-    { key: 'publishers', label: t('appTrust.tab'), children: <Space orientation="vertical" size={16} style={{ width: '100%' }}><OfficialCatalogueSwitch /><AppPlatformStorageStatus /><AppPlatformRuntimePanel reload={runtimeReload} /><AppPlatformPublishersPanel onInitialized={() => setRuntimeReload(v => v + 1)} /></Space> },
-    { key: 'tasks', label: t('appPlatform.tasks.tab'), children: <AppPlatformTasksPanel /> },
-    { key: 'subscriptions', label: t('appPlatform.events.tab'), children: <AppPlatformEventSubscriptionsPanel /> },
-  ]} />
+  return <AppsConsoleTabs active={activeTab} onChange={setActiveTab} panes={{
+    apps: <LoadGate loading={loading} error={error} onRetry={reload}>
+      <AppsMarketplace apps={apps} reload={reload} active={activeTab === 'apps'} onOpenTrust={() => setActiveTab('publishers')} />
+    </LoadGate>,
+    publishers: <Space orientation="vertical" size={16} style={{ width: '100%' }}><OfficialCatalogueSwitch /><AppPlatformStorageStatus /><AppPlatformRuntimePanel reload={runtimeReload} /><AppPlatformPublishersPanel onInitialized={() => setRuntimeReload(v => v + 1)} /></Space>,
+    tasks: <AppPlatformTasksPanel />,
+    subscriptions: <AppPlatformEventSubscriptionsPanel />,
+  }} />
 }

@@ -31,7 +31,9 @@ import { useAuth } from '../auth'
 import Omnibox from '../components/Omnibox'
 import ReportCard from '../components/ReportCard'
 import { linkIconComponent } from '../components/linkIcons'
-import { linkDisplayLabel, shortcutAppKey, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
+import { PLATFORM_PIN_PREFIX, platformPinId, linkDisplayLabel, shortcutAppKey, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
+import { useAppDirectory } from '../lib/appDirectoryV2'
+import { appDisplayText } from '../lib/appDisplayV2'
 import { useAppAccess } from '../appAccess'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import { useLoadFailure } from '../lib/useOnReconnect'
@@ -44,17 +46,28 @@ import FavoritesGrid from '../components/FavoritesGrid'
 const { RangePicker } = DatePicker
 
 export default function HomePage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { catchLoad } = useLoadFailure()
   const { title } = useSite()
   const { token } = theme.useToken()
   const navigate = useNavigate()
-  const { can } = useAuth()
+  const { can, user } = useAuth()
   const appAccess = useAppAccess()
   const [sp, setSp] = useSearchParams()
   const [data, setData] = useState<HomeResp | null>(null)
   const dataRef = useRef(data)
   dataRef.current = data
+  // An entry pinned to a platform installation shows only while the app can be opened, which the access list
+  // alone cannot say once it is gone; so the hub's own directory is read, and only when such a pin exists.
+  const hasPlatformPin = (data?.links ?? []).some((l) => {
+    const res = shortcutOfUrl(l.url)
+    return !!res && !!shortcutAppKey(res)?.startsWith(PLATFORM_PIN_PREFIX)
+  })
+  const directory = useAppDirectory(user ?? null, hasPlatformPin)
+  const platformNames = useMemo(
+    () => Object.fromEntries(directory.items.map((i) => [PLATFORM_PIN_PREFIX + i.installationId, appDisplayText(i.applicationId, i.display, i18n?.language || 'en-US').name])),
+    [directory.items, i18n?.language],
+  )
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -212,9 +225,19 @@ export default function HomePage() {
       // pinned to an app the reader lacks the permission for.
       const appKey = shortcutAppKey(res)
       if (appKey && !appAccess.isOpen(appKey)) return null
+      const installation = platformPinId(appKey)
+      if (installation) {
+        // Until the directory answers nothing is shown (no flash of a button that may vanish); if it cannot be
+        // read the access list alone decides. A page of the directory that does not hold the app proves nothing.
+        if (directory.loading) return null
+        if (!directory.failed) {
+          const entry = directory.items.find((i) => i.installationId === installation)
+          if (entry ? !entry.openable : !directory.nextCursor) return null
+        }
+      }
       return (
         <Button key={l.id} icon={<Icon />} onClick={() => triggerShortcut(res.shortcut, navigate, res.param)}>
-          {linkDisplayLabel(l, t)}
+          {linkDisplayLabel(l, t, platformNames)}
         </Button>
       )
     }

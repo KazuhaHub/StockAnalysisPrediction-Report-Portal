@@ -11,6 +11,11 @@ import { BUILTIN_APPS, BUILTIN_PIN_PREFIX, builtinAppByKey } from './builtinApps
 
 export const SHORTCUT_PREFIX = 'rp:'
 
+// An 'apps' entry pinned to a platform installation: `platform:<installation id>`, the key the server's
+// per-OU access list and the apps hub use. It is text in the link's url, so it needs no schema.
+export const PLATFORM_PIN_PREFIX = 'platform:'
+export const platformPinId = (param?: string): string | undefined => (param?.startsWith(PLATFORM_PIN_PREFIX) ? param.slice(PLATFORM_PIN_PREFIX.length) : undefined)
+
 export type ShortcutKey = 'run-analysis' | 'queue' | 'chat' | 'apps'
 
 export interface AppShortcut {
@@ -65,8 +70,10 @@ export function triggerShortcut(sc: AppShortcut, navigate: (to: string) => void,
   if (sc.route) {
     if (param && sc.key === 'chat') navigate(`${sc.route}?target=${encodeURIComponent(param)}`)
     else if (param && sc.key === 'apps') {
-      // A built-in app pins to its own route (/apps/recurring, …); a downloadable app opens its iframe.
-      if (param.startsWith(BUILTIN_PIN_PREFIX)) {
+      // A built-in app pins to its own route (/apps/recurring, …); a platform installation opens the launch
+      // route the apps hub gives its card; a downloadable app opens its iframe.
+      if (platformPinId(param)) navigate(`/apps/v2/${platformPinId(param)}`)
+      else if (param.startsWith(BUILTIN_PIN_PREFIX)) {
         const app = builtinAppByKey(param.slice(BUILTIN_PIN_PREFIX.length))
         navigate(app ? app.to : sc.route)
       } else navigate(`/apps/x/${encodeURIComponent(param)}`)
@@ -117,9 +124,12 @@ export function shortcutLabelKey(res: ResolvedShortcut): string {
 // blank one on a shortcut follows the reader's language via shortcutLabelKey, which is how an entry
 // to a built-in feature stays translated without a per-language column. A blank plain link shows
 // its URL rather than an empty button.
-export function linkDisplayLabel(l: { label: string; url: string }, t: (key: string) => string): string {
+// `names` maps a pinned platform key (`platform:<id>`) to its display name, which is data the caller holds
+// (the hub's directory, the admin layout); a blank entry pinned to such an app shows that name.
+export function linkDisplayLabel(l: { label: string; url: string }, t: (key: string) => string, names?: Record<string, string>): string {
   const label = l.label.trim()
   if (label) return label
   const res = shortcutOfUrl(l.url)
+  if (res?.param && names?.[res.param]) return names[res.param]
   return res ? t(shortcutLabelKey(res)) : l.url
 }

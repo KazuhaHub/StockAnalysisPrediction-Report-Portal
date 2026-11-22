@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { shortcutOfUrl, shortcutUrl, triggerShortcut, shortcutPerm, builtinAppOptions, linkDisplayLabel, RUN_ANALYSIS_EVENT } from './shortcuts'
+import { shortcutOfUrl, shortcutUrl, triggerShortcut, shortcutPerm, shortcutAppKey, builtinAppOptions, linkDisplayLabel, RUN_ANALYSIS_EVENT } from './shortcuts'
 
 describe('shortcutOfUrl', () => {
   it('returns undefined for a plain URL or empty', () => {
@@ -162,5 +162,38 @@ describe('linkDisplayLabel', () => {
 
   it('falls back to the URL for a blank plain link rather than an empty button', () => {
     expect(linkDisplayLabel({ label: '', url: 'https://example.com' }, t)).toBe('https://example.com')
+  })
+})
+
+describe('an entry pinned to a platform installation', () => {
+  const id = '33333333-3333-4333-8333-333333333333'
+  const url = `rp:apps:platform:${id}`
+
+  it('round-trips through the stored url, splitting only on the first colon', () => {
+    const r = shortcutOfUrl(url)
+    expect(r?.shortcut.key).toBe('apps')
+    expect(r?.param).toBe(`platform:${id}`)
+    expect(shortcutUrl('apps', `platform:${id}`)).toBe(url)
+  })
+
+  it('opens the same launch route the apps hub uses for a platform card', () => {
+    const navigate = vi.fn()
+    const r = shortcutOfUrl(url)!
+    triggerShortcut(r.shortcut, navigate, r.param)
+    expect(navigate).toHaveBeenCalledWith(`/apps/v2/${id}`)
+  })
+
+  it('needs no permission of its own, and is the app key the server’s access list uses', () => {
+    const r = shortcutOfUrl(url)!
+    expect(shortcutPerm(r)).toBeUndefined()
+    expect(shortcutAppKey(r)).toBe(`platform:${id}`)
+  })
+
+  it('shows the installation’s display name when the label is blank, and written text as written', () => {
+    const names = { [`platform:${id}`]: 'Notes' }
+    expect(linkDisplayLabel({ label: '', url }, (k) => k, names)).toBe('Notes')
+    expect(linkDisplayLabel({ label: 'My notes', url }, (k) => k, names)).toBe('My notes')
+    // With no name known it falls back to what the action is called, never a raw id.
+    expect(linkDisplayLabel({ label: '', url }, (k) => k)).toBe('nav.apps')
   })
 })

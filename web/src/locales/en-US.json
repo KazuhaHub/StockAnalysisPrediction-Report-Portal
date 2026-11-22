@@ -4351,5 +4351,6 @@
   "appStore.view.list": "List",
   "appStore.col.app": "App",
   "appStore.col.status": "Status",
-  "appStore.col.access": "Who can use it"
+  "appStore.col.access": "Who can use it",
+  "links.appUninstalled": "Uninstalled"
 }
