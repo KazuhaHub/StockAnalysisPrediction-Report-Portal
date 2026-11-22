@@ -4318,5 +4318,8 @@
   "appRuntime.observed": "執行器回報的身分與繫結一致，已啟用",
   "err.app_platform_runtime_binding_unavailable": "無法準備執行環境繫結：已有已確認或狀態異常的繫結。",
   "err.app_platform_runtime_not_observed": "無法確認執行環境：執行器沒有回報此繫結的身分。請確認 host-setup 使用的是本頁的接入檔案。",
-  "err.app_platform_runtime_endpoint_missing": "Portal 尚未設定執行器通訊端，請先完成 host-setup 並重新啟動 Compose 專案。"
+  "err.app_platform_runtime_endpoint_missing": "Portal 尚未設定執行器通訊端，請先完成 host-setup 並重新啟動 Compose 專案。",
+  "appMarket.downloading": "正在下載軟體包，可能需要幾分鐘。",
+  "appMarket.downloadingProgress": "已下載 {{done}} / {{total}} MiB",
+  "err.app_platform_stage_unknown": "該下載已不再被追蹤，請重新開始驗證。"
 }

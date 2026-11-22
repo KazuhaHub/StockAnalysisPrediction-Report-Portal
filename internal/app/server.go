@@ -47,6 +47,11 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	// platformStageJobs holds the background package downloads of the catalogue staging route
+	// (app_platform_market_stage_job.go).
+	platformStageJobs platformMarketStageJobs
+	// platformStageWaitFor overrides how long the staging route waits for a download; zero is the default.
+	platformStageWaitFor time.Duration
 	// platformBuiltinPublishers and platformOfficialCatalogue are the built-in official sources (doc 189). The
 	// production constructor sets them; a bare test Server has none.
 	platformBuiltinPublishers []platformBuiltinPublisher
@@ -441,7 +446,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic, s.stopPlatformIngress, s.stopPlatformMachine)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic, s.stopPlatformIngress, s.stopPlatformMachine, s.stopPlatformStageJobs)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter

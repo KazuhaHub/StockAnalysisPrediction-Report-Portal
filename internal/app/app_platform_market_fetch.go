@@ -332,15 +332,34 @@ func parseMarketContentRange(value string) (
 
 func (c *platformMarketClient) close() { c.safe.http.CloseIdleConnections() }
 
+// platformMarketStageSyncLimit caps the checks that run inside the request: catalogue, descriptor, signature and
+// trust. A package download is not one of them.
+const platformMarketStageSyncLimit = 45 * time.Second
+
+// platformMarketPackageJob is a managed release whose checks passed and whose package is still to be fetched.
+type platformMarketPackageJob struct {
+	entry                 appplatform.CatalogueRelease
+	descriptor, signature []byte
+}
+
 func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor platformActorSession, catalogueURL, digest string, client *platformMarketClient) (platformStagedRelease, error) {
-	var zero platformStagedRelease
-	if !platformValidSHA(digest) || appplatform.ValidateCatalogueURL(catalogueURL) != nil {
-		return zero, errPlatformManagementInput
+	staged, pkg, err := s.resolvePlatformMarketRelease(ctx, actor, catalogueURL, digest, client)
+	if err != nil || pkg == nil {
+		return staged, err
 	}
 	// A package download is resumable and bounded by its own timeout, so it takes the caller's context, not the
 	// short one the small documents share.
-	requestCtx := ctx
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	return s.fetchAndStagePlatformPackage(ctx, actor, client, pkg.entry, pkg.descriptor, pkg.signature)
+}
+
+// resolvePlatformMarketRelease runs every check that precedes a package download. A release without a package
+// is staged here; for one with a package it returns what the download needs and stages nothing.
+func (s *Server) resolvePlatformMarketRelease(requestCtx context.Context, actor platformActorSession, catalogueURL, digest string, client *platformMarketClient) (platformStagedRelease, *platformMarketPackageJob, error) {
+	var zero platformStagedRelease
+	if !platformValidSHA(digest) || appplatform.ValidateCatalogueURL(catalogueURL) != nil {
+		return zero, nil, errPlatformManagementInput
+	}
+	ctx, cancel := context.WithTimeout(requestCtx, platformMarketStageSyncLimit)
 	defer cancel()
 	var trust appplatform.PublisherTrust
 	var now int64
@@ -352,16 +371,16 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 		return err
 	})
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	raw, err := client.fetchResumable(
 		ctx, catalogueURL, appplatform.MaxCatalogueBytes, 3)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	catalogue, err := appplatform.ParseCatalogue(raw)
 	if err != nil {
-		return zero, errPlatformMarketFetch
+		return zero, nil, errPlatformMarketFetch
 	}
 	var entry *appplatform.CatalogueRelease
 	for i := range catalogue.Releases {
@@ -371,20 +390,20 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 		}
 	}
 	if entry == nil {
-		return zero, errAppPlatformReleaseConflict
+		return zero, nil, errAppPlatformReleaseConflict
 	}
 	descriptor, err := client.fetchResumable(
 		ctx, entry.DescriptorURL, appplatform.MaxDescriptorBytes, 3)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	if platformDigest(descriptor) != digest {
-		return zero, errAppPlatformReleaseConflict
+		return zero, nil, errAppPlatformReleaseConflict
 	}
 	signature, err := client.fetchResumable(
 		ctx, entry.SignatureURL, appplatform.MaxDescriptorSignatureBytes, 3)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	// Network waits may outlast a key/session's validity or a trust change.
 	// Re-read current authority/time before allowing the archive request.
@@ -394,42 +413,43 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 		return err
 	})
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	verified, err := appplatform.VerifyPublisherDescriptor(descriptor, signature, trust, strconv.FormatInt(now, 10))
 	if err != nil {
-		return zero, errAppPlatformReleaseConflict
+		return zero, nil, errAppPlatformReleaseConflict
 	}
 	manifest := verified.Descriptor.Manifest
 	if manifest.ID != entry.AppID || manifest.Publisher != entry.PublisherID || manifest.Version != entry.Version {
-		return zero, errAppPlatformReleaseConflict
+		return zero, nil, errAppPlatformReleaseConflict
 	}
 	if platformPackageRequirements(manifest) != nil {
-		return zero, errAppPlatformInstallUnavailable
+		return zero, nil, errAppPlatformInstallUnavailable
 	}
 	// A managed release with image content installs from its package: the same bytes, and so the same release,
 	// digests and image, as an offline install. Its descriptor and signature are checked equal to the package's.
 	managedImages := manifest.Backend != nil && len(manifest.Backend.Images) > 0
 	if managedImages != (entry.PackageURL != "" || entry.PackageOCI != nil) {
-		return zero, errAppPlatformInstallUnavailable
+		return zero, nil, errAppPlatformInstallUnavailable
 	}
 	if managedImages {
-		return s.fetchAndStagePlatformPackage(requestCtx, actor, client, *entry, descriptor, signature)
+		return zero, &platformMarketPackageJob{entry: *entry, descriptor: descriptor, signature: signature}, nil
 	}
 	// Resolve only the signed relative artifact path against the descriptor's
 	// original directory. Redirect URLs never redefine artifact authority/base.
 	base, _ := url.Parse(entry.DescriptorURL)
 	relative, err := url.Parse(manifest.Frontend.Artifact)
 	if err != nil || relative.IsAbs() || relative.Host != "" {
-		return zero, errAppPlatformReleaseConflict
+		return zero, nil, errAppPlatformReleaseConflict
 	}
 	archive, err := client.fetchResumable(
 		ctx, base.ResolveReference(relative).String(),
 		appplatform.MaxFrontendArchiveBytes, 3)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	// The existing transaction verifies the full archive and current trust,
 	// account, pause and namespace policy again, then atomically persists it.
-	return s.stagePlatformReleaseContext(ctx, actor, descriptor, signature, archive)
+	staged, err := s.stagePlatformReleaseContext(ctx, actor, descriptor, signature, archive)
+	return staged, nil, err
 }

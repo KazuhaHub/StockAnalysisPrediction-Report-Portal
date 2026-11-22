@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -18,6 +19,17 @@ import (
 // platformPackageDownloadTimeout bounds one call to fetch a package. The download is resumable, so a call that
 // runs out of time leaves the file for the next one.
 const platformPackageDownloadTimeout = 10 * time.Minute
+
+// platformDownloadProgress receives the announced size of the package being fetched, for a status poll.
+type platformDownloadProgress struct{ total atomic.Int64 }
+
+type platformDownloadProgressKey struct{}
+
+func platformDownloadTotal(ctx context.Context, total int64) {
+	if p, ok := ctx.Value(platformDownloadProgressKey{}).(*platformDownloadProgress); ok {
+		p.total.Store(total)
+	}
+}
 
 // fetchToFile downloads a package into the staging file named by key, resuming what an earlier call or an earlier
 // process left there. It asks for the missing range with Range and If-Range, the validator of which is kept in a
@@ -64,6 +76,12 @@ func (c *platformMarketClient) fetchPartToFile(ctx context.Context, client *http
 	if offset > limit {
 		return false, 0, truncateAndFail(file)
 	}
+	if offset == limit {
+		// A held file of exactly the expected size (an OCI layer's pinned size) is complete: nothing to ask for.
+		// Its digest or its signed content is verified by the caller.
+		platformDownloadTotal(ctx, offset)
+		return true, offset, nil
+	}
 	request := (&http.Request{Method: http.MethodGet, URL: target, Header: make(http.Header), Host: target.Host}).WithContext(ctx)
 	request.Header.Set("Accept-Encoding", "identity")
 	if token != "" {
@@ -108,10 +126,19 @@ func (c *platformMarketClient) fetchPartToFile(ctx context.Context, client *http
 		}
 		total = all
 	case http.StatusRequestedRangeNotSatisfiable:
+		// "bytes */N" names the size of the file. A held file of exactly that size is the whole file (a staging
+		// that failed after the download, or a download whose last step was lost), so it is kept and verified.
+		if offset > 0 && parseMarketUnsatisfiedRange(response.Header.Get("Content-Range")) == offset {
+			platformDownloadTotal(ctx, offset)
+			return true, offset, nil
+		}
 		// The held prefix does not fit the file as it is now: start again from nothing.
 		return false, 0, truncateAndFail(file)
 	default:
 		return false, 0, errPlatformMarketFetch
+	}
+	if total > 0 {
+		platformDownloadTotal(ctx, total)
 	}
 	if current != "" {
 		if err := os.WriteFile(validatorPath, []byte(current), 0o600); err != nil {
@@ -134,6 +161,19 @@ func (c *platformMarketClient) fetchPartToFile(ctx context.Context, client *http
 	return true, size, nil
 }
 
+// parseMarketUnsatisfiedRange reads the size from the "bytes */N" of a 416 answer, or -1.
+func parseMarketUnsatisfiedRange(value string) int64 {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(value), "bytes */")
+	if !ok {
+		return -1
+	}
+	n, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || n < 0 {
+		return -1
+	}
+	return n
+}
+
 func truncateAndFail(file *os.File) error {
 	_ = file.Truncate(0)
 	return errPlatformMarketFetch
@@ -146,20 +186,36 @@ func truncateAndFail(file *os.File) error {
 // The package comes from package_url or from package_oci. An OCI package's staging key is its repository and
 // manifest digest, so a held prefix always belongs to the same bytes.
 func (s *Server) fetchAndStagePlatformPackage(ctx context.Context, actor platformActorSession, client *platformMarketClient, entry appplatform.CatalogueRelease, descriptor, signature []byte) (platformStagedRelease, error) {
+	return s.fetchAndStagePlatformPackageAdmitted(ctx, actor, client, entry, descriptor, signature, nil)
+}
+
+// platformPackageKey is the staging key of a catalogue package: the one its partial file and its single-flight
+// download are named by.
+func platformPackageKey(entry appplatform.CatalogueRelease) string {
+	if entry.PackageOCI != nil {
+		ref := *entry.PackageOCI
+		// The key is the normalised host/path, so "ghcr.io:443/a" and "ghcr.io/a" share one partial.
+		host, path, _ := appplatform.SplitOCIRepository(ref.Repository)
+		return "catalogue:oci:" + host + "/" + path + "@" + ref.Digest
+	}
+	return "catalogue:" + entry.PackageURL
+}
+
+// fetchAndStagePlatformPackageAdmitted is fetchAndStagePlatformPackage with admit, when set, called before the
+// verification and storage step: it takes the slot that step needs and names the actor the step runs as (one
+// whose authority still holds), or refuses.
+func (s *Server) fetchAndStagePlatformPackageAdmitted(ctx context.Context, actor platformActorSession, client *platformMarketClient, entry appplatform.CatalogueRelease, descriptor, signature []byte, admit func(context.Context) (platformActorSession, func(), error)) (platformStagedRelease, error) {
 	var zero platformStagedRelease
 	store, err := s.platformImages()
 	if err != nil {
 		return zero, err
 	}
-	key := "catalogue:" + entry.PackageURL
+	key := platformPackageKey(entry)
 	download := func(ctx context.Context) (int64, error) {
 		return client.fetchToFile(ctx, entry.PackageURL, appplatform.MaxManagedOfflineEnvelopeBytes, store, key, 3, "")
 	}
 	if entry.PackageOCI != nil {
 		ref := *entry.PackageOCI
-		// The key is the normalised host/path, so "ghcr.io:443/a" and "ghcr.io/a" share one partial.
-		host, path, _ := appplatform.SplitOCIRepository(ref.Repository)
-		key = "catalogue:oci:" + host + "/" + path + "@" + ref.Digest
 		download = func(ctx context.Context) (int64, error) { return client.downloadOCIPackage(ctx, ref, store, key) }
 	}
 	same := func(e appplatform.OfflineEnvelope) error {
@@ -191,17 +247,30 @@ func (s *Server) fetchAndStagePlatformPackage(ctx context.Context, actor platfor
 		if err != nil {
 			return zero, err
 		}
-		staged, err := s.stagePlatformPackageFile(ctx, actor, file, size, same)
+		release, stageActor := func() {}, actor
+		if admit != nil {
+			if stageActor, release, err = admit(ctx); err != nil {
+				file.Close()
+				return zero, err
+			}
+		}
+		staged, err := s.stagePlatformPackageFile(ctx, stageActor, file, size, same)
+		release()
 		file.Close()
 		if err == nil {
 			_, _, _ = store.finishPartial(key)
 			return staged.release, nil
 		}
+		// A cancel, a full store, a trust change or a lost authority says nothing about the bytes: the partial
+		// stays, and the next request verifies it again without downloading.
+		if !bytesIsPackageDamage(err) {
+			return zero, err
+		}
 		// A prefix kept from an earlier download may belong to a different version of the file. The package is
 		// verified in full against the signed descriptor, so the damage is caught here; try once from nothing.
 		store.discardPartial(key)
 		// An OCI layer has already matched its pinned digest: downloading it again yields the same bytes.
-		if fresh == 1 || ctx.Err() != nil || !bytesIsPackageDamage(err) || entry.PackageOCI != nil {
+		if fresh == 1 || ctx.Err() != nil || entry.PackageOCI != nil {
 			return zero, err
 		}
 	}

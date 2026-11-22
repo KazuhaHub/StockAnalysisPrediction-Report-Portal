@@ -68,7 +68,15 @@ bounded JSON and no-store response policy from the management routes.
 | Endpoint | Required JSON fields | Result |
 | --- | --- | --- |
 | /api/admin/app-platform/market/catalogue | catalogue_url | catalogue_sha256, releases, publisher_verified=false |
-| /api/admin/app-platform/market/stage | catalogue_url, release_sha256 | Verified staged release identity, current trust_revision, reused |
+| POST /api/admin/app-platform/market/stage | catalogue_url, release_sha256 | 200: verified staged release identity, current trust_revision, reused. 202: `{state:"downloading", release_sha256, bytes_done, bytes_total}` |
+| GET /api/admin/app-platform/market/stage?release_sha256= | none | `state` of `downloading`, `failed` (with `error_code`, readable until the job expires or a new POST restarts it) or `staged`; 404 `app_platform_stage_unknown` otherwise |
+
+A managed package comes down in a background job detached from the request (one job per
+package, joined by concurrent requests, bounded by the download timeout and cancelled at
+shutdown). The request waits about 15 seconds for it, then answers 202 and the client polls
+the GET. The final verify-and-stage step re-checks the staging actor's authority when the
+download finishes. Job state is in memory only; a restart keeps the partial file, so the
+next request resumes it.
 
 Discovery returns explicitly unverified hints. It does not inspect each release,
 grant app access, import trust, save the catalogue URL or admit an installation.

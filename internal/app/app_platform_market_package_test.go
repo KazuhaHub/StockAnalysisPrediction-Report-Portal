@@ -29,6 +29,10 @@ type platformPackageRemote struct {
 	// breakAfter, when positive, cuts every package response after that fraction (1/n) of what it was going to send.
 	breakDivisor int
 	noPackageURL bool
+	// gate, when set, holds every package response after its first half until the channel is closed, which is a
+	// slow download; failAfterGate then cuts the response instead of finishing it.
+	gate          chan struct{}
+	failAfterGate bool
 }
 
 func newPlatformPackageRemote(t *testing.T, parts platformManagedImageParts, pkg []byte) *platformPackageRemote {
@@ -72,6 +76,7 @@ func (r *platformPackageRemote) servePackage(w http.ResponseWriter, req *http.Re
 	if rng := req.Header.Get("Range"); rng != "" && (req.Header.Get("If-Range") == "" || req.Header.Get("If-Range") == r.etag) {
 		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(rng, "bytes="), "-"))
 		if err != nil || n >= len(r.pkg) {
+			w.Header().Set("Content-Range", "bytes */"+strconv.Itoa(len(r.pkg)))
 			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 			return
 		}
@@ -82,6 +87,23 @@ func (r *platformPackageRemote) servePackage(w http.ResponseWriter, req *http.Re
 	_ = start
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
+	r.mu.Lock()
+	gate, fail := r.gate, r.failAfterGate
+	r.mu.Unlock()
+	if gate != nil {
+		w.Write(body[:len(body)/2])
+		w.(http.Flusher).Flush()
+		select {
+		case <-gate:
+		case <-req.Context().Done():
+			return
+		}
+		if fail {
+			panic(http.ErrAbortHandler)
+		}
+		w.Write(body[len(body)/2:])
+		return
+	}
 	if r.breakDivisor > 0 {
 		w.Write(body[:len(body)/r.breakDivisor])
 		w.(http.Flusher).Flush()
@@ -246,5 +268,30 @@ func TestCatalogueManagedReleaseNeedsItsPackageURL(t *testing.T) {
 	}
 	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 0 {
 		t.Fatal("a release row exists")
+	}
+}
+
+// Fails if a complete partial (a download whose staging step was lost) is thrown away and fetched again because
+// the range request for the bytes after its end is answered 416.
+func TestCatalogueCompletePartialIsReusedWithoutDownloadingAgain(t *testing.T) {
+	f := newPlatformCatalogueFixture(t)
+	store, _ := f.s.platformImages()
+	key := "catalogue:https://127.0.0.1/app.portalapp"
+	if err := os.WriteFile(store.partialPath(key), f.remote.pkg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.validatorPath(key), []byte(f.remote.etag), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := f.install(context.Background())
+	if err != nil || staged.sha256 != platformDigest(f.parts.descriptor) {
+		t.Fatal(err)
+	}
+	f.remote.mu.Lock()
+	defer f.remote.mu.Unlock()
+	for _, r := range f.remote.ranges {
+		if r == "" {
+			t.Fatalf("the package was downloaded from zero again: %v", f.remote.ranges)
+		}
 	}
 }
