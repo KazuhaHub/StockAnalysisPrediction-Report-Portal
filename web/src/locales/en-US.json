@@ -4091,7 +4091,6 @@
   "apps.v2Unavailable": "This app is unavailable. Check your access or contact an administrator.",
   "apps.v2Loading": "Loading app…",
   "appStore.catalogueFailed": "The app catalogue could not be read, so updates and publisher names may be missing.",
-  "apps.loadingName": "Loading the app name",
   "apps.v2Failed": "The app could not connect. Reopen it to try again.",
   "apps.v2Retry": "Reopen app",
   "apps.adminHint": "Upload a .zip bundle (an app.json manifest + a self-contained index.html). Apps run in a sandboxed iframe and reach the API only through a scoped bridge. See docs/adr/0003-downloadable-apps.md.",

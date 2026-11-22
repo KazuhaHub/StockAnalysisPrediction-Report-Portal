@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import CardTable from '../../components/CardTable'
 import { appDisplayText } from '../../lib/appDisplayV2'
 import { LoadingPlaceholder } from '../../components/LoadGate'
+import { useSettled } from '../../lib/useSettled'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
@@ -66,9 +67,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
   // the launcher waits for both its reads, and renders the cards complete. An answer of any kind settles it: a failed
   // read renders the cards with what is known and an inline retry, never an endless spinner.
   const catalogueSettled = market.sourcesState !== 'loading' && (!market.active || market.catalogue?.status === 'ready' || market.catalogue?.status === 'error')
-  const [settled, setSettled] = useState(false)
-  useEffect(() => { if (catalogueSettled) setSettled(true) }, [catalogueSettled])
-  const waiting = !settled && !catalogueSettled
+  const waiting = !useSettled(catalogueSettled)
   const activeSource = market.sources.find(s => s.url === market.active)
   const matches = (text: string) => !search.trim() || text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
   const shown = apps.filter(a => {

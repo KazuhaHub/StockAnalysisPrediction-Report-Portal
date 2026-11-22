@@ -39,7 +39,7 @@ export function parseAppDirectory(value: unknown): Page | null {
 
 /** `enabled` false keeps the directory unread (a page that only sometimes needs it). */
 export function useAppDirectory(owner: string | null, enabled = true) {
-  const [state, setState] = useState({ owner, items: [] as AppDirectoryItem[], nextCursor: '', loading: enabled, failed: false })
+  const [state, setState] = useState({ owner, items: [] as AppDirectoryItem[], nextCursor: '', loading: enabled, failed: false, answered: false })
   const request = useRef<AbortController | null>(null)
   const epoch = useRef(0)
   const load = useCallback((after = '') => {
@@ -47,14 +47,14 @@ export function useAppDirectory(owner: string | null, enabled = true) {
     const controller = new AbortController()
     request.current = controller
     const current = ++epoch.current
-    setState(previous => ({ owner, items: after && previous.owner === owner ? previous.items : [], nextCursor: after, loading: true, failed: false }))
+    setState(previous => ({ owner, items: after && previous.owner === owner ? previous.items : [], nextCursor: after, loading: true, failed: false, answered: after !== '' && previous.owner === owner && previous.answered }))
     api.get<unknown>(`/api/app-platform/apps${after ? `?after=${encodeURIComponent(after)}` : ''}`, { signal: controller.signal }).then(value => {
       if (epoch.current !== current || controller.signal.aborted) return
       const page = parseAppDirectory(value)
       if (!page || (after && page.items.some(item => item.installationId <= after)) || (after && page.nextCursor === after)) throw new Error('invalid application directory')
-      setState(previous => ({ owner, items: after ? [...previous.items, ...page.items] : page.items, nextCursor: page.nextCursor, loading: false, failed: false }))
+      setState(previous => ({ owner, items: after ? [...previous.items, ...page.items] : page.items, nextCursor: page.nextCursor, loading: false, failed: false, answered: true }))
     }).catch(() => {
-      if (epoch.current === current && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, failed: true }))
+      if (epoch.current === current && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, failed: true, answered: true }))
     })
     return controller
   }, [owner])
@@ -68,5 +68,5 @@ export function useAppDirectory(owner: string | null, enabled = true) {
     return cancel
   }, [load, cancel, enabled])
   // Hide a previous account's cards during render, before the new effect runs.
-  return { ...(state.owner === owner ? state : { owner, items: [], nextCursor: '', loading: true, failed: false }), load }
+  return { ...(state.owner === owner ? state : { owner, items: [], nextCursor: '', loading: true, failed: false, answered: false }), load }
 }

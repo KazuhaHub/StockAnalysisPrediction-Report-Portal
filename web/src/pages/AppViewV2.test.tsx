@@ -47,6 +47,23 @@ test('unmount cancels the metadata fetch before late content can mount',async()=
  view.unmount();expect(options.signal?.aborted).toBe(true);expect(frames).toHaveLength(0)
 })
 
+test('waits for the launch and renders the header once, with the name and never an id first',async()=>{
+ let answer!:(value:Response)=>void
+ vi.stubGlobal('fetch',vi.fn(()=>new Promise<Response>(resolve=>{answer=resolve})))
+ render(page());await waitFor(()=>expect(fetch).toHaveBeenCalledTimes(1))
+ // While the launch is out: the page's one loading state, and nothing of the header, no id, no empty title.
+ expect(screen.getByText('apps.v2Loading')).toBeTruthy()
+ expect(screen.queryByRole('heading')).toBeNull()
+ expect(screen.queryByRole('button',{name:'apps.back'})).toBeNull()
+ expect(screen.queryByText(/notes-sample/)).toBeNull()
+ const display={icon:'file-text',texts:[{locale:'en-US',name:'Notes',description:'Personal notes'},{locale:'zh-CN',name:'笔记',description:'个人笔记'},{locale:'zh-TW',name:'筆記',description:'個人筆記'}]}
+ await act(async()=>answer(new Response(JSON.stringify({...response,display}),{status:200})))
+ // The first header on screen is already final.
+ expect(await screen.findByRole('heading',{name:'笔记'})).toBeTruthy()
+ expect(screen.queryByText(/notes-sample/)).toBeNull()
+ expect(screen.queryByText('apps.v2Loading')).toBeNull()
+})
+
 test('signed host title and frame label change language without another launch request',async()=>{
  const display={icon:'file-text',texts:[{locale:'en-US',name:'Notes',description:'Personal notes'},{locale:'zh-CN',name:'笔记',description:'个人笔记'},{locale:'zh-TW',name:'筆記',description:'個人筆記'}]}
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,display}),{status:200})))

@@ -66,6 +66,9 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const { t, i18n } = useTranslation()
   const loc = useLocation()
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SETTINGS)
+  // The portal's name and logo come with the site settings: the shell waits for their first answer (a failure settles
+  // it with the defaults) so the brand is never shown as the default and then swapped for the configured one.
+  const [answered, setAnswered] = useState(false)
 
   const refresh = useCallback(async () => {
     const next = normalizeSettings(await api.get<SiteSettings>('/api/site'))
@@ -76,7 +79,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Load once on mount whatever the tab's visibility — a link opened in a background tab
     // still has to show this portal's title and favicon in the tab strip.
-    refresh().catch(() => setSettings(DEFAULT_SETTINGS))
+    refresh().catch(() => setSettings(DEFAULT_SETTINGS)).finally(() => setAnswered(true))
     const onRestored = () => { void refresh().catch(() => {}) }
     window.addEventListener('rp:connection-restored', onRestored)
     // Then keep the chrome live without a full reload, but only while
@@ -100,8 +103,8 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // The tab shows which page this is, not only which portal. The site name stays as the second
   // half, so a row of tabs is still recognisably one deployment.
   useEffect(() => {
-    document.title = pageTitle(routeTitle(loc.pathname, t), title)
-  }, [title, loc.pathname, t])
+    if (answered) document.title = pageTitle(routeTitle(loc.pathname, t), title)
+  }, [answered, title, loc.pathname, t])
 
   // The document language, which was hard-coded to zh in index.html. A screen reader picks its
   // pronunciation from this: an English UI announced with Chinese phonetics is unintelligible, and
@@ -140,7 +143,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SiteCtx>(() => ({ settings, title, logoUrl, refresh }), [settings, title, logoUrl, refresh])
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  return <Ctx.Provider value={value}>{answered ? children : null}</Ctx.Provider>
 }
 
 export function useSite(): SiteCtx {

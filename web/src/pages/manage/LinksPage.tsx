@@ -57,10 +57,13 @@ export default function LinksPage() {
   const [chatTargets, setChatTargets] = useState<ChatTarget[]>([])
   // The administrator's layout, once read: null until then, so a pin is not called uninstalled while it loads.
   const [layoutApps, setLayoutApps] = useState<AppLayoutEntry[] | null>(null)
+  // Whether the layout has answered (a failure too): the names of the entries pinned to apps come from it.
+  const [layoutAnswered, setLayoutAnswered] = useState(false)
   const { lang } = usePrefs()
   const platformOptions = useMemo(() => platformPinOptions(layoutApps ?? [], lang), [layoutApps, lang])
   // What a blank entry pinned to a platform app shows: its display name.
   const platformNames = useMemo(() => Object.fromEntries(platformOptions.map((o) => [o.value, o.label])), [platformOptions])
+  const pinsApp = links.some((l) => !!shortcutOfUrl(l.url)?.param?.startsWith(PLATFORM_PIN_PREFIX))
   // Same sensors as SortableWrapper, from the same place: this page has its own DndContext (see the
   // comment at the list below), and a second hand-rolled sensor list is how the two quietly diverge.
   const sensors = useSortableSensors()
@@ -92,8 +95,8 @@ export default function LinksPage() {
     // must not remove it from the entry-button picker.
     api
       .get<AppLayoutResp>('/api/admin/apps/layout')
-      .then((r) => setLayoutApps(r.apps || []))
-      .catch(() => {})
+      .then((r) => { setLayoutApps(r.apps || []); setLayoutAnswered(true) })
+      .catch(() => setLayoutAnswered(true))
     if (canRun) {
       api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setBatchTargets(r.targets || [])).catch(() => {})
       api.get<{ targets: ChatTarget[] }>('/api/chat/targets').then((r) => setChatTargets(r.targets || [])).catch(() => {})
@@ -405,7 +408,7 @@ export default function LinksPage() {
         </Space>
       </Space>
 
-      <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={200} title={t('common.loadFailedContent')}>
+      <LoadGate loading={(loading && !loaded) || (loaded && pinsApp && !layoutAnswered)} error={loaded ? undefined : loadErr} onRetry={load} minHeight={200} title={t('common.loadFailedContent')}>
       {!loading && rows.length === 0 ? (
         <Empty description={t('links.empty')} />
       ) : (

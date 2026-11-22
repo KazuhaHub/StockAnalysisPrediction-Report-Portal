@@ -41,6 +41,25 @@ describe('SiteProvider', () => {
     document.querySelector('link[rel="icon"]')?.remove()
   })
 
+  it('renders the shell once the site settings have answered, so the brand is never the default first', async () => {
+    let answer!: (value: unknown) => void
+    apiMock.get.mockImplementation(() => new Promise((resolve) => { answer = resolve }))
+    render(<MemoryRouter><SiteProvider><SiteProbe /></SiteProvider></MemoryRouter>)
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalled())
+    // The settings are out: no title, not even the default one, and the tab title is not set to it either.
+    expect(screen.queryByTestId('title')).toBeNull()
+    expect(document.title).toBe('')
+    answer({ siteTitle: '智研平台' })
+    expect((await screen.findByTestId('title')).textContent).toBe('智研平台')
+    expect(document.title).toContain('智研平台')
+  })
+
+  it('settles on the defaults when the settings cannot be read, never an endless blank', async () => {
+    apiMock.get.mockRejectedValue(new Error('down'))
+    render(<MemoryRouter><SiteProvider><SiteProbe /></SiteProvider></MemoryRouter>)
+    expect((await screen.findByTestId('title')).textContent).toBe('brand')
+  })
+
   it('normalizes public site settings from the backend', async () => {
     apiMock.get.mockResolvedValue({
       siteTitle: ' 智研平台 ',

@@ -3,12 +3,9 @@ import { Alert, Button, Flex, Typography } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { PageActionSnapshot } from '../../lib/page-v2'
-import PendingText from './PendingText'
 
-export default function AppPageHeader({ name, icon, state, onBack, loading = false }: {
+export default function AppPageHeader({ name, icon, state, onBack }: {
   name: string
-  /** The data that carries the name is still loading: a placeholder of the title's size stands in for it. */
-  loading?: boolean
   icon: ReactNode
   state: PageActionSnapshot | null
   onBack(): void
@@ -21,10 +18,8 @@ export default function AppPageHeader({ name, icon, state, onBack, loading = fal
         <Button icon={<ArrowLeftOutlined />} onClick={onBack}>{t('apps.back')}</Button>
         {icon}
         <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-          {loading
-            ? <Typography.Title level={4} style={{ margin: 0 }}><PendingText width={160} height={24} label={t('apps.loadingName')} /></Typography.Title>
-            : <Typography.Title level={4} style={{ margin: 0 }}>{title}</Typography.Title>}
-          {!loading && title !== name && <Typography.Text type="secondary">{name}</Typography.Text>}
+          <Typography.Title level={4} style={{ margin: 0 }}>{title}</Typography.Title>
+          {title !== name && <Typography.Text type="secondary">{name}</Typography.Text>}
           {state?.page.description && <div><Typography.Text type="secondary">{state.page.description}</Typography.Text></div>}
         </div>
       </Flex>

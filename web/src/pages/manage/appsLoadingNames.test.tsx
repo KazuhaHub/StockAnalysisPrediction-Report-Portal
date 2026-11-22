@@ -1,17 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
-import AppPageHeader from '../../components/apps/AppPageHeader'
+import { cleanup } from '@testing-library/react'
 import { installedPublisher, type AdminApp } from './appsAdminModel'
-
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
 const app: AdminApp = {
   key: 'platform:11111111-1111-4111-8111-111111111111', builtin: false, platform: true,
   installationId: '11111111-1111-4111-8111-111111111111', appId: 'market-monitor', publisherId: 'kazuha-hub',
   name: 'Market Monitor', version: '1.4.0', scopes: [], access: [], state: 'installed',
 }
-const noop = () => undefined
-
 afterEach(cleanup)
 
 describe('names are never replaced by identifiers', () => {
@@ -26,13 +21,5 @@ describe('names are never replaced by identifiers', () => {
     expect(installedPublisher(app, undefined)).toBeUndefined()
     // A built-in or retired app has no publisher.
     expect(installedPublisher({ ...app, platform: false }, { publisher_id: 'kazuha-hub' })).toBeUndefined()
-  })
-
-  it('shows a placeholder of the title in the app header until the app has loaded', () => {
-    const { rerender } = render(<AppPageHeader name="" loading icon={null} state={null} onBack={noop} />)
-    expect(screen.getByRole('status', { name: 'apps.loadingName' })).toBeTruthy()
-    rerender(<AppPageHeader name="Market Monitor" icon={null} state={null} onBack={noop} />)
-    expect(screen.queryByRole('status')).toBeNull()
-    expect(screen.getByText('Market Monitor')).toBeTruthy()
   })
 })

@@ -104,17 +104,26 @@ describe('entry buttons pinned to a platform app', () => {
     expect(await screen.findByText('links.appUninstalled')).toBeTruthy()
   })
 
-  it('does not call a pin uninstalled before the layout has been read', async () => {
+  it('waits for the layout before it lists a pin, so no label or verdict appears or changes afterwards', async () => {
     live.layout = layout()
-    live.extraLinks = [{ id: 4, label: 'Old notes', url: `rp:apps:platform:${gone}`, icon: '', newTab: false, groupId: 0, ord: 2 }]
+    live.extraLinks = [
+      { id: 4, label: 'Old notes', url: `rp:apps:platform:${gone}`, icon: '', newTab: false, groupId: 0, ord: 2 },
+      { id: 3, label: '', url: `rp:apps:platform:${live1}`, icon: '', newTab: false, groupId: 0, ord: 3 },
+    ]
     let open!: () => void
     live.gate = new Promise<void>(resolve => { open = resolve })
     try {
       mount()
-      expect(await screen.findByText('Old notes')).toBeTruthy()
+      await waitFor(() => expect(screen.getByText('common.loading')).toBeTruthy())
+      // Nothing of the list is on screen while the layout is out: not a generic label, not a verdict.
+      expect(screen.queryByText('Old notes')).toBeNull()
+      expect(screen.queryByText('nav.apps')).toBeNull()
       expect(screen.queryByText('links.appUninstalled')).toBeNull()
       open()
-      expect(await screen.findByText('links.appUninstalled')).toBeTruthy()
+      // The first render of the list is already final: the app's name, and the uninstalled verdict.
+      expect(await screen.findByText('Notes')).toBeTruthy()
+      expect(screen.getByText('links.appUninstalled')).toBeTruthy()
+      expect(screen.getByText('Old notes')).toBeTruthy()
     } finally { live.gate = null }
   })
 

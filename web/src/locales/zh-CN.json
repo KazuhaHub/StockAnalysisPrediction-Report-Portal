@@ -4091,7 +4091,6 @@
   "apps.v2Unavailable": "应用暂时不可用，请检查访问权限或联系管理员。",
   "apps.v2Loading": "正在加载应用…",
   "appStore.catalogueFailed": "无法读取应用目录，更新和发布者名称可能缺失。",
-  "apps.loadingName": "正在加载应用名称",
   "apps.v2Failed": "应用连接失败，请重新打开后重试。",
   "apps.v2Retry": "重新打开应用",
   "apps.adminHint": "上传 .zip 应用包（app.json 清单 + 自包含的 index.html）。应用运行在沙箱 iframe 中，只能通过受限桥接访问接口。详见 docs/adr/0003-downloadable-apps.md。",

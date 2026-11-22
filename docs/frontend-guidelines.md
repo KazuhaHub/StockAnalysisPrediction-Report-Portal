@@ -162,6 +162,17 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
   (antd centres it in the whole block, far below the fold for a long report).
 - No hand-placed large spinners (`loadingStates.test.ts`). Never render defaults as if the server
   had sent them; a failed load says so and offers a retry.
+- **Render once.** A view waits for every request that feeds its first paint and renders complete:
+  one page-level loading state, then the cards, names and labels as they will stay. Never show an
+  identifier (an app id, a publisher id, a key, a slug) as a stand-in for a name that is still
+  loading, and never show a generic label that a second request will replace; no per-line
+  placeholders. An answer of any kind settles the view, so a failed request renders what is known
+  with an inline retry, never an endless spinner. Gate with `useSettled(answered)`
+  (`lib/useSettled.ts`): it is true from the first moment every request has answered and stays true
+  through later refreshes. The directory hook reports `answered`, the site settings gate the shell.
+  A value only a second, slower request can add is either waited for or left out of the first view;
+  it is never added to a view that is already showing. Each gated view has a test that its first
+  settled render is already final (`AppsAdminPage`, `AppViewV2`, `HomePage`, `LinksPage`, `site`).
 
 ## Feedback, status and confirmation
 
@@ -210,5 +221,5 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
 - [ ] All copy through `t()`, in all three locales.
 - [ ] Verified at 320 / 375 / 768 / 1280 px, light and dark, reduced motion.
 - [ ] No sideways page scroll on a phone; nothing overlaps or is squeezed to an ellipsis.
-- [ ] Loading, empty, filtered-empty and error states all shown.
+- [ ] Loading, empty, filtered-empty and error states all shown; the view renders once (no id-then-name swap).
 - [ ] Tests written first; guard tests pass; reviewed; shown on `preview/all` before the PR.

@@ -657,6 +657,23 @@ describe('an entry button pinned to a platform app', () => {
     expect(screen.getByTestId('where').textContent).toBe(`/apps/v2/${id}`)
   })
 
+  it('renders the entry strip once: nothing of it until the directory has answered, then the final names', async () => {
+    state.resp = { ...base, links: [pin, { id: 10, label: 'Other', url: 'https://example.com', ord: 1 }] }
+    let answer!: (value: unknown) => void
+    state.directory = new Promise((resolve) => { answer = resolve }) as never
+    mount()
+    await waitFor(() => expect(platformRequests().length).toBeGreaterThan(0))
+    // The directory is out: neither the pinned button nor its neighbour is shown, and no generic label stands in.
+    expect(screen.queryByText('Other')).toBeNull()
+    expect(screen.queryByText('Notes')).toBeNull()
+    expect(screen.queryByText('nav.apps')).toBeNull()
+    await act(async () => { answer({ items: [item()], nextCursor: '' }) })
+    // The first time the strip is on screen it is complete.
+    expect(await screen.findByText('Notes')).toBeTruthy()
+    expect(screen.getByText('Other')).toBeTruthy()
+    expect(screen.queryByText('nav.apps')).toBeNull()
+  })
+
   it('keeps written text as written', async () => {
     state.resp = { ...base, links: [{ ...pin, label: 'My notes' }] }
     state.directory = { items: [item()], nextCursor: '' }
