@@ -90,9 +90,13 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 		var err error
 		switch r.PathValue("action") {
 		case "revoke-access":
-			_, err = s.st.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
+			_, err = s.st.exec(`DELETE FROM app_ou_access WHERE app_key=?`, platformAppKey(id))
 		case "restore-access":
-			_, err = s.st.exec(`INSERT INTO app_platform_access_grants(id,installation_id,principal_type,username,account_created,account_generation,group_id,group_created,revision,created_ms,updated_ms) VALUES(?,?,'user',?,?,?,NULL,NULL,1,1,1) ON CONFLICT DO NOTHING`, platformFixtureID(613), id, reader.username, reader.created, reader.generation)
+			// Reopen to the Default OU, as the fixture's install did (doc 190, D7).
+			var snapshot ouPolicySnapshot
+			if snapshot, err = s.st.loadOUPolicySnapshotFrom(s.st.db); err == nil {
+				_, err = s.st.exec(`INSERT INTO app_ou_access(app_key,group_id,enabled) VALUES(?,?,1) ON CONFLICT DO NOTHING`, platformAppKey(id), snapshot.graph.defaultID)
+			}
 		case "revoke-session":
 			_, err = s.st.exec(`UPDATE user_sessions SET revoked=1 WHERE id=?`, reader.sessionID)
 		default:

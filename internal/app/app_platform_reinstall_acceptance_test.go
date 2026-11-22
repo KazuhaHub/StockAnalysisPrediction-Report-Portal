@@ -149,8 +149,8 @@ func testPlatformReviewedReinstallStartsEmpty(
 		s.st.tableExists(pluginTable) ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables
 			WHERE app_id=?`, appID) != 0 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants
-			WHERE installation_id=?`, oldInstallation) != 0 {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access
+			WHERE app_key=?`, platformAppKey(oldInstallation)) != 0 {
 		t.Fatal("reviewed uninstall did not clear the selected plugin data")
 	}
 
@@ -203,8 +203,8 @@ func testPlatformReviewedReinstallStartsEmpty(
 		`SELECT COUNT(*) FROM `+newPluginTable) != 1 ||
 		newPluginTable != pluginTable ||
 		scalar[int](t, s.st,
-			`SELECT COUNT(*) FROM app_platform_access_grants
-			 WHERE installation_id=?`, oldInstallation) != 0 {
+			`SELECT COUNT(*) FROM app_ou_access
+			 WHERE app_key=?`, platformAppKey(oldInstallation)) != 0 {
 		t.Fatal("reinstall revived old rows or lost fresh data")
 	}
 	if err := verifyPlatformObjectStorage(s.st.poolExec()); err != nil {

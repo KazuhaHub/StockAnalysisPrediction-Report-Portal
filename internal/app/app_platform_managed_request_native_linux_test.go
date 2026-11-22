@@ -125,11 +125,9 @@ func nativeManagedViewerState(
 	activation := scalar[string](t, s.st, `SELECT state||':'||generation||':'||
 		policy_revision FROM app_platform_activations
 		WHERE installation_id=? ORDER BY generation DESC LIMIT 1`, installation)
-	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants
-		WHERE installation_id=? AND principal_type='user' AND username=?
-		AND account_created=? AND account_generation=?`,
-		installation, actor.username, actor.created, actor.generation)
+	open := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access
+		WHERE app_key=? AND enabled=1`, platformAppKey(installation))
 	return fmt.Sprintf(
-		"installation=%s activation=%s user=%s grants=%d",
-		state, activation, actor.username, grants)
+		"installation=%s activation=%s user=%s open_ou_rows=%d",
+		state, activation, actor.username, open)
 }

@@ -116,7 +116,7 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 			http.Error(w, "fixture session unavailable", http.StatusUnauthorized)
 			return
 		}
-		if _, err := s.st.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation); err != nil {
+		if _, err := s.st.exec(`DELETE FROM app_ou_access WHERE app_key=?`, platformAppKey(installation)); err != nil {
 			http.Error(w, "fixture unavailable", http.StatusInternalServerError)
 			return
 		}
