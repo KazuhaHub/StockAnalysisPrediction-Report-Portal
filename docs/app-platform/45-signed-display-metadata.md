@@ -28,7 +28,8 @@ plain text, rendered by React, never HTML. Keys are closed and unknown fields ar
 refused. The icon vocabulary is `appstore`, `file-text`, `dashboard`, `calendar`,
 `bar-chart`, `cloud`, `tool`, `experiment`; the host selects its own Ant component.
 No external icon URL, SVG script, network request or arbitrary component name is
-accepted. Custom branding needs a separately validated asset contract later.
+accepted. A custom PNG icon is the one exception, carried inline and strictly
+validated as described under "Publisher name and custom icon".
 
 Descriptor/signature identity covers these bytes. Changing copy requires a new
 app-qualified release and a new signature; never edit an immutable signed release.
@@ -156,3 +157,59 @@ physical resource activation, managed lifecycle, document sizing,
 routing/history/drafts, sensitive broker policy and remaining P00–P14 acceptance.
 No production enrollment/deployment, real credentials, SDK freeze or server beta
 configuration changes are performed.
+
+## Publisher name and custom icon
+
+Two optional additions to the descriptor, both covered by the descriptor
+signature. A Portal that predates them refuses a descriptor carrying either
+field (the schema is closed); that fail-closed behavior is accepted.
+
+### `publisher_name`
+
+A top-level string, 1-64 characters: the publisher's self-declared display name
+(like a VS Code publisher display name). It is display text only; trust stays
+keyed on the `publisher` ID. It must follow the display text rules, already be
+NFC (a decomposed "e" plus combining accent is refused), contain no control or
+format characters (zero-width joiner, bidi overrides), have no leading or
+trailing space and no doubled spaces. The host exposes it only from descriptors
+that verified against publisher trust, as `publisher_name` on catalogue items
+and layout entries and `publisherName` on directory items. The UI shows
+`publisher_name` with the publisher ID as fallback; details views show the ID
+beside the name.
+
+### `display.icon_png`
+
+An optional strict standard base64 string of a PNG. `display.icon` stays
+required and is the fallback when the image is absent or fails to load. Limits:
+at most 16 KiB decoded, square, 64 to 256 pixels per side. The catalogue offers
+only the descriptor and signature before install, so the image has to ride in
+the signed descriptor.
+
+The parser (`appplatform.CanonicalIcon`, run wherever a descriptor is parsed or
+verified) checks, in order: the encoded length bound, the strict alphabet (no
+whitespace, URL alphabet or missing padding), canonical base64, the PNG magic,
+the dimensions from `png.DecodeConfig` before any pixel data is inflated, a full
+decode, then re-encodes the image canonically. Ancillary chunks and trailing
+bytes do not survive. The SHA-256 is taken over the re-encoded bytes.
+
+### Serving
+
+JSON responses never carry the bytes. Catalogue items, directory items, layout
+entries, staged releases, launch documents and installation settings carry
+`display.icon_sha256`. The image is served at
+`GET /api/app-platform/icons/{sha}.png` to signed-in users from a bounded
+in-memory cache (256 entries, least recently used). The cache is filled when a
+catalogue, directory, layout, staged-release, launch or settings response is built
+from a verified descriptor, so a restart empties it until the next listing; an
+unknown hash answers 404 and the UI falls back to the built-in icon. Responses
+carry `Content-Type: image/png`, `X-Content-Type-Options: nosniff`,
+`Content-Security-Policy: default-src 'none'; sandbox`,
+`Cross-Origin-Resource-Policy: same-origin` and
+`Cache-Control: private, max-age=31536000, immutable` (the body is immutable per
+hash). Nothing is stored in the database.
+
+### Deploy ordering
+
+Deploy the Portal that understands these fields before publishing any package
+that uses them: an older Portal rejects the unknown fields, so the release would
+fail to parse there instead of degrading to the built-in icon.
