@@ -14,11 +14,17 @@ import (
 
 var errPlatformInstallationMissing = errors.New("application installation not found")
 
+// platformSettingsAudience is one OU's own access row for the installation. Enabled is its value: an
+// open row and a closed override are both shown, the closed ones being what explains a user's refusal.
 type platformSettingsAudience struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	Type    string `json:"type"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
 }
+
+// platformSettingsAudienceMax caps the rows listed; audience_total says how many exist.
+const platformSettingsAudienceMax = 100
 
 type platformSettingsCapability struct {
 	Capability string `json:"capability"`
@@ -73,6 +79,7 @@ type platformInstallationSettings struct {
 	Version              string                       `json:"version,omitempty"`
 	Display              *appplatform.AppDisplay      `json:"display,omitempty"`
 	Audience             []platformSettingsAudience   `json:"audience"`
+	AudienceTotal        int                          `json:"audience_total"`
 	Capabilities         []platformSettingsCapability `json:"capabilities"`
 	Backend              platformSettingsBackend      `json:"backend"`
 	Data                 *platformSettingsData        `json:"data,omitempty"`
@@ -349,39 +356,30 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 				result.ConfigurationGaps, "secret_binding:"+name)
 		}
 
-		rows, err = e.query(`SELECT g.principal_type,
-			COALESCE(g.username,''),
-			COALESCE(NULLIF(u.display_name,''),g.username,''),
-			COALESCE(g.group_id,0),
-			COALESCE(NULLIF(ug.name,''),'')
-			FROM app_platform_access_grants g
-			LEFT JOIN users u ON u.username=g.username
-			LEFT JOIN user_groups ug ON ug.id=g.group_id
-			WHERE g.installation_id=?
-			ORDER BY g.principal_type,g.username,g.group_id LIMIT ?`,
-			installation, maxPlatformInstallAudience+1)
+		// Who can use the installation is its OU policy: the OUs that have an own row, open or closed. The
+		// inherited and effective values are on the access page (/manage/apps/platform:<id>/access). A
+		// large policy is capped, not refused: audience_total carries the full count.
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_ou_access WHERE app_key=?`, platformAppKey(installation)).Scan(&result.AudienceTotal); err != nil {
+			return err
+		}
+		rows, err = e.query(`SELECT a.group_id,a.enabled,COALESCE(NULLIF(ug.name,''),'')
+			FROM app_ou_access a
+			LEFT JOIN user_groups ug ON ug.id=a.group_id
+			WHERE a.app_key=?
+			ORDER BY a.group_id LIMIT ?`,
+			platformAppKey(installation), platformSettingsAudienceMax)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
-			var kind, username, userName, groupName string
+			var groupName string
 			var groupID int64
-			if err := rows.Scan(&kind, &username, &userName, &groupID, &groupName); err != nil {
+			var enabled int
+			if err := rows.Scan(&groupID, &enabled, &groupName); err != nil {
 				rows.Close()
 				return err
 			}
-			if len(result.Audience) >= maxPlatformInstallAudience {
-				rows.Close()
-				return errAppPlatformInstallUnavailable
-			}
-			item := platformSettingsAudience{Type: kind, ID: username, Name: userName}
-			if kind == "ou" {
-				item.ID = strconv.FormatInt(groupID, 10)
-				item.Name = groupName
-				if item.Name == "" {
-					item.Name = item.ID
-				}
-			}
+			item := platformSettingsAudience{Type: "ou", ID: strconv.FormatInt(groupID, 10), Name: groupName, Enabled: enabled != 0}
 			if item.Name == "" {
 				item.Name = item.ID
 			}

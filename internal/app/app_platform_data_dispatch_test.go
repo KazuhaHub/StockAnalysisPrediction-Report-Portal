@@ -17,7 +17,7 @@ func testPlatformDataDispatchUnavailable(t *testing.T, pg bool) {
 			t.Fatal("uncertain dispatch replaced or completed durable intent")
 		}
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 		t.Fatal("failed dispatch exposed app")
 	}
 }

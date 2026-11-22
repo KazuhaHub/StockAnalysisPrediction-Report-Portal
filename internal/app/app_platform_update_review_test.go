@@ -18,7 +18,7 @@ func platformUpdateFixture(t *testing.T, readable []int) (*Server, platformActor
 func platformUpdateFixturePG(t *testing.T, readable []int, pg bool) (*Server, platformActorSession, string, platformStagedRelease) {
 	t.Helper()
 	s, actor, source := platformInstallFixture(t, pg)
-	review, err := s.createPlatformFrontendInstallReview(actor, source.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformFrontendInstallReview(actor, source.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}

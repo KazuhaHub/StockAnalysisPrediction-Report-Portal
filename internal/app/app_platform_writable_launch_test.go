@@ -59,7 +59,7 @@ func testPlatformWritableLaunchHTTP(t *testing.T, pg bool) {
 	if got := sessionTestRequest(mux, "GET", payload.Source, "", ""); got.Code != 401 {
 		t.Fatal("anonymous writable document")
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	platformCloseAccess(t, s, lease.installationID)
 	if got := sessionTestRequest(mux, "GET", payload.Source, cookie, ""); got.Code != 404 || strings.Contains(got.Body.String(), "Fixture") {
 		t.Fatal("cached writable URL survived revocation")
 	}
@@ -88,7 +88,7 @@ func testPlatformWritableLaunchRefusals(t *testing.T, pg bool) {
 			s.wireRoutes(mux)
 			switch mode {
 			case "grant":
-				mustExec(t, s.st, `DELETE FROM app_platform_access_grants`)
+				mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key LIKE 'platform:%'`)
 			case "runtime":
 				mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=0`)
 			case "key":
@@ -143,7 +143,7 @@ func testPlatformWritableLaunchOU(t *testing.T, pg bool) {
 	}
 	originalGroup := scalar[int64](t, s.st, `SELECT COALESCE(group_id,0) FROM users WHERE username=?`, actor.username)
 	t.Cleanup(func() {
-		mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+		platformCloseAccess(t, s, lease.installationID)
 		mustExec(t, s.st, `UPDATE users SET group_id=NULLIF(?,0) WHERE username=?`, originalGroup, actor.username)
 		mustExec(t, s.st, `DELETE FROM user_groups WHERE id=?`, child)
 		mustExec(t, s.st, `DELETE FROM user_groups WHERE id=?`, parent)
@@ -152,9 +152,8 @@ func testPlatformWritableLaunchOU(t *testing.T, pg bool) {
 	if _, err := s.st.SetPrimaryGroups([]string{actor.username}, child); err != nil {
 		t.Fatal(err)
 	}
-	created := scalar[string](t, s.st, `SELECT created_at FROM user_groups WHERE id=?`, parent)
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(991), "installation_id": lease.installationID, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": parent, "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformCloseAccess(t, s, lease.installationID)
+	platformSetAccess(t, s, lease.installationID, int64(parent), true)
 	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=2 WHERE id=?`, lease.installationID)
 	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=2 WHERE installation_id=?`, lease.installationID)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=2 WHERE installation_id=?`, lease.installationID)

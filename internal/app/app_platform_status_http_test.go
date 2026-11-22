@@ -81,7 +81,7 @@ func testPlatformInstallationStatusReaderProjection(t *testing.T, pg bool) {
 	if err != nil || !result.ControlPaused {
 		t.Fatalf("paused status: %+v %v", result, err)
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
+	platformCloseAccess(t, s, installation)
 	if result, err = s.readPlatformInstallationStatus(context.Background(), reader, installation); err == nil || !reflect.DeepEqual(result, platformInstallationStatus{}) {
 		t.Fatal("revoked audience retained status access")
 	}
@@ -123,7 +123,7 @@ func TestPlatformInstallationStatusHTTPOmitsInternalIdentity(t *testing.T) {
 			t.Fatalf("status query %q: %d %s", suffix, got.Code, got.Body.String())
 		}
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
+	platformCloseAccess(t, s, installation)
 	if got := sessionTestRequest(mux, http.MethodGet, "/api/app-platform/installations/"+installation+"/status", cookie, ""); got.Code != http.StatusNotFound || strings.Contains(got.Body.String(), "installed") {
 		t.Fatal("revoked status remained visible")
 	}

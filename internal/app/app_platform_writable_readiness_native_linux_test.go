@@ -112,7 +112,7 @@ func testNativePortalWritableReadiness(t *testing.T, s *Server, lease platformOp
 		t.Fatal("revoked-source probe mutated state")
 	}
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1 WHERE id=?`, current.writer.runtime.id)
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE id=?`, start.writer.resourceID) != "candidate" || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE id=?`, start.writer.resourceID) != "candidate" || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" {
 		t.Fatal("readiness activated app")
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writable_readiness_observed' AND target_id=?`, lease.id) != 2 {

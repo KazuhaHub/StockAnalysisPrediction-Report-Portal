@@ -321,7 +321,7 @@ func testPlatformManagedMarketStaging(t *testing.T, pg bool) {
 	}
 	plan := sessionTestRequest(
 		mux, "POST", "/api/admin/app-platform/plans", cookie,
-		platformManagementPlanBody(digest, actor.username))
+		platformManagementPlanBody(t, s, digest))
 	if plan.Code != http.StatusServiceUnavailable ||
 		!strings.Contains(plan.Body.String(), "app_platform_runtime_unavailable") ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) != 0 ||

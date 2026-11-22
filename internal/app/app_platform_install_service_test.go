@@ -84,7 +84,7 @@ func TestPlatformFrontendServiceNewAdmissionSQLite(t *testing.T) {
 	s, actor, release := platformInstallFixture(t, false)
 	platformStartFrontendService(t, s)
 	platformAwaitFrontendService(t, s, "idle")
-	review, err := s.createPlatformInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformInstallAudienceReview(actor, release.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}

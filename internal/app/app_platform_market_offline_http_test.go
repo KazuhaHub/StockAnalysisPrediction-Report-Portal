@@ -127,7 +127,7 @@ func testPlatformOfflineMarketHTTP(t *testing.T, pg bool) {
 	}
 	plan := sessionTestRequest(
 		mux, http.MethodPost, "/api/admin/app-platform/plans",
-		cookie, platformManagementPlanBody(staged.Release, actor.username))
+		cookie, platformManagementPlanBody(t, s, staged.Release))
 	if plan.Code != http.StatusOK {
 		t.Fatal("offline install review", plan.Code, plan.Body.String())
 	}

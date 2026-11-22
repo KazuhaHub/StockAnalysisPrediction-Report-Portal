@@ -141,7 +141,7 @@ func (s *Server) commitPlatformWritableActivation(ctx context.Context, lease pla
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
-	if err := insertPlatformInitialAudience(e, lease.installationID, metadata.audience, now); err != nil {
+	if err := insertPlatformInitialAudience(e, lease.installationID, lease.id, metadata.audience, now); err != nil {
 		return zero, err
 	}
 	phase, err := platformReadyPhaseForInstallation(

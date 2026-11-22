@@ -116,7 +116,7 @@ func testPlatformBackendAccessSeesChange(t *testing.T, fixture func(*testing.T) 
 	case "session":
 		mustExec(t, s.st, `UPDATE user_sessions SET revoked=1 WHERE id=?`, actor.sessionID)
 	case "grant":
-		mustExec(t, s.st, `DELETE FROM app_platform_access_grants`)
+		mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key LIKE 'platform:%'`)
 	case "publisher":
 		mustExec(t, s.st, `UPDATE app_platform_publishers SET enabled=0`)
 	case "policy":

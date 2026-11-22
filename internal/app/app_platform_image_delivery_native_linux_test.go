@@ -834,7 +834,7 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	// Review, consumption and the ordinary install worker: stages through load_image, start, probe, registration
 	// and activation, with no synthetic native observation and no direct runner journal write.
 	review, err := s.createPlatformWritableInstallReview(ctx, session, expected.ReleaseSHA256, trust,
-		[]platformAudienceTarget{{kind: "user", username: session.username}}, endpoint)
+		platformOpenTargets(t, s), endpoint)
 	if err != nil {
 		t.Fatal("managed review", err)
 	}

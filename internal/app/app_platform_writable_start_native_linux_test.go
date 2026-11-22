@@ -91,7 +91,7 @@ func testNativePortalWritableStart(t *testing.T, s *Server, lease platformOperat
 	if _, err := s.dispatchPlatformWritableStart(ctx, lease, endpoint); err == nil {
 		t.Fatal("stale start lease dispatched")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`, lease.installationID) != 1 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`, lease.installationID) != 1 {
 		t.Fatal("start fabricated readiness or access")
 	}
 	t.Log("PORTAL_WRITABLE_START_RECONCILED")

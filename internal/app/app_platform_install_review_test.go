@@ -59,7 +59,7 @@ func testPlatformInstallReview(t *testing.T, pg bool) {
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`) != 0 {
 		t.Fatal("admission pretended activation")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_data_namespaces`) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_data_namespaces`) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 		t.Fatal("admission bypassed data preparation or audience review")
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE granted=1`) != 0 {

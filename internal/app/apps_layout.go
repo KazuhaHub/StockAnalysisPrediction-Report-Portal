@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 // App ordering and per-OU app access (ADR 0048).
@@ -17,6 +20,24 @@ import (
 // installed id never contains a colon (appIDRe).
 
 const builtinAppPrefix = "builtin:"
+
+// platformAppPrefix addresses a platform installation: "platform:<installation_id>" (doc 190, D7). The
+// key is valid in app_order and app_ou_access for every installation whose desired state is not
+// removed. A built-in key's baseline is open; a platform key's is closed, chosen by key kind in code
+// (appBaseline), with no synthetic rows.
+const platformAppPrefix = "platform:"
+
+func platformAppKey(installation string) string { return platformAppPrefix + installation }
+
+// platformInstallationFromKey is the installation id a platform key names, if the key has that form.
+func platformInstallationFromKey(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, platformAppPrefix)
+	return id, ok && platformValidUUID(id)
+}
+
+// appBaseline is what no row anywhere in the OU chain resolves to: open for every key but a platform
+// installation's.
+func appBaseline(key string) bool { return !strings.HasPrefix(key, platformAppPrefix) }
 
 // appKeyRecurring is the one built-in key whose feature owns server routes (every
 // /api/admin/batch/recurring* route), which the OU switch therefore gates (routes.go). Batch and Quotes
@@ -30,17 +51,57 @@ const appKeyRecurring = builtinAppPrefix + "recurring"
 var builtinAppKeys = []string{"batch", "recurring", "quotes"}
 
 // appLayoutKeys is every key an ordering or an access row may name: the built-in apps, then the
-// installed ones in the order ListApps returns them. That sequence is "today's order", which is where
-// an app with no position row goes.
-func appLayoutKeys(installed []App) []string {
-	keys := make([]string, 0, len(builtinAppKeys)+len(installed))
+// installed ones in the order ListApps returns them, then the platform installations (already in key
+// form, oldest first). That sequence is "today's order", which is where an app with no position row goes.
+func appLayoutKeys(installed []App, platform []string) []string {
+	keys := make([]string, 0, len(builtinAppKeys)+len(installed)+len(platform))
 	for _, k := range builtinAppKeys {
 		keys = append(keys, builtinAppPrefix+k)
 	}
 	for _, a := range installed {
 		keys = append(keys, a.ID)
 	}
+	return append(keys, platform...)
+}
+
+// platformInstallationRow is one platform installation that is not removed.
+type platformInstallationRow struct {
+	id, appID, desired, phase string
+}
+
+// platformInstallations lists the installations whose desired state is not removed, oldest first.
+func (s *Store) platformInstallations() ([]platformInstallationRow, error) {
+	rows, err := s.query(`SELECT id,app_id,desired_state,phase FROM app_platform_installations WHERE desired_state<>'removed' ORDER BY created_ms,id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []platformInstallationRow{}
+	for rows.Next() {
+		var r platformInstallationRow
+		if err := rows.Scan(&r.id, &r.appID, &r.desired, &r.phase); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func platformInstallationKeys(rows []platformInstallationRow) []string {
+	keys := make([]string, 0, len(rows))
+	for _, r := range rows {
+		keys = append(keys, platformAppKey(r.id))
+	}
 	return keys
+}
+
+// layoutKeys is appLayoutKeys over what the store holds now.
+func (s *Store) layoutKeys() ([]string, []platformInstallationRow, error) {
+	platform, err := s.platformInstallations()
+	if err != nil {
+		return nil, nil, err
+	}
+	return appLayoutKeys(s.ListApps(), platformInstallationKeys(platform)), platform, nil
 }
 
 // orderAppKeys sorts keys by their stored position, ascending. Keys without a row follow, in the order
@@ -89,6 +150,11 @@ func (s *Store) ReplaceAppOrder(keys []string) error {
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
 	e := migExec{s: s, ex: tx}
+	// The OU mutation lock comes first, as in every uninstall path, so locking a platform
+	// installation row below cannot deadlock with a removal that holds the same two locks.
+	if err := lockOUMutation(e); err != nil {
+		return err
+	}
 	// Validated here, inside the write, so an uninstall that lands after the handler's check cannot
 	// leave a position row behind for an app that is gone.
 	for _, k := range appLockOrder(keys) {
@@ -120,6 +186,27 @@ func (s *Store) requireApp(e migExec, key string) error {
 			return nil
 		}
 		return errUnknownApp
+	}
+	if strings.HasPrefix(key, platformAppPrefix) {
+		id, ok := platformInstallationFromKey(key)
+		if !ok {
+			return errUnknownApp
+		}
+		// Lock order: the OU mutation lock (taken by the caller), then the installation row, the order
+		// every uninstall transaction uses.
+		q := `SELECT id FROM app_platform_installations WHERE id=? AND desired_state<>'removed'`
+		if s.driver == "postgres" {
+			q += ` FOR UPDATE`
+		}
+		var found string
+		switch err := e.queryRow(q, id).Scan(&found); {
+		case err == nil:
+			return nil
+		case errors.Is(err, sql.ErrNoRows):
+			return errUnknownApp
+		default:
+			return err
+		}
 	}
 	q := `SELECT id FROM apps WHERE id=?`
 	if s.driver == "postgres" {
@@ -195,10 +282,14 @@ type appAccessView struct {
 	rows  map[string]map[int64]bool
 }
 
-// resolveAppAccess is the nearest explicit row up the chain, open when there is none. It is the same
-// resolver every other OU policy uses, with the baseline "open".
-func resolveAppAccess(chain []int64, rows map[int64]bool) ouPolicyResult[bool] {
-	return nearestOUPolicy(chain, true, func(id int64) *bool {
+// resolveAppAccessKey is the nearest explicit row up the chain, with the baseline of the key's kind
+// (appBaseline) when there is none. It is the same resolver every other OU policy uses.
+func resolveAppAccessKey(key string, chain []int64, rows map[int64]bool) ouPolicyResult[bool] {
+	return resolveAppAccessBaseline(chain, rows, appBaseline(key))
+}
+
+func resolveAppAccessBaseline(chain []int64, rows map[int64]bool, baseline bool) ouPolicyResult[bool] {
+	return nearestOUPolicy(chain, baseline, func(id int64) *bool {
 		if v, ok := rows[id]; ok {
 			return &v
 		}
@@ -210,7 +301,7 @@ func (v appAccessView) open(key string) bool {
 	if v.deny {
 		return false
 	}
-	return resolveAppAccess(v.chain, v.rows[key]).Effective
+	return resolveAppAccessKey(key, v.chain, v.rows[key]).Effective
 }
 
 // appAccessFor builds the view for a signed-in user.
@@ -258,7 +349,7 @@ func (s *Store) appOpenForKey(user, key string) (bool, error) {
 	var one int
 	switch err := s.queryRow(`SELECT 1 FROM app_ou_access WHERE app_key=? LIMIT 1`, key).Scan(&one); {
 	case errors.Is(err, sql.ErrNoRows):
-		return true, nil
+		return appBaseline(key), nil
 	case err != nil:
 		return false, err
 	}
@@ -275,7 +366,7 @@ func (s *Store) appOpenForKey(user, key string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return resolveAppAccess(chain, rows).Effective, nil
+	return resolveAppAccessKey(key, chain, rows).Effective, nil
 }
 
 // appAccessRowsFor reads one app's rows as OU -> enabled.
@@ -341,13 +432,13 @@ func appLockOrder(keys []string) []string {
 
 // appClosesSomewhere reports whether a change to one app's rows turns the app from open to closed for
 // at least one OU, which is the only kind of change that can invalidate a token already minted.
-func appClosesSomewhere(snap ouPolicySnapshot, before, after map[int64]bool) bool {
+func appClosesSomewhere(key string, snap ouPolicySnapshot, before, after map[int64]bool) bool {
 	for id := range snap.graph.nodes {
 		chain, err := snap.graph.policyChain(id)
 		if err != nil {
 			continue
 		}
-		if resolveAppAccess(chain, before).Effective && !resolveAppAccess(chain, after).Effective {
+		if resolveAppAccessKey(key, chain, before).Effective && !resolveAppAccessKey(key, chain, after).Effective {
 			return true
 		}
 	}
@@ -387,10 +478,19 @@ type appAccessOU struct {
 }
 
 type appLayoutEntry struct {
-	Key     string `json:"key"`
+	Key string `json:"key"`
+	// Kind is "builtin", "app" (a v1 installed app, retired by P6) or "platform".
+	Kind    string `json:"kind"`
 	Name    string `json:"name"`
 	Builtin bool   `json:"builtin"`
 	Icon    string `json:"icon,omitempty"`
+	// InstallationID, AppID, State and Display describe a platform installation. State is the control
+	// record's own projection (installed, disabled, pending, setup_required or attention); Display is
+	// the signed display metadata when it verifies.
+	InstallationID string                  `json:"installation_id,omitempty"`
+	AppID          string                  `json:"app_id,omitempty"`
+	State          string                  `json:"state,omitempty"`
+	Display        *appplatform.AppDisplay `json:"display,omitempty"`
 	// Version, Entry and Scopes describe an installed app. The console reads them here rather than
 	// from the reader listing, which shows an administrator only what the switches leave open.
 	Version string        `json:"version,omitempty"`
@@ -415,6 +515,15 @@ func (s *Server) appLayout() ([]appLayoutEntry, error) {
 		return nil, err
 	}
 	installed := s.st.ListApps()
+	platform, err := s.st.platformInstallations()
+	if err != nil {
+		return nil, err
+	}
+	platformByKey := map[string]platformInstallationRow{}
+	for _, p := range platform {
+		platformByKey[platformAppKey(p.id)] = p
+	}
+	displays := s.platformLayoutDisplays(platform)
 	byID := map[string]App{}
 	for _, a := range installed {
 		byID[a.ID] = a
@@ -431,10 +540,23 @@ func (s *Server) appLayout() ([]appLayoutEntry, error) {
 		}
 	}
 	out := []appLayoutEntry{}
-	for _, key := range orderAppKeys(appLayoutKeys(installed), order) {
-		e := appLayoutEntry{Key: key, Access: []appAccessOU{}}
+	for _, key := range orderAppKeys(appLayoutKeys(installed, platformInstallationKeys(platform)), order) {
+		e := appLayoutEntry{Key: key, Kind: "app", Access: []appAccessOU{}}
 		if slug, ok := strings.CutPrefix(key, builtinAppPrefix); ok {
-			e.Name, e.Builtin = slug, true
+			e.Name, e.Builtin, e.Kind = slug, true, "builtin"
+		} else if p, ok := platformByKey[key]; ok {
+			e.Kind, e.InstallationID, e.AppID, e.State = "platform", p.id, p.appID, platformLayoutState(p)
+			e.Name = p.appID
+			if d, ok := displays[p.id]; ok {
+				e.Version, e.Display = d.version, d.display
+				if d.display != nil {
+					e.Icon = d.display.Icon
+					if name := platformDisplayName(d.display); name != "" {
+						e.Name = name
+					}
+				}
+			}
+			e.Scopes = []string{}
 		} else {
 			a := byID[key]
 			e.Name, e.Icon, e.Version, e.Entry, e.Scopes = a.Name, a.Icon, a.Version, a.Entry, a.Scopes
@@ -447,12 +569,87 @@ func (s *Server) appLayout() ([]appLayoutEntry, error) {
 			if !ok {
 				continue
 			}
-			r := resolveAppAccess(chain, rows[key])
+			r := resolveAppAccessKey(key, chain, rows[key])
 			e.Access = append(e.Access, appAccessOU{OU: id, Own: r.Own, Effective: r.Effective, SourceOU: r.SourceOU, Inherited: r.Inherited})
 		}
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// platformLayoutState is the control record's projection for the console: no runner or epoch check,
+// which is the reader directory's job when it decides whether a card opens.
+func platformLayoutState(p platformInstallationRow) string {
+	switch {
+	case p.desired == "disabled":
+		return "disabled"
+	case p.phase == "setup_required":
+		return "setup_required"
+	case p.phase == "pending":
+		return "pending"
+	case p.desired == "enabled" && p.phase == "ready":
+		return "installed"
+	}
+	return "attention"
+}
+
+// platformDisplayName is the English name of a verified display, else the first one.
+func platformDisplayName(d *appplatform.AppDisplay) string {
+	name := ""
+	for _, t := range d.Texts {
+		if name == "" {
+			name = t.Name
+		}
+		if strings.HasPrefix(strings.ToLower(t.Locale), "en") {
+			return t.Name
+		}
+	}
+	return name
+}
+
+type platformLayoutDisplay struct {
+	version string
+	display *appplatform.AppDisplay
+}
+
+// platformLayoutDisplays reads each active installation's version and signed display metadata in one
+// read transaction. It is best effort: an installation whose record does not verify (or any failure)
+// simply has no entry, and the console falls back to the application id.
+func (s *Server) platformLayoutDisplays(rows []platformInstallationRow) map[string]platformLayoutDisplay {
+	out := map[string]platformLayoutDisplay{}
+	if len(rows) == 0 {
+		return out
+	}
+	ctx := context.Background()
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return out
+	}
+	defer tx.Rollback() //nolint:errcheck // read only
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if lockPlatformPublisherTrustShared(e) != nil {
+		return out
+	}
+	trust, err := loadPlatformPublisherTrust(e)
+	if err != nil {
+		return out
+	}
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		record, err := platformReadDisplayRecord(e, r.id)
+		if err != nil || record == nil {
+			continue
+		}
+		item := platformLayoutDisplay{version: record.version}
+		if display, ok := record.verified(trust, now, r.appID, record.publisher); ok {
+			item.display = display
+		}
+		out[r.id] = item
+	}
+	return out
 }
 
 func (s *Server) apiAdminAppsLayout(w http.ResponseWriter, _ *http.Request, _ string) {
@@ -474,7 +671,11 @@ func (s *Server) apiAdminAppsOrder(w http.ResponseWriter, r *http.Request, user 
 		jsonError(w, http.StatusBadRequest, "keys must be a list of app keys")
 		return
 	}
-	known := appLayoutKeys(s.st.ListApps())
+	known, _, err := s.st.layoutKeys()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "database error")
+		return
+	}
 	seen := map[string]bool{}
 	for _, k := range in.Keys {
 		if !slices.Contains(known, k) {
@@ -519,8 +720,8 @@ func (s *Server) apiAdminAppsOrder(w http.ResponseWriter, r *http.Request, user 
 }
 
 // apiAdminAppAccess sets one OU's override for one app: true opens it, false closes it, null removes
-// the override so the OU inherits again. Removing the Default OU's override is allowed and means open,
-// the baseline.
+// the override so the OU inherits again. Removing the Default OU's override is allowed and returns it to
+// the baseline of the key's kind: open for a built-in or installed app, closed for a platform installation.
 func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user string) {
 	key := r.PathValue("key")
 	ou := pathID(r, "ou")
@@ -540,13 +741,18 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		}
 		enabled = &b
 	}
-	if !slices.Contains(appLayoutKeys(s.st.ListApps()), key) {
+	known, _, err := s.st.layoutKeys()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if !slices.Contains(known, key) {
 		jsonError(w, http.StatusNotFound, "app not found")
 		return
 	}
 	var from *bool
 	notFound, closes := false, false
-	err := s.st.withOUMutation(func(e migExec) error {
+	err = s.st.withOUMutation(func(e migExec) error {
 		from, notFound, closes = nil, false, false
 		snap, err := s.st.loadOUPolicySnapshotFrom(e.ex)
 		if err != nil {
@@ -575,7 +781,7 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		if err != nil {
 			return err
 		}
-		closes = appClosesSomewhere(snap, before, after)
+		closes = appClosesSomewhere(key, snap, before, after)
 		return nil
 	})
 	switch {

@@ -246,3 +246,16 @@ network enforcement, visual/mobile/accessibility acceptance and production rollo
 remain open. Signed staging is still a trusted internal development repository
 operation. This change does not pretend that a fresh production market can yet
 download and install the complete first-release app set.
+
+
+## Amendment 2026-11-21: install-time audience becomes OUs opened now (doc 190, D7)
+
+The install plan's `audience` field is replaced by `open_to_ous` (a list of OU ids as decimal strings;
+users are refused with `app_platform_user_audience_unsupported`). The panel's selector lists OUs only,
+labelled as opening the application now, and choosing none keeps the application closed to everyone,
+so the "do not grant anyone" checkbox and the disabled review button are gone. Activation writes the
+chosen OUs as `app_ou_access` rows in its transaction; later changes are ordinary, audited policy edits
+(`/manage/apps/platform:<id>/access`) and are not part of the review.
+
+Verification of earlier evidence ignores the audience: proofs and plans written before this change carry
+the old install-time audience digest, which can never match again, and access is not install evidence.

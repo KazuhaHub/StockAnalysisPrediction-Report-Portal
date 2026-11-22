@@ -134,9 +134,10 @@ func platformPrincipalAfter(kind, cursor string) (string, bool) {
 	return value, true
 }
 
-// platformPrincipalSpace computes the result space of doc 181 section 3.3 from the current rows:
-// accounts that would pass the launch audience check now, and the granted OUs with their current
-// descendants. Nothing is cached, so a moved user or reparented OU is gone from the next call.
+// platformPrincipalSpace computes the result space of doc 181 section 3.3 from the current rows: the
+// OUs on which the installation's OU policy (app_ou_access, doc 190 D7) resolves open, and the active
+// accounts that policy admits. Nothing is cached, so a moved user, a reparented OU or an edited
+// policy row is reflected by the next call.
 func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPrincipalDeriver, installationID string, nowMS int64, zone string) (platformPrincipalDirectory, error) {
 	var zero platformPrincipalDirectory
 	snapshot, err := platformAudienceSnapshot(e)
@@ -144,63 +145,24 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		return zero, err
 	}
 	graph := snapshot.graph
-	lock := ""
-	if e.s.driver == "postgres" {
-		lock = " FOR SHARE"
-	}
-	// Audience rows: an OU grant names the OU instance by ID and creation identity; a user grant
-	// names the account instance by name, creation identity and generation.
-	grantedOUs := map[int64]string{}
-	rows, err := e.query(`SELECT group_id,group_created FROM app_platform_access_grants WHERE installation_id=? AND principal_type='ou'`+lock, installationID)
+	key := platformAppKey(installationID)
+	policyRows, err := txAppRows(e, key)
 	if err != nil {
 		return zero, err
 	}
-	for rows.Next() {
-		var id sql.NullInt64
-		var created sql.NullString
-		if err := rows.Scan(&id, &created); err != nil {
-			rows.Close()
-			return zero, err
+	// open is the policy decision for an OU: its effective value on its own policy chain.
+	open := func(id int64) bool {
+		chain, err := graph.policyChain(id)
+		if err != nil {
+			return false
 		}
-		if id.Valid && created.Valid {
-			grantedOUs[id.Int64] = created.String
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return zero, err
-	}
-	type accountKey struct {
-		name, created string
-		generation    int64
-	}
-	grantedUsers := map[accountKey]bool{}
-	rows, err = e.query(`SELECT username,account_created,account_generation FROM app_platform_access_grants WHERE installation_id=? AND principal_type='user'`+lock, installationID)
-	if err != nil {
-		return zero, err
-	}
-	for rows.Next() {
-		var name, created sql.NullString
-		var generation sql.NullInt64
-		if err := rows.Scan(&name, &created, &generation); err != nil {
-			rows.Close()
-			return zero, err
-		}
-		if name.Valid && created.Valid && generation.Valid {
-			grantedUsers[accountKey{name.String, created.String, generation.Int64}] = true
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return zero, err
+		return resolveAppAccessKey(key, chain, policyRows).Effective
 	}
 
-	// The launch rule (platformAudienceChain): an OU chain with an OU that has no creation identity
+	// The launch rule (platformAccessChain): an OU chain with an OU that has no creation identity
 	// cannot present a viewer, so neither the OU nor an account under it is listable.
 	usableChain := func(id int64) ([]int64, bool) {
-		chain, err := graph.actualChain(id)
+		chain, err := graph.policyChain(id)
 		if err != nil {
 			return nil, false
 		}
@@ -212,21 +174,11 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		return chain, true
 	}
 
-	// OUs: every granted OU that still is the same instance, and all its current descendants.
+	// OUs: every OU whose effective value is open.
 	inSpace := map[int64]bool{}
-	for id, created := range grantedOUs {
-		node, ok := graph.nodes[id]
-		if !ok || node.created == "" || node.created != created {
-			continue
-		}
-		subtree, err := graph.subtree(id)
-		if err != nil {
-			continue
-		}
-		for _, member := range subtree {
-			if _, ok := usableChain(member); ok {
-				inSpace[member] = true
-			}
+	for id := range graph.nodes {
+		if _, ok := usableChain(id); ok && open(id) {
+			inSpace[id] = true
 		}
 	}
 	result := platformPrincipalDirectory{ous: make([]platformPrincipalEntry, 0, len(inSpace))}
@@ -252,9 +204,9 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		result.ous = append(result.ous, platformPrincipalEntry{principal: principal, label: truncatePlatformPrincipalLabel(node.name), parent: parent})
 	}
 
-	// Users: active, unexpired accounts whose current chain or account instance holds a grant.
+	// Users: active, unexpired accounts the policy admits.
 	generations := map[string]int64{}
-	rows, err = e.query(`SELECT source_key,generation FROM notification_source_cycles WHERE source_key LIKE 'notification-account:%'`)
+	rows, err := e.query(`SELECT source_key,generation FROM notification_source_cycles WHERE source_key LIKE 'notification-account:%'`)
 	if err != nil {
 		return zero, err
 	}
@@ -298,20 +250,7 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		if leaf == 0 {
 			leaf = graph.defaultID
 		}
-		chain, ok := usableChain(leaf)
-		if !ok {
-			continue
-		}
-		allowed := grantedUsers[accountKey{name, appplatform.AccountCreatedMarker(created), generation}]
-		if !allowed {
-			for _, id := range chain {
-				if want, ok := grantedOUs[id]; ok && graph.nodes[id].created == want {
-					allowed = true
-					break
-				}
-			}
-		}
-		if !allowed {
+		if _, ok := usableChain(leaf); !ok || !open(leaf) {
 			continue
 		}
 		value, err := deriver.Account(appplatform.ViewerAccountIdentity{Name: name, Created: appplatform.AccountCreatedMarker(created), Generation: generation})

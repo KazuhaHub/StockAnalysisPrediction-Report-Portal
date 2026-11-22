@@ -85,7 +85,7 @@ func testPlatformBackendHTTPAdmission(t *testing.T, pg bool) {
 		t.Fatal("unbounded backend requests", w.Code)
 	}
 	installation := strings.Split(path, "/")[4]
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
+	platformCloseAccess(t, s, installation)
 	// Release the occupied slots before checking current authorization.
 	one()
 	two()

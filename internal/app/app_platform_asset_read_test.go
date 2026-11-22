@@ -51,7 +51,7 @@ func testPlatformAssetRead(t *testing.T, pg bool) {
 		})
 	}
 	// A previously returned binding is not a cached authorization permit.
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
+	platformCloseAccess(t, s, id)
 	got, err := s.readPlatformLaunchAsset(reader, binding, binding.entry)
 	if err == nil || !reflect.DeepEqual(got, appplatform.FrontendFile{}) {
 		t.Fatal("revoked reader reused prior binding")

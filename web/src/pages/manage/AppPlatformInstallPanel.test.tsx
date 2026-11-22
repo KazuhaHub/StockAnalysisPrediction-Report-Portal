@@ -22,7 +22,7 @@ const root = '/api/admin/app-platform'
 const storageKey = 'portal.app-install.pending:admin'
 const translate = mock.t
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'index.css'), 'utf8')
-const review = () => ({ plan_id: plan, plan_sha256: digest, expires_ms: String(Date.now() + 900000), review: { action: 'install', app_id: 'notes', publisher_id: 'publisher', release_sha256: release, declined_capabilities: ['storage.files'], audience: [] } })
+const review = () => ({ plan_id: plan, plan_sha256: digest, expires_ms: String(Date.now() + 900000), review: { action: 'install', app_id: 'notes', publisher_id: 'publisher', release_sha256: release, declined_capabilities: ['storage.files'], open_to_ous: [] } })
 const updateReview = () => ({
   plan_id: plan,
   plan_sha256: digest,
@@ -99,7 +99,6 @@ const enableReview = () => ({
 function mount(path = '/manage/apps') { return render(<MemoryRouter initialEntries={[path]}><AppPlatformInstallPanel /></MemoryRouter>) }
 async function preview() {
   const user = userEvent.setup()
-  await user.click(await screen.findByRole('checkbox', { name: 'appPlatform.noAudience' }))
   await user.click(await screen.findByRole('button', { name: 'appPlatform.review' }))
   await screen.findByRole('dialog')
   return user
@@ -113,11 +112,11 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('application installation confirmation', () => {
-  it('requires explicit audience intent and waits for confirmation before admission', async () => {
+  it('installs closed to everyone unless OUs are chosen, and waits for confirmation before admission', async () => {
     mount()
-    expect(await screen.findByRole('button', { name: 'appPlatform.review' })).toHaveProperty('disabled', true)
+    expect(await screen.findByRole('button', { name: 'appPlatform.review' })).toHaveProperty('disabled', false)
     const user = await preview()
-    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'install', release_sha256: release, trust_revision: '1', audience: [] })
+    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'install', release_sha256: release, trust_revision: '1', open_to_ous: [] })
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(0)
     expect(await screen.findByText('storage.files')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'appPlatform.cancel' }))
@@ -170,7 +169,6 @@ describe('application installation confirmation', () => {
       mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [principalsRelease], next_cursor: '' } : { items: [], next_cursor: '' }))
       mount()
       const user = userEvent.setup()
-      await user.click(await screen.findByRole('checkbox', { name: english['appPlatform.noAudience'] }))
       await user.click(await screen.findByRole('button', { name: english['appPlatform.review'] }))
       await screen.findByRole('dialog')
       expect(within(screen.getByRole('dialog')).getAllByText(sentence).length).toBeGreaterThan(0)
@@ -579,10 +577,6 @@ describe('application installation confirmation', () => {
     })
     expect(pageResult.violations).toEqual([])
 
-    const noAudience = await screen.findByRole('checkbox', { name: 'appPlatform.noAudience' })
-    noAudience.focus()
-    await user.keyboard(' ')
-    expect(noAudience).toHaveProperty('checked', true)
     const reviewButton = screen.getByRole('button', { name: 'appPlatform.review' })
     reviewButton.focus()
     await user.keyboard('{Enter}')
@@ -661,7 +655,6 @@ describe('application installation confirmation', () => {
     mock.post.mockReturnValue(new Promise<ReturnType<typeof review>>(done => { resolve = done }))
     const page = mount()
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('checkbox', { name: 'appPlatform.noAudience' }))
     await user.click(await screen.findByRole('button', { name: 'appPlatform.review' }))
     mock.user = 'other'
     page.rerender(<MemoryRouter><AppPlatformInstallPanel /></MemoryRouter>)
@@ -694,7 +687,6 @@ describe('application installation confirmation', () => {
     await user.click(screen.getByRole('button', { name: 'appMarket.fetch' }))
     await user.click(await screen.findByRole('button', { name: 'appMarket.verifyDownload' }))
     await screen.findByText('appMarket.ready')
-    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.noAudience' }))
     await user.click(screen.getByRole('button', { name: 'appPlatform.review' }))
     await screen.findByRole('dialog')
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(0)
@@ -717,5 +709,38 @@ describe('application installation confirmation', () => {
     await screen.findByText('fresh')
     await act(async () => { resolve({ items: [item('stale')], next_cursor: '' }) })
     expect(screen.queryByText('stale')).toBeNull()
+  })
+})
+
+describe('opening an installation to organizational units', () => {
+  it('sends the chosen OU ids as open_to_ous and shows them in the review', async () => {
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases`
+      ? { items: [{ release_sha256: release, app_id: 'notes', publisher_id: 'publisher', version: '1.0.0', trust_revision: '1', installable: true }], next_cursor: '' }
+      : { items: url.includes('kind=ou') ? [{ id: '7', name: 'Research' }] : [], next_cursor: '' }))
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans')
+      ? { ...review(), review: { ...review().review, open_to_ous: ['7'] } }
+      : { operation_id: operation }))
+    mount()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('combobox', { name: 'appPlatform.audience' }))
+    await user.click(await screen.findByText('Research (7)'))
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.review' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'install', release_sha256: release, trust_revision: '1', open_to_ous: ['7'] })
+    expect(within(dialog).getByText('Research')).toBeTruthy()
+    expect(mock.get.mock.calls.some(([url]) => String(url).includes('kind=user'))).toBe(false)
+  })
+
+  it('says that choosing the Default OU opens the application to every organizational unit', async () => {
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases`
+      ? { items: [{ release_sha256: release, app_id: 'notes', publisher_id: 'publisher', version: '1.0.0', trust_revision: '1', installable: true }], next_cursor: '' }
+      : { items: url.includes('kind=ou') ? [{ id: '1', name: 'Default', default: true }, { id: '7', name: 'Research' }] : [], next_cursor: '' }))
+    mount()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('combobox', { name: 'appPlatform.audience' }))
+    await user.click(await screen.findByText('Research (7)'))
+    expect(screen.queryByText('appPlatform.defaultOUNote')).toBeNull()
+    await user.click(await screen.findByText('Default (1)'))
+    expect(await screen.findByText('appPlatform.defaultOUNote')).toBeTruthy()
   })
 })

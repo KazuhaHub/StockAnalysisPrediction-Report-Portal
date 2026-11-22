@@ -74,7 +74,7 @@ func TestPlatformPrincipalRoutesRefuseEveryOtherCaller(t *testing.T) {
 					return p.cookie, out
 				},
 				"administrator outside the audience": func(t *testing.T, p *platformPrincipalEnv, b map[string]string) (string, map[string]any) {
-					mustExec(t, p.s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=? AND principal_type='user' AND username=?`, p.installation, p.admin.username)
+					mustExec(t, p.s.st, `UPDATE users SET group_id=NULL WHERE username=?`, p.admin.username)
 					return p.cookie, body(p)
 				},
 			} {
@@ -198,25 +198,21 @@ func TestPlatformPrincipalDirectoryFollowsCurrentMembership(t *testing.T) {
 		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "dave") {
 			t.Fatal("a disabled account is listed", labels)
 		}
-		// A recreated account instance does not inherit the old direct grant.
 		mustExec(t, p.s.st, `UPDATE users SET active=1 WHERE username='dave'`)
-		mustExec(t, p.s.st, `UPDATE app_platform_access_grants SET account_generation=account_generation+1 WHERE installation_id=? AND username='dave'`, p.installation)
-		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "dave") {
-			t.Fatal("a recreated account inherited the old grant", labels)
-		}
 	})
 }
 
-// A recreated OU is a different instance: it does not inherit the old grant, as at launch.
-func TestPlatformPrincipalDirectoryIgnoresARecreatedGrantedOU(t *testing.T) {
+// A closed row on a descendant overrides the open ancestor: neither the OU nor its members are listed,
+// the same decision launch makes.
+func TestPlatformPrincipalDirectoryFollowsAClosedOverride(t *testing.T) {
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
-		mustExec(t, p.s.st, `UPDATE user_groups SET created_at='recreated-instance' WHERE id=?`, p.groups["Research"])
-		if labels := p.searchLabels(t, "ou"); len(labels) != 0 {
-			t.Fatal("a recreated OU kept the old grant", labels)
+		platformSetAccess(t, p.s, p.installation, p.groups["Research Lab"], false)
+		if labels := p.searchLabels(t, "ou"); !slices.Equal(labels, []string{"Research"}) {
+			t.Fatal("a closed descendant is listed", labels)
 		}
-		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "Alice Analyst") || slices.Contains(labels, "bob") {
-			t.Fatal("members of a recreated OU kept the old grant", labels)
+		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "bob") || !slices.Contains(labels, "Alice Analyst") {
+			t.Fatal("members of a closed descendant are listed, or an open OU's are not", labels)
 		}
 	})
 }
@@ -450,7 +446,7 @@ func TestPlatformPrincipalDirectoryUseIsAuditedOncePerHour(t *testing.T) {
 }
 
 // Launch refuses an account whose OU chain holds an OU without a creation identity, even when the
-// account is granted directly (platformAudienceChain). The directory applies the same rule, so it
+// account's OU is open (platformAccessChain). The directory applies the same rule, so it
 // never lists a user or OU that could not present the principal at launch.
 func TestPlatformPrincipalDirectoryExcludesChainsWithoutACreationIdentity(t *testing.T) {
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
@@ -462,17 +458,69 @@ func TestPlatformPrincipalDirectoryExcludesChainsWithoutACreationIdentity(t *tes
 		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "bob") || !slices.Contains(labels, "Alice Analyst") {
 			t.Fatal("a member of an OU without a creation identity is listed, or a healthy chain is not", labels)
 		}
-		// An ancestor without one removes the whole subtree below it.
+		// An ancestor without one removes the whole subtree below it. The administrator moves to a
+		// healthy open OU first, so the directory call itself is still admitted.
+		home, err := p.s.st.CreateUserGroup("Admin home", "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		platformSetAccess(t, p.s, p.installation, home, true)
+		mustExec(t, p.s.st, `UPDATE users SET group_id=? WHERE username=?`, home, p.admin.username)
 		mustExec(t, p.s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, p.groups["Research"])
-		if labels := p.searchLabels(t, "ou"); len(labels) != 0 {
+		if labels := p.searchLabels(t, "ou"); !slices.Equal(labels, []string{"Admin home"}) {
 			t.Fatal("OUs below an ancestor without a creation identity are listed", labels)
 		}
-		// A direct grant does not rescue an account whose own chain is unusable.
+		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "Alice Analyst") || slices.Contains(labels, "dave") || !slices.Contains(labels, p.admin.username) {
+			t.Fatal("accounts below an ancestor without a creation identity are listed, or a healthy account is not", labels)
+		}
+		// An open OU whose own chain is unusable is excluded, with its accounts.
+		platformSetAccess(t, p.s, p.installation, p.groups["Other"], true)
+		if labels := p.searchLabels(t, "user"); !slices.Contains(labels, "carol") {
+			t.Fatal("an open healthy OU's account is not listed", labels)
+		}
 		mustExec(t, p.s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, p.groups["Other"])
-		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "dave") || slices.Contains(labels, "Alice Analyst") {
-			t.Fatal("a directly granted account with an unusable chain is listed", labels)
+		if labels := p.searchLabels(t, "user"); slices.Contains(labels, "carol") {
+			t.Fatal("an account whose chain is unusable is listed", labels)
+		}
+		if labels := p.searchLabels(t, "ou"); slices.Contains(labels, "Other") {
+			t.Fatal("an open OU without a creation identity is listed", labels)
 		}
 	})
+}
+
+// A deleted OU takes its rows with it, so an OU created later (even one that reuses the id) does not
+// inherit the old access: launch is refused and the directory is empty.
+func TestARecreatedOUWithTheSameIDDoesNotInheritThePlatformRows(t *testing.T) {
+	e := newPlatformAccessEnv(t, false)
+	group, err := e.s.st.CreateUserGroup("Recreated", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.st.SetPrimaryGroups([]string{e.reader.username}, group); err != nil {
+		t.Fatal(err)
+	}
+	platformSetAccess(t, e.s, e.id, group, true)
+	if got := e.surfaces(e.reader); got != (platformSurfaces{true, true, true}) {
+		t.Fatalf("the open OU is not usable: %+v", got)
+	}
+	if _, err := e.s.st.SetPrimaryGroups([]string{e.reader.username}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.s.st.DeleteUserGroup(group); err != nil {
+		t.Fatal(err)
+	}
+	// Force the new OU onto the old id, as a reused id would be.
+	mustExec(t, e.s.st, `INSERT INTO user_groups(id,name,description,created_at,weight,urgent_unlimited,is_default) VALUES(?,?,?,?,0,0,0)`, group, "Recreated again", "", "2999-01-01T00:00:00Z")
+	t.Cleanup(func() {
+		e.s.st.SetPrimaryGroups([]string{e.reader.username}, 0) //nolint:errcheck // cleanup
+		e.s.st.DeleteUserGroup(group)                           //nolint:errcheck // cleanup
+	})
+	if _, err := e.s.st.SetPrimaryGroups([]string{e.reader.username}, group); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.surfaces(e.reader); got != (platformSurfaces{}) {
+		t.Fatalf("the recreated OU inherited the old rows: %+v", got)
+	}
 }
 
 // Only a real installation the viewer may use reaches the limiter, so arbitrary installation ids

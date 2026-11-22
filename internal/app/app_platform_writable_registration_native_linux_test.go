@@ -91,7 +91,7 @@ func testNativePortalWritableRegistration(t *testing.T, s *Server, lease platfor
 		t.Fatal("revoked source changed registration")
 	}
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1 WHERE id=?`, current.start.writer.runtime.id)
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE id=?`, start.writer.resourceID) != "candidate" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE id=?`, start.writer.resourceID) != "candidate" {
 		t.Fatal("delivery activated application")
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writable_registration_observed' AND target_id=?`, lease.id) != 1 {

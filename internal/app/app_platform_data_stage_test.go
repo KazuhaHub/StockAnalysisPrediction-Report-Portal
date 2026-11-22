@@ -60,7 +60,7 @@ func testPlatformDataStage(t *testing.T, pg bool) {
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_data_namespaces WHERE state='active' AND revision=2 AND data_format>0 AND writer_fence=1`) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE state='applied' AND observed_fence=admitted_fence AND receipt_json<>'{}'`) != 1 {
 		t.Fatal("data/effect not committed together")
 	}
-	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 		t.Fatal("data receipt activated application")
 	}
 	before := dumpOf(t, s.st)

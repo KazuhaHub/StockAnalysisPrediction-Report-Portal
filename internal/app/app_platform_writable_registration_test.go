@@ -68,7 +68,7 @@ func testPlatformWritableRegistrationIntent(t *testing.T, pg bool) {
 	if !samePlatformWritableRegistrationIntent(i, again) || i.applied {
 		t.Fatal("intent duplicated/replaced/fabricated delivery")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writable_registration_intent' AND target_id=?`, lease.id) != 1 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writable_registration_intent' AND target_id=?`, lease.id) != 1 {
 		t.Fatal("intent changed grants/history")
 	}
 	if _, err := s.commitPlatformWritableRegistration(context.Background(), lease, i, platformRuntimeEndpoint{}, transport.WritableLifecycleObservation{}); err == nil {

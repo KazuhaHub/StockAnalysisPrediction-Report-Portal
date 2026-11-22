@@ -29,7 +29,7 @@ func testPlatformDocumentRead(t *testing.T, pg bool) {
 	if got, err := s.readPlatformLaunchDocument(reader, changed); err == nil || !reflect.DeepEqual(got, appplatform.FrontendDocument{}) {
 		t.Fatal("superseded binding received document")
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
+	platformCloseAccess(t, s, id)
 	if got, err := s.readPlatformLaunchDocument(reader, binding); err == nil || !reflect.DeepEqual(got, appplatform.FrontendDocument{}) {
 		t.Fatal("revoked reader received derived document")
 	}

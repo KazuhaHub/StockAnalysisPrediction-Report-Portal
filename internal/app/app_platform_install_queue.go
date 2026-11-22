@@ -111,7 +111,7 @@ func (s *Server) closeNextUnexecutablePlatformInstall(ctx context.Context) (plat
 	if _, err = e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, facts.lease.installationID); err != nil {
 		return zero, err
 	}
-	if _, err = e.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, facts.lease.installationID); err != nil {
+	if err = deletePlatformAppRows(e, facts.lease.installationID); err != nil {
 		return zero, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -295,11 +295,11 @@ func platformInstallStageMayHaveEffects(stage appplatform.Stage, format string) 
 }
 
 func platformInstallAuthorityRefusal(err error) bool {
-	return errors.Is(err, errAppPlatformStageEvidence) || errors.Is(err, errAppPlatformPlanChanged) || errors.Is(err, errAppPlatformReleaseConflict) || errors.Is(err, errAppPlatformActorUnavailable) || errors.Is(err, errAppPlatformInstallUnavailable)
+	return errors.Is(err, errPlatformUserAudience) || errors.Is(err, errAppPlatformStageEvidence) || errors.Is(err, errAppPlatformPlanChanged) || errors.Is(err, errAppPlatformReleaseConflict) || errors.Is(err, errAppPlatformActorUnavailable) || errors.Is(err, errAppPlatformInstallUnavailable)
 }
 func platformInstallResourceCount(e migExec, installation string) (int, error) {
 	var count int
-	err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.kind NOT IN (`+platformInstallationNeutralEffectKinds+`))+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted=1)`, installation, installation, installation, installation, installation, installation).Scan(&count)
+	err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.kind NOT IN (`+platformInstallationNeutralEffectKinds+`))+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted=1)`, installation, installation, installation, installation, installation).Scan(&count)
 	return count, err
 }
 

@@ -1207,7 +1207,8 @@ export interface AppsResp {
   apps: AppSummary[]
   // Open built-in app slugs, in order. Absent from an older server: treat as "all open".
   builtin_apps?: string[]
-  // Both kinds as one key sequence (`builtin:<slug>` or an installed id): how the hub interleaves them.
+  // Every kind as one key sequence (`builtin:<slug>`, an installed id, or `platform:<installation id>` for a
+  // platform installation open to the caller): how the hub interleaves them.
   order?: string[]
 }
 
@@ -1221,10 +1222,16 @@ export interface AppAccessOU {
 }
 
 export interface AppLayoutEntry {
-  key: string // `builtin:<slug>` or an installed app's id
+  key: string // `builtin:<slug>`, an installed app's id, or `platform:<installation id>`
+  // Absent from an older server: `builtin` tells built-in from installed.
+  kind?: 'builtin' | 'app' | 'platform'
   name: string // an installed app's name; a built-in app's slug
   builtin: boolean
   icon?: string
+  // A platform installation: its id, application id and control state (the directory's states).
+  installation_id?: string
+  app_id?: string
+  state?: string
   // An installed app's manifest detail, sent for every app whether or not it is open for the caller.
   version?: string
   entry?: string

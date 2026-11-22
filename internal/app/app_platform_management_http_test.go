@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,13 +25,14 @@ func platformManagementFixture(t *testing.T, pg bool) (*Server, *http.ServeMux, 
 	return s, mux, actor, release.sha256, cookie
 }
 
-func platformManagementPlanBody(release, username string) string {
-	return fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","audience":[{"type":"user","username":%q}]}`, release, username)
+// platformManagementPlanBody is an install plan that opens the app to the Default OU on activation.
+func platformManagementPlanBody(t *testing.T, s *Server, release string) string {
+	return fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","open_to_ous":[%q]}`, release, strconv.FormatInt(platformOpenTargets(t, s)[0].ouID, 10))
 }
 
 func testPlatformManagementInstallHTTP(t *testing.T, pg bool) {
 	s, mux, actor, release, cookie := platformManagementFixture(t, pg)
-	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, platformManagementPlanBody(release, actor.username))
+	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, platformManagementPlanBody(t, s, release))
 	if plan.Code != 200 {
 		t.Fatalf("review: %d %s", plan.Code, plan.Body.String())
 	}
@@ -588,10 +590,10 @@ func TestPlatformManagementRestoreHTTP(t *testing.T) {
 func TestPlatformManagementHTTPRefusals(t *testing.T) {
 	s, mux, actor, release, cookie := platformManagementFixture(t, false)
 	path := "/api/admin/app-platform/plans"
-	valid := platformManagementPlanBody(release, actor.username)
+	valid := platformManagementPlanBody(t, s, release)
 	for _, body := range []string{
-		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"audience":[]`, `"audience":[]`, 1),
-		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"audience":[`, `"installation_id":"bad","audience":[`, 1),
+		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"open_to_ous":[]`, `"open_to_ous":[]`, 1),
+		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"open_to_ous":[`, `"installation_id":"bad","open_to_ous":[`, 1),
 		strings.Replace(valid, `"action":"install"`, `"action":"disable"`, 1),
 		`{"action":"repair"}`,
 		`{"action":"repair","installation_id":"bad"}`,
@@ -605,7 +607,7 @@ func TestPlatformManagementHTTPRefusals(t *testing.T) {
 		strings.Replace(valid, `"action":"install"`, `"Action":"install"`, 1),
 		strings.Replace(valid, `"action":"install"`, `"action":"install","endpoint":"/tmp/escape.sock"`, 1),
 		valid + `{}`, `null`, `{}`, strings.Repeat(" ", 32769) + valid,
-		strings.Replace(valid, `"audience":[`, `"audience":null,"ignored":[`, 1),
+		strings.Replace(valid, `"open_to_ous":[`, `"open_to_ous":null,"ignored":[`, 1),
 	} {
 		if got := sessionTestRequest(mux, "POST", path, cookie, body); got.Code != 400 {
 			t.Fatalf("malformed request admitted: %d %s body=%s", got.Code, got.Body.String(), body)
@@ -691,8 +693,8 @@ func TestPlatformManagementCommitRefusals(t *testing.T) {
 			if kind == "empty_audience" {
 				platformStartFrontendService(t, s)
 				platformAwaitFrontendService(t, s, "complete")
-				if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
-					t.Fatal("installer received implicit app-use grant")
+				if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
+					t.Fatal("installer received an implicit app-use row")
 				}
 			} else if kind != "native_replay" && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`) != 0 {
 				t.Fatal("refused confirmation created operation")
@@ -732,7 +734,7 @@ func TestPlatformManagementProgressPrivacyAndPause(t *testing.T) {
 }
 
 func TestPlatformManagementHTTPVerificationBudget(t *testing.T) {
-	s, mux, actor, release, cookie := platformManagementFixture(t, false)
+	s, mux, _, release, cookie := platformManagementFixture(t, false)
 	for range 2 {
 		releaseSlot, ok := s.platformDocuments.acquire()
 		if !ok {
@@ -740,7 +742,7 @@ func TestPlatformManagementHTTPVerificationBudget(t *testing.T) {
 		}
 		defer releaseSlot()
 	}
-	body := platformManagementPlanBody(release, actor.username)
+	body := platformManagementPlanBody(t, s, release)
 	path := "/api/admin/app-platform/plans"
 	got := sessionTestRequest(mux, "POST", path, cookie, body)
 	if got.Code != 429 || got.Header().Get("Retry-After") != "1" {
@@ -760,9 +762,9 @@ func TestPlatformManagementOUReviewBinding(t *testing.T) {
 	if err := s.st.queryRow(`SELECT id FROM user_groups WHERE is_default=1`).Scan(&group); err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","audience":[{"type":"ou","group_id":"%d"}]}`, release, group)
+	body := fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":"1","open_to_ous":["%d"]}`, release, group)
 	got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
-	if got.Code != 200 || !strings.Contains(got.Body.String(), fmt.Sprintf(`"group_id":"%d"`, group)) {
+	if got.Code != 200 || !strings.Contains(got.Body.String(), fmt.Sprintf(`"open_to_ous":["%d"]`, group)) {
 		t.Fatal("OU review unavailable", got.Code, got.Body.String())
 	}
 	var plan struct {
@@ -784,7 +786,7 @@ func TestPlatformManagementHTTPBlockedRequestCancellationPostgres(t *testing.T) 
 	for _, kind := range []string{"plan", "commit", "progress"} {
 		t.Run(kind, func(t *testing.T) {
 			s, mux, actor, release, cookie := platformManagementFixture(t, true)
-			method, path, body := "POST", "/api/admin/app-platform/plans", platformManagementPlanBody(release, actor.username)
+			method, path, body := "POST", "/api/admin/app-platform/plans", platformManagementPlanBody(t, s, release)
 			if kind != "plan" {
 				review, err := s.createPlatformInstallReview(actor, release, 1)
 				if err != nil {

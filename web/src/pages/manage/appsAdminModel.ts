@@ -9,8 +9,10 @@ import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/
 // The administrator's view of one app (ADR 0048): the layout entry (key, kind, per-OU access) joined
 // with what the installed list knows about an installed app (version, entry route, bridge scopes).
 export interface AdminApp {
-  key: string // `builtin:<slug>` or the installed app's id
+  key: string // `builtin:<slug>`, the installed app's id, or `platform:<installation id>`
   builtin: boolean
+  platform: boolean
+  installationId?: string
   builtinDef?: BuiltinApp
   name: string // an installed app's declared name; a built-in app's slug until translated
   icon?: string
@@ -54,6 +56,8 @@ function merge(entry: AppLayoutEntry): AdminApp {
   return {
     key: entry.key,
     builtin: entry.builtin,
+    platform: entry.kind === 'platform',
+    installationId: entry.installation_id,
     builtinDef: def,
     name: entry.name,
     icon: entry.icon,

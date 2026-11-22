@@ -56,6 +56,15 @@ No intermediate deprecation release: the only installation is the owner's.
    (`/data/report-portal/status-release-0.1.0-beta.3/compose.json`). Portal never managed it.
 4. Notification rules on `extension.app.status.notice` show their source as retired.
 5. Install Status v2 from the official catalogue once it is published.
+6. Platform installations are closed to everyone after R1 (D7: a platform key's baseline is closed and the
+   old install-time audience is no longer read). Before deploying, list every existing installation
+   (`SELECT id, app_id, desired_state FROM app_platform_installations WHERE desired_state<>'removed'`).
+   After deploying, open each one per OU on its access page (`/manage/apps/platform:<installation id>/access`);
+   until then nobody can use it, administrators included.
+7. Deploy R1 only with no platform lifecycle work in flight: no unconsumed review plan and no incomplete
+   operation (`SELECT id, action, stage FROM app_platform_operations WHERE completed_ms IS NULL` returns
+   nothing). R1 changes the evidence digests those carry, so an in-flight plan or operation fails closed
+   and needs a new review; a managed update caught after its runner start would land in recovery.
 
 ## 4. The apps console
 

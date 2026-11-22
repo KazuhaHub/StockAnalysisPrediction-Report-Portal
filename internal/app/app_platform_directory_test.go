@@ -32,10 +32,10 @@ func testPlatformDirectory(t *testing.T, pg bool) {
 	if err != nil || len(result.Items) != 1 || result.Items[0].State != "disabled" || result.Items[0].Openable {
 		t.Fatal("disabled state advertised an open action")
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET account_generation=account_generation+1 WHERE installation_id=?`, id)
+	platformCloseAccess(t, s, id)
 	result, err = s.listPlatformApps(context.Background(), reader, "")
 	if err != nil || len(result.Items) != 0 {
-		t.Fatal("stale lifecycle inherited directory access")
+		t.Fatal("closed installation stayed in the directory")
 	}
 }
 func TestPlatformDirectorySQLite(t *testing.T)   { testPlatformDirectory(t, false) }
@@ -53,7 +53,7 @@ func TestPlatformDirectoryHTTP(t *testing.T) {
 	if got := sessionTestRequest(mux, http.MethodGet, "/api/app-platform/apps", "", ""); got.Code != 401 {
 		t.Fatal("anonymous directory read")
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
+	platformCloseAccess(t, s, id)
 	response = sessionTestRequest(mux, http.MethodGet, "/api/app-platform/apps", cookie, "")
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || len(result.Items) != 0 {
 		t.Fatal("revoked audience stayed in the directory")
@@ -72,7 +72,7 @@ func testPlatformDirectoryPagination(t *testing.T, pg bool) {
 		if err := platformSeedInstallation(t, s.st.poolExec(), id, "fixture-publisher", fmt.Sprintf("notes-page-%d", i)); err != nil {
 			t.Fatal(err)
 		}
-		platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(800 + i), "installation_id": id, "principal_type": "user", "username": reader.username, "account_created": reader.created, "account_generation": reader.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+		platformOpenDefault(t, s, id)
 	}
 	first, err := s.listPlatformApps(context.Background(), reader, "")
 	if err != nil || len(first.Items) != 32 || first.NextCursor != first.Items[31].InstallationID {
@@ -120,7 +120,7 @@ func testPlatformDirectoryOU(t *testing.T, pg bool) {
 	if err := s.st.queryRow(`SELECT created_at FROM user_groups WHERE id=?`, parent).Scan(&created); err != nil {
 		t.Fatal(err)
 	}
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(901), "installation_id": id, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": parent, "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformSetAccess(t, s, id, int64(parent), true)
 	result, err := s.listPlatformApps(context.Background(), reader, "")
 	if err != nil || len(result.Items) != 1 {
 		t.Fatal("ancestor audience missing", err)
@@ -134,10 +134,12 @@ func testPlatformDirectoryOU(t *testing.T, pg bool) {
 	if err := s.st.queryRow(`SELECT id,created_at FROM user_groups WHERE is_default=1`).Scan(&defaultID, &created); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_id=?,group_created=?`, defaultID, created)
+	// A detached root is still governed by the Default OU's row (the policy chain ends at Default).
+	platformCloseAccess(t, s, id)
+	platformSetAccess(t, s, id, defaultID, true)
 	result, err = s.listPlatformApps(context.Background(), reader, "")
-	if err != nil || len(result.Items) != 0 {
-		t.Fatal("Default policy fallback manufactured an audience", err)
+	if err != nil || len(result.Items) != 1 {
+		t.Fatal("Default row did not reach a detached OU", err)
 	}
 	if _, err := s.st.SetPrimaryGroups([]string{reader.username}, 0); err != nil {
 		t.Fatal(err)
@@ -146,10 +148,10 @@ func testPlatformDirectoryOU(t *testing.T, pg bool) {
 	if err != nil || len(result.Items) != 1 {
 		t.Fatal("Default member audience missing", err)
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_created=?`, created+"old")
+	platformCloseAccess(t, s, id)
 	result, err = s.listPlatformApps(context.Background(), reader, "")
 	if err != nil || len(result.Items) != 0 {
-		t.Fatal("stale OU identity inherited directory access", err)
+		t.Fatal("no row anywhere in the chain must resolve closed", err)
 	}
 }
 func TestPlatformDirectoryOUSQLite(t *testing.T)   { testPlatformDirectoryOU(t, false) }

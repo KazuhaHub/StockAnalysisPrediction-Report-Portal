@@ -96,8 +96,7 @@ func testPlatformViewerOUGrant(t *testing.T, pg bool) {
 	if _, err := s.st.SetPrimaryGroups([]string{reader.username}, child); err != nil {
 		t.Fatal(err)
 	}
-	created := scalar[string](t, s.st, `SELECT created_at FROM user_groups WHERE id=?`, parent)
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(993), "installation_id": id, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": parent, "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformSetAccess(t, s, id, int64(parent), true)
 	v, err := s.readPlatformLaunchViewerContext(context.Background(), reader, id)
 	if err != nil || len(v.OUs) != 2 {
 		t.Fatal("actual ancestor grant denied", err)
@@ -105,11 +104,6 @@ func testPlatformViewerOUGrant(t *testing.T, pg bool) {
 	mustExec(t, s.st, `UPDATE user_groups SET parent_id=NULL WHERE id=?`, child)
 	if v, err := s.readPlatformLaunchViewerContext(context.Background(), reader, id); err == nil || !reflect.DeepEqual(v, protocol.Viewer{}) {
 		t.Fatal("former ancestor retained viewer access")
-	}
-	mustExec(t, s.st, `UPDATE user_groups SET parent_id=? WHERE id=?`, parent, child)
-	mustExec(t, s.st, `UPDATE user_groups SET created_at='new-ancestor' WHERE id=?`, parent)
-	if v, err := s.readPlatformLaunchViewerContext(context.Background(), reader, id); err == nil || !reflect.DeepEqual(v, protocol.Viewer{}) {
-		t.Fatal("recreated ancestor inherited old grant")
 	}
 }
 func TestPlatformViewerOUGrantSQLite(t *testing.T)   { testPlatformViewerOUGrant(t, false) }
@@ -131,7 +125,7 @@ func testPlatformViewerRefusals(t *testing.T, pg bool) {
 			case "inactive":
 				mustExec(t, s.st, `UPDATE users SET active=0 WHERE username=?`, reader.username)
 			case "grant_removed":
-				mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
+				platformCloseAccess(t, s, id)
 			case "missing_ou_creation":
 				created := scalar[string](t, s.st, `SELECT created_at FROM user_groups WHERE is_default=1`)
 				t.Cleanup(func() { mustExec(t, s.st, `UPDATE user_groups SET created_at=? WHERE is_default=1`, created) })

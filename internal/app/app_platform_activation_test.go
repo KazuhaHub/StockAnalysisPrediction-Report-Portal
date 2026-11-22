@@ -17,7 +17,7 @@ func platformActivationFixture(t *testing.T, pg bool, audience bool) (*Server, p
 	s, session, release := platformInstallFixture(t, pg)
 	var targets []platformAudienceTarget
 	if audience {
-		targets = []platformAudienceTarget{{kind: "user", username: session.username}}
+		targets = platformOpenTargets(t, s)
 	}
 	review, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, targets)
 	if err != nil {
@@ -74,7 +74,7 @@ func testPlatformStaticActivation(t *testing.T, pg bool) {
 	if _, err := s.inspectPlatformLaunchAccess(session, lease.installationID); err != nil {
 		t.Fatal("explicitly reviewed installer audience cannot open", err)
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 1 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 1 {
 		t.Fatal("audience not applied exactly")
 	}
 	if _, err := s.activatePlatformStaticInstall(context.Background(), lease); err == nil {
@@ -88,7 +88,7 @@ func TestPlatformStaticActivationNoImplicitAdminSQLite(t *testing.T) {
 	if _, err := s.activatePlatformStaticInstall(context.Background(), lease); err != nil {
 		t.Fatal(err)
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 {
 		t.Fatal("empty audience silently gained grants")
 	}
 	if _, err := s.inspectPlatformLaunchAccess(session, lease.installationID); err == nil {
@@ -211,12 +211,12 @@ func TestPlatformStaticActivationRefusalsPostgres(t *testing.T) {
 	testPlatformStaticActivationRefusals(t, true)
 }
 func testPlatformStaticActivationRollback(t *testing.T, pg bool) {
-	for _, table := range []string{"app_platform_access_grants", "app_platform_installations", "app_platform_operations"} {
+	for _, table := range []string{"app_ou_access", "app_platform_installations", "app_platform_operations"} {
 		t.Run(table, func(t *testing.T) {
 			s, _, lease := platformActivationFixture(t, pg, true)
 			operation := "UPDATE"
 			condition := ""
-			if table == "app_platform_access_grants" {
+			if table == "app_ou_access" {
 				operation = "INSERT"
 			}
 			if table == "app_platform_installations" {
@@ -235,7 +235,7 @@ func testPlatformStaticActivationRollback(t *testing.T, pg bool) {
 			if _, err := s.activatePlatformStaticInstall(context.Background(), lease); err == nil {
 				t.Fatal("partial activation succeeded")
 			}
-			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "activate" {
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "activate" {
 				t.Fatal("failed activation partly committed")
 			}
 			if pg {
@@ -288,7 +288,7 @@ func TestPlatformStaticActivationUnsupportedFrontendSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	review, err := s.createPlatformNativeInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformNativeInstallAudienceReview(actor, release.sha256, 1, platformOpenTargets(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestPlatformStaticActivationLateAuditPostgres(t *testing.T) {
 			if kind == "canceled_context" && !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatal("context ignored", err)
 			}
-			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "activate" {
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "pending" || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "activate" {
 				t.Fatal("late failure partly committed")
 			}
 		})

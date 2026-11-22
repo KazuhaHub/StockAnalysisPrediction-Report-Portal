@@ -18,7 +18,7 @@ import AppMachineReadPanel from './AppMachineReadPanel'
 import AppNetworkTargetsPanel from './AppNetworkTargetsPanel'
 import type { NetworkPolicyView } from '../../lib/appNetworkTargetsV2'
 
-type Audience = { type: 'user' | 'ou'; id: string; name: string }
+type Audience = { type: 'user' | 'ou'; id: string; name: string; enabled?: boolean }
 type Capability = { capability: string; granted: boolean; required: boolean }
 type RecoveryPoint = {
   id: string
@@ -43,6 +43,7 @@ type Settings = {
   version?: string
   display?: AppDisplay
   audience: Audience[]
+  audience_total?: number
   capabilities: Capability[]
   // The reviewed network.http destinations, present while that grant is on.
   networkPolicy?: NetworkPolicyView
@@ -631,8 +632,16 @@ export default function AppPlatformSettingsPage() {
 
     <Card title={t('appPlatform.settings.audience')}>
       {settings.audience.length
-        ? <Space size={[6, 6]} wrap>{settings.audience.map((item) => <Tag key={`${item.type}:${item.id}`} style={{ maxWidth: '100%', height: 'auto', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{t(`appPlatform.settings.principal.${item.type}`)}: {item.name} ({item.id})</Tag>)}</Space>
+        ? <Space size={[6, 6]} wrap>{settings.audience.map((item) => {
+          const style = { maxWidth: '100%', height: 'auto', whiteSpace: 'normal', overflowWrap: 'anywhere' } as const
+          const label = `${t(`appPlatform.settings.principal.${item.type}`)}: ${item.name} (${item.id})`
+          return item.enabled === false
+            ? <StatusTag key={`${item.type}:${item.id}`} tone="error" style={style}>{label} · {t('appPlatform.settings.accessClosed')}</StatusTag>
+            : <Tag key={`${item.type}:${item.id}`} style={style}>{label}</Tag>
+        })}</Space>
         : <Typography.Text type="secondary">{t('appPlatform.settings.noAudience')}</Typography.Text>}
+      {(settings.audience_total ?? 0) > settings.audience.length && <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>{t('appPlatform.settings.audienceMore', { count: (settings.audience_total ?? 0) - settings.audience.length })}</Typography.Paragraph>}
+      <div style={{ marginTop: 12 }}><Link to={`/manage/apps/${encodeURIComponent(`platform:${settings.installation_id}`)}/access`}>{t('appPlatform.settings.manageAccess')}</Link></div>
     </Card>
 
     <Card title={t('appPlatform.settings.capabilities')}>

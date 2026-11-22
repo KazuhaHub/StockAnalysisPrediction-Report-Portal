@@ -242,3 +242,30 @@ Two tables join the ledger; the baseline is unchanged. Installed apps gain a rea
 Built-in apps gain only a visibility control, and this ADR says so rather than implying otherwise.
 Asset serving is the one place where a closed installed app is not refused for every possible caller;
 the token mint, which is what an app needs to do anything, is.
+
+
+## Amendment: platform installations (doc 190, D7)
+
+`platform:<installation_id>` is a third key form, valid in `app_order` and `app_ou_access` for every
+installation whose desired state is not removed. It resolves exactly like the other keys, with one
+difference chosen by key kind in code (`appBaseline`, no synthetic rows): **no row anywhere in the
+chain means closed**, where a built-in key's baseline stays open. Administrators are not exempt.
+
+- Who can use an installation is its effective value on the user's OU chain, a user without an OU
+  being governed by the Default OU. Launch, the reader directory, the status endpoint, the managed
+  backend's viewer identity and the principal directory (doc 181) all read it, and nothing reads or
+  writes `app_platform_access_grants` any more.
+- Writes validate the key inside their own transaction (`requireApp`). The OU mutation lock is taken
+  first (the order every uninstall transaction uses), then the installation row is locked FOR UPDATE
+  on Postgres, so a write and an uninstall cannot deadlock; `ReplaceAppOrder` takes the same lock.
+- Install-time access is `open_to_ous` in the install plan (OU ids only): activation writes
+  `app_ou_access(platform:<id>, ou, 1)` rows in its transaction, replacing any row an administrator set
+  while the installation was pending. Plan hashing and expiry are unchanged.
+- The access rows are an administrator's policy, not install evidence: they are not part of the
+  pre-activation resource counts, the removal digest or the audience digest the readiness, enable and
+  update proofs carry (that digest is now the constant digest of the empty audience).
+- Final removal (and the removal of a never-run install) deletes the installation's `app_order` and
+  `app_ou_access` rows in the same transaction. Deleting an OU already deletes its rows by group id.
+- `GET /api/admin/apps/layout` also lists every non-removed platform installation (`kind`, `name`,
+  `installation_id`, `app_id`, `state`, `version`, `display`); `GET /api/apps` adds
+  `platform:<installation_id>` keys to `order` for the installations open to the caller.

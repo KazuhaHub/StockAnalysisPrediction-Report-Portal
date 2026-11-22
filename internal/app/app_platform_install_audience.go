@@ -1,18 +1,16 @@
 package app
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"sort"
 	"strconv"
-	"time"
-	"unicode/utf8"
-
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 const maxPlatformInstallAudience = 128
+
+// errPlatformUserAudience is a user principal in an install plan: opening an installation is per OU only.
+var errPlatformUserAudience = errors.New("install access is per organisational unit; user principals are not accepted")
 
 type platformAudienceTarget struct {
 	kind, username string
@@ -30,51 +28,6 @@ type platformInstallAudience struct {
 func platformInstallAudienceKey(p platformInstallAudience) string {
 	return p.Type + ":" + p.Username + p.GroupID
 }
-func platformAudienceUser(e migExec, username string, now int64) (platformInstallAudience, error) {
-	var zero platformInstallAudience
-	if len(username) == 0 || len(username) > 320 || !utf8.ValidString(username) {
-		return zero, errAppPlatformPlanChanged
-	}
-	lock := ""
-	if e.s.driver == "postgres" {
-		lock = " FOR SHARE"
-	}
-	var actual, created, expiry string
-	var active int
-	err := e.queryRow(`SELECT username,COALESCE(created_at,''),COALESCE(active,1),COALESCE(expires_at,'') FROM users WHERE username=?`+lock, username).Scan(&actual, &created, &active, &expiry)
-	if errors.Is(err, sql.ErrNoRows) {
-		return zero, errAppPlatformPlanChanged
-	}
-	if err != nil {
-		return zero, err
-	}
-	created = appplatform.AccountCreatedMarker(created)
-	if len(actual) == 0 || len(actual) > 320 || !utf8.ValidString(actual) || created == "" || len(created) > 64 || active != 1 {
-		return zero, errAppPlatformPlanChanged
-	}
-	if expiry != "" {
-		var zone sql.NullString
-		if err := e.queryRow(`SELECT v FROM meta WHERE k='timezone'`).Scan(&zone); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return zero, err
-		}
-		location := time.Local
-		if zone.Valid && zone.String != "" {
-			var err error
-			location, err = time.LoadLocation(zone.String)
-			if err != nil {
-				return zero, errAppPlatformPlanChanged
-			}
-		}
-		if _, err := time.Parse("2006-01-02", expiry); err != nil || time.UnixMilli(now).In(location).Format("2006-01-02") > expiry {
-			return zero, errAppPlatformPlanChanged
-		}
-	}
-	generation, err := notificationAccountGeneration(e, actual)
-	if err != nil {
-		return zero, err
-	}
-	return platformInstallAudience{Type: "user", Username: actual, AccountCreated: created, AccountGeneration: strconv.FormatInt(generation, 10)}, nil
-}
 func resolvePlatformInstallAudience(e migExec, targets []platformAudienceTarget, now int64) ([]platformInstallAudience, error) {
 	if len(targets) > maxPlatformInstallAudience {
 		return nil, errAppPlatformPlanChanged
@@ -84,14 +37,8 @@ func resolvePlatformInstallAudience(e migExec, targets []platformAudienceTarget,
 		var principal platformInstallAudience
 		switch target.kind {
 		case "user":
-			if target.ouID != 0 {
-				return nil, errAppPlatformPlanChanged
-			}
-			var err error
-			principal, err = platformAudienceUser(e, target.username, now)
-			if err != nil {
-				return nil, err
-			}
+			// Access is an OU policy (doc 190, D7); there are no per-user grants.
+			return nil, errPlatformUserAudience
 		case "ou":
 			if target.username != "" || target.ouID < 1 {
 				return nil, errAppPlatformPlanChanged

@@ -66,7 +66,7 @@ export default function AppsAdminPage() {
     {
       title: t('apps.col.type'),
       className: 'rp-apps-col-type',
-      render: (_: unknown, a: AdminApp) => (a.builtin ? t('apps.type.builtin') : t('apps.type.installed')),
+      render: (_: unknown, a: AdminApp) => (a.builtin ? t('apps.type.builtin') : a.platform ? t('apps.type.platform') : t('apps.type.installed')),
     },
     { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
   ]

@@ -346,7 +346,7 @@ func (c *soakChild) id() string {
 }
 
 func (c *soakChild) audience() []platformAudienceTarget {
-	return []platformAudienceTarget{{kind: "user", username: c.session.username}}
+	return platformOpenTargets(c.t, c.s)
 }
 
 func TestPlatformCapacitySoakChild(t *testing.T) {
@@ -679,7 +679,7 @@ func (c *soakChild) installManagedWithCode(app string, memoryMiB, cpuMillis int)
 // console routes an administrator uses, so the plan format is the one the console creates.
 func (c *soakChild) installStagedRelease(app, sha string, trust int64) (string, string) {
 	t := c.t
-	planned := sessionTestRequest(c.mux, http.MethodPost, "/api/admin/app-platform/plans", c.cookie, fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"audience":[{"type":"user","username":%q}]}`, sha, strconv.FormatInt(trust, 10), c.session.username))
+	planned := sessionTestRequest(c.mux, http.MethodPost, "/api/admin/app-platform/plans", c.cookie, fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"open_to_ous":[%q]}`, sha, strconv.FormatInt(trust, 10), strconv.FormatInt(platformOpenTargets(c.t, c.s)[0].ouID, 10)))
 	var review struct {
 		ID     string `json:"plan_id"`
 		SHA256 string `json:"plan_sha256"`
@@ -982,8 +982,8 @@ func (c *soakChild) probeInstallationCap() {
 	release := c.stageStatic("notes-soak-s99")
 	_, err := c.s.createPlatformFrontendInstallReview(c.session, release.sha256, release.trustRevision, c.audience())
 	reviewRefused := errors.Is(err, errPlatformInstallationCapacity)
-	body := fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"audience":[{"type":"user","username":%q}]}`,
-		release.sha256, strconv.FormatInt(release.trustRevision, 10), c.session.username)
+	body := fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"open_to_ous":[%q]}`,
+		release.sha256, strconv.FormatInt(release.trustRevision, 10), strconv.FormatInt(platformOpenTargets(c.t, c.s)[0].ouID, 10))
 	response := sessionTestRequest(c.mux, http.MethodPost, "/api/admin/app-platform/plans", c.cookie, body)
 	observed := ""
 	if reviewRefused && response.Code == http.StatusTooManyRequests && strings.Contains(response.Body.String(), `"installation_capacity"`) {

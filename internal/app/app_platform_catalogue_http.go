@@ -246,6 +246,8 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 type platformSubjectSummary struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Default marks the Default OU, which every other OU inherits from.
+	Default bool `json:"default,omitempty"`
 }
 
 func (s *Server) apiPlatformSubjects(w http.ResponseWriter, r *http.Request, user string) {
@@ -263,10 +265,10 @@ func (s *Server) apiPlatformSubjects(w http.ResponseWriter, r *http.Request, use
 	items := make([]platformSubjectSummary, 0)
 	next := ""
 	err = s.withPlatformTrustActorContext(r.Context(), actor, func(e migExec, facts platformActorFacts, control platformActorControl, _ appplatform.PublisherTrust) error {
-		query := `SELECT username,COALESCE(NULLIF(display_name,''),username) FROM users WHERE COALESCE(active,1)=1 AND username>? ORDER BY username LIMIT 33`
+		query := `SELECT username,COALESCE(NULLIF(display_name,''),username),0 FROM users WHERE COALESCE(active,1)=1 AND username>? ORDER BY username LIMIT 33`
 		var cursor any = after
 		if kind == "ou" {
-			query = `SELECT id,name FROM user_groups WHERE id>? ORDER BY id LIMIT 33`
+			query = `SELECT id,name,COALESCE(is_default,0) FROM user_groups WHERE id>? ORDER BY id LIMIT 33`
 			cursor = int64(0)
 			if after != "" {
 				cursor, _ = strconv.ParseInt(after, 10, 64)
@@ -279,10 +281,12 @@ func (s *Server) apiPlatformSubjects(w http.ResponseWriter, r *http.Request, use
 		items = make([]platformSubjectSummary, 0)
 		for rows.Next() {
 			var item platformSubjectSummary
-			if err = rows.Scan(&item.ID, &item.Name); err != nil {
+			var isDefault int
+			if err = rows.Scan(&item.ID, &item.Name, &isDefault); err != nil {
 				rows.Close()
 				return err
 			}
+			item.Default = isDefault != 0
 			items = append(items, item)
 		}
 		err = rows.Err()

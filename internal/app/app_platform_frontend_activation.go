@@ -66,42 +66,16 @@ func platformFrontendEvidence(c platformStaticCandidate, epoch, installation, au
 	return raw
 }
 
+// platformInstallationAudienceSHA is the digest the readiness, enable and update proofs bind to. Who
+// may use an installation is an OU policy edited at any time (doc 190, D7), so it is not install
+// evidence and the digest no longer follows it: it is the digest of the empty audience, constant.
 func platformInstallationAudienceSHA(e migExec, installation string) (string, error) {
-	rows, err := e.query(`SELECT principal_type,COALESCE(username,''),COALESCE(account_created,''),COALESCE(account_generation,0),COALESCE(group_id,0),COALESCE(group_created,'') FROM app_platform_access_grants WHERE installation_id=? ORDER BY principal_type,username,group_id LIMIT ?`, installation, maxPlatformInstallAudience+1)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-	var audience []platformInstallAudience
-	for rows.Next() {
-		var kind, username, accountCreated, groupCreated string
-		var accountGeneration, groupID int64
-		if err := rows.Scan(&kind, &username, &accountCreated, &accountGeneration, &groupID, &groupCreated); err != nil {
-			return "", err
-		}
-		switch kind {
-		case "user":
-			if username == "" || accountCreated == "" || accountGeneration < 0 || groupID != 0 || groupCreated != "" {
-				return "", errAppPlatformLaunchUnavailable
-			}
-			audience = append(audience, platformInstallAudience{Type: kind, Username: username, AccountCreated: accountCreated, AccountGeneration: strconv.FormatInt(accountGeneration, 10)})
-		case "ou":
-			if username != "" || accountCreated != "" || accountGeneration != 0 || groupID < 1 || groupCreated == "" {
-				return "", errAppPlatformLaunchUnavailable
-			}
-			audience = append(audience, platformInstallAudience{Type: kind, GroupID: strconv.FormatInt(groupID, 10), GroupCreated: groupCreated})
-		default:
-			return "", errAppPlatformLaunchUnavailable
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	if len(audience) > maxPlatformInstallAudience {
-		return "", errAppPlatformLaunchUnavailable
-	}
-	raw, _ := json.Marshal(audience)
-	return platformDigest(raw), nil
+	return platformNoAudienceSHA(), nil
+}
+
+func platformNoAudienceSHA() string {
+	raw, _ := json.Marshal([]platformInstallAudience(nil))
+	return platformDigest(raw)
 }
 
 func verifyPlatformFrontendActivation(e migExec, installation, release, epoch string, generation, policy, observed int64, raw string, manifest appplatform.Manifest) error {
@@ -152,8 +126,6 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	}
 	var encoded []byte
 	var actualDeclined []byte
-	var enableAudienceSHA, enableGrantsSHA string
-	var grantsRebase int64
 	switch action {
 	case "install":
 		if generation != 1 || policy != 1 {
@@ -224,11 +196,6 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 			!platformValidSHA(p.AudienceSHA256) {
 			return fail
 		}
-		enableAudienceSHA, enableGrantsSHA =
-			p.AudienceSHA256, p.GrantsSHA256
-		if p.Format == platformFrontendResumeFormat {
-			grantsRebase = p.SourcePolicyRevision
-		}
 	default:
 		return fail
 	}
@@ -237,17 +204,14 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 			string(actualDeclined) != string(expectedDeclined)) {
 		return fail
 	}
-	audienceSHA, err := platformInstallationAudienceSHA(e, installation)
-	if err != nil || audienceSHA != proof.AudienceSHA {
-		return fail
-	}
-	if action == "enable" {
-		grantsSHA, err := platformRemovalGrantsDigestAt(e, installation, grantsRebase)
-		if err != nil || grantsSHA != enableGrantsSHA ||
-			audienceSHA != enableAudienceSHA {
-			return fail
-		}
-	}
+	// proof.AudienceSHA and the enable plan's audience and grants digests are deliberately not compared
+	// (doc 190, D7). Who may use an installation is an OU policy an administrator edits at any time, not
+	// install evidence, so no digest of it can bind a proof. Evidence written before this change carries
+	// the digest of the install-time audience (and plans the grants digest over the old row set), which
+	// can never match again; comparing them would refuse every installation activated or enabled before
+	// the upgrade. Everything else in the proof (release, generation, policy, epoch, frontend and document
+	// digests, the review and operation binding) is still checked, and capability grants are verified
+	// by the launch and update paths themselves.
 	var archive []byte
 	if err := e.queryRow(`SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, manifest.Frontend.SHA256).Scan(&archive); err != nil {
 		return err

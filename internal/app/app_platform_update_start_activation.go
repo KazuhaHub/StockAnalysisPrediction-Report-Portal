@@ -296,11 +296,6 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		if err != nil || grants != plan.GrantsSHA256 {
 			return zero, errAppPlatformStageEvidence
 		}
-		audience, err := platformInstallationAudienceSHA(
-			e, lease.installationID)
-		if err != nil || audience != plan.AudienceSHA256 {
-			return zero, errAppPlatformStageEvidence
-		}
 	}
 	if plan.RecoversOperationID != "" {
 		// The retry resolves the failed update it recovers and every failed retry before it.

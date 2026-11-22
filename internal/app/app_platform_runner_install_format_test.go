@@ -79,7 +79,7 @@ func TestConsolePlansARunnerInstallTheEngineClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"audience":[{"type":"user","username":%q}]}`, release.sha256, strconv.FormatInt(release.trustRevision, 10), f.actor.username)
+	body := fmt.Sprintf(`{"action":"install","release_sha256":%q,"trust_revision":%q,"open_to_ous":[%q]}`, release.sha256, strconv.FormatInt(release.trustRevision, 10), strconv.FormatInt(platformOpenTargets(t, s)[0].ouID, 10))
 
 	writable := *f.target
 	writable.Profile.WritableSandboxProfile = control.WritableCandidateSandboxProfile

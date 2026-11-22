@@ -131,41 +131,25 @@ func platformManagementRead(w http.ResponseWriter, r *http.Request, keys ...stri
 	return fields, nil
 }
 
-func platformManagementAudience(raw json.RawMessage) ([]platformAudienceTarget, error) {
-	var items []json.RawMessage
+// platformManagementOpenToOUs parses open_to_ous: a list of OU ids as decimal strings, the
+// organisational units the installation opens to when it activates. Empty keeps it closed to everyone.
+func platformManagementOpenToOUs(raw json.RawMessage) ([]platformAudienceTarget, error) {
+	var items []string
 	if json.Unmarshal(raw, &items) != nil || items == nil || len(items) > maxPlatformInstallAudience {
 		return nil, errPlatformManagementInput
 	}
 	result := make([]platformAudienceTarget, 0, len(items))
-	for _, item := range items {
-		fields, err := platformManagementObject(item, "type", "username", "group_id")
-		if err != nil || len(fields) != 2 {
+	seen := map[int64]bool{}
+	for _, value := range items {
+		if !platformPositiveCounter(value) {
 			return nil, errPlatformManagementInput
 		}
-		kind, err := platformManagementString(fields, "type")
-		if err != nil {
-			return nil, err
-		}
-		target := platformAudienceTarget{kind: kind}
-		switch kind {
-		case "user":
-			target.username, err = platformManagementString(fields, "username")
-			if target.username == "" || len(target.username) > 320 {
-				return nil, errPlatformManagementInput
-			}
-		case "ou":
-			value, parseErr := platformManagementString(fields, "group_id")
-			if parseErr != nil || !platformPositiveCounter(value) {
-				return nil, errPlatformManagementInput
-			}
-			target.ouID, err = strconv.ParseInt(value, 10, 64)
-		default:
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || seen[id] {
 			return nil, errPlatformManagementInput
 		}
-		if err != nil {
-			return nil, errPlatformManagementInput
-		}
-		result = append(result, target)
+		seen[id] = true
+		result = append(result, platformAudienceTarget{kind: "ou", ouID: id})
 	}
 	return result, nil
 }
@@ -185,6 +169,8 @@ func platformManagementStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, errPlatformManagementInput):
 		status, code = 400, "app_platform_invalid_request"
+	case errors.Is(err, errPlatformUserAudience):
+		status, code = 400, "app_platform_user_audience_unsupported"
 	case errors.Is(err, errAppPlatformActorUnavailable), errors.Is(err, errAppPlatformLaunchUnavailable):
 		status, code = 403, "app_platform_permission_required"
 	case errors.Is(err, errAppPlatformPlanExpired):
@@ -329,7 +315,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	fields, err := platformManagementObject(raw, "action",
-		"release_sha256", "trust_revision", "audience",
+		"release_sha256", "trust_revision", "audience", "open_to_ous",
 		"installation_id", "data_namespace_id", "recovery_set_id", "recovers_operation_id",
 		"data_quota_bytes", "data_quota_inodes", "archive_sha256")
 	if err != nil {
@@ -386,12 +372,17 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		// The administrator may approve a smaller data quota than the app requested (doc 185); both
 		// fields are optional and decimal strings like every other count on this surface.
 		approvedBytes, approvedInodes, optional, quotaErr := platformManagementQuotaApproval(fields)
-		if quotaErr != nil || len(fields) != 4+optional || fields["audience"] == nil || fields["installation_id"] != nil {
+		if fields["audience"] != nil {
+			// The per-principal audience of earlier plans is gone (doc 190, D7): say so by code.
+			platformManagementError(w, errPlatformUserAudience)
+			return
+		}
+		if quotaErr != nil || len(fields) != 4+optional || fields["open_to_ous"] == nil || fields["installation_id"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
 		reviewCtx := platformWithQuotaApproval(r.Context(), approvedBytes, approvedInodes)
-		targets, audienceErr := platformManagementAudience(fields["audience"])
+		targets, audienceErr := platformManagementOpenToOUs(fields["open_to_ous"])
 		if audienceErr != nil {
 			platformManagementError(w, errPlatformManagementInput)
 			return
@@ -425,17 +416,11 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, err)
 			return
 		}
-		audience := make([]map[string]string, 0, len(projection.Audience))
+		openToOUs := make([]string, 0, len(projection.Audience))
 		for _, target := range projection.Audience {
-			item := map[string]string{"type": target.Type}
-			if target.Type == "user" {
-				item["username"] = target.Username
-			} else {
-				item["group_id"] = target.GroupID
-			}
-			audience = append(audience, item)
+			openToOUs = append(openToOUs, target.GroupID)
 		}
-		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": strconv.FormatInt(projection.DataQuotaBytes, 10), "data_quota_inodes": strconv.FormatInt(projection.DataQuotaInodes, 10), "requested_data_quota_bytes": strconv.FormatInt(projection.RequestedDataQuotaBytes, 10), "requested_data_quota_inodes": strconv.FormatInt(projection.RequestedDataQuotaInodes, 10), "audience": audience}})
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": strconv.FormatInt(projection.DataQuotaBytes, 10), "data_quota_inodes": strconv.FormatInt(projection.DataQuotaInodes, 10), "requested_data_quota_bytes": strconv.FormatInt(projection.RequestedDataQuotaBytes, 10), "requested_data_quota_inodes": strconv.FormatInt(projection.RequestedDataQuotaInodes, 10), "open_to_ous": openToOUs}})
 	case "update":
 		recovers := ""
 		want := 4
@@ -447,7 +432,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 				return
 			}
 		}
-		if len(fields) != want || fields["installation_id"] == nil || fields["audience"] != nil {
+		if len(fields) != want || fields["installation_id"] == nil || fields["audience"] != nil || fields["open_to_ous"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
@@ -474,7 +459,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"policy_revision": strconv.FormatInt(projection.PolicyRevision, 10), "target_policy_revision": strconv.FormatInt(projection.TargetPolicyRevision, 10),
 			"trust_revision": revision, "declined_capabilities": projection.Target.DeclinedCapabilities,
 			"previous_capabilities": platformNonNilStrings(projection.PreviousCapabilities), "target_capabilities": platformNonNilStrings(projection.TargetCapabilities), "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
-			"grants_sha256": projection.GrantsSHA256, "audience": nil,
+			"grants_sha256": projection.GrantsSHA256,
 		}
 		if projection.RecoversOperationID != "" {
 			reviewBody["recovers_operation_id"] = projection.RecoversOperationID

@@ -139,6 +139,13 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 				return
 			}
 		}
+		// A platform installation's position and OU access rows live outside the platform tables (doc 190, D7).
+		for _, q := range []string{`DELETE FROM app_order WHERE app_key LIKE 'platform:%'`, `DELETE FROM app_ou_access WHERE app_key LIKE 'platform:%'`} {
+			if _, err := tx.Exec(q); err != nil {
+				t.Error(err)
+				return
+			}
+		}
 		if _, err := tx.Exec(`DELETE FROM app_platform_task_attempts`); err != nil {
 			t.Error(err)
 			return

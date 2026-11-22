@@ -76,7 +76,7 @@ func completePlatformLaunchFixture(t *testing.T, s *Server, session platformActo
 }
 func platformGrantLaunchUser(t *testing.T, s *Server, reader platformActorSession, id string) {
 	t.Helper()
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(613), "installation_id": id, "principal_type": "user", "username": reader.username, "account_created": reader.created, "account_generation": reader.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformOpenDefault(t, s, id)
 }
 func testPlatformLaunchUserAccess(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
@@ -95,9 +95,9 @@ func testPlatformLaunchUserAccess(t *testing.T, pg bool) {
 	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
 		t.Fatal("inspection changed durable app state")
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET account_generation=account_generation+1 WHERE installation_id=?`, id)
+	platformCloseAccess(t, s, id)
 	if r, err := s.inspectPlatformLaunchAccess(reader, id); err == nil || !reflect.DeepEqual(r, platformLaunchAccess{}) {
-		t.Fatal("recreated principal inherited access")
+		t.Fatal("a closed installation stayed launchable")
 	}
 }
 func TestPlatformLaunchUserAccessSQLite(t *testing.T)   { testPlatformLaunchUserAccess(t, false) }
@@ -253,46 +253,43 @@ func testPlatformLaunchOUAccess(t *testing.T, pg bool) {
 		t.Fatal(err)
 	}
 	var created string
-	if err := s.st.queryRow(`SELECT created_at FROM user_groups WHERE id=?`, parent).Scan(&created); err != nil {
-		t.Fatal(err)
-	}
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(614), "installation_id": id, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": parent, "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	platformSetAccess(t, s, id, int64(parent), true)
 	if _, err := s.inspectPlatformLaunchAccess(reader, id); err != nil {
-		t.Fatal("actual ancestor grant denied:", err)
+		t.Fatal("ancestor row did not reach the child:", err)
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_created=?`, created+"old")
+	// A nearer row overrides the ancestor's.
+	platformSetAccess(t, s, id, int64(child), false)
 	if _, err := s.inspectPlatformLaunchAccess(reader, id); err == nil {
-		t.Fatal("stale OU identity inherited grant")
+		t.Fatal("a closed child row did not override the open ancestor")
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_created=?`, created)
+	platformSetAccess(t, s, id, int64(child), true)
+	mustExec(t, s.st, `DELETE FROM app_ou_access WHERE app_key=? AND group_id=?`, platformAppKey(id), child)
 	mustExec(t, s.st, `UPDATE user_groups SET parent_id=NULL WHERE id=?`, child)
 	if _, err := s.inspectPlatformLaunchAccess(reader, id); err == nil {
 		t.Fatal("old ancestor retained access after reparent")
 	}
-	// A Default policy fallback does not put an independent historical root in
-	// the Default audience subtree.
+	// A detached root is governed by the Default OU's row, like every OU.
 	var defaultID int64
 	if err := s.st.queryRow(`SELECT id,created_at FROM user_groups WHERE is_default=1`).Scan(&defaultID, &created); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_id=?,group_created=?`, defaultID, created)
-	if _, err := s.inspectPlatformLaunchAccess(reader, id); err == nil {
-		t.Fatal("policy fallback manufactured OU audience ancestry")
+	platformCloseAccess(t, s, id)
+	platformSetAccess(t, s, id, defaultID, true)
+	if _, err := s.inspectPlatformLaunchAccess(reader, id); err != nil {
+		t.Fatal("Default row did not reach a detached OU:", err)
 	}
 	if _, err := s.st.SetPrimaryGroups([]string{reader.username}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.inspectPlatformLaunchAccess(reader, id); err != nil {
-		t.Fatal("Default member denied Default grant:", err)
+		t.Fatal("Default member denied Default row:", err)
 	}
 	t.Cleanup(func() { mustExec(t, s.st, `UPDATE user_groups SET created_at=? WHERE id=?`, created, defaultID) })
 	mustExec(t, s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, defaultID)
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_created=''`)
 	if _, err := s.inspectPlatformLaunchAccess(reader, id); err == nil {
 		t.Fatal("missing OU creation identity authorized access")
 	}
 	mustExec(t, s.st, `UPDATE user_groups SET created_at=? WHERE id=?`, created, defaultID)
-	mustExec(t, s.st, `UPDATE app_platform_access_grants SET group_created=?`, created)
 	mustExec(t, s.st, `UPDATE user_groups SET parent_id=? WHERE id=?`, defaultID, child)
 	if _, err := s.st.SetPrimaryGroups([]string{reader.username}, child); err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ import (
 func testPlatformFrontendDisablePreservesData(t *testing.T, pg bool) {
 	s, actor := platformRemovalFixture(t, pg, false)
 	beforeData := scalar[int](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces`)
-	beforeAccess := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`)
+	beforeAccess := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`)
 	plan, err := s.createPlatformRemovalReview(actor, platformFixtureID(1), appplatform.ActionDisable)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func testPlatformFrontendDisablePreservesData(t *testing.T, pg bool) {
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "complete" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE state='active'`) != 0 ||
 		scalar[int](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces`) != beforeData ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants`) != beforeAccess {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key LIKE 'platform:%'`) != beforeAccess {
 		t.Fatal("frontend disable removed retained data or authority rows")
 	}
 }
@@ -41,7 +41,7 @@ func testPlatformManagedDisableWaitsForStopEvidence(t *testing.T, pg bool) {
 	appID := scalar[string](t, s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, lease.installationID)
 	pluginTable := platformPluginDataTableName(appID)
 	beforeData := scalar[int](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID)
-	beforeAccess := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	beforeAccess := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func testPlatformManagedDisableWaitsForStopEvidence(t *testing.T, pg bool) {
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "disabled:disabled" ||
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "complete" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind='stop' AND state='applied'`, lease.id) != 1 ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != beforeAccess ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != beforeAccess ||
 		scalar[int](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != beforeData ||
 		!s.st.tableExists(pluginTable) {
 		t.Fatal("managed disable deleted retained data, code or grant rows")
@@ -126,7 +126,7 @@ func TestPlatformFrontendDisableSchedulerPreservesPluginData(t *testing.T) {
 	if scheduler.currentStatus().code != "complete" ||
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "complete" ||
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "disabled:disabled" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, installation) == 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, installation) == 0 ||
 		!s.st.tableExists(pluginTable) {
 		t.Fatal("disable scheduler cleared retained plugin data or authority")
 	}
@@ -165,7 +165,7 @@ func testPlatformManagedDisableSchedulerRequiresRecovery(t *testing.T, pg bool) 
 	if scheduler.currentStatus().code != "review_required" ||
 		scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, commit.OperationID) != "recovery_required:managed_disable_stop_pending" ||
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installed.installationID) != "disabled:recovery_required" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, installed.installationID) == 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, installed.installationID) == 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_data_namespaces WHERE owner_installation_id=? AND state='active'`, installed.installationID) != 1 {
 		t.Fatal("managed disable scheduler misreported an unavailable runner")
 	}

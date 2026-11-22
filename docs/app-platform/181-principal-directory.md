@@ -188,3 +188,30 @@ The owner decided every question below on 2026-11-17.
    administrators already see usernames in Portal.
 3. Scope beyond the audience (all OUs, to pre-grant before widening the
    audience). Decided: no; widen the audience first.
+
+
+## Amendment 2026-11-21: result space follows the OU policy (doc 190, D7)
+
+Who can use an installation is now its OU policy, not install-time grants, so section 3.3 reads:
+
+- OUs: every OU whose effective `app_ou_access` value for `platform:<installation_id>` is open
+  (an OU inherits its parent's row unless it has its own; no row anywhere is closed), that has a usable
+  creation identity chain.
+- Users: active, unexpired accounts whose OU (the Default OU when they have none) resolves open, with
+  the same usable-chain rule.
+
+Unchanged: the principal values, labels, paging (`after` cursors are the principal values), the
+administrator-only authority, the rate limit and the audit rule. There are no per-user grants, so a
+user is never listed on their own account. The principals stay pinned to the OU id and creation
+identity and to the account name, creation identity and generation, so a recreated OU or account is a
+different principal. Launch, the directory, status, the viewer identity and this directory all decide
+from the same rows (`TestPlatformPrincipalDirectoryAgreesWithLaunch`).
+
+Evidence is not compared with access. Readiness evidence, enable plans and update checks written before
+this change carry the digest of the install-time audience, and the grants digest was computed over a row
+set that included the audience table. Neither can match again, and access is an OU policy edited at any
+time rather than install evidence, so verification no longer compares the audience digest or the enable
+plan's audience and grants digests (`verifyPlatformFrontendActivation`, the enable and update-start
+checks). Everything else in the proof stays checked, and an installation activated or enabled before the
+upgrade keeps launching and keeps verifying as an update source (`TestPlatformLaunchAndUpdateVerifyEvidence...`).
+Deleting an OU deletes its access rows and does not move any installation's policy revision.

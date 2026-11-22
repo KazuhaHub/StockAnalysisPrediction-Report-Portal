@@ -560,8 +560,7 @@ func (s *Server) settlePlatformDeleteData(
 		WHERE installation_id=?`, expected.installationID); err != nil {
 		return zero, err
 	}
-	if _, err := e.exec(`DELETE FROM app_platform_access_grants
-		WHERE installation_id=?`, expected.installationID); err != nil {
+	if err := deletePlatformAppRows(e, expected.installationID); err != nil {
 		return zero, err
 	}
 	changed, err = e.exec(`UPDATE app_platform_operations

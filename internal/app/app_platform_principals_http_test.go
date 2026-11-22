@@ -79,9 +79,9 @@ func platformPrincipalLabels(items []platformPrincipalItem) []string {
 //
 //	Research (granted)          alice "Alice Analyst", ivan (inactive)
 //	  Research Lab (descendant) bob (no display name)
-//	Other (not granted)         carol, dave (direct user grant)
+//	Other (not granted)         carol
 //
-// The fixture reader is an administrator granted directly.
+// The fixture reader is an administrator in Research. Access is the OU policy (doc 190, D7).
 func platformPrincipalEnvironment(t *testing.T, pg bool) *platformPrincipalEnv {
 	t.Helper()
 	s, reader, id := platformPrincipalsFixture(t, pg)
@@ -90,7 +90,6 @@ func platformPrincipalEnvironment(t *testing.T, pg bool) *platformPrincipalEnv {
 	clearPlatformPrincipalFixture(t, s)
 	t.Cleanup(func() { clearPlatformPrincipalFixture(t, s) })
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, reader.username)
-	platformGrantLaunchUser(t, s, reader, id)
 	groups := map[string]int64{}
 	for _, name := range []string{"Research", "Research Lab", "Other"} {
 		group, err := s.st.CreateUserGroup(name, "", 0)
@@ -100,7 +99,7 @@ func platformPrincipalEnvironment(t *testing.T, pg bool) *platformPrincipalEnv {
 		groups[name] = group
 	}
 	mustExec(t, s.st, `UPDATE user_groups SET parent_id=? WHERE id=?`, groups["Research"], groups["Research Lab"])
-	for username, group := range map[string]string{"alice": "Research", "bob": "Research Lab", "carol": "Other", "dave": "Other", "ivan": "Research"} {
+	for username, group := range map[string]string{"alice": "Research", "bob": "Research Lab", "carol": "Other", "dave": "Research", "ivan": "Research"} {
 		if err := s.st.UpsertUser(User{Username: username, PasswordHash: "fixture", Role: "user", Active: true}); err != nil {
 			t.Fatal(err)
 		}
@@ -108,14 +107,9 @@ func platformPrincipalEnvironment(t *testing.T, pg bool) *platformPrincipalEnv {
 	}
 	mustExec(t, s.st, `UPDATE users SET display_name='Alice Analyst' WHERE username='alice'`)
 	mustExec(t, s.st, `UPDATE users SET active=0 WHERE username='ivan'`)
-	created := scalar[string](t, s.st, `SELECT created_at FROM user_groups WHERE id=?`, groups["Research"])
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(994), "installation_id": id, "principal_type": "ou", "username": nil, "account_created": nil, "account_generation": nil, "group_id": groups["Research"], "group_created": created, "revision": 1, "created_ms": 1, "updated_ms": 1})
-	dave := s.st.GetUser("dave")
-	daveGeneration, err := notificationAccountGeneration(s.st.poolExec(), "dave")
-	if err != nil {
-		t.Fatal(err)
-	}
-	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(995), "installation_id": id, "principal_type": "user", "username": "dave", "account_created": dave.CreatedAt, "account_generation": daveGeneration, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	// The policy opens Research (and so Research Lab); the administrator and dave sit in Research.
+	platformSetAccess(t, s, id, int64(groups["Research"]), true)
+	mustExec(t, s.st, `UPDATE users SET group_id=? WHERE username=?`, groups["Research"], reader.username)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	cookie := s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())

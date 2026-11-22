@@ -76,7 +76,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := s.createPlatformNetworkAndStreamWritableInstallReview(ctx, session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}}, endpoint, policy.Policy, streamPolicy.Policy)
+	plan, err := s.createPlatformNetworkAndStreamWritableInstallReview(ctx, session, release.sha256, 1, platformOpenTargets(t, s), endpoint, policy.Policy, streamPolicy.Policy)
 	if err != nil {
 		t.Fatal("writable review", err)
 	}
@@ -208,7 +208,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if scalar[int](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != 3 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writer_observed' AND target_id=?`, lease.id) != 1 {
 		t.Fatal("writer effect/namespace not atomic or replay not idempotent")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state<>'candidate'`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state<>'candidate'`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" {
 		t.Fatal("writer granted app access")
 	}
 	t.Log("PORTAL_WRITER_SETTLEMENT_RECONCILED")

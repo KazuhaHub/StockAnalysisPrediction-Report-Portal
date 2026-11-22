@@ -85,7 +85,7 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 	if err != nil || proof.Result().Response.Status != 200 {
 		t.Fatal("actual write before revocation", err)
 	}
-	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	platformCloseAccess(t, s, lease.installationID)
 	withheld, err := s.completePlatformManagedBackendRequest(ctx, actor, lease.installationID, access, proof, endpoint, raw, sig, command)
 	if !errors.Is(err, errAppPlatformBackendRequestUncertain) || len(withheld.Body) != 0 {
 		t.Fatal("revoked audience received buffered response or false rollback claim")
