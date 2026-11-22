@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { MarketCard, MarketDetailModal } from './appStoreParts'
+import { MarketCard, MarketDetailModal, PublisherLine } from './appStoreParts'
 import { AppDisplayIcon, parseAppDisplay } from '../../lib/appDisplayV2'
 import { parsePlatformMarketApps, type PlatformMarketApp } from '../../api/appPlatform'
 
@@ -40,6 +40,12 @@ describe('publisher name', () => {
     expect(line.getAttribute('tabindex')).toBe('0')
     fireEvent.focus(line)
     await waitFor(() => expect(screen.getByRole('tooltip').textContent).toBe('kazuha'))
+  })
+  it('lifts the line above the card link overlay and keeps its hover text', () => {
+    render(<PublisherLine publisherName="Kazuha Hub" publisherId="kazuha" className="rp-app-card-sub" title="Kazuha Hub · notes · Official">Kazuha Hub · 1.0.0</PublisherLine>)
+    const line = screen.getByText('Kazuha Hub · 1.0.0')
+    expect(line.classList.contains('rp-publisher-line')).toBe(true)
+    expect(line.getAttribute('title')).toBe('Kazuha Hub · notes · Official')
   })
   it('keeps the ID visible in the details view beside the name', () => {
     render(<MarketDetailModal app={app({ publisher_name: 'Kazuha Hub' })} lang="en-US" staging={null} blocked={false} error="" onClose={() => {}} onInstall={() => {}} onOpenTrust={() => {}} />)

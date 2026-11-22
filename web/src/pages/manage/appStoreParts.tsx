@@ -103,7 +103,7 @@ export function InstalledState({ app }: { app: AdminApp }) {
  */
 export function PublisherLine({ publisherName, publisherId, className, title, children }: { publisherName?: string; publisherId?: string; className?: string; title?: string; children: React.ReactNode }) {
   if (!publisherName || !publisherId) return <Typography.Text type="secondary" className={className} title={title}>{children}</Typography.Text>
-  return <Tooltip title={publisherId} trigger={['hover', 'focus']}><Typography.Text type="secondary" className={className} tabIndex={0}>{children}</Typography.Text></Tooltip>
+  return <Tooltip title={publisherId} trigger={['hover', 'focus']}><Typography.Text type="secondary" className={[className, 'rp-publisher-line'].filter(Boolean).join(' ')} title={title} tabIndex={0}>{children}</Typography.Text></Tooltip>
 }
 
 export interface InstalledCardProps extends InstalledActionProps {

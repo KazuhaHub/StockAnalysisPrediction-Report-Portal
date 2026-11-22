@@ -184,3 +184,57 @@ func TestParserDoesNotEncodeAndCanonicalFormIsMemoised(t *testing.T) {
 		t.Fatalf("expected one encode for two calls, got %d", got-before)
 	}
 }
+
+// A hot path that parses the same descriptor again must not decode the image again.
+func TestSecondParseOfTheSameDescriptorDoesNotDecode(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString(testPNG(t, 67, 67))
+	raw, err := os.ReadFile("testdata/descriptors/static.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	root["presentation"].(map[string]any)["display"] = map[string]any{"icon": "file-text", "icon_png": encoded, "texts": []any{
+		map[string]any{"locale": "en-US", "name": "Notes", "description": "Personal notes"},
+		map[string]any{"locale": "zh-CN", "name": "笔记", "description": "个人笔记"},
+		map[string]any{"locale": "zh-TW", "name": "筆記", "description": "個人筆記"},
+	}}
+	b, _ := json.Marshal(root)
+	before := iconDecodes.Load()
+	for i := 0; i < 3; i++ {
+		if _, err := ParseDescriptor(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := iconDecodes.Load() - before; got != 1 {
+		t.Fatalf("three parses decoded %d times", got)
+	}
+	// A failure is never remembered as a success.
+	bad := encoded[:len(encoded)-4] + "AAAA"
+	for i := 0; i < 2; i++ {
+		if ValidateIcon(bad) == nil {
+			t.Fatal("corrupted icon accepted")
+		}
+	}
+}
+
+func TestIconMemoIsLeastRecentlyUsed(t *testing.T) {
+	c := newIconLRU[int]()
+	key := func(i int) [32]byte { return [32]byte{byte(i), byte(i >> 8)} }
+	for i := 0; i < iconMemoEntries; i++ {
+		c.put(key(i), i)
+	}
+	c.get(key(0)) // touch the oldest
+	c.put(key(iconMemoEntries), 0)
+	if _, ok := c.get(key(0)); !ok {
+		t.Fatal("recently used entry was evicted")
+	}
+	if _, ok := c.get(key(1)); ok {
+		t.Fatal("least recently used entry survived")
+	}
+	if c.order.Len() != iconMemoEntries || len(c.entries) != iconMemoEntries {
+		t.Fatal("memo is not bounded")
+	}
+}

@@ -2,6 +2,7 @@ package appplatform
 
 import (
 	"bytes"
+	"container/list"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -27,9 +28,13 @@ var errInvalidIcon = errors.New("invalid app icon")
 // iconEncodes counts canonical re-encodes; tests use it to prove that parsing never encodes.
 var iconEncodes atomic.Int64
 
+// iconDecodes counts full validation decodes; tests use it to prove validation is memoised.
+var iconDecodes atomic.Int64
+
 // decodeIcon is the validation shared by the parser and CanonicalIcon: strict base64, size, PNG magic, a
 // square 64-256 px image (checked before any pixel data is inflated) and a full decode. It never encodes.
 func decodeIcon(encoded string) (image.Image, error) {
+	iconDecodes.Add(1)
 	if encoded == "" || len(encoded) > maxIconBase64 || len(encoded)%4 != 0 {
 		return nil, errInvalidIcon
 	}
@@ -58,11 +63,66 @@ func decodeIcon(encoded string) (image.Image, error) {
 	return img, nil
 }
 
+// iconMemoEntries bounds each memo; it matches the host's served-icon cache so a full listing fits.
+const iconMemoEntries = 256
+
+// iconLRU is a small mutex-guarded least-recently-used map keyed by the SHA-256 of a descriptor's icon_png.
+type iconLRU[V any] struct {
+	mu      sync.Mutex
+	order   *list.List // front is the most recently used
+	entries map[[32]byte]*list.Element
+}
+
+type iconLRUEntry[V any] struct {
+	key   [32]byte
+	value V
+}
+
+func newIconLRU[V any]() *iconLRU[V] {
+	return &iconLRU[V]{order: list.New(), entries: map[[32]byte]*list.Element{}}
+}
+
+func (c *iconLRU[V]) get(key [32]byte) (V, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.entries[key]; ok {
+		c.order.MoveToFront(el)
+		return el.Value.(*iconLRUEntry[V]).value, true
+	}
+	var zero V
+	return zero, false
+}
+
+func (c *iconLRU[V]) put(key [32]byte, value V) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.entries[key]; ok {
+		c.order.MoveToFront(el)
+		return
+	}
+	c.entries[key] = c.order.PushFront(&iconLRUEntry[V]{key, value})
+	for c.order.Len() > iconMemoEntries {
+		oldest := c.order.Back()
+		c.order.Remove(oldest)
+		delete(c.entries, oldest.Value.(*iconLRUEntry[V]).key)
+	}
+}
+
+var validIcons = newIconLRU[struct{}]()
+
 // ValidateIcon checks a descriptor's display.icon_png without producing the canonical form. It is what the
-// descriptor parser runs, so it stays cheap.
+// descriptor parser runs. A success is memoised by the hash of the input, so a hot path that parses the same
+// descriptor again pays a hash and a lookup instead of a decode. Failures are never memoised.
 func ValidateIcon(encoded string) error {
-	_, err := decodeIcon(encoded)
-	return err
+	key := sha256.Sum256([]byte(encoded))
+	if _, ok := validIcons.get(key); ok {
+		return nil
+	}
+	if _, err := decodeIcon(encoded); err != nil {
+		return err
+	}
+	validIcons.put(key, struct{}{})
+	return nil
 }
 
 type canonicalIcon struct {
@@ -70,23 +130,14 @@ type canonicalIcon struct {
 	sha string
 }
 
-const canonicalIconCacheEntries = 64
-
-var canonicalIcons = struct {
-	sync.Mutex
-	byInput map[[32]byte]canonicalIcon
-	order   [][32]byte
-}{byInput: map[[32]byte]canonicalIcon{}}
+var canonicalIcons = newIconLRU[canonicalIcon]()
 
 // CanonicalIcon validates a descriptor's display.icon_png and returns the canonical re-encoded PNG with its
 // SHA-256. Ancillary chunks and trailing bytes do not survive re-encoding. The result is memoised by the hash
-// of the input in a small bounded cache, so repeated listings of the same descriptor cost one hash.
+// of the input, so repeated listings of the same descriptor cost one hash.
 func CanonicalIcon(encoded string) ([]byte, string, error) {
 	key := sha256.Sum256([]byte(encoded))
-	canonicalIcons.Lock()
-	hit, ok := canonicalIcons.byInput[key]
-	canonicalIcons.Unlock()
-	if ok {
+	if hit, ok := canonicalIcons.get(key); ok {
 		return hit.png, hit.sha, nil
 	}
 	img, err := decodeIcon(encoded)
@@ -100,16 +151,7 @@ func CanonicalIcon(encoded string) ([]byte, string, error) {
 	}
 	sum := sha256.Sum256(out.Bytes())
 	entry := canonicalIcon{out.Bytes(), hex.EncodeToString(sum[:])}
-	canonicalIcons.Lock()
-	if _, dup := canonicalIcons.byInput[key]; !dup {
-		canonicalIcons.byInput[key] = entry
-		canonicalIcons.order = append(canonicalIcons.order, key)
-		if len(canonicalIcons.order) > canonicalIconCacheEntries {
-			delete(canonicalIcons.byInput, canonicalIcons.order[0])
-			canonicalIcons.order = canonicalIcons.order[1:]
-		}
-	}
-	canonicalIcons.Unlock()
+	canonicalIcons.put(key, entry)
 	return entry.png, entry.sha, nil
 }
 

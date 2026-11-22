@@ -3410,6 +3410,8 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-app-card-link.ant-btn { position: static; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; font-weight: 600; }
 .rp-app-card-link.ant-btn > span { overflow: hidden; text-overflow: ellipsis; }
 .rp-app-card-link::after { content: ''; position: absolute; inset: 0; z-index: 0; }
+/* A publisher line with a tooltip sits above the card's link overlay so it can be hovered and focused. */
+.rp-publisher-line { position: relative; z-index: 1; }
 .rp-app-card-link:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .rp-app-glyph {
   flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; font-size: 16px;
