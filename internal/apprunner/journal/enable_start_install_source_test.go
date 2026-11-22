@@ -112,3 +112,21 @@ func TestEnableStartNamesTheWritableInstallBackendAsItsSource(t *testing.T) {
 		t.Fatalf("the writable install backend is not named by its own claim: %+v", named)
 	}
 }
+
+// The read-only install backend's labels carry the writer fence of its own start receipt, not the one of the data
+// receipt. The two differ here, so the source can only be right if it reads the start receipt.
+func TestEnableStartReadOnlyInstallSourceCarriesTheStartReceiptWriterFence(t *testing.T) {
+	f, _, _, _, _ := updateStartJournalFixture(t)
+	start := f.source
+	start.WriterFence = "3"
+	source := checkpointSource{source: start, sourceFence: 1}
+	source.command.Payload.SourceOperationID = fixtureID(9103)
+	source.data.WriterFence = "1"
+	named, err := enableStartNativeSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if named.Origin != driver.UpdateStartSourceCandidate || named.WriterFence != "3" {
+		t.Fatalf("the source carries fence %s, not its start receipt's 3: %+v", named.WriterFence, named)
+	}
+}
