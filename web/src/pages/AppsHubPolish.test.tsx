@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import AppsHub from './AppsHub'
-vi.mock('../auth', () => ({ useAuth: () => ({ user: 'fixture', can: () => true }) }))
+vi.mock('../auth', () => ({ useAuth: () => ({ user: 'fixture', admin: true, can: () => true }) }))
 vi.mock('../lib/builtinApps', () => ({ BUILTIN_APPS: [], BUILTIN_PIN_PREFIX: 'builtin:' }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 vi.mock('../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
