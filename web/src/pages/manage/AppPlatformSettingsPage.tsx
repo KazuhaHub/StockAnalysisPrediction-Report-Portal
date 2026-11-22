@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
-import { AppstoreOutlined, ArrowLeftOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
+import { Alert, App, Button, Card, Checkbox, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
+import { AppstoreOutlined, ArrowLeftOutlined, CheckCircleOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
@@ -52,6 +52,7 @@ type Settings = {
   recovery: { count: number; state?: string; pending: boolean; points: RecoveryPoint[] }
   configuration_gaps: string[]
   repair_eligible: boolean
+  resolve_keep_data_eligible?: boolean
   quota_raise_eligible?: boolean
   import_eligible?: boolean
   control_paused: boolean
@@ -105,6 +106,20 @@ type RepairReview = {
   grants_sha256: string
   data_effect: 'checkpoint_and_retain'
 }
+type ResolveReview = {
+  action: 'resolve_keep_data'
+  installation_id: string
+  operation_id: string
+  operation_action: string
+  release_sha256: string
+  observed_bytes: string
+  checkpoint_recovery_set_id: string
+  abandoned_effects: { effect_id: string; stage: string; kind: string }[]
+  keeps_data: true
+  keeps_checkpoint: boolean
+  runs_rollback: false
+}
+type ResolvePlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: ResolveReview }
 type RepairPlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: RepairReview }
 type QuotaReview = {
   action: 'set_data_quota'
@@ -201,6 +216,10 @@ export default function AppPlatformSettingsPage() {
   const [repairPlan, setRepairPlan] = useState<RepairPlan | null>(null)
   const [repairError, setRepairError] = useState('')
   const [repairing, setRepairing] = useState(false)
+  const [resolvePlan, setResolvePlan] = useState<ResolvePlan | null>(null)
+  const [resolveError, setResolveError] = useState('')
+  const [resolving, setResolving] = useState(false)
+  const [resolveAck, setResolveAck] = useState(false)
   const [raiseOpen, setRaiseOpen] = useState(false)
   const [raiseBytes, setRaiseBytes] = useState('')
   const [raiseInodes, setRaiseInodes] = useState('')
@@ -230,6 +249,7 @@ export default function AppPlatformSettingsPage() {
     setRepairPlan(null)
     setRepairError('')
     setRepairing(false)
+    setResolvePlan(null); setResolveError(''); setResolving(false); setResolveAck(false)
     setRaiseOpen(false); setRaisePlan(null); setRaiseError(''); setRaising(false)
     setImportOpen(false); setImportPlan(null); setImportError(''); setImporting(false); setImportDigest('')
     setRestorePlan(null)
@@ -401,6 +421,47 @@ export default function AppPlatformSettingsPage() {
       setRepairError(errText(failure, t))
     } finally {
       setRepairing(false)
+    }
+  }
+  const prepareResolve = async () => {
+    if (!settings.resolve_keep_data_eligible || resolving) return
+    setResolving(true); setResolveError('')
+    try {
+      const result = await api.post<{ plan_id: string; plan_sha256: string; expires_ms: string; review: ResolveReview }>(
+        `${root}/plans`,
+        { action: 'resolve_keep_data', installation_id: installation },
+      )
+      if (result.review.action !== 'resolve_keep_data' ||
+        result.review.installation_id !== installation ||
+        result.review.keeps_data !== true || result.review.runs_rollback !== false ||
+        !uuid.test(result.review.operation_id) ||
+        !uuid.test(result.plan_id) || !/^[0-9a-f]{64}$/.test(result.plan_sha256)) {
+        throw new Error(t('appPlatform.invalidOperation'))
+      }
+      setResolveAck(false)
+      setResolvePlan({ ...result, idempotency_key: crypto.randomUUID() })
+    } catch (failure) {
+      setResolveError(errText(failure, t))
+    } finally {
+      setResolving(false)
+    }
+  }
+  const confirmResolve = async () => {
+    if (!resolvePlan || resolving || !resolveAck) return
+    setResolving(true); setResolveError('')
+    try {
+      const result = await api.post<{ resolved: boolean; operation_id: string }>(`${root}/operations`, {
+        plan_id: resolvePlan.plan_id,
+        plan_sha256: resolvePlan.plan_sha256,
+        idempotency_key: resolvePlan.idempotency_key,
+      })
+      if (result.resolved !== true || !uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
+      setResolvePlan(null)
+      setRefresh((n) => n + 1)
+    } catch (failure) {
+      setResolveError(errText(failure, t))
+    } finally {
+      setResolving(false)
     }
   }
   const openRaise = () => {
@@ -718,11 +779,15 @@ export default function AppPlatformSettingsPage() {
       ]} /> : <Typography.Text type="secondary">{t('appPlatform.settings.noData')}</Typography.Text>}
     </Card>
 
-    <Card title={t('appPlatform.settings.recovery')} extra={settings.repair_eligible
-      ? <Button loading={repairing} icon={<ToolOutlined aria-hidden="true" />} onClick={() => void prepareRepair()}>{t('appPlatform.settings.repair')}</Button>
+    <Card title={t('appPlatform.settings.recovery')} extra={settings.repair_eligible || settings.resolve_keep_data_eligible
+      ? <Space wrap>
+        {settings.resolve_keep_data_eligible && <Button loading={resolving} icon={<CheckCircleOutlined aria-hidden="true" />} onClick={() => void prepareResolve()}>{t('appPlatform.settings.resolve')}</Button>}
+        {settings.repair_eligible && <Button loading={repairing} icon={<ToolOutlined aria-hidden="true" />} onClick={() => void prepareRepair()}>{t('appPlatform.settings.repair')}</Button>}
+      </Space>
       : undefined}>
       {settings.control_paused && <Alert type="warning" showIcon title={t('err.app_platform_control_paused')} description={t('appPlatform.settings.restorePaused')} />}
       {repairError && !repairPlan && <Alert type="error" showIcon title={repairError} />}
+      {resolveError && !resolvePlan && <Alert type="error" showIcon title={resolveError} />}
       {restoreError && !restorePlan && <Alert type="error" showIcon title={restoreError} />}
       {settings.recovery.points.length
         ? <Space orientation="vertical" size={12} style={{ width: '100%' }}>
@@ -827,6 +892,39 @@ export default function AppPlatformSettingsPage() {
             { key: 'data', label: t('appPlatform.storage'), children: t('appPlatform.settings.repairDataRetained') },
             { key: 'grants', label: t('appPlatform.settings.repairGrants'), children: t('appPlatform.settings.repairGrantsUnchanged') },
           ]} />
+        </Space>
+      </div>}
+    </Modal>
+    <Modal
+      className="rp-platform-review-modal"
+      open={!!resolvePlan}
+      title={t('appPlatform.settings.resolveTitle')}
+      okText={t('appPlatform.settings.resolveAction')}
+      cancelText={t('common.cancel')}
+      okButtonProps={{ disabled: !resolveAck }}
+      confirmLoading={resolving}
+      closable={!resolving}
+      mask={{ closable: false }}
+      onOk={() => void confirmResolve()}
+      onCancel={() => { if (!resolving) { setResolvePlan(null); setResolveError(''); setResolveAck(false) } }}
+    >
+      {resolvePlan && <div role="document" tabIndex={0} className="rp-platform-review-scroll">
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="warning" showIcon title={t('appPlatform.settings.resolveWarning')} />
+          {resolveError && <Alert type="error" showIcon title={resolveError} />}
+          <Descriptions column={1} size="small" items={[
+            { key: 'operation', label: t('appPlatform.settings.resolveOperation'), children: <Typography.Text code copyable>{resolvePlan.review.operation_id}</Typography.Text> },
+            { key: 'data', label: t('appPlatform.settings.resolveData'), children: t('appPlatform.settings.resolveDataValue', { bytes: bytes(resolvePlan.review.observed_bytes) }) },
+            { key: 'rollback', label: t('appPlatform.settings.resolveRollback'), children: resolvePlan.review.abandoned_effects.length
+              ? t('appPlatform.settings.resolveRollbackValue', { count: resolvePlan.review.abandoned_effects.length })
+              : t('appPlatform.settings.resolveRollbackNone') },
+            ...(resolvePlan.review.keeps_checkpoint ? [{ key: 'checkpoint', label: t('appPlatform.settings.resolveCheckpoint'), children: <>
+              <Typography.Text code>{resolvePlan.review.checkpoint_recovery_set_id}</Typography.Text>
+              <div>{t('appPlatform.settings.resolveCheckpointKept')}</div>
+            </> }] : []),
+            { key: 'next', label: t('appPlatform.settings.resolveNext'), children: t('appPlatform.settings.resolveNextValue') },
+          ]} />
+          <Checkbox checked={resolveAck} onChange={(event) => setResolveAck(event.target.checked)}>{t('appPlatform.settings.resolveConfirm')}</Checkbox>
         </Space>
       </div>}
     </Modal>

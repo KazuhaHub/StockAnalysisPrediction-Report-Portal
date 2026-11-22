@@ -326,6 +326,74 @@ describe('application installation settings', () => {
     expect(await screen.findByText('apps')).toBeTruthy()
   })
 
+  it('reviews and accepts the data a failed import left, only after an explicit acknowledgement', async () => {
+    const user = userEvent.setup()
+    const plan = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    const operation = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    const recovery = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+    let resolved = false
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        return {
+          ...settings,
+          desired_state: 'disabled',
+          phase: 'recovery_required',
+          generation: '1',
+          repair_eligible: resolved,
+          resolve_keep_data_eligible: !resolved,
+          operation_pending: !resolved,
+        }
+      }
+      return { bindings: [] }
+    })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) {
+        return {
+          plan_id: plan,
+          plan_sha256: 'c'.repeat(64),
+          expires_ms: String(Date.now() + 900000),
+          review: {
+            action: 'resolve_keep_data',
+            installation_id: installation,
+            operation_id: operation,
+            operation_action: 'import_data',
+            release_sha256: release,
+            observed_bytes: '780615680',
+            checkpoint_recovery_set_id: recovery,
+            abandoned_effects: [{ effect_id: operation, stage: 'import', kind: 'restore' }],
+            keeps_data: true,
+            keeps_checkpoint: true,
+            runs_rollback: false,
+          },
+        }
+      }
+      resolved = true
+      return { resolved: true, operation_id: operation, installation_id: installation, abandoned_effects: '1' }
+    })
+    mount()
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.repair' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.resolve' }))
+    expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'resolve_keep_data', installation_id: installation })
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveWarning')
+    expect(dialog.textContent).toContain(operation)
+    expect(dialog.textContent).toContain(recovery)
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveRollbackValue')
+    const confirm = screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))
+    expect(confirm.disabled).toBe(false)
+    await user.click(confirm)
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'c'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    // The page reads the settings again: the data stays, and a repair is now the way forward.
+    expect(await screen.findByRole('button', { name: 'appPlatform.settings.repair' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolve' })).toBeNull()
+  })
+
   it('reviews and admits restore from the exact verified recovery point', async () => {
     const user = userEvent.setup()
     const recovery = '88888888-8888-4888-8888-888888888888'

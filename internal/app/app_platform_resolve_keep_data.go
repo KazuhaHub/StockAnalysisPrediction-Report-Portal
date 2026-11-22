@@ -142,7 +142,6 @@ func loadPlatformResolveKeepDataPlan(e migExec, installation string, control pla
 		Scan(&p.OperationID, &p.OperationAction, &stage, &managed, &p.OperationFence, &errorCode, &completed, &owner, &planRelease, &planTarget, &plan); err != nil {
 		return p, errPlatformResolveKeepDataUnavailable
 	}
-	_ = plan
 	action := appplatform.Action(p.OperationAction)
 	if stage != string(appplatform.StageRecoveryRequired) || managed != 1 || !completed.Valid || owner.Valid ||
 		!platformSameReleaseLifecycle(action) || !planRelease.Valid || !planTarget.Valid || planRelease.String != planTarget.String {
