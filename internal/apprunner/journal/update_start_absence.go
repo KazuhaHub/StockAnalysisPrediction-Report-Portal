@@ -146,7 +146,7 @@ func (s *Store) readUpdateStartHeld(ctx context.Context, raw, signature []byte) 
 		return nil, err
 	}
 	c := verified.Command()
-	if c.Kind != "update-start" && c.Kind != "enable-start" {
+	if c.Kind != "update-start" && c.Kind != "enable-start" && c.Kind != "restore-start" {
 		return nil, nil
 	}
 	row, err := loadAdmittedCommand(ctx, tx, c.EffectID)

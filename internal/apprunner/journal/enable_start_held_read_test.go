@@ -4,6 +4,7 @@ package journal
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -49,6 +50,13 @@ func TestEnableStartReadAnswersEveryStateTheJournalHoldsItIn(t *testing.T) {
 	// Claimed and never executed, as prod's start is: the runner holds it with nothing executing it.
 	if _, err := f.store.ClaimUpdateStart(ctx, raw, sig); err != nil {
 		t.Fatal(err)
+	}
+	// The row is the one prod holds: the command is an enable-start, the journal stores every start under the kind
+	// update-start, and the claim marker has no preflight because nothing got as far as a container.
+	var kind, state, marker string
+	if err := f.store.db.QueryRow(`SELECT kind,state,receipt_json FROM runner_commands WHERE effect_id=?`, start.EffectID).Scan(&kind, &state, &marker); err != nil ||
+		kind != "update-start" || state != "unknown" || !strings.Contains(marker, "update-start-claim") || strings.Contains(marker, "preflight") {
+		t.Fatalf("the held row is not the shape prod has: %s %s %s %v", kind, state, marker, err)
 	}
 	if absence := read(); absence.State != "orphaned" || !UpdateStartAbsenceMatchesCommand(absence, start) {
 		t.Fatalf("a claimed enable-start was not reported orphaned: %+v", absence)

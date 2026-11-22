@@ -76,8 +76,18 @@ func TestRestoreStartReadNeverReportsAbsenceForAnyRow(t *testing.T) {
 				readSignature[0] ^= 0xff
 			}
 			result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, readSignature)
-			if _, absent := result.(UpdateStartAbsence); absent {
+			status, typed := result.(UpdateStartAbsence)
+			if typed && status.State == "absent" {
 				t.Fatalf("an absence reply was minted for a non-absent effect: %v", err)
+			}
+			// A restore-start the journal holds is answered with the state it is held in, like any start: settlement of
+			// a rolled-back update reads it that way. Nothing else is answered.
+			held := map[string]string{"reserved": "reserved", "claimed": "orphaned"}[mode]
+			if held != "" {
+				if err != nil || !typed || status.State != held {
+					t.Fatalf("a %s restore-start read as %#v %v", mode, result, err)
+				}
+				return
 			}
 			if err == nil {
 				t.Fatalf("a read of an unsettled effect answered %#v", result)
@@ -155,7 +165,7 @@ func TestRestoreStartAbsenceReadWaitsForTheExecutionGate(t *testing.T) {
 	}
 	release()
 	got := <-done
-	if _, absent := got.result.(UpdateStartAbsence); absent || got.err == nil {
-		t.Fatalf("a reserved effect read as absent: %#v %v", got.result, got.err)
+	if status, typed := got.result.(UpdateStartAbsence); !typed || status.State != "reserved" || got.err != nil {
+		t.Fatalf("a reserved effect did not read as reserved: %#v %v", got.result, got.err)
 	}
 }
