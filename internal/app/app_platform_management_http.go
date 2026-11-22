@@ -169,6 +169,8 @@ func platformManagementStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, errPlatformManagementInput):
 		status, code = 400, "app_platform_invalid_request"
+	case errors.Is(err, errPlatformResolveKeepDataUnavailable):
+		status, code = 409, "app_platform_resolve_unavailable"
 	case errors.Is(err, errPlatformUserAudience):
 		status, code = 400, "app_platform_user_audience_unsupported"
 	case errors.Is(err, errAppPlatformActorUnavailable), errors.Is(err, errAppPlatformLaunchUnavailable):
@@ -337,7 +339,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	} else if action != "disable" && action != "uninstall" && action != "enable" &&
 		action != "repair" && action != "restore" &&
 		action != "set_data_quota" && action != "import_data" &&
-		action != "delete_data" && !platformRecoveryAction(action) {
+		action != "delete_data" && action != "resolve_keep_data" && !platformRecoveryAction(action) {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -634,6 +636,28 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		writeJSON(w, platformRepairManagementResponse(review, projection))
+	case "resolve_keep_data":
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		if len(fields) != 2 || installationErr != nil || !platformValidUUID(installation) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			platformManagementError(w, errAppPlatformRuntimeConflict)
+			return
+		}
+		review, err := s.createPlatformResolveKeepDataReview(r.Context(), actor, installation, endpoint)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformResolveKeepDataPlan
+		if json.Unmarshal([]byte(review.JSON), &projection) != nil || projection.Format != platformResolveKeepDataFormat || projection.InstallationID != installation {
+			platformManagementError(w, errAppPlatformPlanChanged)
+			return
+		}
+		writeJSON(w, platformResolveKeepDataManagementResponse(review, projection))
 	case "set_data_quota":
 		installation, installationErr := platformManagementString(fields, "installation_id")
 		bytesText, bytesErr := platformManagementString(fields, "data_quota_bytes")
@@ -753,6 +777,22 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 	}
 	var result platformRemovalCommit
 	var recovery bool
+	if platformPlanIsResolveKeepData(planRaw) {
+		// Accepting the data a failed import left is one database transition and no operation: it answers at once.
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			platformManagementError(w, errAppPlatformRuntimeConflict)
+			return
+		}
+		resolved, err := s.consumePlatformResolveKeepDataReview(r.Context(), actor, id, sha, key, endpoint)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"resolved": true, "operation_id": resolved.OperationID, "installation_id": resolved.InstallationID,
+			"abandoned_effects": strconv.Itoa(resolved.Abandoned)})
+		return
+	}
 	switch action {
 	case "install":
 		format, formatErr := platformParseInstallProfile(planRaw)
@@ -956,6 +996,23 @@ func platformDataQuotaManagementResponse(review platformRemovalReview, p platfor
 		item["capacity_remaining"] = strconv.FormatInt(p.CapacityRemaining, 10)
 	}
 	return map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": item}
+}
+
+func platformResolveKeepDataManagementResponse(review platformRemovalReview, p platformResolveKeepDataPlan) map[string]any {
+	effects := make([]map[string]any, 0, len(p.AbandonedEffects))
+	for _, f := range p.AbandonedEffects {
+		effects = append(effects, map[string]any{"effect_id": f.EffectID, "stage": f.Stage, "kind": f.Kind})
+	}
+	return map[string]any{
+		"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+		"review": map[string]any{
+			"action": "resolve_keep_data", "installation_id": p.InstallationID, "app_id": p.AppID, "publisher_id": p.PublisherID,
+			"operation_id": p.OperationID, "operation_action": p.OperationAction, "operation_error_code": p.OperationErrorCode,
+			"release_sha256": p.ReleaseSHA256, "observed_bytes": strconv.FormatInt(p.ObservedBytes, 10),
+			"checkpoint_recovery_set_id": p.CheckpointRecoverySt, "abandoned_effects": effects,
+			"keeps_data": true, "keeps_checkpoint": p.CheckpointRecoverySt != "", "runs_rollback": false,
+		},
+	}
 }
 
 func platformImportDataManagementResponse(review platformRemovalReview, p platformManagedUpdatePlan) map[string]any {
