@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Alert, Button, Card, Dropdown, Modal, Progress, Select, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Dropdown, Modal, Progress, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { ArrowUpOutlined, EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -97,6 +97,15 @@ export function InstalledState({ app }: { app: AdminApp }) {
   return <StatusTag tone={state.tone}>{state.key ? t(state.key) : state.raw}</StatusTag>
 }
 
+/**
+ * A secondary line that names the publisher. The self-declared name is what shows; the publisher ID, which trust is
+ * keyed on, sits in a keyboard-focusable tooltip so an administrator can tell two similar names apart.
+ */
+export function PublisherLine({ publisherName, publisherId, className, title, children }: { publisherName?: string; publisherId?: string; className?: string; title?: string; children: React.ReactNode }) {
+  if (!publisherName || !publisherId) return <Typography.Text type="secondary" className={className} title={title}>{children}</Typography.Text>
+  return <Tooltip title={publisherId} trigger={['hover', 'focus']}><Typography.Text type="secondary" className={className} tabIndex={0}>{children}</Typography.Text></Tooltip>
+}
+
 export interface InstalledCardProps extends InstalledActionProps {
   name: string
   description: string
@@ -123,7 +132,7 @@ export function InstalledCard({ name, description, publisher, source, ...actions
           <div className="rp-app-card-line">
             {/* The link is the card's one way in: its ::after covers the card, so a click anywhere opens the app page while the controls stay separate. */}
             <Link to={appPath(app.key)} className="rp-app-card-name rp-app-card-link">{name}</Link>
-            {secondary && <Typography.Text type="secondary" className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</Typography.Text>}
+            {secondary && <PublisherLine publisherName={actions.catalogue?.publisher_name} publisherId={actions.catalogue?.publisher_id} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
           <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} /></div>
@@ -162,7 +171,7 @@ export function MarketCard({ app, name, description, staging, blocked, error, on
           <div className="rp-app-card-line">
             <Button type="text" className="rp-app-card-name rp-app-card-link" onClick={onOpen}>{name}</Button>
           </div>
-          <Typography.Text type="secondary" className="rp-app-card-sub rp-app-card-line">{t('appStore.publishedBy', { publisher: publisherLabel(app.publisher_name, app.publisher_id) })}</Typography.Text>
+          <PublisherLine publisherName={app.publisher_name} publisherId={app.publisher_id} className="rp-app-card-sub rp-app-card-line">{t('appStore.publishedBy', { publisher: publisherLabel(app.publisher_name, app.publisher_id) })}</PublisherLine>
           {error
             ? <Typography.Text type="danger" className="rp-app-card-desc" title={error} role="alert">{error}</Typography.Text>
             : <div className="rp-app-card-desc">{description || '\u00a0'}</div>}

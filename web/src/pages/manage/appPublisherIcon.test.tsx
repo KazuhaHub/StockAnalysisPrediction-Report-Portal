@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { MarketCard, MarketDetailModal } from './appStoreParts'
 import { AppDisplayIcon, parseAppDisplay } from '../../lib/appDisplayV2'
@@ -22,7 +22,7 @@ const app = (extra: Partial<PlatformMarketApp> = {}): PlatformMarketApp => ({
   versions: [{ version: '1.0.0', descriptor_sha256: 'b'.repeat(64) }],
   display: { icon: 'file-text', texts: texts as never }, ...extra,
 })
-const card = (a: PlatformMarketApp) => render(<MemoryRouter><MarketCard app={a} name="Notes" description="d" staging={undefined} blocked={false} onOpen={() => {}} onInstall={() => {}} /></MemoryRouter>)
+const card = (a: PlatformMarketApp) => render(<MemoryRouter><MarketCard app={a} name="Notes" description="d" staging={null} blocked={false} onOpen={() => {}} onInstall={() => {}} /></MemoryRouter>)
 
 describe('publisher name', () => {
   it('shows the declared name on the market card, not the ID', () => {
@@ -34,8 +34,15 @@ describe('publisher name', () => {
     card(app())
     expect(screen.getByText('appStore.publishedBy:kazuha')).toBeTruthy()
   })
+  it('puts the publisher ID in a keyboard-focusable tooltip on the name', async () => {
+    card(app({ publisher_name: 'Kazuha Hub' }))
+    const line = screen.getByText('appStore.publishedBy:Kazuha Hub')
+    expect(line.getAttribute('tabindex')).toBe('0')
+    fireEvent.focus(line)
+    await waitFor(() => expect(screen.getByRole('tooltip').textContent).toBe('kazuha'))
+  })
   it('keeps the ID visible in the details view beside the name', () => {
-    render(<MarketDetailModal app={app({ publisher_name: 'Kazuha Hub' })} lang="en-US" staging={undefined} blocked={false} onClose={() => {}} onInstall={() => {}} onOpenTrust={() => {}} />)
+    render(<MarketDetailModal app={app({ publisher_name: 'Kazuha Hub' })} lang="en-US" staging={null} blocked={false} error="" onClose={() => {}} onInstall={() => {}} onOpenTrust={() => {}} />)
     expect(screen.getByText('Kazuha Hub (kazuha)')).toBeTruthy()
   })
   it('reads publisher_name from the catalogue and drops an oversized one', () => {
@@ -60,6 +67,14 @@ describe('custom icon', () => {
     fireEvent.error(img)
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('.anticon-file-text')).not.toBeNull()
+  })
+  it('tries a new hash again after an earlier one failed', () => {
+    const other = 'b'.repeat(64)
+    const { container, rerender } = render(<AppDisplayIcon display={parseAppDisplay({ icon: 'file-text', icon_sha256: sha, texts })} />)
+    fireEvent.error(container.querySelector('img') as HTMLImageElement)
+    expect(container.querySelector('img')).toBeNull()
+    rerender(<AppDisplayIcon display={parseAppDisplay({ icon: 'file-text', icon_sha256: other, texts })} />)
+    expect(container.querySelector('img')?.getAttribute('src')).toBe(`/api/app-platform/icons/${other}.png`)
   })
   it('renders only the built-in icon without a hash', () => {
     const { container } = render(<AppDisplayIcon display={parseAppDisplay({ icon: 'cloud', texts })} />)

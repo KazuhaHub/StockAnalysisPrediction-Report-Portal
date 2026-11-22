@@ -9,7 +9,7 @@ import { appDisplayText, publisherLabel } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
-import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, RECOVERY_STATES } from './appStoreParts'
+import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, PublisherLine, RECOVERY_STATES } from './appStoreParts'
 import { appPath, useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import { sourceName, useAppsConsoleFlow } from './appsConsoleFlow'
@@ -96,7 +96,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           <AppIcon app={a} size={28} />
           <div className="rp-app-list-name">
             <Link to={appPath(a.key)}>{d.name}</Link>
-            <div><Typography.Text type="secondary" className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</Typography.Text></div>
+            <div><PublisherLine publisherName={d.catalogue?.publisher_name} publisherId={d.catalogue?.publisher_id} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
           </div>
         </Space>
       },
