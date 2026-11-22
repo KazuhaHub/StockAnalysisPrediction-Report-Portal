@@ -34,7 +34,7 @@ Run from the Apps repository root:
 
 ```sh
 python3 scripts/create-app.py my-app --name "My app" --template v2 \
-  --parent-origin https://portal.example.invalid --publisher development-publisher
+  --publisher development-publisher
 npm install
 python3 scripts/plugin-standard.py
 npm run typecheck
@@ -42,16 +42,20 @@ npm test --workspace=apps/my-app/frontend
 python3 scripts/build-app-v2.py my-app
 ```
 
-Select the real trusted development origin instead of the example. Only canonical
-HTTPS or exact loopback HTTP is accepted. No credentials, path, query or fragment
-are allowed. Parent origin is infrastructure build configuration, not a user
-installation form. It is never derived from a parent DOM/referrer/query/message.
-The developer guide explains each file, checks, output and error recovery.
-
-This per-development-deployment origin is provisional. Trusted cross-deployment
-bootstrap/distribution must be accepted before a stable public template/default.
-The default generator still preserves legacy source until that migration is
-approved; this development option is not a public compatibility promise.
+The package carries no parent origin, so one build runs on any Portal. The bridge
+client derives it from its own document URL (`new URL(location.href).origin`,
+readable even inside the opaque-origin sandbox). The client posts hello to, and accepts messages only from, the derived origin
+with `event.source` equal to its parent Window, so a framer on any other origin
+receives nothing and is ignored. The derivation is safe because (i) the Portal
+origin serves no unsandboxed attacker-controlled HTML (app documents and legacy
+`/app-assets/` are sandboxed without `allow-same-origin`) and (ii) every app
+document is served with `frame-ancestors 'self'` (error and public documents with
+`'none'`), so no other site can embed it. A document with an opaque URL
+(`about:srcdoc`, `data:`) fails immediately as `invalid_context`.
+The command above requires the Apps repository SDK version that removed
+`--parent-origin` (see the matching Apps change; this repository's Apps pin bump
+follows its merge). The developer guide explains each file, checks, output and
+error recovery.
 
 ## Build and integrity
 

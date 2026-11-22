@@ -1,5 +1,5 @@
 import { MessageChannel as NodeMessageChannel } from "node:worker_threads";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   createBridgeHost,
   createBridgeClient,
@@ -26,7 +26,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function windows() {
+const documentHref = "https://portal.example.invalid/app-documents/x/index.html";
+
+function windows(
+  childHref: string = documentHref,
+  hostOrigin = "https://portal.example.invalid",
+) {
   const listeners = [
     new Set<(event: MessageEvent) => void>(),
     new Set<(event: MessageEvent) => void>(),
@@ -34,6 +39,9 @@ function windows() {
   const sent: { from: number; data: Record<string, unknown> }[] = [];
   const received: { to: number; event: MessageEvent }[] = [];
   const peers = [0, 1].map((index) => ({
+    location: {
+      href: index === 1 ? childHref : "https://portal.example.invalid/",
+    },
     addEventListener: (
       _type: string,
       listener: (event: MessageEvent) => void,
@@ -47,14 +55,14 @@ function windows() {
       target: string,
       ports: MessagePort[] = [],
     ) => {
-      expect(target).toBe(index === 1 ? "*" : "https://portal.example.invalid");
+      expect(target).toBe(index === 1 ? "*" : hostOrigin);
       const from = 1 - index;
       sent.push({ from, data: structuredClone(data) });
       const cloned = structuredClone({ data, ports }, { transfer: ports });
       const event = {
         ...cloned,
         source: peers[from],
-        origin: from === 0 ? "https://portal.example.invalid" : "null",
+        origin: from === 0 ? hostOrigin : "null",
       } as unknown as MessageEvent;
       received.push({ to: index, event });
       queueMicrotask(() => {
@@ -117,7 +125,6 @@ test("host waits for applied presentation and keeps 64-bit binding exact", async
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: applied.mockReturnValue(wait),
   });
   cleanup.push(() => client.close());
@@ -195,7 +202,6 @@ async function backendPair(
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -408,7 +414,6 @@ test("document measurements are bound, coalesced and can shrink without reloadin
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -444,7 +449,6 @@ test("viewport mode cannot size the host", async () => {
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -471,7 +475,6 @@ test("host refuses malicious height and ignores old generation measurements", as
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -513,7 +516,6 @@ test("draft state is a bounded boolean hint tied to the current channel", async 
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -546,7 +548,6 @@ test("draft host rejects contents while stale hints cannot clear edits", async (
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -596,7 +597,6 @@ test("draft host fails a flooding channel without delivering excess reports", as
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -635,7 +635,6 @@ test("coalesced presentation updates wait for latest application before reveal",
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: applied,
   });
   cleanup.push(() => client.close());
@@ -709,7 +708,6 @@ test("late presentation completion after close cannot acknowledge a document", a
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: apply,
   });
   cleanup.push(() => client.close());
@@ -732,7 +730,6 @@ test("handshake timeout disposes listeners and never falls back to legacy", asyn
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: vi.fn(),
     onFailure: failed,
   });
@@ -768,7 +765,6 @@ test("construction snapshots its peer window even if the options object changes"
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: vi.fn(),
   });
   cleanup.push(() => client.close());
@@ -782,7 +778,6 @@ function clientOnly() {
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: apply,
     onFailure: failed,
   });
@@ -888,7 +883,6 @@ test("application callback failure exposes only a bounded code", async () => {
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation() {
       throw new Error("fixture credential must never cross the channel");
     },
@@ -975,7 +969,6 @@ test("a fresh host session can renegotiate the same WindowProxy", async () => {
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: vi.fn(),
     onReset: reset,
   });
@@ -1017,7 +1010,6 @@ test("a late rejection from the previous handshake cannot fail its successor", a
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: apply,
     onFailure: failed,
   });
@@ -1101,7 +1093,6 @@ test("registered navigation is source-bound and the host owns the committed path
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -1228,7 +1219,6 @@ test("host ignores stale navigation and refuses injected destinations before dis
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -1294,7 +1284,6 @@ test("navigation query is validated against its signed destination rather than t
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -1349,7 +1338,6 @@ test("shared page actions execute once and retire with signed route changes", as
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(() => client.close());
@@ -1422,7 +1410,6 @@ test("page descriptions require exact current binding, revision, scope and close
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -1484,7 +1471,7 @@ async function networkPair(onNetworkRequest?: Parameters<typeof createBridgeHost
  vi.stubGlobal("MessageChannel",NodeMessageChannel);
  const w=windows();
  const host=createBridgeHost({localWindow:w.host,frameWindow:w.child,binding,presentation,capabilities:granted?["network.http",...extraCapabilities]:[],onNetworkRequest});
- const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,parentOrigin:"https://portal.example.invalid",onPresentation:()=>{}});
+ const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,onPresentation:()=>{}});
  cleanup.push(()=>client.close(),()=>host.close());
  await vi.waitFor(()=>expect(host.state()).toBe("ready"));
  return {...w,host,client};
@@ -1507,7 +1494,6 @@ async function networkStreamPair(
  const client=createBridgeClient({
   localWindow:w.child,
   parentWindow:w.host,
-  parentOrigin:"https://portal.example.invalid",
   onPresentation:()=>{},
  });
  cleanup.push(()=>client.close(),()=>host.close());
@@ -1536,7 +1522,6 @@ async function reportsPair(
  const client=createBridgeClient({
   localWindow:w.child,
   parentWindow:w.host,
-  parentOrigin:"https://portal.example.invalid",
   onPresentation:()=>{},
  });
  cleanup.push(()=>client.close(),()=>host.close());
@@ -1658,7 +1643,6 @@ async function notificationsPair(
  const client=createBridgeClient({
   localWindow:w.child,
   parentWindow:w.host,
-  parentOrigin:"https://portal.example.invalid",
   onPresentation:()=>{},
  });
  cleanup.push(()=>client.close(),()=>host.close());
@@ -1730,7 +1714,6 @@ async function principalsPair(
  const client=createBridgeClient({
   localWindow:w.child,
   parentWindow:w.host,
-  parentOrigin:"https://portal.example.invalid",
   onPresentation:()=>{},
  });
  cleanup.push(()=>client.close(),()=>host.close());
@@ -1823,7 +1806,6 @@ async function objectsPair(
  const client=createBridgeClient({
   localWindow:w.child,
   parentWindow:w.host,
-  parentOrigin:"https://portal.example.invalid",
   onPresentation:()=>{},
  });
  cleanup.push(()=>client.close(),()=>host.close());
@@ -1951,7 +1933,7 @@ test("network and own-backend channels keep independent request identities and r
  const backend=vi.fn(async()=>({status:200,body:'{"channel":"backend"}'}));
  const network=vi.fn(async()=>({status:200,contentType:"application/json",bodyBase64:"eyJjaGFubmVsIjoibmV0d29yayJ9"}));
  const host=createBridgeHost({localWindow:w.host,frameWindow:w.child,binding,presentation,capabilities:["network.http"],onBackendRequest:backend,onNetworkRequest:network});
- const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,parentOrigin:"https://portal.example.invalid",onPresentation:()=>{}});
+ const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,onPresentation:()=>{}});
  cleanup.push(()=>client.close(),()=>host.close());
  await vi.waitFor(()=>expect(host.state()).toBe("ready"));
  const [backendResult,networkResult]=await Promise.all([
@@ -2102,7 +2084,6 @@ async function targetsPair(
   const client = createBridgeClient({
     localWindow: w.child,
     parentWindow: w.host,
-    parentOrigin: "https://portal.example.invalid",
     onPresentation: () => {},
   });
   cleanup.push(
@@ -2246,4 +2227,87 @@ test("a new client offers both protocols and, against a 2-dev.8 host, has no net
   w.deliver({ ...w.init, protocol: BRIDGE_PROTOCOL_PREVIOUS, capabilities: ["network.http"] });
   await vi.waitFor(() => expect(w.client.state()).toBe("ready"));
   await expect(w.client.requestNetworkTargets([target])).rejects.toMatchObject({ code: "unsupported" });
+});
+
+describe("derived parent origin", () => {
+  test("client derives the parent origin from its own document URL", async () => {
+    vi.stubGlobal("MessageChannel", NodeMessageChannel);
+    const w = windows(
+      "http://127.0.0.1:31935/app-documents/y/index.html?x=1#h",
+      "http://127.0.0.1:31935",
+    );
+    const client = createBridgeClient({
+      localWindow: w.child,
+      parentWindow: w.host,
+      onPresentation: () => {},
+    });
+    cleanup.push(() => client.close());
+    expect(client.state()).not.toBe("failed");
+    await vi.waitFor(() =>
+      expect(w.sent.some((i) => i.data.type === "app:hello")).toBe(true),
+    );
+  });
+
+  for (const href of [
+    "about:srcdoc",
+    "data:text/html,x",
+    "null",
+    "blob:null/abc",
+    "",
+  ]) {
+    test(`opaque or non-http document URL ${JSON.stringify(href)} fails immediately`, () => {
+      vi.stubGlobal("MessageChannel", NodeMessageChannel);
+      const w = windows(href);
+      const failed = vi.fn();
+      const client = createBridgeClient({
+        localWindow: w.child,
+        parentWindow: w.host,
+        onPresentation: () => {},
+        onFailure: failed,
+      });
+      cleanup.push(() => client.close());
+      expect(client.state()).toBe("failed");
+      expect(failed).toHaveBeenCalledExactlyOnceWith("invalid_context");
+      expect(w.sent).toHaveLength(0);
+    });
+  }
+
+  test("a valid challenge from a different origin is ignored, from the right origin it is answered", async () => {
+    vi.stubGlobal("MessageChannel", NodeMessageChannel);
+    const w = windows();
+    const client = createBridgeClient({
+      localWindow: w.child,
+      parentWindow: w.host,
+      onPresentation: () => {},
+    });
+    cleanup.push(() => client.close());
+    const hostNonce = "c".repeat(32);
+    const challenge = {
+      type: "app:challenge",
+      protocol: BRIDGE_PROTOCOL,
+      hostNonce,
+    };
+    const answered = () =>
+      w.sent.some(
+        (item) =>
+          item.from === 1 &&
+          item.data.type === "app:hello" &&
+          item.data.hostNonce === hostNonce,
+      );
+    const send = (origin: string) => {
+      for (const listener of w.listeners[1])
+        listener({
+          data: structuredClone(challenge),
+          origin,
+          source: w.host,
+          ports: [],
+        } as unknown as MessageEvent);
+    };
+    send("https://evil.example.invalid");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(answered()).toBe(false);
+    expect(client.state()).not.toBe("failed");
+    send("https://portal.example.invalid");
+    await vi.waitFor(() => expect(answered()).toBe(true));
+  });
 });

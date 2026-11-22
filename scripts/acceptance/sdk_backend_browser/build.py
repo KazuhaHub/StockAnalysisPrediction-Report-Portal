@@ -9,7 +9,6 @@ import subprocess
 import zipfile
 
 PORTAL = Path(__file__).resolve().parents[3]
-ORIGIN = "http://127.0.0.1:31935"
 
 
 def build(apps, output):
@@ -130,7 +129,7 @@ function Fixture(){
  <Typography.Text data-testid="objects-result" data-request-id={objectsResult.id}>{objectsResult.text}</Typography.Text>
  <Button onClick={()=>setMalicious(true)}>Malicious shell descriptor</Button><Button onClick={()=>setHuge(true)}>Huge document height</Button><Button onClick={()=>void oscillateHeight()}>Oscillate height</Button><Button onClick={()=>setRunaway(true)}>Runaway render</Button></Space></div>
 }
-createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(ORIGIN) + '''><Fixture/></AppRoot>);''')
+createRoot(document.getElementById('app')!).render(<AppRoot><Fixture/></AppRoot>);''')
     host = output / "host.tsx"
     host.write_text('''import {useEffect,useMemo,useState} from 'react';import {createRoot} from 'react-dom/client';
 import AppFrameV2 from ''' + json.dumps(str(PORTAL / "web/src/components/apps/AppFrameV2.tsx")) + ''';

@@ -22,7 +22,7 @@ func TestFrontendDocumentEmbedsVerifiedLocalResources(t *testing.T) {
 	if result.SourceSHA256 == "" || result.DocumentSHA256 == "" || !bytes.Equal(raw, before) {
 		t.Fatal("missing derived integrity")
 	}
-	if strings.Contains(result.CSP, "allow-same-origin") || !strings.Contains(result.CSP, "connect-src 'none'") || !strings.Contains(result.CSP, "sandbox allow-scripts") {
+	if strings.Contains(result.CSP, "allow-same-origin") || !strings.Contains(result.CSP, "connect-src 'none'") || !strings.Contains(result.CSP, "sandbox allow-scripts") || !strings.Contains(result.CSP, "frame-ancestors 'self'") {
 		t.Fatal("sandbox boundary was weakened")
 	}
 }

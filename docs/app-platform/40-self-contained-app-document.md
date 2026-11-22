@@ -108,7 +108,15 @@ The script creates only a temporary directory and loopback server. It builds the
 actual Portal `AppFrameV2` and actual Apps React/Ant `AppRoot` as classic bundles,
 uses a known fixture-only HttpOnly/SameSite=Lax cookie, invokes the Go compiler
 through the explicitly requested fixture-export test, and prints `PROBE_URL`.
-The fixture app's trusted parent origin is the exact selected loopback origin.
+The fixture app bakes in no parent origin: the client derives it from the
+document URL, which is the selected loopback origin. The client posts hello to, and accepts messages only from, the derived origin
+with `event.source` equal to its parent Window, so a framer on any other origin
+receives nothing and is ignored. The derivation is safe because (i) the Portal
+origin serves no unsandboxed attacker-controlled HTML (app documents and legacy
+`/app-assets/` are sandboxed without `allow-same-origin`) and (ii) every app
+document is served with `frame-ancestors 'self'` (error and public documents with
+`'none'`), so no other site can embed it. A document with an opaque URL
+(`about:srcdoc`, `data:`) fails immediately as `invalid_context`.
 It does not read the viewer's real Portal session or derive trust from a message.
 Open that URL through the browser plugin. Stop the script after acceptance.
 
