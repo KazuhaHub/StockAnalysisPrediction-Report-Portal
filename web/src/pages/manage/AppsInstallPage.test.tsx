@@ -344,9 +344,10 @@ describe('The install page', () => {
       return { items: [], next_cursor: '' }
     })
     renderPage(`/manage/apps/install?operation=${operation}`)
-    const settings = await screen.findByRole('link', { name: 'appPlatform.openSettings' })
-    expect(settings.getAttribute('href')).toBe(`/manage/apps/${encodeURIComponent(`platform:${installationId}`)}`)
-    expect(screen.getByRole('link', { name: 'appStore.backToApps' }).getAttribute('href')).toBe('/manage/apps')
+    const settings = await screen.findByRole('button', { name: 'appPlatform.openSettings' })
+    expect(screen.getByRole('button', { name: 'appStore.backToApps' })).toBeTruthy()
+    await userEvent.setup().click(settings)
+    expect(await screen.findByText(`detail:platform:${installationId}`)).toBeTruthy()
   })
 
   it('reads the sources again each time it opens, so the official switch is honoured', async () => {

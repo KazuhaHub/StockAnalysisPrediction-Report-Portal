@@ -30,10 +30,10 @@ export function appDisplayText(id: string, display: AppDisplayView | null | unde
   const copy = display?.texts.find(text => text.locale === locale)
   return copy ? { name: copy.name, description: copy.description } : { name: id, description: '' }
 }
-const icons = { appstore: AppstoreOutlined, 'file-text': FileTextOutlined, dashboard: DashboardOutlined, calendar: CalendarOutlined, 'bar-chart': BarChartOutlined, cloud: CloudOutlined, tool: ToolOutlined, experiment: ExperimentOutlined }
+export const DISPLAY_ICONS = { appstore: AppstoreOutlined, 'file-text': FileTextOutlined, dashboard: DashboardOutlined, calendar: CalendarOutlined, 'bar-chart': BarChartOutlined, cloud: CloudOutlined, tool: ToolOutlined, experiment: ExperimentOutlined }
 /** The signed custom icon when there is one and it loads; otherwise the built-in glyph the descriptor names. */
 export function AppDisplayIcon({ display, iconSha256 }: { display?: AppDisplayView | null; iconSha256?: string }) {
-  const Icon = display ? icons[display.icon] : AppstoreOutlined
+  const Icon = display ? DISPLAY_ICONS[display.icon] : AppstoreOutlined
   const sha = iconSha256 ?? display?.icon_sha256
   const [failed, setFailed] = useState<string | undefined>()
   if (sha && SHA256.test(sha) && failed !== sha) {

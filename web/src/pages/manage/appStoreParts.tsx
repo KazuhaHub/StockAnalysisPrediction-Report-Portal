@@ -135,7 +135,7 @@ export function InstalledCard({ name, description, publisher, source, ...actions
             {secondary && <PublisherLine publisherName={actions.catalogue?.publisher_name} publisherId={actions.catalogue?.publisher_id} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
-          <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} /></div>
+          <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} compact /></div>
         </div>
         <InstalledControls {...actions} />
       </div>

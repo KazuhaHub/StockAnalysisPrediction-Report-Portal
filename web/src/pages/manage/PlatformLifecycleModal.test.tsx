@@ -5,7 +5,7 @@ import axe from 'axe-core'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { ApiError } from '../../api/client'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
 import { usePlatformLifecycle, type LifecycleAction } from './platformLifecycle'
@@ -109,8 +109,10 @@ function Harness({ item, action }: { item: PlatformRelease; action: LifecycleAct
     <button onClick={() => lifecycle.begin(item, action)}>start</button>
     {lifecycle.hiddenPending && <button onClick={lifecycle.reopen}>reopen</button>}
     <PlatformLifecycleModal lifecycle={lifecycle} />
+    <LocationProbe />
   </>
 }
+function LocationProbe() { const where = useLocation(); return <output data-testid="location">{where.pathname}</output> }
 const tree = (item: PlatformRelease = base, action: LifecycleAction = 'install') => <MemoryRouter initialEntries={[location]}><Harness item={item} action={action} /></MemoryRouter>
 let location = '/manage/apps'
 function mount(item: PlatformRelease = base, action: LifecycleAction = 'install', path = '/manage/apps') { location = path; return render(tree(item, action)) }
@@ -311,12 +313,31 @@ describe('application installation flow', () => {
 
   it('opens the app settings after completion and tells the page once that the operation is terminal', async () => {
     mount(base, 'install', `/manage/apps?operation=${operation}`)
-    const link = await screen.findByRole('link', { name: 'appPlatform.openSettings' })
-    expect(link.getAttribute('href')).toBe(`/manage/apps/${encodeURIComponent(`platform:${operation}`)}`)
+    const settings = await screen.findByRole('button', { name: 'appPlatform.openSettings' })
     await waitFor(() => expect(changes).toBe(1))
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(changes).toBe(1)
     expect(mock.post).not.toHaveBeenCalled()
+    await userEvent.setup().click(settings)
+    expect(screen.getByTestId('location').textContent).toBe(`/manage/apps/${encodeURIComponent(`platform:${operation}`)}`)
+  })
+
+  // antd spaces footer buttons with `.ant-btn + .ant-btn`; a button wrapped in a link breaks that adjacency and the
+  // buttons render glued together.
+  it('keeps every completed-footer action a direct button sibling so antd spaces them', async () => {
+    mount(base, 'install', `/manage/apps?operation=${operation}`)
+    await screen.findByRole('button', { name: 'appPlatform.openSettings' })
+    const footer = document.querySelector('.rp-platform-review-modal .ant-modal-footer')!
+    const children = [...footer.children]
+    expect(children.length).toBeGreaterThanOrEqual(3)
+    for (const child of children) expect(child.tagName).toBe('BUTTON')
+  })
+
+  it('does not offer the settings of an app that a completed uninstall removed', async () => {
+    mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? { ...finished, action: 'uninstall' } : { items: [], next_cursor: '' }))
+    mount(base, 'install', `/manage/apps?operation=${operation}`)
+    await screen.findByRole('button', { name: 'appPlatform.done' })
+    expect(screen.queryByRole('button', { name: 'appPlatform.openSettings' })).toBeNull()
   })
 
   it('renders lifecycle progress and review-required states for repair and deletion', async () => {
@@ -324,14 +345,14 @@ describe('application installation flow', () => {
     mount(base, 'install', `/manage/apps?operation=${operation}`)
     expect(await screen.findByText('recovery_required')).toBeTruthy()
     expect(screen.getByText('appPlatform.operationNeedsReview')).toBeTruthy()
-    expect(screen.queryByRole('link', { name: 'appPlatform.openSettings' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.openSettings' })).toBeNull()
   })
 
   it('shows a paused lifecycle as a warning rather than a terminal success', async () => {
     mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? { operation_id: operation, installation_id: operation, action: 'delete_data', stage: 'remove_data', terminal: false, control_paused: true } : { items: [], next_cursor: '' }))
     mount(base, 'install', `/manage/apps?operation=${operation}`)
     expect(await screen.findByText('err.app_platform_control_paused')).toBeTruthy()
-    expect(screen.queryByRole('link', { name: 'appPlatform.openSettings' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.openSettings' })).toBeNull()
   })
 
   it('reviews an installed app update without requiring an audience choice', async () => {

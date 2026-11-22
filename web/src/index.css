@@ -3396,7 +3396,10 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-app-card-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; line-height: 20px; }
 .rp-app-card-sub { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 20px; }
 .rp-app-card-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--ant-color-text-secondary); }
-.rp-app-card-meta { display: flex; align-items: center; gap: 8px; min-width: 0; height: 20px; overflow: hidden; font-size: 12px; white-space: nowrap; }
+.rp-app-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; min-height: 20px; font-size: 12px; white-space: nowrap; }
+.rp-app-card-meta > * { min-width: 0; max-width: 100%; }
+.rp-app-status-short { display: inline-block; vertical-align: top; }
+.rp-app-card-meta .ant-tag, .rp-app-card-meta .rp-app-status-short, .rp-app-card-meta .ant-badge-status-text { overflow: hidden; text-overflow: ellipsis; }
 .rp-app-card-meta .ant-tag { margin: 0; font-size: 11px; line-height: 18px; padding-inline: 6px; }
 .rp-app-card-meta .ant-badge-status-text { font-size: 12px; }
 .rp-app-controls { display: inline-flex; flex: none; align-items: center; gap: 2px; margin: -2px -4px 0 0; position: relative; z-index: 1; }
