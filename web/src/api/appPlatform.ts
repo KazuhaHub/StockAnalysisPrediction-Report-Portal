@@ -28,6 +28,8 @@ export interface PlatformRelease {
   updateable?: boolean
   enableable?: boolean
   installed?: boolean
+  // A first install that failed after its candidate started: only an uninstall review clears it.
+  uninstallable?: boolean
 }
 
 export interface PlatformMarketHint {
