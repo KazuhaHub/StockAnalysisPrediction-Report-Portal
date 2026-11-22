@@ -360,7 +360,10 @@ describe('application installation settings', () => {
             release_sha256: release,
             observed_bytes: '780615680',
             checkpoint_recovery_set_id: recovery,
-            abandoned_effects: [{ effect_id: operation, stage: 'import', kind: 'restore' }],
+            abandoned_effects: [
+              { operation_id: operation, operation_action: 'import_data', operation_completed_ms: '1795345430805', effect_id: operation, stage: 'import', kind: 'restore' },
+              { operation_id: recovery, operation_action: 'import_data', operation_completed_ms: '1795339211708', effect_id: plan, stage: 'snapshot', kind: 'snapshot', recovery_set_id: 'abcdef12-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+            ],
             keeps_data: true,
             keeps_checkpoint: true,
             runs_rollback: false,
@@ -378,7 +381,12 @@ describe('application installation settings', () => {
     expect(dialog.textContent).toContain('appPlatform.settings.resolveWarning')
     expect(dialog.textContent).toContain(operation)
     expect(dialog.textContent).toContain(recovery)
-    expect(dialog.textContent).toContain('appPlatform.settings.resolveRollbackValue')
+    // Each unfinished item is listed with its operation, kind and the recovery set closed with it.
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffectRestore')
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffectSnapshot')
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffectSet')
+    expect(dialog.textContent).toContain(operation.slice(0, 8))
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffects:{"count":2}')
     const confirm = screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))

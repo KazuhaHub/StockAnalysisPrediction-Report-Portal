@@ -114,7 +114,7 @@ type ResolveReview = {
   release_sha256: string
   observed_bytes: string
   checkpoint_recovery_set_id: string
-  abandoned_effects: { operation_id: string; effect_id: string; stage: string; kind: string; recovery_set_id?: string }[]
+  abandoned_effects: { operation_id: string; operation_action: string; operation_completed_ms: string; effect_id: string; stage: string; kind: string; recovery_set_id?: string }[]
   keeps_data: true
   keeps_checkpoint: boolean
   runs_rollback: false
@@ -915,9 +915,16 @@ export default function AppPlatformSettingsPage() {
           <Descriptions column={1} size="small" items={[
             { key: 'operation', label: t('appPlatform.settings.resolveOperation'), children: <Typography.Text code copyable>{resolvePlan.review.operation_id}</Typography.Text> },
             { key: 'data', label: t('appPlatform.settings.resolveData'), children: t('appPlatform.settings.resolveDataValue', { bytes: bytes(resolvePlan.review.observed_bytes) }) },
-            { key: 'rollback', label: t('appPlatform.settings.resolveRollback'), children: resolvePlan.review.abandoned_effects.length
-              ? t('appPlatform.settings.resolveRollbackValue', { count: resolvePlan.review.abandoned_effects.length })
-              : t('appPlatform.settings.resolveRollbackNone') },
+            { key: 'effects', label: t('appPlatform.settings.resolveEffects', { count: resolvePlan.review.abandoned_effects.length }), children: resolvePlan.review.abandoned_effects.length
+              ? <ul style={{ margin: 0, paddingInlineStart: 18 }}>{resolvePlan.review.abandoned_effects.map((effect) => <li key={effect.effect_id}>
+                {t(effect.kind === 'restore' ? 'appPlatform.settings.resolveEffectRestore' : 'appPlatform.settings.resolveEffectSnapshot', {
+                  action: t(`appPlatform.settings.resolveActionName.${effect.operation_action}`, { defaultValue: effect.operation_action }),
+                  operation: effect.operation_id.slice(0, 8),
+                  when: new Date(Number(effect.operation_completed_ms)).toLocaleString(lang),
+                })}
+                {effect.recovery_set_id && <div>{t('appPlatform.settings.resolveEffectSet', { id: effect.recovery_set_id.slice(0, 8) })}</div>}
+              </li>)}</ul>
+              : t('appPlatform.settings.resolveNoEffects') },
             ...(resolvePlan.review.keeps_checkpoint ? [{ key: 'checkpoint', label: t('appPlatform.settings.resolveCheckpoint'), children: <>
               <Typography.Text code>{resolvePlan.review.checkpoint_recovery_set_id}</Typography.Text>
               <div>{t('appPlatform.settings.resolveCheckpointKept')}</div>
