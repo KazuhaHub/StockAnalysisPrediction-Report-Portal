@@ -34,16 +34,16 @@ func platformReadDisplayRecord(e migExec, installation string) (*platformDisplay
 	record.coherent = generation == currentGeneration && policy == currentPolicy
 	return &record, nil
 }
-func (r *platformDisplayRecord) verified(trust appplatform.PublisherTrust, now int64, app, publisher string) (*appplatform.AppDisplay, bool) {
+func (r *platformDisplayRecord) verified(trust appplatform.PublisherTrust, now int64, app, publisher string) (*appplatform.AppDisplay, string, bool) {
 	verified, err := appplatform.VerifyPublisherDescriptor(r.raw, r.signature, trust, strconv.FormatInt(now, 10))
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
 	m := verified.Descriptor.Manifest
 	if !r.coherent || verified.Descriptor.SHA256 != r.release || verified.KeyID != r.key || m.ID != app || m.ID != r.app || m.Publisher != publisher || m.Publisher != r.publisher || m.Version != r.version || m.Frontend.SHA256 != r.frontend || boolInt(m.Backend != nil) != r.managed {
-		return nil, false
+		return nil, "", false
 	}
-	return m.Presentation.Display, true
+	return m.Presentation.Display, platformManifestPublisherName(m), true
 }
 
 // The transaction holds the complete trust snapshot stable. Repeat only its

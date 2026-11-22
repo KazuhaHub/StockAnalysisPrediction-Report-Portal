@@ -5,11 +5,11 @@ import { AppstoreOutlined, BarsOutlined, OrderedListOutlined, PlusOutlined } fro
 import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import CardTable from '../../components/CardTable'
-import { appDisplayText } from '../../lib/appDisplayV2'
+import { appDisplayText, publisherLabel } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
-import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, RECOVERY_STATES } from './appStoreParts'
+import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, PublisherLine, RECOVERY_STATES } from './appStoreParts'
 import { appPath, useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import { sourceName, useAppsConsoleFlow } from './appsConsoleFlow'
@@ -77,7 +77,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
       app: a, catalogue: cat,
       name: copy?.name && copy.name !== cat?.app_id ? copy.name : labels.title(a),
       description: a.builtin ? labels.description(a) : copy?.description ?? '',
-      publisher: cat?.publisher_id,
+      publisher: cat ? publisherLabel(cat.publisher_name, cat.publisher_id) : undefined,
       source: !a.builtin && cat && activeSource ? sourceName(activeSource.name, activeSource.url, activeSource.official) : undefined,
       uninstallable: !!a.installationId && uninstallable[a.installationId],
       busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
@@ -96,7 +96,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           <AppIcon app={a} size={28} />
           <div className="rp-app-list-name">
             <Link to={appPath(a.key)}>{d.name}</Link>
-            <div><Typography.Text type="secondary" className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</Typography.Text></div>
+            <div><PublisherLine publisherName={d.catalogue?.publisher_name} publisherId={d.catalogue?.publisher_id} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
           </div>
         </Space>
       },

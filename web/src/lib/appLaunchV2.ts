@@ -1,8 +1,7 @@
-import {parseAppDisplay} from './appDisplayV2'
-import type {AppDisplay} from './descriptor-contract.generated'
+import {parseAppDisplay, type AppDisplayView} from './appDisplayV2'
 import {DESCRIPTOR_PATTERNS} from './descriptor-contract.generated'
 import {parseBridgeRoutes,type BridgeRoute,type BridgeBinding,type BridgePresentation} from './bridge-v2'
-export interface AppLaunchV2 {routes:readonly BridgeRoute[];backendAvailable:boolean;display?:AppDisplay;source:string;binding:BridgeBinding;capabilities:readonly string[];applicationId:string;layout:BridgePresentation['layout'];timeZone:string}
+export interface AppLaunchV2 {routes:readonly BridgeRoute[];backendAvailable:boolean;display?:AppDisplayView;source:string;binding:BridgeBinding;capabilities:readonly string[];applicationId:string;layout:BridgePresentation['layout'];timeZone:string}
 const hostCapabilities=new Set([
   'network.http',
   'notifications.publish',

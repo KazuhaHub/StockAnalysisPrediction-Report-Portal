@@ -1232,6 +1232,8 @@ export interface AppLayoutEntry {
   installation_id?: string
   app_id?: string
   publisher_id?: string
+  // The publisher's self-declared display name from the verified descriptor; the ID stays the identity.
+  publisher_name?: string
   // A platform installation's signed display metadata, when it verifies (parse it with parseAppDisplay).
   display?: unknown
   state?: string

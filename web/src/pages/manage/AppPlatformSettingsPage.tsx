@@ -4,7 +4,7 @@ import { AppstoreOutlined, ArrowLeftOutlined, DeleteOutlined, ImportOutlined, Ke
 import { Link, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
-import type { AppDisplay } from '../../lib/descriptor-contract.generated'
+import type { AppDisplayView } from '../../lib/appDisplayV2'
 import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
@@ -41,7 +41,7 @@ type Settings = {
   policy_revision: string
   current_release_sha256?: string
   version?: string
-  display?: AppDisplay
+  display?: AppDisplayView
   audience: Audience[]
   audience_total?: number
   capabilities: Capability[]

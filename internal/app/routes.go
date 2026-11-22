@@ -573,6 +573,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/abandon-runtime", s.apiPlatformAbandonRuntime)
 	// V2 documents remain session-only and inherit the enrolment wall. Response
 	// policy wraps that wall too, so authentication failures cannot be cached.
+	s.platformIconRoute(mux)
 	s.route(mux, "GET /api/app-platform/apps", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformApps))))
 	s.route(mux, "GET /api/app-platform/installations/{installation}/status", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformInstallationStatus))))
 	s.route(mux, "GET /api/app-platform/installations/{installation}/launch", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformLaunch))))

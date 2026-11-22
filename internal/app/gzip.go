@@ -47,6 +47,10 @@ func gzipEligible(p string) bool {
 	if strings.HasPrefix(p, "/api/admin/exports/") && strings.HasSuffix(p, "/file") {
 		return false
 	}
+	// Platform app icons are PNG already.
+	if strings.HasPrefix(p, "/api/app-platform/icons/") {
+		return false
+	}
 	if strings.HasPrefix(p, "/api/") {
 		return true
 	}

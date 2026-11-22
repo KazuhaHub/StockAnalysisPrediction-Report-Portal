@@ -20,7 +20,8 @@ type platformStagedSummary struct {
 	Publisher            string                    `json:"publisher_id"`
 	Version              string                    `json:"version"`
 	TrustRevision        string                    `json:"trust_revision"`
-	Display              *appplatform.AppDisplay   `json:"display,omitempty"`
+	Display              *platformDisplayView      `json:"display,omitempty"`
+	PublisherName        string                    `json:"publisher_name,omitempty"`
 	Compatibility        appplatform.Compatibility `json:"compatibility"`
 	Platforms            []string                  `json:"platforms,omitempty"`
 	RequiredCapabilities []string                  `json:"required_capabilities"`
@@ -112,7 +113,7 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		for _, record := range records {
-			display, valid := record.verified(trust, final.nowMS, record.app, record.publisher)
+			display, publisherName, valid := record.verified(trust, final.nowMS, record.app, record.publisher)
 			if !valid {
 				continue
 			}
@@ -125,7 +126,7 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 			item := platformStagedSummary{
 				Release: record.release, App: record.app,
 				Publisher: record.publisher, Version: record.version,
-				TrustRevision: verified.PublisherRevision, Display: display,
+				TrustRevision: verified.PublisherRevision, Display: platformDisplayViewOf(display), PublisherName: publisherName,
 				Compatibility: manifest.Compatibility,
 				RequiredCapabilities: append(
 					[]string{}, manifest.Capabilities.Required...),

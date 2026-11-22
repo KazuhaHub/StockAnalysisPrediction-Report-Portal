@@ -28,7 +28,8 @@ type platformMarketApp struct {
 	PublisherID      string                  `json:"publisher_id"`
 	AppID            string                  `json:"app_id"`
 	Versions         []platformMarketVersion `json:"versions"`
-	Display          *appplatform.AppDisplay `json:"display,omitempty"`
+	Display          *platformDisplayView    `json:"display,omitempty"`
+	PublisherName    string                  `json:"publisher_name,omitempty"`
 	PublisherTrusted bool                    `json:"publisher_trusted"`
 
 	newest appplatform.CatalogueRelease
@@ -131,6 +132,6 @@ func platformMarketApplyTrust(apps []*platformMarketApp, previews map[*platformM
 		if manifest.ID != app.AppID || manifest.Publisher != app.PublisherID || manifest.Version != app.newest.Version {
 			continue
 		}
-		app.Display = manifest.Presentation.Display
+		app.Display, app.PublisherName = platformDisplayViewOf(manifest.Presentation.Display), platformManifestPublisherName(manifest)
 	}
 }

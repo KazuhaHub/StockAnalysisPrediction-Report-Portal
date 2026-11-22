@@ -1,10 +1,11 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "7d0b5fcc91778b3a3ff456c6f368b5e21de0487a138e0b331d07c77920f6eb5e";
+export const DESCRIPTOR_SCHEMA_SHA256 = "7d987fb45b3233fd8daa2f45b3ff2a948959ce8055f5beeafb00b3705d6011a1";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
  version: string;
  publisher: string;
+ publisher_name?: string;
  compatibility: Compatibility;
  presentation: Presentation;
  frontend: Artifact;
@@ -84,6 +85,7 @@ export interface DataMigration {
 }
 export interface AppDisplay {
  icon: "appstore" | "file-text" | "dashboard" | "calendar" | "bar-chart" | "cloud" | "tool" | "experiment";
+ icon_png?: string;
  texts: (AppDisplayText)[];
 }
 export interface AppDisplayText {
@@ -253,6 +255,7 @@ export const DESCRIPTOR_FIELDS = {
     "id",
     "version",
     "publisher",
+    "publisher_name",
     "compatibility",
     "presentation",
     "frontend",
@@ -332,6 +335,7 @@ export const DESCRIPTOR_FIELDS = {
   ],
   "AppDisplay": [
     "icon",
+    "icon_png",
     "texts"
   ],
   "AppDisplayText": [

@@ -77,7 +77,7 @@ type platformInstallationSettings struct {
 	PolicyRevision       string                       `json:"policy_revision"`
 	CurrentReleaseSHA256 string                       `json:"current_release_sha256,omitempty"`
 	Version              string                       `json:"version,omitempty"`
-	Display              *appplatform.AppDisplay      `json:"display,omitempty"`
+	Display              *platformDisplayView         `json:"display,omitempty"`
 	Audience             []platformSettingsAudience   `json:"audience"`
 	AudienceTotal        int                          `json:"audience_total"`
 	Capabilities         []platformSettingsCapability `json:"capabilities"`
@@ -275,7 +275,9 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 				return err
 			}
 			manifest := parsed.Manifest
-			result.Display = manifest.Presentation.Display
+			// The stored release is parsed, not signature-verified, here: its custom icon and
+			// publisher name are left out; the built-in icon key and texts remain.
+			result.Display = platformDisplayViewUnverified(manifest.Presentation.Display)
 			result.Backend.Required = manifest.Backend != nil
 			for _, capability := range manifest.Capabilities.Required {
 				required[capability] = true
