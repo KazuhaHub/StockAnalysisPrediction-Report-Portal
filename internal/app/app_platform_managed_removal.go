@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -187,21 +188,23 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 		if err != nil {
 			return zero, errAppPlatformStageEvidence
 		}
-		sourceQuery, sourceArgs := `SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
-			FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
-			WHERE o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
-			  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NULL
-			ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`, []any{expected.installationID}
-		if never != nil && never.Started() {
-			sourceQuery, sourceArgs = `SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
+		var row *sql.Row
+		switch {
+		case never != nil && never.Started():
+			row = e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
 				FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
 				WHERE o.id=? AND o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
-				  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NOT NULL`, []any{never.OperationID, expected.installationID}
-		} else if never != nil {
+				  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NOT NULL`, never.OperationID, expected.installationID)
+		case never != nil:
 			return zero, errAppPlatformStageEvidence
+		default:
+			row = e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
+				FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
+				WHERE o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
+				  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NULL
+				ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`, expected.installationID)
 		}
-		if err := e.queryRow(sourceQuery, sourceArgs...).
-			Scan(&sourceOperation, &sourcePlanRaw, &sourcePlanSHA, &sourceRelease, &descriptorRaw, &sourceGeneration, &sourceFence, &sourceCompleted); err != nil {
+		if err := row.Scan(&sourceOperation, &sourcePlanRaw, &sourcePlanSHA, &sourceRelease, &descriptorRaw, &sourceGeneration, &sourceFence, &sourceCompleted); err != nil {
 			return zero, errAppPlatformStageEvidence
 		}
 		descriptor := []byte(descriptorRaw)
