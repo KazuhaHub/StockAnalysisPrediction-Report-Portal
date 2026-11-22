@@ -3457,6 +3457,7 @@
   "appPlatform.defaultOUNote": "默认组织单元是所有组织单元的上级，选择它会向全部组织单元开放此应用，包括外部组织单元。",
   "apps.status.all": "对所有人开放",
   "apps.status.some": "部分组织单元开放 · {{open}} / {{total}}",
+  "apps.status.someShort": "部分开放 {{open}}/{{total}}",
   "apps.status.none": "对所有人关闭",
   "apps.backToList": "返回应用列表",
   "apps.detail.type": "类型",

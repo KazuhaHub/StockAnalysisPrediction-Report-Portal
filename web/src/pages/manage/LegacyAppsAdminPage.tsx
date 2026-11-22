@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import AppGlyph from '../../components/apps/AppGlyph'
 import { App, Button, Card, Empty, Input, Space, Table, Tag, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { AppstoreOutlined, CloudDownloadOutlined, DeleteOutlined, ShopOutlined, UploadOutlined } from '@ant-design/icons'
@@ -141,7 +142,7 @@ export default function LegacyAppsAdminPage() {
       title: t('common.name'),
       render: (_: unknown, a: AppSummary) => (
         <Space>
-          {a.icon && <span>{a.icon}</span>}
+          {a.icon && <AppGlyph icon={a.icon} />}
           <span>{a.name}</span>
           <Typography.Text type="secondary" copyable>
             {a.id}
@@ -175,7 +176,7 @@ export default function LegacyAppsAdminPage() {
       render: (_: unknown, e: AppMarketEntry) => (
         <Space orientation="vertical" size={0}>
           <Space>
-            {e.icon && <span>{e.icon}</span>}
+            {e.icon && <AppGlyph icon={e.icon} />}
             <span>{e.name}</span>
             {e.version && <Typography.Text type="secondary">v{e.version}</Typography.Text>}
           </Space>

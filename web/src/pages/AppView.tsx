@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AppGlyph from '../components/apps/AppGlyph'
 import { Alert, Button, Space, Typography, theme } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router'
@@ -167,7 +168,7 @@ export default function AppView() {
             {t('apps.back')}
           </Button>
           <Typography.Text strong style={{ fontSize: 16 }}>
-            {meta.app.icon && <span style={{ marginInlineEnd: 6 }}>{meta.app.icon}</span>}
+            {meta.app.icon && <span style={{ marginInlineEnd: 6 }}><AppGlyph icon={meta.app.icon} /></span>}
             {meta.app.name}
           </Typography.Text>
           {meta.app.version && <Typography.Text type="secondary">v{meta.app.version}</Typography.Text>}

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import AppGlyph from '../components/apps/AppGlyph'
 import { Alert, Button, Card, Col, Empty, Row, Space, Tag, Typography, theme } from 'antd'
 import { AppstoreOutlined, ClockCircleOutlined, PlayCircleOutlined, SettingOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router'
@@ -73,6 +74,11 @@ export default function AppsHub() {
   // nothing but their own permission.
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
+  // The built-in cards and the platform installs arrive separately; show neither until both have answered once.
+  const [settled, setSettled] = useState(false)
+  const bothDone = !loading && !directory.loading
+  useEffect(() => { if (bothDone) setSettled(true) }, [bothDone])
+  const waiting = !settled && !bothDone
 
   const load = () => {
     setLoading(true)
@@ -134,9 +140,9 @@ export default function AppsHub() {
         <Alert type="warning" showIcon title={t('apps.v2ListUnavailable')}
           action={<Button size="small" onClick={() => directory.load()}>{t('common.retry')}</Button>} />
       )}
-      {(loading || directory.loading) && isEmpty ? (
+      {waiting ? (
         <LoadingPlaceholder minHeight={200} />
-      ) : isEmpty && !loading && !directory.loading && !loadErr && !directory.failed ? (
+      ) : isEmpty && !loadErr && !directory.failed ? (
         <Empty description={t('apps.empty')} />
       ) : (
         <Row gutter={[16, 16]}>
@@ -157,7 +163,7 @@ export default function AppsHub() {
               return (
                 <AppCard
                   key={e.app.id}
-                  icon={e.app.icon ? <span style={{ fontSize: 28, lineHeight: 1 }}>{e.app.icon}</span> : <AppstoreOutlined />}
+                  icon={<AppGlyph icon={e.app.icon} />}
                   title={e.app.name}
                   desc={e.app.version ? `v${e.app.version}` : undefined}
                   onClick={() => navigate(`/apps/x/${e.app.id}`)}
@@ -168,7 +174,7 @@ export default function AppsHub() {
             const copy = appDisplayText(a.applicationId, a.display, lang)
             return (
               <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
-                tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
+                tag={a.state === 'installed' ? undefined : t(`apps.v2State.${a.state}`)} disabled={!a.openable}
                 status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
                 footer={!a.openable
                   ? <Space wrap>
