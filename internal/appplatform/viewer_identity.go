@@ -17,9 +17,9 @@ var ErrViewerIdentity = errors.New("application viewer identity unavailable")
 
 // LegacyAccountCreated stands in for the creation marker of accounts that
 // predate users.created_at (NULL or empty there). Real markers are timestamps,
-// which never equal this word. Every site that reads, compares or records a
-// user's account_created must pass the stored value through AccountCreatedMarker
-// so grants and viewer derivation agree; DeriveViewerIdentity itself stays strict.
+// which never equal this word. Viewer derivation and user-principal audience
+// grants (their write and every compare) pass the stored value through
+// AccountCreatedMarker so they agree; DeriveViewerIdentity itself stays strict.
 // Existing users.created_at values must never be backfilled: the viewer subjects
 // and user-principal grants of legacy accounts depend on that value staying empty.
 // Stored identities elsewhere (storage owners, review plans, session scope) keep
