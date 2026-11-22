@@ -59,6 +59,8 @@ type migExec struct {
 	// it was prepared on and cannot be used on another. It is the pool the executor was made from, not
 	// whatever pool is current when a statement runs.
 	rp *readPool
+	// cat, when set, answers the three schema probes below from one catalog read (schema_catalog.go).
+	cat *schemaCatalog
 }
 
 // pool is the pool whose statement cache this executor uses.
@@ -138,6 +140,9 @@ func (e migExec) setSetting(k, v string) error {
 }
 
 func (e migExec) tableExists(name string) bool {
+	if e.cat != nil {
+		return e.cat.tables[name]
+	}
 	var n int
 	if e.s.driver == "postgres" {
 		e.queryRow(`SELECT COUNT(*) FROM information_schema.tables
@@ -149,6 +154,9 @@ func (e migExec) tableExists(name string) bool {
 }
 
 func (e migExec) indexExists(name string) bool {
+	if e.cat != nil {
+		return e.cat.indexes[name]
+	}
 	var n int
 	if e.s.driver == "postgres" {
 		e.queryRow(`SELECT COUNT(*) FROM pg_indexes WHERE schemaname='public' AND indexname=?`, name).Scan(&n)
@@ -159,6 +167,9 @@ func (e migExec) indexExists(name string) bool {
 }
 
 func (e migExec) columnExists(table, col string) bool {
+	if e.cat != nil {
+		return e.cat.columns[e.cat.columnKey(table, col)]
+	}
 	if e.s.driver == "postgres" {
 		var n int
 		e.queryRow(`SELECT COUNT(*) FROM information_schema.columns
@@ -894,28 +905,36 @@ func (s *Store) applyMigrationOnce(m migration) error {
 // verifyMigrationProducts checks what every step declared. It runs for the whole list on every start
 // — recorded or not — because the ledger says what was applied, not what is still there.
 func (s *Store) verifyMigrationProducts(e migExec, steps []migration) error {
+	// The declared products are read from one catalog snapshot taken through e; a step's own verify
+	// runs on e itself, since it may issue queries a snapshot cannot answer. A catalog that cannot be
+	// read is reported as such: on PostgreSQL the failed query has aborted e's transaction, so probing
+	// on would only turn the real error into a made-up "missing".
+	c, err := e.withCatalog()
+	if err != nil {
+		return fmt.Errorf("reading the schema catalog: %w", err)
+	}
 	for _, m := range steps {
-		for _, c := range m.columns {
-			if !e.columnExists(c.table, c.name) {
+		for _, col := range m.columns {
+			if !c.columnExists(col.table, col.name) {
 				return fmt.Errorf("migration %s declares %s.%s, which is missing: this database is "+
-					"recorded as migrated but does not have that shape", m.id, c.table, c.name)
+					"recorded as migrated but does not have that shape", m.id, col.table, col.name)
 			}
 		}
 		for _, tbl := range m.tables {
-			if !e.tableExists(tbl) {
+			if !c.tableExists(tbl) {
 				return fmt.Errorf("migration %s declares table %s, which is missing", m.id, tbl)
 			}
 		}
 		for _, idx := range m.indices {
-			if !e.indexExists(idx) {
+			if !c.indexExists(idx) {
 				return fmt.Errorf("migration %s declares index %s, which is missing", m.id, idx)
 			}
 		}
 		for _, r := range m.renames {
-			if !e.columnExists(r.table, r.to) {
+			if !c.columnExists(r.table, r.to) {
 				return fmt.Errorf("migration %s renames %s.%s to %s, which is missing", m.id, r.table, r.from, r.to)
 			}
-			if e.columnExists(r.table, r.from) {
+			if c.columnExists(r.table, r.from) {
 				return fmt.Errorf("migration %s renames %s.%s to %s, but %s.%s is still present", m.id,
 					r.table, r.from, r.to, r.table, r.from)
 			}

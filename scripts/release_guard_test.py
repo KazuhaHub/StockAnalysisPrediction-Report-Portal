@@ -16,6 +16,7 @@ CHANGES_CONDITIONS = (
     "needs.changes.outputs.go == 'true'",
     "needs.changes.outputs.web == 'true'",
     "needs.changes.outputs.go == 'true' || needs.changes.outputs.web == 'true'",
+    "needs.changes.outputs.go == 'true' && needs.changes.outputs.platform == 'true'",
 )
 
 
@@ -38,7 +39,7 @@ def push_run_jobs(workflow):
             continue
         if cond == 'always()':
             cond = None
-        # The changes job says go=true and web=true on every event but a pull request
+        # The changes job says go, web and platform are all true on every event but a pull request
         # (test_changes_job_needs_everything_off_a_pull_request), so a job gated on them runs on a push.
         if cond in CHANGES_CONDITIONS:
             cond = None
@@ -203,7 +204,7 @@ class GuardTests(unittest.TestCase):
                 # A skipped job passes only on the changes job's word that the group was not needed.
                 self.assertEqual(needs[0], 'changes')
                 skipped = re.findall(r'test "\$\{\{ needs\.([\w-]+)\.result \}\}" = skipped', block)
-                self.assertEqual(sorted(skipped), sorted(n.strip() for n in needs[1:]))
+                self.assertEqual(sorted(set(skipped)), sorted(n.strip() for n in needs[1:]))
                 self.assertRegex(block, r'if \[ "\$\{\{ needs\.changes\.outputs\.(go|web) \}\}" = false \]; then')
 
     def test_changes_job_needs_everything_off_a_pull_request(self):
@@ -215,29 +216,43 @@ class GuardTests(unittest.TestCase):
         step = block[block.index('id: classify'):]
         early = step.index('exit 0')
         self.assertIn('if [ "${{ github.event_name }}" != pull_request ]; then', step[:early])
-        self.assertIn("printf 'go=true\\nweb=true\\n' | tee -a \"$GITHUB_OUTPUT\"", step[:early])
+        self.assertIn("printf 'go=true\\nweb=true\\nplatform=true\\n' | tee -a \"$GITHUB_OUTPUT\"", step[:early])
         self.assertLess(early, step.index('git diff'))
         # A renamed file must be listed under its old path as well as its new one.
         self.assertIn('git diff --no-renames --name-only HEAD^1 HEAD', step)
         self.assertIn('go: ${{ steps.classify.outputs.go }}', block)
         self.assertIn('web: ${{ steps.classify.outputs.web }}', block)
+        self.assertIn('platform: ${{ steps.classify.outputs.platform }}', block)
 
-    def test_pr_race_shards_split_packages_from_the_subset(self):
-        # Shard 1 races the packages; the app subset is dealt over the other shards, so the deal must
-        # count them, not the matrix.
+    def test_pr_race_shards_deal_journal_and_the_subset_over_every_shard(self):
+        # Shard 1 races the small concurrency packages; internal/apprunner/journal and the app subset
+        # are each dealt over every shard, so both deals must read the matrix, and each step must fail
+        # on a shard dealt nothing rather than race nothing green.
         block = job_block(read_workflow('test.yml'), 'go-race-shard')
         shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
         self.assertEqual(shards, list(range(1, len(shards) + 1)))
         name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
         self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
-        packages = block[block.index('Race the concurrency packages'):block.index('of the app subset')]
+        packages = block[block.index('Race the concurrency packages'):block.index('of internal/apprunner/journal')]
         self.assertIn('if: matrix.shard == 1', packages)
-        # Shard 1's only work is a pipe into tee: without bash's pipefail a failed race passes.
+        self.assertNotIn('journal', packages)
+        # Every step's work is a pipe into tee: without bash's pipefail a failed race passes.
         self.assertIn('shell: bash', packages)
+        journal = block[block.index('of internal/apprunner/journal'):block.index('of the app subset')]
         subset = block[block.index('of the app subset'):]
-        self.assertIn('if: matrix.shard != 1', subset)
-        self.assertIn('--shard "$(( ${{ matrix.shard }} - 1 ))" --of "$(( ${{ strategy.job-total }} - 1 ))"', subset)
-        self.assertIn('test -n "$regex"', subset)
+        for label, step in (('journal', journal), ('subset', subset)):
+            with self.subTest(step=label):
+                self.assertNotIn('if: matrix.shard', step)
+                self.assertIn('shell: bash', step)
+                self.assertIn('scripts/ci_shard.py --shard "${{ matrix.shard }}" --of "${{ strategy.job-total }}"', step)
+                self.assertIn('test -n "$regex"', step)
+        self.assertIn('./internal/apprunner/journal/', journal)
+        # Journal and the platform lane skip together, on the changes job's word alone, and the summary
+        # accepts the platform lane's skip only when that word was "no platform change".
+        self.assertIn("if: needs.changes.outputs.platform == 'true'", journal)
+        summary = job_block(read_workflow('test.yml'), 'go-race')
+        gate = summary.index('if [ "${{ needs.changes.outputs.platform }}" = false ]; then')
+        self.assertLess(gate, summary.index('test "${{ needs.go-race-platform.result }}" = skipped', gate))
 
     def test_ci_compiles_every_release_target(self):
         # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles

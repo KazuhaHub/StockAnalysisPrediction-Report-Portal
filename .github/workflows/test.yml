@@ -44,6 +44,7 @@ jobs:
     outputs:
       go: ${{ steps.classify.outputs.go }}
       web: ${{ steps.classify.outputs.web }}
+      platform: ${{ steps.classify.outputs.platform }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" != pull_request ]; then
-            printf 'go=true\nweb=true\n' | tee -a "$GITHUB_OUTPUT"
+            printf 'go=true\nweb=true\nplatform=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
           test "$(git rev-list --parents -n 1 HEAD | wc -w)" = 3 || { echo "::error::HEAD is not the pull request's merge commit"; exit 1; }
@@ -92,7 +93,10 @@ jobs:
           POSTGRES_DB: reports_test
         ports:
           - 5432:5432
+        # The data directory on tmpfs: a throwaway CI database needs no durability, and every
+        # commit's fsync to the runner's disk is time the PostgreSQL variants spend waiting.
         options: >-
+          --tmpfs /var/lib/postgresql/data
           --health-cmd "pg_isready -U portal -d reports_test"
           --health-interval 10s
           --health-timeout 5s
@@ -218,10 +222,12 @@ jobs:
   # before: neither race lane below has a database, so these are the only race runs of these tests'
   # PostgreSQL variants, and of the runner's broker, transport and control egress paths on a pull
   # request. Not dealt over shards: about five minutes in all, under the go-test shards' time.
+  # A pull request that touches no app-platform ground (scripts/ci_changes.py, "platform") skips it:
+  # its ordinary runs are in the go-test shards either way, and a main push runs it in full.
   go-race-platform:
     name: go race (app platform, PostgreSQL)
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.platform == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -233,7 +239,10 @@ jobs:
           POSTGRES_DB: reports_test
         ports:
           - 5432:5432
+        # The data directory on tmpfs: a throwaway CI database needs no durability, and every
+        # commit's fsync to the runner's disk is time the PostgreSQL variants spend waiting.
         options: >-
+          --tmpfs /var/lib/postgresql/data
           --health-cmd "pg_isready -U portal -d reports_test"
           --health-interval 10s
           --health-timeout 5s
@@ -315,7 +324,10 @@ jobs:
           POSTGRES_DB: reports_test
         ports:
           - 5432:5432
+        # The data directory on tmpfs: a throwaway CI database needs no durability, and every
+        # commit's fsync to the runner's disk is time the PostgreSQL variants spend waiting.
         options: >-
+          --tmpfs /var/lib/postgresql/data
           --health-cmd "pg_isready -U portal -d reports_test"
           --health-interval 10s
           --health-timeout 5s
@@ -408,10 +420,11 @@ jobs:
   # internal/app (one big test binary), which used to put 6+ minutes on every PR. A PR runs the
   # packages where concurrency actually lives plus the app package's scheduler/engine/webhook
   # tests; a main-branch push runs everything as the post-merge backstop, so a missed race turns
-  # into a red main instead of a blocked PR. Shard 1 races the concurrency packages, whose
-  # internal/apprunner/journal alone takes five minutes under -race; the app subset is dealt
-  # round-robin over the other shards. (With three shards, shard 1 carried both, 10.8 minutes against
-  # 7.5 for the others.) The required check "go race" is the summary job below.
+  # into a red main instead of a blocked PR. internal/apprunner/journal takes about seven minutes
+  # under -race (40s without it, spread over many tests with no long pole), so it is dealt over every
+  # shard like the app subset rather than given to one: on shard 1 alone it was the race lane's
+  # critical path, 431-437s against 264-411s for the subset shards. Shard 1 also races the small
+  # concurrency packages, a few seconds. The required check "go race" is the summary job below.
   go-race-shard:
     name: go race (${{ matrix.shard }}/4)
     needs: changes
@@ -438,24 +451,33 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      # shell: bash, so the step gets pipefail and a failed test is not hidden behind tee's exit status.
-      # Without it, journal's runs at the old -timeout=5m (it takes about 300s under -race) timed out
-      # and still passed; 10m leaves it room, as the push lane's 12m does.
+      # shell: bash, so each step gets pipefail and a failed test is not hidden behind tee's exit status.
       - name: Race the concurrency packages
         if: matrix.shard == 1
         shell: bash
-        run: go test -race -count=1 -timeout=10m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ ./internal/apprunner/journal/ 2>&1 | tee go-race-packages.txt
+        run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ 2>&1 | tee go-race-packages.txt
+      # The list is built with -race, the same flags as the run, so the run reuses its compile.
+      # Journal is app-platform ground: a pull request with no platform change skips it, as it skips
+      # go race (app platform, PostgreSQL); a main push races it in go-race-others.
+      - name: Race shard ${{ matrix.shard }}/${{ strategy.job-total }} of internal/apprunner/journal
+        if: needs.changes.outputs.platform == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests=$(go test -race -list '^(Test|Fuzz)' ./internal/apprunner/journal/ | grep -E '^(Test|Fuzz)' | grep -v '^TestMain$')
+          regex=$(printf '%s\n' "$tests" | python3 -B scripts/ci_shard.py --shard "${{ matrix.shard }}" --of "${{ strategy.job-total }}")
+          test -n "$regex" || { echo "::error::journal shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
+          go test -race -count=1 -timeout=10m -run "^(${regex})$" ./internal/apprunner/journal/ 2>&1 | tee "go-race-journal-${{ matrix.shard }}.txt"
       # The subset is name-based on purpose: the run queue, scheduler, retry/reconcile loops,
       # webhook delivery and chat gate are the paths a race detector can actually catch here. The
-      # list is the top-level tests that pattern selects, dealt by position over shards 2 to N.
+      # list is the top-level tests that pattern selects, dealt by position over every shard.
       - name: Race shard ${{ matrix.shard }}/${{ strategy.job-total }} of the app subset
-        if: matrix.shard != 1
         shell: bash
         run: |
           set -euo pipefail
           subset='Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout|Forecast|Evaluator|Settle|Watchdog|Population|Restore|Scope|Alert|Ledger|QuoteOrder|Readiness|QuoteProbe|QuoteShadow|SinaRange|SinaKline|ShadowHTTPBudget|ShadowNeverWrites|FallbackModesTier1|AppPlatform|Keyring|Seal|RotateSecretKey'
           tests=$(go test -race -list "$subset" ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
-          regex=$(printf '%s\n' "$tests" | python3 -B scripts/ci_shard.py --shard "$(( ${{ matrix.shard }} - 1 ))" --of "$(( ${{ strategy.job-total }} - 1 ))")
+          regex=$(printf '%s\n' "$tests" | python3 -B scripts/ci_shard.py --shard "${{ matrix.shard }}" --of "${{ strategy.job-total }}")
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
           go test -race -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
       - name: Upload race output
@@ -483,7 +505,11 @@ jobs:
             test "${{ needs.go-race-platform.result }}" = skipped
           else
             test "${{ needs.go-race-shard.result }}" = success
-            test "${{ needs.go-race-platform.result }}" = success
+            if [ "${{ needs.changes.outputs.platform }}" = false ]; then
+              test "${{ needs.go-race-platform.result }}" = skipped
+            else
+              test "${{ needs.go-race-platform.result }}" = success
+            fi
           fi
 
   # Full -race over every package, on main pushes only: PRs run the scoped go-race lane above.

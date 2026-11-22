@@ -12,8 +12,15 @@ A file one side reads from the other side's ground is "both" whatever its place:
 name them, and scripts/ci_changes_test.py scans the sources so that a new such read fails there.
 An empty list of files runs everything: it means the diff said nothing, not that nothing changed.
 
-Usage: python3 scripts/ci_changes.py [FILE ...]  (or the names on stdin); prints go=... and web=...
-lines for $GITHUB_OUTPUT.
+A third output, platform, says whether the app platform's own race lane runs: go race (app platform,
+PostgreSQL) and the race shards of internal/apprunner/journal. internal/app is one Go package that
+holds both the Portal and the platform, so a Portal-only Go change still runs every platform test in
+the ordinary go-test shards and the platform subset of the race shards; what it skips is only the
+platform's PostgreSQL race runs, which a main push still runs in full. The rule errs towards running:
+a file counts unless it is docs, web (outside GO_READS) or a Go file off the platform's ground below.
+
+Usage: python3 scripts/ci_changes.py [FILE ...]  (or the names on stdin); prints go=..., web=... and
+platform=... lines for $GITHUB_OUTPUT.
 """
 import sys
 
@@ -26,6 +33,16 @@ GO_READS = (
 # Go sources that web tests read.
 WEB_READS = (
     'internal/app/export_sources.go',               # web/src/lib/exportFilter.test.ts
+)
+
+# Go sources the platform lane covers: the platform itself, and the shared core its tests stand on
+# (the store and its statement cache, schema checks and migrations, the keyring and secret box its
+# credentials are sealed with, the sessions its viewer requests check, the run queue).
+PLATFORM_GO = (
+    'internal/app/app_platform', 'internal/app/apps_', 'internal/apprunner/', 'internal/appplatform/',
+    'cmd/app-runner/', 'cmd/app-task-worker/', 'cmd/app-inspect/',
+    'internal/app/store', 'internal/app/migrate', 'internal/app/schema_catalog', 'internal/app/keyring',
+    'internal/app/secretbox', 'internal/app/sessions', 'internal/queue/',
 )
 
 
@@ -61,11 +78,26 @@ def classify(paths):
     return need
 
 
+def needs_platform(paths):
+    """Whether the changed paths need the app platform's own race lane."""
+    paths = [p for p in paths if p]
+    if not paths:
+        return True
+    for path in paths:
+        k = kind(path)
+        if _listed(path, GO_READS) or _listed(path, WEB_READS):
+            k = 'both'
+        if k == 'both' or (k == 'go' and path.startswith(PLATFORM_GO)):
+            return True
+    return False
+
+
 def main(argv=None, stdin=sys.stdin, stdout=sys.stdout):
     argv = sys.argv[1:] if argv is None else argv
     paths = argv or [line.strip() for line in stdin]
     for key, value in classify(paths).items():
         stdout.write(f'{key}={"true" if value else "false"}\n')
+    stdout.write(f'platform={"true" if needs_platform(paths) else "false"}\n')
 
 
 if __name__ == '__main__':
