@@ -4318,5 +4318,8 @@
   "appRuntime.observed": "运行器报告的身份与绑定一致，已启用",
   "err.app_platform_runtime_binding_unavailable": "无法准备运行环境绑定：已有已确认或状态异常的绑定。",
   "err.app_platform_runtime_not_observed": "无法确认运行环境：运行器没有报告此绑定的身份。请确认 host-setup 使用的是本页的接入文件。",
-  "err.app_platform_runtime_endpoint_missing": "Portal 尚未配置运行器套接字，请先完成 host-setup 并重启 Compose 项目。"
+  "err.app_platform_runtime_endpoint_missing": "Portal 尚未配置运行器套接字，请先完成 host-setup 并重启 Compose 项目。",
+  "appMarket.downloading": "正在下载软件包，可能需要几分钟。",
+  "appMarket.downloadingProgress": "已下载 {{done}} / {{total}} MiB",
+  "err.app_platform_stage_unknown": "该下载已不再被跟踪，请重新开始验证。"
 }

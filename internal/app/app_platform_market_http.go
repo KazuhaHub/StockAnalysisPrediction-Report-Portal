@@ -1,8 +1,10 @@
 package app
 
 import (
+	"context"
 	"net/http"
-	"strconv"
+	"sync"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -89,11 +91,56 @@ func (s *Server) apiPlatformMarketStageClient(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	defer releaseSlot()
-	result, err := s.fetchAndStagePlatformMarketRelease(r.Context(), actor, address, digest, client)
+	var once sync.Once
+	release := func() { once.Do(releaseSlot) }
+	defer release()
+	staged, pkg, err := s.resolvePlatformMarketRelease(r.Context(), actor, address, digest, client)
 	if err != nil {
 		platformManagementError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{"release_sha256": result.sha256, "app_id": result.appID, "publisher_id": result.publisherID, "trust_revision": strconv.FormatInt(result.trustRevision, 10), "reused": result.reused})
+	if pkg == nil {
+		writeJSON(w, platformStagedBody(staged))
+		return
+	}
+	// The package comes down in the background, detached from this request: the slot is not held while it does.
+	release()
+	store, err := s.platformImages()
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	job, err := s.platformStageJobs.start(platformPackageKey(pkg.entry), digest, store, func(ctx context.Context) (platformStagedRelease, error) {
+		defer client.close()
+		// The verification and storage step takes a slot of its own, so a long download does not hold one.
+		admit := func() (func(), error) {
+			slot, ok := s.platformDocuments.acquire()
+			if !ok {
+				return nil, errPlatformManagementBusy
+			}
+			return slot, nil
+		}
+		return s.fetchAndStagePlatformPackageAdmitted(ctx, actor, client, pkg.entry, pkg.descriptor, pkg.signature, admit)
+	})
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	timer := time.NewTimer(platformMarketStageWait)
+	defer timer.Stop()
+	select {
+	case <-job.done:
+		if v, ok := s.platformStageJobs.view(digest, false); ok && v.job == job && !v.running {
+			if v.err != nil {
+				s.platformStageJobs.forget(job)
+				platformManagementError(w, v.err)
+				return
+			}
+			writeJSON(w, platformStagedBody(v.result))
+			return
+		}
+	case <-timer.C:
+	case <-r.Context().Done():
+	}
+	writeJSONStatus(w, http.StatusAccepted, job.downloading())
 }

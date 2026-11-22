@@ -57,3 +57,25 @@ export function parsePlatformMarket(value: unknown): PlatformMarketHint[] | null
   // as signature/trust verification, or use returned URLs to fetch in the browser.
   return value.releases as PlatformMarketHint[]
 }
+
+/**
+ * The state of staging a catalogue package: the answer of POST and GET /market/stage. A package comes down in the
+ * background, so a start answers `downloading` (202) when it is not done in a moment and the caller polls the GET
+ * until `staged` or `failed`. A synchronous 200 body carries no state and reads as staged.
+ */
+export type PlatformStageStatus =
+  | { state: 'staged'; release_sha256: string }
+  | { state: 'downloading'; release_sha256: string; bytes_done: number; bytes_total: number | null }
+  | { state: 'failed'; release_sha256: string; error_code: string }
+
+const counter = /^(0|[1-9][0-9]{0,15})$/
+export function parsePlatformStageStatus(value: unknown): PlatformStageStatus | null {
+  if (!object(value) || typeof value.release_sha256 !== 'string' || !digest.test(value.release_sha256)) return null
+  const release_sha256 = value.release_sha256
+  if (value.state === undefined || value.state === 'staged') return { state: 'staged', release_sha256 }
+  if (value.state === 'failed') return typeof value.error_code === 'string' && value.error_code ? { state: 'failed', release_sha256, error_code: value.error_code } : null
+  if (value.state !== 'downloading' || typeof value.bytes_done !== 'string' || !counter.test(value.bytes_done)) return null
+  // The total is empty until the server has announced a size.
+  if (typeof value.bytes_total !== 'string' || (value.bytes_total !== '' && !counter.test(value.bytes_total))) return null
+  return { state: 'downloading', release_sha256, bytes_done: Number(value.bytes_done), bytes_total: value.bytes_total === '' ? null : Number(value.bytes_total) }
+}

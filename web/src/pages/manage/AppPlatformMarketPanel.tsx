@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Descriptions, Empty, Input, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Descriptions, Empty, Input, Progress, Space, Switch, Table, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../auth'
 import { api, errText } from '../../api/client'
-import { parsePlatformMarket, type PlatformMarketHint, type PlatformRelease } from '../../api/appPlatform'
+import { parsePlatformMarket, parsePlatformStageStatus, type PlatformMarketHint, type PlatformRelease, type PlatformStageStatus } from '../../api/appPlatform'
 
 const root = '/api/admin/app-platform'
+// A package that is not staged within a moment comes down in the background; this is how often it is asked after.
+const stagePollMs = 2000
+const wait = (ms: number) => new Promise<void>(done => { setTimeout(done, ms) })
+const MiB = 1024 * 1024
 type OfficialSource = { name: string; url: string; enabled: boolean }
 function parseSources(value: unknown): OfficialSource | null {
   const official = value && typeof value === 'object' ? (value as { official?: unknown }).official : undefined
@@ -24,6 +28,7 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
   const [error, setError] = useState('')
   const [ready, setReady] = useState(false)
   const [verifiedRelease, setVerifiedRelease] = useState<PlatformRelease | null>(null)
+  const [downloading, setDownloading] = useState<Extract<PlatformStageStatus, { state: 'downloading' }> | null>(null)
   const [official, setOfficial] = useState<OfficialSource | null>(null)
   const [switching, setSwitching] = useState(false)
   const owner = useRef(user)
@@ -43,7 +48,7 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     generation.current = epoch
     active.current = false
     setAddress(''); setSource(''); setEntries(null); setBusy(null); setError('')
-    setReady(false); setVerifiedRelease(null)
+    setReady(false); setVerifiedRelease(null); setDownloading(null)
     reportBusy.current(false)
     return () => { mounted.current = false; generation.current = {}; reportBusy.current(false) }
   }, [user])
@@ -71,7 +76,7 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     generation.current = {}
     active.current = false
     setAddress(next); setSource(''); setEntries(null); setError('')
-    setReady(false); setVerifiedRelease(null); setBusy(null)
+    setReady(false); setVerifiedRelease(null); setBusy(null); setDownloading(null)
     reportBusy.current(false)
   }
 
@@ -98,9 +103,19 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     active.current = true; setBusy('stage'); setError(''); setReady(false)
     setVerifiedRelease(null); reportBusy.current(true)
     try {
-      const result = await api.post<{ release_sha256: string }>(`${root}/market/stage`, { catalogue_url: requested, release_sha256: entry.descriptor_sha256 })
+      let result = parsePlatformStageStatus(await api.post<unknown>(`${root}/market/stage`, { catalogue_url: requested, release_sha256: entry.descriptor_sha256 }))
       if (!live(account, epoch)) return
-      if (result.release_sha256 !== entry.descriptor_sha256) throw new Error(t('appMarket.verificationChanged'))
+      // A slow package answers "downloading"; ask after it until it is staged or has failed.
+      while (result?.state === 'downloading' && result.release_sha256 === entry.descriptor_sha256) {
+        setDownloading(result)
+        await wait(stagePollMs)
+        if (!live(account, epoch)) return
+        result = parsePlatformStageStatus(await api.get<unknown>(`${root}/market/stage?release_sha256=${entry.descriptor_sha256}`))
+        if (!live(account, epoch)) return
+      }
+      setDownloading(null)
+      if (result?.state === 'failed') { setError(t(`err.${result.error_code}`, { defaultValue: t('common.error') })); return }
+      if (result?.state !== 'staged' || result.release_sha256 !== entry.descriptor_sha256) throw new Error(t('appMarket.verificationChanged'))
       // Read current verified metadata by exact digest; a newly staged package
       // may be beyond the directory's first cursor page. Catalogue copy is never
       // promoted into a signed display/permission review.
@@ -113,7 +128,7 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
       setVerifiedRelease(verified)
       setReady(true)
     } catch (e) { if (live(account, epoch)) setError(errText(e, t)) }
-    finally { if (live(account, epoch)) { active.current = false; setBusy(null); reportBusy.current(false) } }
+    finally { if (live(account, epoch)) { active.current = false; setBusy(null); setDownloading(null); reportBusy.current(false) } }
   }
 
   return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -146,7 +161,15 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
       <Alert type="warning" showIcon title={t('appMarket.unverified')} description={t('appMarket.trustHint')} />
       <Table<PlatformMarketHint> rowKey="descriptor_sha256" dataSource={entries} pagination={{ pageSize: 10, showSizeChanger: false }} locale={{ emptyText: <Empty description={t('appMarket.empty')} /> }} columns={[
         { title: t('appPlatform.application'), render: (_, item) => <><Typography.Text strong>{item.app_id}</Typography.Text><div><Typography.Text type="secondary">{item.publisher_id} · {item.version}</Typography.Text></div><Tag>{t('appMarket.unverifiedTag')}</Tag></> },
-        { title: t('appPlatform.action'), render: (_, item) => <Button disabled={disabled || busy !== null} loading={busy === 'stage'} onClick={() => void stage(item)}>{t('appMarket.verifyDownload')}</Button> },
+        { title: t('appPlatform.action'), render: (_, item) => <Space orientation="vertical" size="small">
+          <Button disabled={disabled || busy !== null} loading={busy === 'stage'} onClick={() => void stage(item)}>{t('appMarket.verifyDownload')}</Button>
+          {downloading?.release_sha256 === item.descriptor_sha256 && <div style={{ minWidth: 200 }}>
+            <Typography.Text type="secondary">{t('appMarket.downloading')}</Typography.Text>
+            {downloading.bytes_total
+              ? <Progress percent={Math.min(99, Math.floor(downloading.bytes_done * 100 / downloading.bytes_total))} size="small" format={() => t('appMarket.downloadingProgress', { done: Math.floor(downloading.bytes_done / MiB), total: Math.ceil(downloading.bytes_total! / MiB) })} />
+              : <Progress percent={100} status="active" showInfo={false} size="small" />}
+          </div>}
+        </Space> },
       ]} />
     </>}
   </Space>

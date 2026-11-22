@@ -29,6 +29,10 @@ type platformPackageRemote struct {
 	// breakAfter, when positive, cuts every package response after that fraction (1/n) of what it was going to send.
 	breakDivisor int
 	noPackageURL bool
+	// gate, when set, holds every package response after its first half until the channel is closed, which is a
+	// slow download; failAfterGate then cuts the response instead of finishing it.
+	gate          chan struct{}
+	failAfterGate bool
 }
 
 func newPlatformPackageRemote(t *testing.T, parts platformManagedImageParts, pkg []byte) *platformPackageRemote {
@@ -82,6 +86,23 @@ func (r *platformPackageRemote) servePackage(w http.ResponseWriter, req *http.Re
 	_ = start
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
+	r.mu.Lock()
+	gate, fail := r.gate, r.failAfterGate
+	r.mu.Unlock()
+	if gate != nil {
+		w.Write(body[:len(body)/2])
+		w.(http.Flusher).Flush()
+		select {
+		case <-gate:
+		case <-req.Context().Done():
+			return
+		}
+		if fail {
+			panic(http.ErrAbortHandler)
+		}
+		w.Write(body[len(body)/2:])
+		return
+	}
 	if r.breakDivisor > 0 {
 		w.Write(body[:len(body)/r.breakDivisor])
 		w.(http.Flusher).Flush()

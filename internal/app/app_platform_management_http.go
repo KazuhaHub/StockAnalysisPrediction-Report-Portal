@@ -23,6 +23,7 @@ const platformManagementTimeout = 15 * time.Second
 
 var platformManagementOrigin = http.NewCrossOriginProtection()
 var errPlatformManagementInput = errors.New("invalid application management input")
+var errPlatformManagementBusy = errors.New("application management is busy")
 var errPlatformOperationMissing = errors.New("application operation not found")
 
 func platformNonNilStrings(values []string) []string {
@@ -34,7 +35,7 @@ func platformNonNilStrings(values []string) []string {
 
 func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handler) {
 	s.route(mux, pattern, authAdmin, "", platformDocumentHeaders(s.requireAdminJSON(func(w http.ResponseWriter, r *http.Request, user string) {
-		listPath := r.Method == "GET" && (r.URL.Path == "/api/admin/app-platform/releases" || r.URL.Path == "/api/admin/app-platform/subjects" || r.URL.Path == "/api/admin/app-platform/credentials" || r.URL.Path == "/api/admin/app-platform/tasks" || r.URL.Path == "/api/admin/app-platform/event-subscriptions" || strings.HasPrefix(r.URL.Path, "/api/admin/app-platform/installations/") && strings.HasSuffix(r.URL.Path, "/secret-bindings"))
+		listPath := r.Method == "GET" && (r.URL.Path == "/api/admin/app-platform/releases" || r.URL.Path == "/api/admin/app-platform/subjects" || r.URL.Path == "/api/admin/app-platform/credentials" || r.URL.Path == "/api/admin/app-platform/tasks" || r.URL.Path == "/api/admin/app-platform/market/stage" || r.URL.Path == "/api/admin/app-platform/event-subscriptions" || strings.HasPrefix(r.URL.Path, "/api/admin/app-platform/installations/") && strings.HasSuffix(r.URL.Path, "/secret-bindings"))
 		if !platformHTTPPath(r) && !(listPath && len(r.URL.RawQuery) <= 2048 && !r.URL.ForceQuery && r.URL.EscapedPath() == r.URL.Path) {
 			jsonErrorCode(w, 400, "app_platform_invalid_request", "invalid application management request")
 			return
@@ -60,7 +61,9 @@ func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handle
 		}
 		timeout := platformManagementTimeout
 		if r.URL.Path == "/api/admin/app-platform/market/stage" {
-			timeout = 45 * time.Second
+			// The synchronous checks are capped at 45s; the wait for the background download comes on top
+			// and the whole answer stays well under the 100s a proxy in front allows.
+			timeout = platformMarketStageSyncLimit + platformMarketStageWait
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -168,10 +171,16 @@ func platformManagementAudience(raw json.RawMessage) ([]platformAudienceTarget, 
 }
 
 func platformManagementError(w http.ResponseWriter, err error) {
+	status, code := platformManagementStatus(err)
+	jsonErrorCode(w, status, code, "application management request could not be completed")
+}
+
+// platformManagementStatus maps an error to the public status and code set, so a failure that is reported
+// later (an asynchronous job) uses the same codes as one answered inline.
+func platformManagementStatus(err error) (int, string) {
 	status, code := 503, "app_platform_unavailable"
 	if dataStatus, dataCode, ok := platformDataActionError(err); ok {
-		jsonErrorCode(w, dataStatus, dataCode, "application management request could not be completed")
-		return
+		return dataStatus, dataCode
 	}
 	switch {
 	case errors.Is(err, errPlatformManagementInput):
@@ -218,8 +227,10 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 404, "app_platform_operation_missing"
 	case errors.Is(err, errPlatformInstallationMissing):
 		status, code = 404, "app_platform_installation_missing"
+	case errors.Is(err, errPlatformManagementBusy):
+		status, code = 429, "app_platform_busy"
 	}
-	jsonErrorCode(w, status, code, "application management request could not be completed")
+	return status, code
 }
 
 // Plan verification/admission inspects the signed archive. Share the document

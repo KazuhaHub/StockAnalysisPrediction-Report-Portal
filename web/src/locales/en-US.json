@@ -4318,5 +4318,8 @@
   "appRuntime.observed": "The runner reported the bound identity; the binding is enabled",
   "err.app_platform_runtime_binding_unavailable": "The runtime binding cannot be prepared: a binding is already confirmed or needs review.",
   "err.app_platform_runtime_not_observed": "The runtime cannot be confirmed: the runner did not report this binding's identity. Check that host-setup used this page's document.",
-  "err.app_platform_runtime_endpoint_missing": "Portal has no runner socket configured. Finish host-setup and restart the Compose project first."
+  "err.app_platform_runtime_endpoint_missing": "Portal has no runner socket configured. Finish host-setup and restart the Compose project first.",
+  "appMarket.downloading": "Downloading the package. This can take a few minutes.",
+  "appMarket.downloadingProgress": "Downloaded {{done}} of {{total}} MiB",
+  "err.app_platform_stage_unknown": "This download is no longer tracked. Start the verification again."
 }

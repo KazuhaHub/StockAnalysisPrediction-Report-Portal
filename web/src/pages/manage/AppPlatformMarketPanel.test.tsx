@@ -225,4 +225,58 @@ describe('remote application catalogue', () => {
     expect(mock.post).toHaveBeenLastCalledWith(`${root}/market/sources`, { official_enabled: true })
     expect(await screen.findByRole('button', { name: 'appMarket.browseOfficial' })).toBeTruthy()
   })
+
+  describe('a package that downloads in the background', () => {
+    const downloading = (done: string) => ({ state: 'downloading', release_sha256: digest, bytes_done: done, bytes_total: '2097152' })
+    const stageCalls = () => mock.get.mock.calls.filter(([url]) => String(url).includes('/market/stage'))
+    afterEach(() => { vi.useRealTimers() })
+    async function startStage(ready: () => void) {
+      render(<AppPlatformMarketPanel disabled={false} onReady={ready} onBusyChange={() => {}} />)
+      await discover()
+      vi.useFakeTimers({ toFake: ['setTimeout'] })
+      await act(async () => { screen.getByRole('button', { name: 'appMarket.verifyDownload' }).click() })
+    }
+    const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+
+    it('shows progress and polls until the package is staged, then reads the verified release', async () => {
+      const replies = [downloading('1048576'), { state: 'staged', release_sha256: digest }]
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/catalogue') ? discovery : downloading('0')))
+      mock.get.mockImplementation((url: string) => Promise.resolve(String(url).includes('/market/stage') ? replies.shift() : { items: [verified], next_cursor: '' }))
+      const ready = vi.fn()
+      await startStage(ready)
+      expect(screen.getByText('appMarket.downloading')).toBeTruthy()
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('0')
+      await tick()
+      expect(stageCalls()).toEqual([[`${root}/market/stage?release_sha256=${digest}`]])
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('50')
+      expect(ready).not.toHaveBeenCalled()
+      await tick()
+      expect(ready).toHaveBeenCalledWith(verified)
+      expect(screen.queryByRole('progressbar')).toBeNull()
+      expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/stage'))).toHaveLength(1)
+    })
+
+    it('shows the failure of the background download and installs nothing', async () => {
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/catalogue') ? discovery : downloading('0')))
+      mock.get.mockResolvedValue({ state: 'failed', release_sha256: digest, error_code: 'app_platform_unavailable' })
+      const ready = vi.fn()
+      await startStage(ready)
+      await tick()
+      expect(screen.getByText('err.app_platform_unavailable')).toBeTruthy()
+      expect(screen.queryByRole('progressbar')).toBeNull()
+      expect(ready).not.toHaveBeenCalled()
+    })
+
+    it('stops polling when the panel goes away', async () => {
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/catalogue') ? discovery : downloading('0')))
+      mock.get.mockResolvedValue(downloading('10'))
+      const ready = vi.fn()
+      await startStage(ready)
+      cleanup()
+      await tick()
+      await tick()
+      expect(stageCalls()).toHaveLength(0)
+      expect(ready).not.toHaveBeenCalled()
+    })
+  })
 })

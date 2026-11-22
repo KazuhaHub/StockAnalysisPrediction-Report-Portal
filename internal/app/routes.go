@@ -520,6 +520,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/postgres-policy/consume", s.apiPlatformPostgresPolicyConsume)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/catalogue", s.apiPlatformMarketCatalogue)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/stage", s.apiPlatformMarketStage)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/market/stage", s.apiPlatformMarketStageStatus)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/offline", s.apiPlatformMarketOffline)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/market/sources", s.apiPlatformMarketSources)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/sources", s.apiPlatformMarketSourcesChange)
