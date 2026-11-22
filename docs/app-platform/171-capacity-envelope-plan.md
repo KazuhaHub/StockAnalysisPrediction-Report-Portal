@@ -857,7 +857,7 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
     Reinstalling the same app while its removal is unknown completes (tested through `ensurePlatformReleaseImage`).
 46. **Orphaned enable and restore starts are settled.** `control` accepts `enable-start` and `restore-start` besides
     `update-start` in the settle command and the reserved removal, with the same read-signed start reference and
-    payload binding. The journal side needed no change, because those starts are stored as update-start rows; the
+    payload binding. The journal stores those starts as update-start rows, but its held and absence reads check the kind of the signed request, so they had to accept `enable-start` and `restore-start` too (until they did, every held enable, repair or import start read as an ordinary error and never settled); the
     enable source is released through `settleEnableSourceAbsent` in the same transaction, only after two absence
     observations. On the Portal, `settlePlatformHeldStarts` drives the existing held-start steps for finished enable and
     repair operations from the idle settlement tick, and a restore resume's orphan is settled from the recovery

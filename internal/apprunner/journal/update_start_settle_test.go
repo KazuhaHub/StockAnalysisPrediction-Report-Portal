@@ -31,6 +31,8 @@ type fakeInspector struct {
 	beforeRemove, afterRemove func()
 	// onInspect runs inside each inspection, before it answers.
 	onInspect func()
+	// byID, when set, answers each inspection by the id asked for, so a source and a target can differ.
+	byID map[string]driver.TargetInspection
 }
 
 func (f *fakeInspector) ListNamespaceContainers(context.Context, string) ([]driver.NamespaceContainer, error) {
@@ -61,10 +63,13 @@ func (f *fakeInspector) RemoveStrayContainer(_ context.Context, nativeID string)
 	return nil
 }
 
-func (f *fakeInspector) InspectTarget(context.Context, string) (driver.TargetInspection, error) {
+func (f *fakeInspector) InspectTarget(_ context.Context, id string) (driver.TargetInspection, error) {
 	f.calls++
 	if f.onInspect != nil {
 		f.onInspect()
+	}
+	if f.byID != nil {
+		return f.byID[id], f.err
 	}
 	return f.inspection, f.err
 }
