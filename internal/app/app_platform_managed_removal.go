@@ -262,13 +262,7 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 				return zero, errAppPlatformStageEvidence
 			}
 			running, err := journal.ParseWritableCandidateRunningReceipt([]byte(start.receipt))
-			revision, _ := strconv.ParseInt(running.Claim.ControlRevision, 10, 64)
-			if err != nil || running.Claim.Preflight == nil || running.Claim.Preflight.Native.Platform != plan.Runtime.Profile.Platform ||
-				running.Claim.SandboxProfile != control.WritableCandidateSandboxProfile || running.Claim.EffectID != start.id ||
-				running.Claim.PayloadSHA256 != start.digest || running.Claim.AdmittedFence != strconv.FormatInt(sourceFence, 10) ||
-				running.Claim.DataReceiptSHA256 != platformDigest([]byte(dataEffect.receipt)) ||
-				running.Claim.Preflight.Native.ProjectID != data.ProjectID || running.Claim.Preflight.Native.NamespaceInode != data.NamespaceInode ||
-				revision < 1 || revision > runtime.controlRevision {
+			if err != nil || !platformWritableStartedSourceMatches(running, start.id, start.digest, sourceFence, dataEffect.receipt, data, plan.Runtime.Profile.Platform, runtime.controlRevision) {
 				return zero, errAppPlatformStageEvidence
 			}
 			resourceID, namespaceID, nativeID, platform = running.Claim.ResourceID, data.Claim.ResourceID, running.NativeID, running.Claim.Preflight.Native.Platform
@@ -938,4 +932,19 @@ func (s *Server) finishPlatformManagedUninstallForReview(ctx context.Context, ex
 		return err
 	}
 	return tx.Commit()
+}
+
+// platformWritableStartedSourceMatches is the one rule for a writable start whose candidate a removal stops: the
+// running receipt must be bound to the start effect, its payload, the source fence and the preparation receipt,
+// run on the runtime's platform under the writable sandbox profile, sit on the prepared namespace, and carry a
+// control revision the runtime has reached. The stop stage and the uninstall review both use it, so the review
+// never admits a start the stop would refuse.
+func platformWritableStartedSourceMatches(running journal.WritableCandidateRunningReceipt, startID, startDigest string, sourceFence int64, dataReceipt string, data journal.DataPreparationReceipt, platform string, controlRevision int64) bool {
+	revision, _ := strconv.ParseInt(running.Claim.ControlRevision, 10, 64)
+	return running.Claim.Preflight != nil && running.Claim.Preflight.Native.Platform == platform &&
+		running.Claim.SandboxProfile == control.WritableCandidateSandboxProfile && running.Claim.EffectID == startID &&
+		running.Claim.PayloadSHA256 == startDigest && running.Claim.AdmittedFence == strconv.FormatInt(sourceFence, 10) &&
+		running.Claim.DataReceiptSHA256 == platformDigest([]byte(dataReceipt)) &&
+		running.Claim.Preflight.Native.ProjectID == data.ProjectID && running.Claim.Preflight.Native.NamespaceInode == data.NamespaceInode &&
+		revision >= 1 && revision <= controlRevision
 }

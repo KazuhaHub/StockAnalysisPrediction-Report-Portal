@@ -176,7 +176,7 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 			if f.state == "reverted" {
 				continue
 			}
-			if f.state != "applied" || start != nil || plan.Format != platformWritableInstallFormat || !platformStartedCandidateProved(f.stage, f.kind, f.id, f.digest, f.receipt, f.number, f.fence, f.observed, f.epoch, epoch, f.runtime, runtimeID, install.fence) {
+			if f.state != "applied" || start != nil || plan.Format != platformWritableInstallFormat || !platformStartedCandidateProved(f.stage, f.kind, f.id, f.digest, f.number, f.fence, f.observed, f.epoch, epoch, f.runtime, runtimeID, install.fence) {
 				return refused("the start of the install is not reverted")
 			}
 			start = &found[index]
@@ -196,6 +196,10 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	if prepare.fence > install.fence {
 		return refused("the prepare_data effect was admitted at a newer fence than the install")
 	}
+	if start != nil && (prepare.fence != install.fence || prepare.observed != install.fence) {
+		// The stop stage loads prepare_data and the start at the install's own fence; admit only what it will load.
+		return refused("the prepare_data effect was not admitted at the install's fence")
+	}
 	receipt, err := journal.ParseDataPreparationReceipt([]byte(prepare.receipt))
 	format, formatErr := strconv.ParseInt(receipt.DataFormat, 10, 64)
 	if err != nil || formatErr != nil {
@@ -206,6 +210,16 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	}
 	if receipt.Claim.EffectID != prepare.id || receipt.InstallationID != installation || receipt.PayloadSHA256 != prepare.digest || format != namespaceFormat {
 		return refused("the prepare_data receipt does not match its effect")
+	}
+	if start != nil {
+		running, runningErr := journal.ParseWritableCandidateRunningReceipt([]byte(start.receipt))
+		var controlRevision int64
+		if err := e.queryRow(`SELECT control_revision FROM app_platform_runtime_bindings WHERE id=?`, runtimeID).Scan(&controlRevision); err != nil {
+			return zero, err
+		}
+		if runningErr != nil || !platformWritableStartedSourceMatches(running, start.id, start.digest, install.fence, prepare.receipt, receipt, plan.Runtime.Profile.Platform, controlRevision) {
+			return refused("the start receipt is not bound to the install's preparation")
+		}
 	}
 	var namespaces, owned, active int
 	if err := e.queryRow(`SELECT
@@ -236,15 +250,14 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 
 // platformStartedCandidateProved checks the shape of an applied writable start effect: the first start-candidate
 // effect, admitted and observed at the install's own fence on this runtime and epoch, whose running receipt
-// parses and names the effect and its payload. The removal's stop stage verifies the receipt against the signed
-// start command again before it sends anything.
-func platformStartedCandidateProved(stage, kind, id, digest, receipt string, number, admitted, observed int64, effectEpoch, epoch string, effectRuntime sql.NullString, runtimeID string, installFence int64) bool {
+// is then checked against the preparation receipt by platformWritableStartedSourceMatches, the rule the stop
+// stage uses.
+func platformStartedCandidateProved(stage, kind, id, digest string, number, admitted, observed int64, effectEpoch, epoch string, effectRuntime sql.NullString, runtimeID string, installFence int64) bool {
 	if stage != string(appplatform.StageStart) || kind != "start-candidate" || number != 1 || !platformValidUUID(id) || !platformValidSHA(digest) ||
 		!effectRuntime.Valid || effectRuntime.String != runtimeID || effectEpoch != epoch || admitted < 1 || admitted != installFence || observed != admitted {
 		return false
 	}
-	running, err := journal.ParseWritableCandidateRunningReceipt([]byte(receipt))
-	return err == nil && running.Claim.EffectID == id && running.Claim.PayloadSHA256 == digest && running.Claim.AdmittedFence == strconv.FormatInt(admitted, 10)
+	return true
 }
 
 // platformOperationNeverStarted returns the never-started evidence a removal operation was admitted with, or nil
@@ -374,10 +387,21 @@ func closePlatformNeverStartedInstall(e migExec, install, removal string, now in
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
+	// An install whose candidate started is closed under its own audit action, so the log never says a started
+	// install never started.
+	var started int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind='start-candidate' AND state='applied'`, install).Scan(&started); err != nil {
+		return err
+	}
+	action := "app_platform.never_started_install_closed"
+	if started != 0 {
+		action = "app_platform.failed_install_closed"
+	}
 	detail, _ := json.Marshal(struct {
 		Removal string `json:"removal_operation_id"`
-	}{removal})
-	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.never_started_install_closed','app_platform_operation',?,?,'')`,
-		time.UnixMilli(now).UTC().Format(time.RFC3339), install, string(detail))
+		Started bool   `json:"started,omitempty"`
+	}{removal, started != 0})
+	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,?,'app_platform_operation',?,?,'')`,
+		time.UnixMilli(now).UTC().Format(time.RFC3339), action, install, string(detail))
 	return err
 }

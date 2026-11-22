@@ -307,8 +307,9 @@ func (s *Server) apiPlatformSubjects(w http.ResponseWriter, r *http.Request, use
 
 // platformMarkUninstallableFailedInstall offers the uninstall of a first-generation managed install that ended in
 // review_required or recovery_required, on the release that install was for. It marks the release only when the
-// uninstall review would be admitted: the same evidence the review loads must hold, so the console never offers a
-// button the review would refuse.
+// uninstall review's evidence holds (the same loader the review uses). The review also checks the actor, the
+// pending operations and the installation tuple, so a click can still be refused; the button is a strong hint,
+// not a guarantee.
 func platformMarkUninstallableFailedInstall(e migExec, app, publisher, release string, item *platformStagedSummary) error {
 	var installation, epoch, runtime, namespace string
 	var format int64
