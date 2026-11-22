@@ -615,7 +615,7 @@ type platformLayoutDisplay struct {
 	publisherName string
 }
 
-// platformLayoutDisplays reads each active installation's version and signed display metadata in one
+// platformLayoutDisplays reads each installation's current-release version and signed display metadata in one
 // read transaction. It is best effort: an installation whose record does not verify (or any failure)
 // simply has no entry, and the console falls back to the application id.
 func (s *Server) platformLayoutDisplays(rows []platformInstallationRow) map[string]platformLayoutDisplay {
@@ -642,7 +642,7 @@ func (s *Server) platformLayoutDisplays(rows []platformInstallationRow) map[stri
 		return out
 	}
 	for _, r := range rows {
-		record, err := platformReadDisplayRecord(e, r.id)
+		record, err := platformReadCurrentReleaseDisplayRecord(e, r.id)
 		if err != nil || record == nil {
 			continue
 		}
