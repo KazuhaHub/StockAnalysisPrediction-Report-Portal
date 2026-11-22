@@ -321,6 +321,22 @@ func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) (*Server, pl
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This checkpoint is taken from an install source after a disable. The runner checks the command against the
+	// install's own data receipt and the stopped resource, neither of which a disable changes, so the command must
+	// carry the writer fence they hold, not the namespace's raised one.
+	dataReceipt, receiptErr := journal.ParseDataPreparationReceipt([]byte(scalar[string](t, s.st,
+		`SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=?`,
+		checkpoint.command.Payload.SourceDataEffectID)))
+	if receiptErr != nil ||
+		checkpoint.command.Payload.WriterFence != dataReceipt.WriterFence {
+		t.Fatalf("checkpoint writer fence %q differs from the source data receipt's %q (%v)",
+			checkpoint.command.Payload.WriterFence, dataReceipt.WriterFence, receiptErr)
+	}
+	if scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE id=?`,
+		checkpoint.command.Payload.NamespaceID) <= 1 ||
+		checkpoint.source.currentWriterFence == "" {
+		t.Fatal("the disable did not raise the namespace writer fence, or the source lost it")
+	}
 	checkpointEndpoint := platformCheckpointEndpointFixture()
 	checkpointObservation := platformCheckpointObservationFixture(
 		checkpoint, checkpointEndpoint)

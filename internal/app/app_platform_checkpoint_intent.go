@@ -344,7 +344,10 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 	source.quotaBytes, source.quotaInodes = strconv.FormatInt(currentBytes, 10), strconv.FormatInt(currentInodes, 10)
 	source.rootFilesystemUUID, source.rootInode = data.Claim.RootFilesystemUUID, data.Claim.RootInode
 	if allowDisabled {
-		source.writerFence = strconv.FormatInt(writerFence, 10)
+		// A disable raises the namespace's fence but leaves the install's data receipt and the stopped resource at the
+		// fence they were created with, and the runner checks the command against those. The raised fence is kept
+		// beside it, as the update source does.
+		source.currentWriterFence = strconv.FormatInt(writerFence, 10)
 	}
 	var pending int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND completed_ms IS NULL`, expected.installationID).Scan(&pending); err != nil || pending != expectedPending {
