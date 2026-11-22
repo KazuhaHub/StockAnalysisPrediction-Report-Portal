@@ -1,123 +1,36 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Input, Space, Tabs, Typography, theme } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
-import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { useState } from 'react'
+import { Space, Tabs } from 'antd'
 import { useTranslation } from 'react-i18next'
 import LoadGate from '../../components/LoadGate'
-import AppInstall from './AppInstall'
-import AppReorderModal from './AppReorderModal'
-import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
-import { AppIcon, ServiceStatus } from './appsAdminParts'
-import CardTable from '../../components/CardTable'
-import AppPlatformInstallPanel from './AppPlatformInstallPanel'
+import { useAppsCatalog } from './appsAdminModel'
+import AppsMarketplace from './AppsMarketplace'
+import OfficialCatalogueSwitch from './OfficialCatalogueSwitch'
 import AppPlatformStorageStatus from './AppPlatformStorageStatus'
 import AppPlatformPublishersPanel from './AppPlatformPublishersPanel'
 import AppPlatformRuntimePanel from './AppPlatformRuntimePanel'
 import AppPlatformTasksPanel from './AppPlatformTasksPanel'
 import AppPlatformEventSubscriptionsPanel from './AppPlatformEventSubscriptionsPanel'
 
-// The Apps list: every built-in and installed app with where it is switched on, in the administrator's
-// order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
-// and installation are occasional jobs, so they live behind the two buttons above the table.
+// The Apps console: one marketplace page (what is installed, and what the catalogue offers), the sources
+// and trust behind it, and the tasks and event subscriptions of installed apps. Installing, updating and
+// removing all run in one modal on the marketplace page (doc 190, section 4). `?operation=` and
+// `?installation=` links from an app's own page land here, on the marketplace tab, where the modal
+// resumes the operation.
 export default function AppsAdminPage() {
   const { t } = useTranslation()
-  const { token } = theme.useToken()
-  const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const operation = params.get('operation')
-  const installation = params.get('installation')
-  const labels = useAppLabels()
   const { apps, loading, error, reload } = useAppsCatalog()
-  const [search, setSearch] = useState('')
-  const [reordering, setReordering] = useState(false)
   const [runtimeReload, setRuntimeReload] = useState(0)
-  const [activeTab, setActiveTab] = useState(operation || installation ? 'platform' : 'apps')
-  useEffect(() => {
-    if (operation || installation) setActiveTab('platform')
-  }, [installation, operation])
-
-  // The muted line under a name: what a built-in app is for, or which build of an installed app this is.
-  const subtitle = (a: AdminApp) => (a.builtin ? labels.description(a) : [a.version && `v${a.version}`, a.key].filter(Boolean).join(' · '))
-  const shown = useMemo(() => {
-    const q = search.trim().toLocaleLowerCase()
-    if (!q) return apps
-    return apps.filter((a) => `${labels.title(a)} ${a.key} ${subtitle(a)}`.toLocaleLowerCase().includes(q))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apps, search, t])
-
-  const columns: ColumnsType<AdminApp> = [
-    {
-      title: t('apps.col.app'),
-      render: (_: unknown, a: AdminApp) => (
-        <Space size={12}>
-          <AppIcon app={a} />
-          <div style={{ minWidth: 0 }}>
-            {/* A real link: it is what a keyboard reaches, while the whole row is the mouse target. */}
-            <Link to={appPath(a.key)} onClick={(e) => e.stopPropagation()}>
-              {labels.title(a)}
-            </Link>
-            <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{subtitle(a)}</div>
-          </div>
-        </Space>
-      ),
-    },
-    { title: t('apps.col.status'), render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
-    {
-      title: t('apps.col.type'),
-      className: 'rp-apps-col-type',
-      render: (_: unknown, a: AdminApp) => (a.builtin ? t('apps.type.builtin') : a.platform ? t('apps.type.platform') : t('apps.type.installed')),
-    },
-    { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
-  ]
+  const [activeTab, setActiveTab] = useState('apps')
 
   return <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
     {
       key: 'apps',
       label: t('nav.apps'),
       children: <LoadGate loading={loading} error={error} onRetry={reload}>
-        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-        <Space wrap style={{ width: '100%', justifyContent: 'flex-end' }}>
-          <Button icon={<OrderedListOutlined aria-hidden="true" />} onClick={() => setReordering(true)} disabled={apps.length < 2}>
-            {t('apps.reorder')}
-          </Button>
-          <AppInstall onInstalled={() => reload({ quiet: true })} />
-        </Space>
-        <Card className="rp-flush-card" styles={{ body: { padding: 0 } }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
-            <Input.Search
-              allowClear
-              style={{ maxWidth: 320 }}
-              aria-label={t('apps.search')}
-              placeholder={t('apps.search')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {/* The count keeps one line; the search box is what gives way. */}
-            <Typography.Text type="secondary" style={{ marginInlineStart: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
-              {t('apps.count', { count: shown.length })}
-            </Typography.Text>
-          </div>
-          <div className="rp-table-scroll">
-          <CardTable
-            className="rp-apps-table"
-            rowKey="key"
-            dataSource={shown}
-            columns={columns}
-            pagination={false}
-            locale={{ emptyText: t('apps.empty') }}
-            filtered={!!search.trim()}
-            onClearFilters={() => setSearch('')}
-            onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
-          />
-          </div>
-        </Card>
-        </Space>
-        <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => reload({ quiet: true })} />
+        <AppsMarketplace apps={apps} reload={reload} onOpenTrust={() => setActiveTab('publishers')} />
       </LoadGate>,
     },
-    { key: 'platform', label: t('appPlatform.tab'), children: <><AppPlatformStorageStatus /><AppPlatformInstallPanel /></> },
-    { key: 'publishers', label: t('appTrust.tab'), children: <><AppPlatformRuntimePanel reload={runtimeReload} /><AppPlatformPublishersPanel onInitialized={() => setRuntimeReload(v => v + 1)} /></> },
+    { key: 'publishers', label: t('appTrust.tab'), children: <Space orientation="vertical" size={16} style={{ width: '100%' }}><OfficialCatalogueSwitch /><AppPlatformStorageStatus /><AppPlatformRuntimePanel reload={runtimeReload} /><AppPlatformPublishersPanel onInitialized={() => setRuntimeReload(v => v + 1)} /></Space> },
     { key: 'tasks', label: t('appPlatform.tasks.tab'), children: <AppPlatformTasksPanel /> },
     { key: 'subscriptions', label: t('appPlatform.events.tab'), children: <AppPlatformEventSubscriptionsPanel /> },
   ]} />

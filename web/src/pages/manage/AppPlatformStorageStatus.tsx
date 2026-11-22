@@ -19,7 +19,7 @@ export default function AppPlatformStorageStatus() {
   }, [])
   if (items.length === 0) return null
   return (
-    <Space orientation="vertical" size={8} style={{ width: '100%', marginBottom: 16 }} data-testid="image-storage-status">
+    <Space orientation="vertical" size={8} style={{ width: '100%' }} data-testid="image-storage-status">
       {items.map((item) => (
         <Alert key={item.release_sha256} type="warning" showIcon
           title={t('appPlatform.storage.reuploadRequired')}

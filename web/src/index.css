@@ -3323,22 +3323,9 @@ body {
   .rp-app-access__tree { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); }
   .rp-app-access__setting { padding: 16px; }
 }
-@media (max-width: 767px) {
-  .rp-apps-col-type { display: none; }
-}
-.rp-apps-col-chevron { width: 40px; }
-@media (max-width: 767px) {
-  .rp-apps-col-chevron { display: none; }
-}
-.rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }
-
 /* Application lifecycle management keeps wide package metadata inside the page. The table wraps
    long names/digests instead of forcing the whole admin body sideways, and the confirmation dialog
    owns its vertical scroll when permissions or recovery details exceed the viewport. */
-.rp-platform-release-table { min-width: 0; }
-.rp-platform-release-table .ant-table-content { overflow-x: auto; }
-.rp-platform-release-table :is(th, td) { vertical-align: top; overflow-wrap: anywhere; white-space: normal; }
-.rp-platform-release-table :is(.ant-space, .ant-tag, .ant-typography) { max-width: 100%; overflow-wrap: anywhere; }
 .rp-platform-review { min-width: 0; }
 .rp-platform-review .ant-descriptions-view { min-width: 0; }
 .rp-platform-review .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
@@ -3351,7 +3338,7 @@ body {
 .rp-platform-review-modal .ant-btn-dangerous:not(:disabled):hover { background: #820014; border-color: #820014; }
 .rp-platform-review-modal .ant-modal-footer .ant-btn-default,
 .rp-platform-review-modal .ant-modal-footer .ant-btn-default > span { color: var(--ant-color-text) !important; border-color: var(--ant-color-primary); }
-.rp-platform-review-modal { top: 24px; width: min(560px, calc(100vw - 24px)) !important; padding-bottom: 24px; }
+.rp-platform-review-modal { top: 24px; width: min(640px, calc(100vw - 24px)) !important; padding-bottom: 24px; }
 .rp-platform-review-modal :is(.ant-modal-container, .ant-modal-content),
 .rp-platform-review-modal.ant-modal-content { display: flex; flex-direction: column; max-height: calc(100dvh - 72px); }
 .rp-platform-review-modal :is(.ant-modal-header, .ant-modal-footer) { flex: none; }
@@ -3383,4 +3370,60 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
   background: var(--ant-color-primary); color: var(--ant-color-white);
   font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}
+
+/* Apps marketplace (installed apps and the catalogue, one page). One grid rule for every card list: installed
+   cards are wide (two across on a desktop), catalogue cards small (four across); on a phone each is one column. */
+.rp-app-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.rp-app-search { flex: 1 1 220px; max-width: 360px; }
+.rp-app-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.rp-app-grid { display: grid; gap: 16px; }
+.rp-app-grid--installed { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+.rp-app-grid--market { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.rp-app-grid-state { display: flex; justify-content: center; padding: 24px 0; }
+.rp-app-card { position: relative; height: 100%; min-width: 0; overflow: hidden; }
+.rp-app-card > .ant-card-body { display: flex; flex-direction: column; gap: 12px; height: 100%; min-width: 0; }
+.rp-app-card-corner {
+  position: absolute; top: 0; inset-inline-end: 0; padding: 0 8px; font-size: 11px; line-height: 18px;
+  border-top-right-radius: var(--ant-border-radius); border-bottom-left-radius: var(--ant-border-radius-sm);
+  background: var(--ant-color-fill-secondary); color: var(--ant-color-text-secondary);
+}
+.rp-app-card-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.rp-app-card-main { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
+.rp-app-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.rp-app-card-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.rp-app-card-title .ant-tag { margin-inline-end: 0; }
+/* Stretched link: the name's link covers the whole card; every control inside rises above it. */
+.rp-app-card-link::after { content: ''; position: absolute; inset: 0; z-index: 0; }
+.rp-app-card .ant-btn, .rp-app-card .ant-badge, .rp-app-card .ant-tag, .rp-app-card .ant-badge-status { position: relative; z-index: 1; }
+.rp-app-card-link:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
+.rp-app-card-desc, .rp-market-card-desc { margin: 0 !important; }
+.rp-market-card-desc { min-height: calc(2 * 1.5715em); }
+.rp-app-card-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.rp-app-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--ant-color-border-secondary); font-size: 12px; min-width: 0; }
+.rp-app-card-source { flex: none; text-transform: uppercase; letter-spacing: 0.02em; font-size: 11px; }
+.rp-market-card > .ant-card-body { gap: 8px; }
+.rp-app-card:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
+.rp-app-glyph {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; font-size: 18px;
+  border-radius: var(--ant-border-radius-lg); background: var(--ant-color-fill-secondary); color: var(--ant-color-text-secondary);
+}
+.rp-app-glyph--large { width: 44px; height: 44px; font-size: 22px; }
+.rp-market-card .rp-app-card-main { gap: 0; }
+.rp-market-detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-inline-end: 32px; }
+.rp-market-detail-title { display: flex; flex: 1 1 160px; flex-direction: column; min-width: 0; }
+.rp-market-detail-actions { margin-inline-start: auto; }
+.rp-market-detail-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 24px; }
+.rp-market-detail-body > div { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.rp-market-detail-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rp-market-versions { margin: 0 0 12px; padding-inline-start: 18px; max-height: 160px; overflow-y: auto; }
+.rp-market-detail-note { margin-top: 8px; font-size: 12px; }
+.rp-lifecycle-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+.rp-lifecycle-body > .ant-steps { flex: none; }
+@media (max-width: 575px) {
+  .rp-market-detail-body { grid-template-columns: minmax(0, 1fr); }
+  .rp-market-detail-actions { margin-inline-start: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-app-card { transition: none; }
 }
