@@ -49,10 +49,12 @@ original handshake deadline.
 
 The host fixes its Window handles and sanitized context at construction. It
 accepts hello only from the exact frame Window and opaque origin `null`. The
-client accepts initialization/challenge only from its configured parent Window
-and exact canonical HTTP(S) parent origin, not an origin learned from an arbitrary
-message. Provide that origin through trusted bootstrap configuration. Do not
-read the host DOM, infer permissions from a referrer or weaken sandbox flags.
+client accepts initialization/challenge only from its parent Window and the
+parent origin it derives from its own document URL, never from a message. This is
+safe because every app document is served with `frame-ancestors 'self'` (error
+and public documents with `'none'`), so only the Portal origin can embed it; an
+opaque document URL fails at once as `invalid_context`. Do not read the host DOM,
+infer permissions from a referrer or weaken sandbox flags.
 
 The design follows the [HTML messaging standard](https://html.spec.whatwg.org/multipage/web-messaging.html):
 listeners precede readiness announcements, transferred ports establish a separate

@@ -24,9 +24,11 @@ test('actual host keeps frame hidden through delayed apply, latest settings and 
  const view=render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle<HTMLIFrameElement>('Fixture');const child=frame.contentWindow!
  vi.spyOn(child,'postMessage').mockImplementation((data:unknown,_target?:unknown,ports?:unknown)=>delivery(child,window,window.location.origin,data,(ports??[]) as MessagePort[]))
  vi.spyOn(window,'postMessage').mockImplementation((data:unknown,_target?:unknown,ports?:unknown)=>delivery(window,child,'null',data,(ports??[]) as MessagePort[]))
+ // The sandboxed child reports the Portal document URL; the client derives its parent origin from it.
+ const documentWindow=new Proxy(child,{get:(t,k)=>k==='location'?{href:window.location.href}:(()=>{const v=Reflect.get(t,k,t);return typeof v==='function'?v.bind(t):v})()}) as Window
  let finish:(()=>void)|undefined
  const applied:BridgePresentation[]=[]
- const client=createBridgeClient({localWindow:child,parentWindow:window,parentOrigin:window.location.origin,onPresentation:next=>{applied.push(next);return new Promise<void>(resolve=>{finish=resolve})}})
+ const client=createBridgeClient({localWindow:documentWindow,parentWindow:window,onPresentation:next=>{applied.push(next);return new Promise<void>(resolve=>{finish=resolve})}})
  try{
   fireEvent.load(frame);await waitFor(()=>expect(applied).toHaveLength(1));expect(frame.style.visibility).toBe('hidden')
   const changed:BridgePresentation={...presentation,locale:'zh-TW',timeZone:'Asia/Taipei'}

@@ -1044,7 +1044,6 @@ export interface BridgeHostOptions extends BaseOptions {
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
   parentWindow: Window;
-  parentOrigin: string;
   onPresentation: (
     presentation: BridgePresentation,
     context: BridgeContext,
@@ -1289,12 +1288,16 @@ function notifyFailure(
     /* Never echo callback errors across the bridge. */
   }
 }
-function parentOrigin(value: string): boolean {
+// The Portal serves every app document with frame-ancestors 'self' (or 'none'
+// for error and public documents), so the only page that can embed this
+// document is the Portal itself: the document's own origin is the parent's.
+// Opaque documents (about:srcdoc, data:, blob:null) have no usable origin.
+function derivedParentOrigin(localWindow: Window): string | null {
   try {
-    const url = new URL(value);
-    return ["http:", "https:"].includes(url.protocol) && url.origin === value;
+    const url = new URL(localWindow.location.href);
+    return ["http:", "https:"].includes(url.protocol) ? url.origin : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -2985,12 +2988,12 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   const {
     localWindow,
     parentWindow,
-    parentOrigin: expectedOrigin,
     onPresentation,
     onReset,
     onReady,
     onFailure,
   } = options;
+  const expectedOrigin = derivedParentOrigin(localWindow);
   let state: BridgeState = "waiting",
     port: MessagePort | undefined,
     envelope: Record<string, string> | undefined;
@@ -4142,7 +4145,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     }
   }
   function hello() {
-    if (terminal() || port) return;
+    if (terminal() || port || expectedOrigin === null) return;
     try {
       parentWindow.postMessage(
         {
@@ -4736,7 +4739,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       }
     },
   };
-  if (localWindow === parentWindow || !parentOrigin(expectedOrigin)) {
+  if (localWindow === parentWindow || expectedOrigin === null) {
     fail("invalid_context");
     return session;
   }

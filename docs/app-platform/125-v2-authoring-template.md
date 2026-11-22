@@ -34,7 +34,7 @@ Run from the Apps repository root:
 
 ```sh
 python3 scripts/create-app.py my-app --name "My app" --template v2 \
-  --parent-origin https://portal.example.invalid --publisher development-publisher
+  --publisher development-publisher
 npm install
 python3 scripts/plugin-standard.py
 npm run typecheck
@@ -42,16 +42,15 @@ npm test --workspace=apps/my-app/frontend
 python3 scripts/build-app-v2.py my-app
 ```
 
-Select the real trusted development origin instead of the example. Only canonical
-HTTPS or exact loopback HTTP is accepted. No credentials, path, query or fragment
-are allowed. Parent origin is infrastructure build configuration, not a user
-installation form. It is never derived from a parent DOM/referrer/query/message.
+The package carries no parent origin, so one build runs on any Portal. The bridge
+client derives it from its own document URL (`new URL(location.href).origin`,
+readable even inside the opaque-origin sandbox), posts hello with that exact
+`targetOrigin` and accepts messages only when `event.origin` equals it and
+`event.source` is the parent Window. This is safe because the Portal serves every
+app document with `frame-ancestors 'self'`, so only the Portal origin can embed
+it; error and public documents use `frame-ancestors 'none'`. A document with an
+opaque URL (`about:srcdoc`, `data:`) fails immediately as `invalid_context`.
 The developer guide explains each file, checks, output and error recovery.
-
-This per-development-deployment origin is provisional. Trusted cross-deployment
-bootstrap/distribution must be accepted before a stable public template/default.
-The default generator still preserves legacy source until that migration is
-approved; this development option is not a public compatibility promise.
 
 ## Build and integrity
 
