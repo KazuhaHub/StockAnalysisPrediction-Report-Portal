@@ -4318,7 +4318,6 @@
   "appStore.customOpen": "打开目录",
   "appStore.customInvalid": "目录地址必须是 https 地址。",
   "appStore.builtinBadge": "内置",
-  "appStore.updateTo": "更新到 v{{version}}",
   "appStore.switchVersion": "切换版本",
   "appStore.current": "当前",
   "appStore.latest": "最新",
@@ -4345,5 +4344,8 @@
   "appStore.retry": "重试",
   "appStore.switchTo": "切换到此版本",
   "appStore.alreadyInstalled": "此版本已安装",
-  "appStore.platformNotReady": "应用平台尚未初始化。请先在“来源与信任”中完成初始化。"
+  "appStore.platformNotReady": "应用平台尚未初始化。请先在“来源与信任”中完成初始化。",
+  "appStore.updateTo": "更新到 {{version}}",
+  "appStore.releaseMissing": "无法读取这个应用当前的发布。",
+  "appStore.sourcesFailed": "无法读取应用目录的来源。"
 }

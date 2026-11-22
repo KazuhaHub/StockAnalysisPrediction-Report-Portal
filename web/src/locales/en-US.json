@@ -4318,7 +4318,6 @@
   "appStore.customOpen": "Open catalogue",
   "appStore.customInvalid": "The catalogue address must be an https URL.",
   "appStore.builtinBadge": "Built-in",
-  "appStore.updateTo": "Update to v{{version}}",
   "appStore.switchVersion": "Switch version",
   "appStore.current": "Current",
   "appStore.latest": "Latest",
@@ -4345,5 +4344,8 @@
   "appStore.retry": "Retry",
   "appStore.switchTo": "Switch to this version",
   "appStore.alreadyInstalled": "This version is already installed",
-  "appStore.platformNotReady": "The application platform is not initialised yet. Set it up in Sources and trust first."
+  "appStore.platformNotReady": "The application platform is not initialised yet. Set it up in Sources and trust first.",
+  "appStore.updateTo": "Update to {{version}}",
+  "appStore.releaseMissing": "Could not read this app’s current release.",
+  "appStore.sourcesFailed": "Could not read the catalogue sources."
 }

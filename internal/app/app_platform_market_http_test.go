@@ -271,7 +271,7 @@ func TestPlatformMarketCatalogueDisabledPublisherIsNotTrusted(t *testing.T) {
 	if len(apps) != 1 || apps[0].Trusted || apps[0].Display != nil {
 		t.Fatal("a disabled publisher must not be trusted", body)
 	}
-	if h.requested("/fixture-publisher-") {
-		t.Fatal("a disabled publisher's descriptor was fetched")
+	if h.requested("/fixture-publisher-") || len(h.paths) != 0 {
+		t.Fatal("a disabled publisher's descriptor or signature was fetched", h.paths)
 	}
 }

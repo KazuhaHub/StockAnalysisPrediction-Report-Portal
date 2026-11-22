@@ -26,6 +26,15 @@ describe('compareVersions', () => {
   }
 })
 
+describe('updates for a prerelease install', () => {
+  it('offers the newest newer version, never a downgrade', () => {
+    expect(offeredUpdate('1.0.0-beta.1', ['0.9.0', '1.0.0-beta.2'])).toBe('1.0.0-beta.2')
+    expect(offeredUpdate('1.0.0-beta.2', ['0.9.0', '1.0.0-beta.2'])).toBeUndefined()
+    expect(offeredUpdate('1.0.0-beta.1', ['0.9.0'])).toBeUndefined()
+    expect(offeredUpdate('1.0.0-beta.1', ['1.0.0-beta.2', '1.0.0', '1.1.0-alpha'])).toBe('1.1.0-alpha')
+  })
+})
+
 describe('prerelease policy', () => {
   it('tells a prerelease from a release, ignoring build metadata', () => {
     expect(isPrerelease('1.0.0-beta.1')).toBe(true)

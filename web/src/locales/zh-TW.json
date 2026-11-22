@@ -4318,7 +4318,6 @@
   "appStore.customOpen": "開啟目錄",
   "appStore.customInvalid": "目錄位址必須是 https 位址。",
   "appStore.builtinBadge": "內建",
-  "appStore.updateTo": "更新到 v{{version}}",
   "appStore.switchVersion": "切換版本",
   "appStore.current": "目前",
   "appStore.latest": "最新",
@@ -4345,5 +4344,8 @@
   "appStore.retry": "重試",
   "appStore.switchTo": "切換到此版本",
   "appStore.alreadyInstalled": "此版本已安裝",
-  "appStore.platformNotReady": "應用平台尚未初始化。請先在「來源與信任」中完成初始化。"
+  "appStore.platformNotReady": "應用平台尚未初始化。請先在「來源與信任」中完成初始化。",
+  "appStore.updateTo": "更新到 {{version}}",
+  "appStore.releaseMissing": "無法讀取這個應用目前的發佈。",
+  "appStore.sourcesFailed": "無法讀取應用目錄的來源。"
 }

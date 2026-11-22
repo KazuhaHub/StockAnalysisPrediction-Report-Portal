@@ -12,11 +12,13 @@ already staged signed releases, not a completed remote marketplace.
 | --- | --- |
 | internal/app/app_platform_catalogue_http.go | Bounded signed release metadata and minimal user/OU directories |
 | internal/app/app_platform_catalogue_http_test.go | Trust/input/auth refusal and audience cursor pagination |
-| web/src/pages/manage/AppsAdminPage.tsx | New/legacy tabs on the existing management route |
-| web/src/pages/manage/LegacyAppsAdminPage.tsx | Existing upload/market/backend behavior, moved without redesign |
-| web/src/pages/manage/AppPlatformInstallPanel.tsx | Explicit audience, reviewed confirmation, persistent request identity and progress observation |
+| web/src/pages/manage/AppsAdminPage.tsx | Tabs of the apps console on the existing management route |
+| web/src/pages/manage/AppsMarketplace.tsx | The one marketplace page: installed and catalogue cards, install menu |
+| web/src/pages/manage/platformLifecycle.ts | Review, confirmation, persistent request identity and progress observation for every lifecycle action |
+| web/src/pages/manage/PlatformLifecycleModal.tsx | The Steps modal: audience, review, progress |
+| web/src/pages/manage/PlatformReviewDetails.tsx | The verified review of one plan |
 | web/src/pages/manage/AppPlatformSettingsPage.tsx | Installation settings, audience/grants, backend, retained data, recovery and credential metadata, plus reviewed retained-data deletion |
-| web/src/pages/manage/AppPlatformInstallPanel.test.tsx | Confirmation, replay, refresh, identity and stale response tests |
+| web/src/pages/manage/PlatformLifecycleModal.test.tsx | Confirmation, replay, refresh, identity and stale response tests |
 | internal/app/app_platform_settings_http.go | Bounded administrator-only installation settings projection |
 | internal/app/app_platform_management_browser_test.go | Opt-in loopback server with temporary store and synthetic trust/session |
 | scripts/app-install-browser-fixture.py | Real page/preferences/auth/Ant build and loopback relay for browser acceptance |

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { usePlatformMarket } from './platformMarket'
+import { loadInstalledRelease, usePlatformMarket } from './platformMarket'
 import type { PlatformMarketApp } from '../../api/appPlatform'
 
 const mock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), postBytes: vi.fn(), user: 'admin' }))
@@ -174,5 +174,12 @@ describe('staging an offline package', () => {
     let result: unknown
     await act(async () => { result = await view.result.current.stageOffline(new Blob(['zip'])) })
     expect(result).toEqual({ error: 'appMarket.verificationChanged' })
+  })
+})
+
+describe('reading an installation’s current release', () => {
+  it('fails with a translated message when there is none', async () => {
+    mock.get.mockResolvedValue({})
+    await expect(loadInstalledRelease('33333333-3333-4333-8333-333333333333', key => key)).rejects.toThrow('appStore.releaseMissing')
   })
 })

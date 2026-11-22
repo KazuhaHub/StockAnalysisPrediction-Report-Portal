@@ -10,11 +10,15 @@ automatically install code discovered in a catalogue.
 
 | File | Responsibility |
 | --- | --- |
-| web/src/pages/manage/AppPlatformMarketPanel.tsx | Deliberate discovery, unverified hints, download/verification and result ownership |
+| web/src/pages/manage/platformMarket.ts | Catalogue sources, discovery, download/verification and result ownership |
+| web/src/pages/manage/AppsMarketplace.tsx | Catalogue and installed cards, version choice, install menu |
+| web/src/pages/manage/appStoreParts.tsx | The installed card, the catalogue card and the catalogue detail dialog |
 | web/src/api/appPlatform.ts | Shared staged summary and bounded discovery response shapes |
-| web/src/pages/manage/AppPlatformInstallPanel.tsx | Current verified release pin and existing explicit audience/review/admission |
-| web/src/pages/manage/AppPlatformMarketPanel.test.tsx | Discovery/staging/refusal/retry and stale account/source response coverage |
-| web/src/pages/manage/AppPlatformInstallPanel.test.tsx | End-to-end UI boundary from a remote version outside the first directory page |
+| web/src/pages/manage/platformLifecycle.ts | Current verified release pin and existing explicit audience/review/admission |
+| web/src/pages/manage/PlatformLifecycleModal.tsx | Audience, review and progress steps |
+| web/src/pages/manage/PlatformReviewDetails.tsx | The verified review of one plan |
+| web/src/pages/manage/platformMarket.test.tsx | Discovery/staging/refusal/retry and stale account/source response coverage |
+| web/src/pages/manage/AppsAdminPage.test.tsx | End-to-end UI boundary from a remote version outside the first directory page |
 | internal/app/app_platform_catalogue_http.go | Exact digest lookup using the current signed directory gate |
 | internal/app/app_platform_market_http.go | Closed production client entry points plus private shared handler implementation |
 | internal/app/app_platform_management_browser_test.go | Optional synthetic TLS market only in the temporary test listener |

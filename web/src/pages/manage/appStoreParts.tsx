@@ -51,14 +51,14 @@ export function InstalledCard({ app, name, description, publisher, source, catal
   const updatable = !!newest
   const state = app.platform ? platformStateTone(app.state) : null
   const lifecycleOK = app.platform && !!app.installationId && LIFECYCLE_STATES.includes(app.state ?? '')
-  const versionLabel = app.version ? `v${app.version}` : ''
+  const versionLabel = app.version ?? ''
   const versionItems = catalogue ? [{
     type: 'group' as const,
     label: t('appStore.switchVersion'),
     children: catalogue.versions.map(v => ({
       key: v.version,
       disabled: v.version === app.version,
-      label: <Space size={8}><span>v{v.version}</span>{v.version === app.version && <Tag>{t('appStore.current')}</Tag>}</Space>,
+      label: <Space size={8}><span>{v.version}</span>{v.version === app.version && <Tag>{t('appStore.current')}</Tag>}</Space>,
     })),
   }] : []
   const recoveryUninstall = !lifecycleOK && app.platform && !!app.installationId && RECOVERY_STATES.includes(app.state ?? '') && !!uninstallable
@@ -147,7 +147,10 @@ export function MarketDetailModal({ app, installed, lang, stagingVersion, blocke
   const { t } = useTranslation()
   const [chosen, setChosen] = useState('')
   const latest = app ? latestVersion(app.versions.map(v => v.version)) ?? '' : ''
-  const version = app?.versions.some(v => v.version === chosen) ? chosen : latest
+  // For an installed app the dialog opens on the version it would be updated to, or else on the installed one.
+  const offered = app && installed?.version ? offeredUpdate(installed.version, app.versions.map(v => v.version)) : undefined
+  const fallback = offered ?? (installed?.version && app?.versions.some(v => v.version === installed.version) ? installed.version : latest)
+  const version = app?.versions.some(v => v.version === chosen) ? chosen : fallback
   const isCurrent = !!installed && !!installed.version && version === installed.version
   const actionLabel = !installed ? t('appStore.installAction') : installed.version && compareVersions(version, installed.version) > 0 ? t('appStore.updateTo', { version }) : t('appStore.switchTo')
   const copy = app ? appDisplayText(app.app_id, app.display, lang) : { name: '', description: '' }

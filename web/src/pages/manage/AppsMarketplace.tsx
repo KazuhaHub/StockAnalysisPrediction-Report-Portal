@@ -67,7 +67,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
     for (const id of recovering) {
       if (probed.current.has(id)) continue
       probed.current.add(id)
-      loadInstalledRelease(id)
+      loadInstalledRelease(id, t)
         .then(r => { if (live(account, epoch)) setUninstallable(v => ({ ...v, [id]: r.uninstallable === true })) })
         .catch(() => { if (live(account, epoch)) probed.current.delete(id) })
     }
@@ -96,6 +96,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
   const openStaged = (release: PlatformRelease, installation?: string): string => {
     if (release.installed) return t('appStore.alreadyInstalled')
     const target = installation ?? release.installation_id
+    if (release.uninstallable && target) { lifecycle.begin({ ...release, installation_id: target }, 'uninstall'); return '' }
     if (release.enableable && target) { lifecycle.begin({ ...release, installation_id: target }, 'enable'); return '' }
     // A version chosen for an installed app is always an update: the server, not this page, refuses a downgrade.
     if (installation) { lifecycle.begin({ ...release, installation_id: installation }, 'update'); return '' }
@@ -136,7 +137,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
     const account = user, epoch = generation.current
     setActing(a.key)
     try {
-      const release = await loadInstalledRelease(a.installationId)
+      const release = await loadInstalledRelease(a.installationId, t)
       if (live(account, epoch)) lifecycle.begin(release, action)
     } catch (e) { if (live(account, epoch)) notifyError(errText(e, t)) }
     finally { if (live(account, epoch)) setActing('') }
@@ -166,7 +167,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
   const marketBody = () => {
     const state = market.catalogue
     if (market.sourcesState === 'uninitialised') return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('appStore.platformNotReady')}><Button onClick={onOpenTrust}>{t('appStore.openTrust')}</Button></Empty>
-    if (!market.sources.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={market.sourcesState === 'loading' ? <Spin /> : t('appStore.sourceNone')} />
+    if (!market.sources.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={market.sourcesState === 'loading' ? <Spin /> : market.sourcesState === 'failed' ? t('appStore.sourcesFailed') : t('appStore.sourceNone')} />
     if (!state || state.status === 'loading') return <div className="rp-app-grid-state"><Spin /></div>
     if (state.status === 'error') return <Alert type="error" title={state.error} action={<Button onClick={market.reload}>{t('appStore.retry')}</Button>} />
     if (!shownMarket.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search.trim() ? t('appStore.noMatches') : t('appStore.catalogueEmpty')} />

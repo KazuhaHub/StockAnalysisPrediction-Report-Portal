@@ -66,10 +66,19 @@ export function usePlatformMarket(visible: boolean = true) {
     // that turns the official catalogue on or off lives on another tab.
     api.get<unknown>(`${platformRoot}/market/sources`, { signal: abort.signal })
       .then(value => { if (!abort.signal.aborted) { setOfficial(parseSources(value)); setSourcesState('ready') } })
-      .catch(e => {
+      .catch(async e => {
         if (abort.signal.aborted) return
         setOfficial(null)
-        setSourcesState(e instanceof ApiError && e.code === 'app_platform_unavailable' ? 'uninitialised' : 'failed')
+        // A 503 is "not set up" only when the publishers directory says the platform is not initialised; any
+        // other failure is just a failed read.
+        let state: SourcesState = 'failed'
+        if (e instanceof ApiError && e.status === 503) {
+          try {
+            const directory = await api.get<{ initialized?: boolean }>(`${platformRoot}/publishers`, { signal: abort.signal })
+            if (directory.initialized === false) state = 'uninitialised'
+          } catch { /* the generic failure stands */ }
+        }
+        if (!abort.signal.aborted) setSourcesState(state)
       })
     return () => abort.abort()
   }, [user, visible])
@@ -167,12 +176,12 @@ export function usePlatformMarket(visible: boolean = true) {
 export type PlatformMarket = ReturnType<typeof usePlatformMarket>
 
 /** The verified release row of an installed app's current release, for a lifecycle action on that installation. */
-export async function loadInstalledRelease(installation: string): Promise<PlatformRelease> {
+export async function loadInstalledRelease(installation: string, t: (key: string) => string): Promise<PlatformRelease> {
   const settings = await api.get<{ current_release_sha256?: string }>(`${platformRoot}/installations/${installation}/settings`)
   const digest = settings.current_release_sha256
-  if (!digest || !/^[0-9a-f]{64}$/.test(digest)) throw new Error('missing release')
+  if (!digest || !/^[0-9a-f]{64}$/.test(digest)) throw new Error(t('appStore.releaseMissing'))
   const page = await api.get<{ items: PlatformRelease[] }>(`${platformRoot}/releases?release_sha256=${digest}`)
   const row = page.items?.length === 1 ? page.items[0] : undefined
-  if (!row || row.release_sha256 !== digest) throw new Error('missing release')
+  if (!row || row.release_sha256 !== digest) throw new Error(t('appStore.releaseMissing'))
   return { ...row, installation_id: installation }
 }

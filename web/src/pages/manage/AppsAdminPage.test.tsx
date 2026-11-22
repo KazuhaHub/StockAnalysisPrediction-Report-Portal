@@ -108,7 +108,7 @@ describe('Installed apps', () => {
     expect(within(cardOf('nav.batch')).getByText('appStore.builtinBadge')).toBeTruthy()
     expect(within(cardOf('Hello')).queryByText('appStore.builtinBadge')).toBeNull()
     expect(cardOf('nav.batch').querySelector('[data-icon="play-circle"]')).not.toBeNull()
-    expect(within(cardOf('Hello')).getByText('v1.2.0')).toBeTruthy()
+    expect(within(cardOf('Hello')).getByText('1.2.0')).toBeTruthy()
   })
 
   it('shows one page: no segmented switch, no preview or unverified notice, no separate platform tab', async () => {
@@ -165,7 +165,7 @@ describe('A platform app card', () => {
     renderPage()
     const card = (await screen.findAllByText('Notes')).map(n => n.closest('.rp-app-card') as HTMLElement).find(c => c.querySelector('[data-icon]') && within(c).queryByText('appStore.state.enabled'))!
     expect(within(card).getByText('appStore.state.enabled')).toBeTruthy()
-    expect(within(card).getByText('v1.0.0')).toBeTruthy()
+    expect(within(card).getByText('1.0.0')).toBeTruthy()
   })
 
   it('maps known states and shows an unknown one as it is', async () => {
@@ -203,7 +203,7 @@ describe('A platform app card', () => {
     await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
     await user.click(screen.getAllByRole('button', { name: 'appStore.switchVersion' })[0])
     const items = await screen.findAllByRole('menuitem')
-    expect(items.map(i => i.textContent)).toEqual(['v1.1.0', 'v1.0.0appStore.current'])
+    expect(items.map(i => i.textContent)).toEqual(['1.1.0', '1.0.0appStore.current'])
     expect(items[1].getAttribute('aria-disabled')).toBe('true')
     await user.click(items[0])
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, expect.objectContaining({ action: 'update', installation_id: installationId })))
@@ -222,7 +222,7 @@ describe('A platform app card', () => {
     renderPage()
     await screen.findByText('nav.batch')
     await user.click((await screen.findAllByRole('button', { name: 'appStore.switchVersion' }))[0])
-    await user.click(await screen.findByText('v1.0.0'))
+    await user.click(await screen.findByText('1.0.0'))
     expect(await screen.findByText('downgrade refused')).toBeTruthy()
   })
 
@@ -500,6 +500,30 @@ describe('Prerelease policy and publisher identity', () => {
   })
 })
 
+describe('A prerelease install', () => {
+  const prereleaseCatalogue = () => catalogue([{ ...notesApp, versions: [{ version: '1.0.0-beta.2', descriptor_sha256: sha('e') }, { version: '0.9.0', descriptor_sha256: sha('7') }, { version: '1.0.0-beta.1', descriptor_sha256: sha('a') }] }])
+  it('is offered the newer prerelease, and the dialog opens on it', async () => {
+    withPlatform('installed', '1.0.0-beta.1')
+    catalogueResponse = prereleaseCatalogue
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })
+    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
+    await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })).toBeTruthy()
+  })
+  it('opens the dialog on the installed version when nothing newer is offered', async () => {
+    withPlatform('installed', '1.1.0')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
+    await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('appStore.alreadyInstalled')).toBeTruthy()
+  })
+})
+
 describe('The catalogue dialog of an installed app', () => {
   const openDialog = async () => {
     withPlatform('installed', '1.0.0')
@@ -534,6 +558,13 @@ describe('The catalogue dialog of an installed app', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: installationId }))
   })
 
+  it('reviews an uninstall when the staged release is one that can only be uninstalled', async () => {
+    releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, uninstallable: true })
+    const { user, dialog } = await openDialog()
+    await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'uninstall', installation_id: installationId }))
+  })
+
   it('says so instead of planning an update when the staged release is the installed one', async () => {
     releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, installed: true })
     const { user, dialog } = await openDialog()
@@ -549,6 +580,7 @@ describe('Platform not initialised', () => {
     const base = apiMock.get.getMockImplementation()!
     apiMock.get.mockImplementation(async (url: string) => {
       if (url === `${root}/market/sources`) throw new ApiError(503, 'unavailable', 'app_platform_unavailable')
+      if (url === `${root}/publishers`) return { initialized: false, paused: false }
       return base(url)
     })
     const user = userEvent.setup()
@@ -557,6 +589,21 @@ describe('Platform not initialised', () => {
     expect(screen.queryByText('appStore.sourceNone')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'appStore.openTrust' }))
     await waitFor(() => expect(screen.getByRole('tab', { name: 'appTrust.tab' }).getAttribute('aria-selected')).toBe('true'))
+  })
+})
+
+describe('Sources that cannot be read', () => {
+  it('reports a 503 as a failed read, not as an uninitialised platform, when the platform is initialised', async () => {
+    const { ApiError } = await import('../../api/client')
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === `${root}/market/sources`) throw new ApiError(503, 'unavailable', 'app_platform_unavailable')
+      if (url === `${root}/publishers`) return { initialized: true, paused: false }
+      return base(url)
+    })
+    renderPage()
+    expect(await screen.findByText('appStore.sourcesFailed')).toBeTruthy()
+    expect(screen.queryByText('appStore.platformNotReady')).toBeNull()
   })
 })
 

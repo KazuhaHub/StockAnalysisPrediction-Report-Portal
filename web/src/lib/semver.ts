@@ -49,12 +49,15 @@ export function latestVersion(versions: readonly string[]): string | undefined {
 }
 
 /**
- * The version an installed app should be offered as an update, if any: the catalogue's latest when it is newer
- * than the installed one and either stable or the installed version is itself a prerelease. A stable install is
- * never nudged toward a prerelease.
+ * The version an installed app should be offered as an update, if any. A stable install is offered only a newer
+ * stable version (the catalogue's latest), never a prerelease. A prerelease install is offered the newest version
+ * that is newer than it, prerelease or stable, and never a downgrade.
  */
 export function offeredUpdate(installed: string, versions: readonly string[]): string | undefined {
+  if (isPrerelease(installed)) {
+    const newest = versions.reduce<string | undefined>((best, v) => (best === undefined || compareVersions(v, best) > 0 ? v : best), undefined)
+    return newest !== undefined && compareVersions(newest, installed) > 0 ? newest : undefined
+  }
   const latest = latestVersion(versions)
-  if (!latest || compareVersions(latest, installed) <= 0) return undefined
-  return !isPrerelease(latest) || isPrerelease(installed) ? latest : undefined
+  return latest !== undefined && !isPrerelease(latest) && compareVersions(latest, installed) > 0 ? latest : undefined
 }
