@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { validInstallationId } from './appLaunchV2'
-import { parseAppDisplay } from './appDisplayV2'
-import type { AppDisplay } from './descriptor-contract.generated'
+import { parseAppDisplay, type AppDisplayView } from './appDisplayV2'
 import { DESCRIPTOR_PATTERNS } from './descriptor-contract.generated'
 
 export type AppDirectoryState = 'installed' | 'pending' | 'setup_required' | 'disabled' | 'attention'
@@ -11,7 +10,8 @@ export interface AppDirectoryItem {
   applicationId: string
   state: AppDirectoryState
   openable: boolean
-  display?: AppDisplay
+  display?: AppDisplayView
+  publisherName?: string
 }
 interface Page { items: AppDirectoryItem[]; nextCursor: string }
 const applicationId = new RegExp(DESCRIPTOR_PATTERNS.slug)
@@ -31,7 +31,7 @@ export function parseAppDirectory(value: unknown): Page | null {
     const display = item.display == null ? null : parseAppDisplay(item.display)
     if (item.display != null && !display) return null
     previous = item.installationId
-    items.push({ installationId: item.installationId, applicationId: item.applicationId, state: item.state as AppDirectoryState, openable: item.openable, ...(display ? { display } : {}) })
+    items.push({ installationId: item.installationId, applicationId: item.applicationId, state: item.state as AppDirectoryState, openable: item.openable, ...(display ? { display } : {}), ...(typeof item.publisherName === 'string' && item.publisherName !== '' ? { publisherName: item.publisherName } : {}) })
   }
   if (v.nextCursor !== '' && (items.length === 0 || previous !== v.nextCursor)) return null
   return { items, nextCursor: v.nextCursor }

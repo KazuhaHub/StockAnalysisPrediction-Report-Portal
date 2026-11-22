@@ -1,5 +1,4 @@
-import type { AppDisplay } from '../lib/descriptor-contract.generated'
-import { parseAppDisplay } from '../lib/appDisplayV2'
+import { parseAppDisplay, type AppDisplayView } from '../lib/appDisplayV2'
 
 export interface PlatformRelease {
   release_sha256: string
@@ -7,7 +6,8 @@ export interface PlatformRelease {
   publisher_id: string
   version: string
   trust_revision: string
-  display?: AppDisplay
+  display?: AppDisplayView
+  publisher_name?: string
   compatibility?: {
     platform_api: string
     runner_protocol: string
@@ -91,7 +91,9 @@ export interface PlatformMarketApp {
   publisher_id: string
   app_id: string
   versions: PlatformMarketVersion[]
-  display?: AppDisplay
+  display?: AppDisplayView
+  /** Self-declared by the publisher, shown beside the ID; never a trust input. */
+  publisher_name?: string
   publisher_trusted: boolean
 }
 
@@ -112,7 +114,7 @@ export function parsePlatformMarketApps(value: unknown): PlatformMarketApp[] {
     }
     if (versions.length !== item.versions.length) continue
     const display = item.display === undefined || item.display === null ? undefined : parseAppDisplay(item.display) ?? undefined
-    apps.push({ publisher_id: item.publisher_id, app_id: item.app_id, versions, display, publisher_trusted: item.publisher_trusted === true })
+    apps.push({ publisher_id: item.publisher_id, app_id: item.app_id, versions, display, ...(typeof item.publisher_name === 'string' && item.publisher_name !== '' && [...item.publisher_name].length <= 64 ? { publisher_name: item.publisher_name } : {}), publisher_trusted: item.publisher_trusted === true })
   }
   return apps
 }

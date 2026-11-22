@@ -1,7 +1,7 @@
 import { Alert, Descriptions, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../prefs'
-import { appDisplayText } from '../../lib/appDisplayV2'
+import { appDisplayText, publisherWithId } from '../../lib/appDisplayV2'
 import { joinList } from '../../lib/joinList'
 import type { PlatformRelease } from '../../api/appPlatform'
 import { formatBytes } from './AppNetworkProxyPanel'
@@ -50,7 +50,7 @@ export default function PlatformReviewDetails({ review, release, groups, expired
   return <div role="document" tabIndex={0} className="rp-platform-review rp-platform-review-scroll"><Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
     { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'disable' ? 'appPlatform.disable' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : review.review.action === 'enable' ? 'appPlatform.enable' : 'appPlatform.install') },
     { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, release?.display, lang).name} · ${release?.version ?? ''}` },
-    { key: 'publisher', label: t('appPlatform.publisher'), children: review.review.publisher_id },
+    { key: 'publisher', label: t('appPlatform.publisher'), children: publisherWithId(release?.publisher_name, review.review.publisher_id) },
     { key: 'release', label: t('appPlatform.releaseDigest'), children: <Typography.Text code copyable style={{ wordBreak: 'break-all' }}>{review.review.release_sha256}</Typography.Text> },
     { key: 'compatibility', label: t('appPlatform.compatibility'), children: compatibility },
     { key: 'resources', label: t('appPlatform.resources'), children: resources },
