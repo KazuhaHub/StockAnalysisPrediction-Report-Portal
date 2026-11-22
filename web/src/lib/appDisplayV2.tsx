@@ -22,8 +22,8 @@ export function appDisplayText(id: string, display: AppDisplay | null | undefine
   const copy = display?.texts.find(text => text.locale === locale)
   return copy ? { name: copy.name, description: copy.description } : { name: id, description: '' }
 }
-const icons = { appstore: AppstoreOutlined, 'file-text': FileTextOutlined, dashboard: DashboardOutlined, calendar: CalendarOutlined, 'bar-chart': BarChartOutlined, cloud: CloudOutlined, tool: ToolOutlined, experiment: ExperimentOutlined }
+export const DISPLAY_ICONS = { appstore: AppstoreOutlined, 'file-text': FileTextOutlined, dashboard: DashboardOutlined, calendar: CalendarOutlined, 'bar-chart': BarChartOutlined, cloud: CloudOutlined, tool: ToolOutlined, experiment: ExperimentOutlined }
 export function AppDisplayIcon({ display }: { display?: AppDisplay | null }) {
-  const Icon = display ? icons[display.icon] : AppstoreOutlined
+  const Icon = display ? DISPLAY_ICONS[display.icon] : AppstoreOutlined
   return <Icon aria-hidden />
 }

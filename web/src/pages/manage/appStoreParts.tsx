@@ -126,7 +126,7 @@ export function InstalledCard({ name, description, publisher, source, ...actions
             {secondary && <Typography.Text type="secondary" className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</Typography.Text>}
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
-          <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} /></div>
+          <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} compact /></div>
         </div>
         <InstalledControls {...actions} />
       </div>

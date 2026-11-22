@@ -3457,6 +3457,7 @@
   "appPlatform.defaultOUNote": "The Default OU is the parent of every organizational unit, so this opens the application to all of them, including external ones.",
   "apps.status.all": "On for everyone",
   "apps.status.some": "On for some organizational units · {{open}} / {{total}}",
+  "apps.status.someShort": "Partly open {{open}}/{{total}}",
   "apps.status.none": "Off for everyone",
   "apps.backToList": "Back to apps",
   "apps.detail.type": "Type",

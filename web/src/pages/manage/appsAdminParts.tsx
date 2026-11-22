@@ -1,7 +1,8 @@
-import { Badge, Breadcrumb, theme } from 'antd'
+import { Badge, Breadcrumb, Tooltip, theme } from 'antd'
 import { AppstoreOutlined, ClockCircleOutlined, LineChartOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import AppGlyph from '../../components/apps/AppGlyph'
 import { appPath, serviceStatus, type AdminApp } from './appsAdminModel'
 
 // The glyphs the apps hub and the header use for each built-in app.
@@ -30,18 +31,20 @@ export function AppIcon({ app, size = 36 }: { app: AdminApp; size?: number }) {
         color: app.builtin ? token.colorPrimary : token.colorTextSecondary,
       }}
     >
-      {app.icon || (app.builtinDef && BUILTIN_GLYPHS[app.builtinDef.key]) || <AppstoreOutlined />}
+      {app.icon ? <AppGlyph icon={app.icon} /> : (app.builtinDef && BUILTIN_GLYPHS[app.builtinDef.key]) || <AppstoreOutlined />}
     </span>
   )
 }
 
 /** A status dot and the words for it: everyone, some OUs (k of n), or nobody. */
-export function ServiceStatus({ app }: { app: AdminApp }) {
+export function ServiceStatus({ app, compact = false }: { app: AdminApp; compact?: boolean }) {
   const { t } = useTranslation()
   const s = serviceStatus(app.access)
   if (s.kind === 'all') return <Badge status="success" text={t('apps.status.all')} />
   if (s.kind === 'none') return <Badge status="default" text={t('apps.status.none')} />
-  return <Badge status="warning" text={t('apps.status.some', { open: s.open, total: s.total })} />
+  const full = t('apps.status.some', { open: s.open, total: s.total })
+  if (!compact) return <Badge status="warning" text={full} />
+  return <Tooltip title={full}><span tabIndex={0} aria-label={full} className="rp-app-status-short"><Badge status="warning" text={t('apps.status.someShort', { open: s.open, total: s.total })} /></span></Tooltip>
 }
 
 /** Apps › name › (page). The ancestors are links; the last item is the current page. */

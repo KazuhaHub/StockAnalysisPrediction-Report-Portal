@@ -59,7 +59,7 @@ describe('Installed apps', () => {
     renderPage()
     await screen.findByText('nav.batch')
     expect(within(cardOf('nav.batch')).getByText('apps.status.all')).toBeTruthy()
-    expect(within(cardOf('nav.quotes')).getByText('apps.status.some:{"open":1,"total":2}')).toBeTruthy()
+    expect(within(cardOf('nav.quotes')).getByText('apps.status.someShort:{"open":1,"total":2}')).toBeTruthy()
     expect(within(cardOf('Hello')).getByText('apps.status.none')).toBeTruthy()
     expect(within(cardOf('nav.batch')).getAllByText('appStore.builtinBadge')).toHaveLength(1)
     expect(within(cardOf('Hello')).queryByText('appStore.builtinBadge')).toBeNull()
