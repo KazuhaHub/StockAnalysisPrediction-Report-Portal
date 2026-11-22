@@ -77,7 +77,7 @@ func ParseUpdateStartAbsence(raw []byte) (UpdateStartAbsence, error) {
 
 // UpdateStartAbsenceMatchesCommand reports whether the reply answers exactly this signed restore-start.
 func UpdateStartAbsenceMatchesCommand(a UpdateStartAbsence, c control.UpdateStartCommand) bool {
-	return (c.Kind == "restore-start" || c.Kind == "update-start") && a.DeploymentID == c.DeploymentID && a.ControllerEpoch == c.ControllerEpoch &&
+	return (c.Kind == "restore-start" || c.Kind == "update-start" || c.Kind == "enable-start") && a.DeploymentID == c.DeploymentID && a.ControllerEpoch == c.ControllerEpoch &&
 		a.InstallationID == c.InstallationID && a.OperationID == c.OperationID &&
 		a.TargetGeneration == c.TargetGeneration && a.Stage == c.Stage && a.EffectNumber == c.EffectNumber &&
 		a.EffectID == c.EffectID && a.PayloadSHA256 == c.PayloadSHA256
@@ -146,7 +146,7 @@ func (s *Store) readUpdateStartHeld(ctx context.Context, raw, signature []byte) 
 		return nil, err
 	}
 	c := verified.Command()
-	if c.Kind != "update-start" {
+	if c.Kind != "update-start" && c.Kind != "enable-start" {
 		return nil, nil
 	}
 	row, err := loadAdmittedCommand(ctx, tx, c.EffectID)
@@ -236,7 +236,7 @@ func (s *Store) restoreStartAbsent(ctx context.Context, raw, signature []byte, v
 		return nil, err
 	}
 	c := verified.Command()
-	if c.Kind != "restore-start" && c.Kind != "update-start" {
+	if c.Kind != "restore-start" && c.Kind != "update-start" && c.Kind != "enable-start" {
 		return nil, nil
 	}
 	if _, err := loadAdmittedCommand(ctx, tx, c.EffectID); err == nil {

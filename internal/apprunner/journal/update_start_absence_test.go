@@ -105,11 +105,18 @@ func TestUpdateStartReadReportsAbsenceOnlyWhenNoRowExists(t *testing.T) {
 	}
 }
 
-func TestUpdateStartReadHasNoAbsenceForOtherKinds(t *testing.T) {
+func TestStartAbsenceAnswersTheStartKindsAndNoOther(t *testing.T) {
 	_, _, command, _, _ := updateStartJournalFixture(t)
-	command.Kind = "enable-start"
-	if UpdateStartAbsenceMatchesCommand(UpdateStartAbsence{}, command) {
-		t.Fatal("an enable-start can be answered with an absence")
+	absence := updateStartAbsenceFor(command, 1)
+	for _, kind := range []string{"update-start", "restore-start", "enable-start"} {
+		command.Kind = kind
+		if !UpdateStartAbsenceMatchesCommand(absence, command) {
+			t.Fatalf("a %s cannot be answered with an absence", kind)
+		}
+	}
+	command.Kind = "snapshot"
+	if UpdateStartAbsenceMatchesCommand(absence, command) {
+		t.Fatal("a command that is not a start was answered with an absence")
 	}
 }
 
