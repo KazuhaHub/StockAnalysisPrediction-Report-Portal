@@ -20,6 +20,10 @@ var ErrViewerIdentity = errors.New("application viewer identity unavailable")
 // which never equal this word. Every site that reads, compares or records a
 // user's account_created must pass the stored value through AccountCreatedMarker
 // so grants and viewer derivation agree; DeriveViewerIdentity itself stays strict.
+// Existing users.created_at values must never be backfilled: the viewer subjects
+// and user-principal grants of legacy accounts depend on that value staying empty.
+// Stored identities elsewhere (storage owners, review plans, session scope) keep
+// the raw value and must not use this marker.
 const LegacyAccountCreated = "legacy"
 
 // AccountCreatedMarker maps an empty stored creation value to LegacyAccountCreated

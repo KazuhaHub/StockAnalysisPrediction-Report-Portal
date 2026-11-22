@@ -28,16 +28,17 @@ func logPlatformRefusal(r *http.Request, err error) {
 		return
 	}
 	text := err.Error()
+	key := r.PathValue("installation") + "\x00" + text
 	now := time.Now()
 	platformRefusals.Lock()
-	if at, ok := platformRefusals.last[text]; ok && now.Sub(at) < platformRefusalLogInterval {
+	if at, ok := platformRefusals.last[key]; ok && now.Sub(at) < platformRefusalLogInterval {
 		platformRefusals.Unlock()
 		return
 	}
 	if len(platformRefusals.last) >= platformRefusalLogMax {
 		clear(platformRefusals.last)
 	}
-	platformRefusals.last[text] = now
+	platformRefusals.last[key] = now
 	platformRefusals.Unlock()
-	log.Printf("app platform: %s %s refused: %s (repeats are not logged for %s)", r.Method, r.PathValue("installation"), text, platformRefusalLogInterval)
+	log.Printf("app platform: %s %s refused: %q (repeats are not logged for %s)", r.Method, r.PathValue("installation"), text, platformRefusalLogInterval)
 }

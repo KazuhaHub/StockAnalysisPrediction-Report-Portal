@@ -11,8 +11,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 var errAppPlatformActorUnavailable = errors.New("current application administrator authority is unavailable")
@@ -99,7 +97,6 @@ func platformReadSessionAccount(e migExec, session platformActorSession, now int
 		}
 		return account, err
 	}
-	account.created = appplatform.AccountCreatedMarker(account.created)
 	if (requireAdmin && account.role != "admin") || active != 1 || account.created != session.created || account.sessionRevision != session.sessionRevision {
 		return account, errAppPlatformActorUnavailable
 	}

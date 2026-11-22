@@ -42,7 +42,7 @@ func (s *Server) platformViewerIdentity(e migExec, account platformActorAccount,
 	if err != nil {
 		return zero, err
 	}
-	return appplatform.DeriveViewerIdentity(appID, installationID, seed, appplatform.ViewerAccountIdentity{Name: account.username, Created: account.created, Generation: account.generation, SessionRevision: account.sessionRevision, Role: account.role}, ous)
+	return appplatform.DeriveViewerIdentity(appID, installationID, seed, appplatform.ViewerAccountIdentity{Name: account.username, Created: appplatform.AccountCreatedMarker(account.created), Generation: account.generation, SessionRevision: account.sessionRevision, Role: account.role}, ous)
 }
 
 // readPlatformInstallationSeed opens the installation's sealed identity seed
