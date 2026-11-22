@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
 import type { AppDisplayView } from '../../lib/appDisplayV2'
-import { AppDisplayIcon, appDisplayText, publisherWithId } from '../../lib/appDisplayV2'
+import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
@@ -42,7 +42,6 @@ type Settings = {
   current_release_sha256?: string
   version?: string
   display?: AppDisplayView
-  publisher_name?: string
   audience: Audience[]
   audience_total?: number
   capabilities: Capability[]
@@ -606,7 +605,7 @@ export default function AppPlatformSettingsPage() {
         {settings.display ? <AppDisplayIcon display={settings.display} /> : <AppstoreOutlined aria-hidden="true" style={{ fontSize: 32, color: token.colorPrimary }} />}
         <div style={{ minWidth: 0, flex: '1 1 240px' }}>
           <Typography.Title level={4} style={{ margin: 0 }}>{copy.name}</Typography.Title>
-          <Typography.Text type="secondary">{publisherWithId(settings.publisher_name, settings.publisher_id)} · {settings.app_id}</Typography.Text>
+          <Typography.Text type="secondary">{settings.publisher_id} · {settings.app_id}</Typography.Text>
         </div>
         <StatusTag className={phaseTone(settings) === 'success' ? 'rp-platform-success-tag' : undefined} tone={phaseTone(settings)}>{t(`appPlatform.settings.phase.${settings.phase}`, { defaultValue: settings.phase })}</StatusTag>
       </div>

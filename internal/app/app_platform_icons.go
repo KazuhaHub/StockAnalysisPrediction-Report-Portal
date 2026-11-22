@@ -83,6 +83,15 @@ func platformDisplayViewOf(d *appplatform.AppDisplay) *platformDisplayView {
 	return view
 }
 
+// platformDisplayViewUnverified projects a display block that has not been verified against publisher
+// trust: no icon hash and nothing cached, so the built-in icon key is the only icon.
+func platformDisplayViewUnverified(d *appplatform.AppDisplay) *platformDisplayView {
+	if d == nil {
+		return nil
+	}
+	return &platformDisplayView{Icon: d.Icon, Texts: d.Texts}
+}
+
 // platformManifestPublisherName is the verified manifest's self-declared name, empty when it has none.
 func platformManifestPublisherName(m appplatform.Manifest) string {
 	if m.PublisherName == nil {
@@ -103,8 +112,13 @@ func (s *Server) apiPlatformIcon(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	sha, named := strings.CutSuffix(r.PathValue("file"), ".png")
+	if !named || !platformBlobDigest.MatchString(sha) {
+		h.Set("Cache-Control", "no-store")
+		http.NotFound(w, r)
+		return
+	}
 	png, ok := platformIcons.get(sha)
-	if !named || !ok || !platformBlobDigest.MatchString(sha) {
+	if !ok {
 		h.Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return

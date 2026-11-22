@@ -24,7 +24,7 @@ func validAppDisplay(display AppDisplay) bool {
 		return false
 	}
 	if display.IconPNG != nil {
-		if _, _, err := CanonicalIcon(*display.IconPNG); err != nil {
+		if err := ValidateIcon(*display.IconPNG); err != nil {
 			return false
 		}
 	}

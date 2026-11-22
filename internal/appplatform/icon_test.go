@@ -143,3 +143,44 @@ func TestDescriptorIconPNG(t *testing.T) {
 		})
 	}
 }
+
+// Parsing validates only: the expensive canonical re-encode runs when a hash is produced, once per input.
+func TestParserDoesNotEncodeAndCanonicalFormIsMemoised(t *testing.T) {
+	// A size no other test uses, so the memo cannot already hold it.
+	encoded := base64.StdEncoding.EncodeToString(testPNG(t, 66, 66))
+	before := iconEncodes.Load()
+	if err := ValidateIcon(encoded); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("testdata/descriptors/static.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	root["presentation"].(map[string]any)["display"] = map[string]any{"icon": "file-text", "icon_png": encoded, "texts": []any{
+		map[string]any{"locale": "en-US", "name": "Notes", "description": "Personal notes"},
+		map[string]any{"locale": "zh-CN", "name": "笔记", "description": "个人笔记"},
+		map[string]any{"locale": "zh-TW", "name": "筆記", "description": "個人筆記"},
+	}}
+	b, _ := json.Marshal(root)
+	if _, err := ParseDescriptor(b); err != nil {
+		t.Fatal(err)
+	}
+	if got := iconEncodes.Load(); got != before {
+		t.Fatalf("parsing encoded %d time(s)", got-before)
+	}
+	_, first, err := CanonicalIcon(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := CanonicalIcon(encoded)
+	if err != nil || second != first {
+		t.Fatal(err)
+	}
+	if got := iconEncodes.Load(); got != before+1 {
+		t.Fatalf("expected one encode for two calls, got %d", got-before)
+	}
+}

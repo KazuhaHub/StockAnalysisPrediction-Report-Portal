@@ -15,6 +15,14 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
+// isolatePlatformIcons gives the test its own empty icon cache and restores the shared one afterwards.
+func isolatePlatformIcons(t *testing.T) {
+	t.Helper()
+	saved := platformIcons
+	platformIcons = newPlatformIconCache()
+	t.Cleanup(func() { platformIcons = saved })
+}
+
 func iconTestPNG(t *testing.T, size int) string {
 	t.Helper()
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
@@ -29,6 +37,7 @@ func iconTestPNG(t *testing.T, size int) string {
 }
 
 func TestPlatformDisplayViewCarriesHashNotBytes(t *testing.T) {
+	isolatePlatformIcons(t)
 	encoded := iconTestPNG(t, 64)
 	view := platformDisplayViewOf(&appplatform.AppDisplay{Icon: "file-text", IconPNG: &encoded, Texts: []appplatform.AppDisplayText{{Locale: "en-US", Name: "Notes", Description: "d"}}})
 	if view == nil || len(view.IconSHA256) != 64 {
@@ -70,6 +79,7 @@ func TestPlatformIconCacheIsBounded(t *testing.T) {
 }
 
 func TestPlatformIconRoute(t *testing.T) {
+	isolatePlatformIcons(t)
 	s, _, _, _, cookie := platformManagementFixture(t, false)
 	mux := http.NewServeMux()
 	s.platformIconRoute(mux)
@@ -118,6 +128,7 @@ func TestPlatformIconsSkipGzip(t *testing.T) {
 }
 
 func TestPlatformMarketCatalogueShowsPublisherNameAndIconHash(t *testing.T) {
+	isolatePlatformIcons(t)
 	h := newMarketCatalogueHarness(t)
 	raw, _, _ := platformSignedReleaseFixture(t, "1.0.0")
 	var manifest appplatform.Manifest
@@ -156,5 +167,17 @@ func TestPlatformMarketCatalogueShowsPublisherNameAndIconHash(t *testing.T) {
 	}
 	if _, ok := platformIcons.get(parsed.Apps[0].Display.IconSHA256); !ok {
 		t.Fatal("verified catalogue entry must fill the icon cache")
+	}
+}
+
+func TestPlatformUnverifiedDisplayHasNoCustomIcon(t *testing.T) {
+	isolatePlatformIcons(t)
+	encoded := iconTestPNG(t, 64)
+	view := platformDisplayViewUnverified(&appplatform.AppDisplay{Icon: "cloud", IconPNG: &encoded})
+	if view.IconSHA256 != "" || view.Icon != "cloud" || platformIcons.order.Len() != 0 {
+		t.Fatalf("view=%+v cached=%d", view, platformIcons.order.Len())
+	}
+	if platformDisplayViewUnverified(nil) != nil {
+		t.Fatal("nil display must stay nil")
 	}
 }
