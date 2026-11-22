@@ -514,9 +514,15 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, err)
 			return
 		}
+		// An installation with no active activation (a failed first install) is reviewed for the release it was
+		// installed from.
+		releaseSHA := projection.SourceReleaseSHA256
+		if releaseSHA == "" && projection.NeverStarted != nil {
+			releaseSHA = projection.NeverStarted.ReleaseSHA256
+		}
 		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
 			"action": action, "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
-			"release_sha256": projection.SourceReleaseSHA256, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
+			"release_sha256": releaseSHA, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
 			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": action == "uninstall", "managed_data_retained": action == "disable", "managed_data_cleared": action == "uninstall" && projection.Managed && projection.Data != nil,
 		}})
 	case "delete_data":

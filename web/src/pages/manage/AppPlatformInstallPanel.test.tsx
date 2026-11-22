@@ -516,6 +516,30 @@ describe('application installation confirmation', () => {
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(1)
   })
 
+  it('offers the uninstall review for a first install that failed after its candidate started', async () => {
+    const failedRelease = {
+      release_sha256: release,
+      app_id: 'notes',
+      publisher_id: 'publisher',
+      version: '1.0.0',
+      trust_revision: '1',
+      installable: false,
+      reason: 'already_installed',
+      installation_id: operation,
+      current_release_sha256: release,
+      uninstallable: true,
+    }
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [failedRelease], next_cursor: '' } : { items: [], next_cursor: '' }))
+    mock.post.mockResolvedValue(uninstallReview())
+    mount()
+    const user = userEvent.setup()
+    expect(screen.queryByRole('button', { name: 'appPlatform.reviewDisable' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewUninstall' }))
+    expect(await screen.findByText('appPlatform.uninstallConfirmHint')).toBeTruthy()
+    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'uninstall', installation_id: operation })
+    expect(screen.queryByText('appPlatform.reason.already_installed')).toBeNull()
+  })
+
   it('keeps the uninstall review accessible to assistive technology', async () => {
     const installedRelease = {
       release_sha256: release,

@@ -35,6 +35,9 @@ type platformStagedSummary struct {
 	Updateable           bool                      `json:"updateable,omitempty"`
 	Enableable           bool                      `json:"enableable,omitempty"`
 	Installed            bool                      `json:"installed,omitempty"`
+	// Uninstallable marks the release of a first install that failed after its candidate started (or whose start
+	// the runner refused), so the installation can only be cleared by an uninstall review.
+	Uninstallable bool `json:"uninstallable,omitempty"`
 }
 
 func platformManagementQuery(r *http.Request, keys ...string) (url.Values, error) {
@@ -214,6 +217,11 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 						}
 					}
 				}
+				if errors.Is(err, sql.ErrNoRows) {
+					if err := platformMarkUninstallableFailedInstall(e, record.app, record.publisher, record.release, &item); err != nil {
+						return err
+					}
+				}
 			}
 			items = append(items, item)
 		}
@@ -295,4 +303,36 @@ func (s *Server) apiPlatformSubjects(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 	writeJSON(w, map[string]any{"items": items, "next_cursor": next})
+}
+
+// platformMarkUninstallableFailedInstall offers the uninstall of a first-generation managed install that ended in
+// review_required or recovery_required, on the release that install was for. It marks the release only when the
+// uninstall review would be admitted: the same evidence the review loads must hold, so the console never offers a
+// button the review would refuse.
+func platformMarkUninstallableFailedInstall(e migExec, app, publisher, release string, item *platformStagedSummary) error {
+	var installation, epoch, runtime, namespace string
+	var format int64
+	err := e.queryRow(`SELECT i.id,i.controller_epoch,i.runtime_id,n.id,n.data_format FROM app_platform_installations i
+		JOIN app_platform_data_namespaces n ON n.owner_installation_id=i.id AND n.state='active'
+		WHERE i.app_id=? AND i.publisher_id=? AND i.desired_state='enabled' AND i.generation=1 AND i.runtime_id IS NOT NULL
+		  AND i.phase IN ('review_required','recovery_required')
+		  AND NOT EXISTS(SELECT 1 FROM app_platform_operations o WHERE o.installation_id=i.id AND o.completed_ms IS NULL)
+		ORDER BY i.updated_ms DESC,i.id LIMIT 1`, app, publisher).Scan(&installation, &epoch, &runtime, &namespace, &format)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	evidence, err := platformLoadNeverStartedEvidence(e, installation, epoch, runtime, namespace, format, "")
+	if errors.Is(err, errAppPlatformPlanChanged) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if evidence.ReleaseSHA256 == release {
+		item.InstallationID, item.CurrentReleaseSHA256, item.Uninstallable = installation, release, true
+	}
+	return nil
 }

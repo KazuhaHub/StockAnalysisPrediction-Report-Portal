@@ -37,7 +37,17 @@ type platformRemovalNeverStarted struct {
 	PayloadSHA256 string `json:"prepare_data_payload_sha256"`
 	ReceiptSHA256 string `json:"prepare_data_receipt_sha256"`
 	AdmittedFence int64  `json:"prepare_data_admitted_fence"`
+	// The start fields are set only for an install whose candidate started and then failed (its readiness probe
+	// did not pass), where the start-candidate effect is applied: the candidate may still be running, so the
+	// removal stops and removes it on the runner before deleting data. They are absent from a never-started
+	// install, which keeps its reviewed plan byte for byte.
+	StartEffectID      string `json:"start_effect_id,omitempty"`
+	StartPayloadSHA256 string `json:"start_payload_sha256,omitempty"`
+	StartReceiptSHA256 string `json:"start_receipt_sha256,omitempty"`
 }
+
+// Started reports whether the evidence is that of an install whose candidate started (and may still run).
+func (n platformRemovalNeverStarted) Started() bool { return n.StartEffectID != "" }
 
 // platformStartBearingKinds are the effect kinds that start a backend: a candidate or writable candidate
 // (both are start-candidate), an update start, an enable start and a restore start.
@@ -51,8 +61,10 @@ var platformStartBearingKinds = map[string]bool{
 //
 //   - the installation has exactly one other operation, its install, which ended failed (or recovery_required,
 //     where an unsettled effect kept it) with an error code and no lease;
-//   - no start-bearing effect of that operation is anything but reverted: an applied, unknown or merely
-//     prepared start may have run;
+//   - no start-bearing effect of that operation is anything but reverted, with one exception: an applied
+//     start-candidate effect of a writable install whose running receipt is valid and bound to the effect admits
+//     the started-failed variant (the evidence then carries the start fields). An unknown or merely prepared
+//     start may have run and is never admitted;
 //   - every other effect of the operation is settled (applied or reverted) and none lies past the start stage;
 //   - its prepare_data effect is applied and its receipt names the namespace;
 //   - the namespace is the installation's only one, and it is active;
@@ -123,20 +135,20 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 		}
 		return zero, err
 	}
-	effects, err := e.query(`SELECT stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,state,receipt_json
+	effects, err := e.query(`SELECT stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json
 		FROM app_platform_operation_effects WHERE operation_id=?`, install.id)
 	if err != nil {
 		return zero, err
 	}
 	type effect struct {
 		stage, id, kind, digest, epoch, state, receipt string
-		number, fence                                  int64
+		number, fence, observed                        int64
 		runtime                                        sql.NullString
 	}
 	var found []effect
 	for effects.Next() {
 		var f effect
-		if err := effects.Scan(&f.stage, &f.number, &f.id, &f.kind, &f.digest, &f.runtime, &f.epoch, &f.fence, &f.state, &f.receipt); err != nil {
+		if err := effects.Scan(&f.stage, &f.number, &f.id, &f.kind, &f.digest, &f.runtime, &f.epoch, &f.fence, &f.observed, &f.state, &f.receipt); err != nil {
 			effects.Close()
 			return zero, err
 		}
@@ -147,7 +159,7 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	if err != nil {
 		return zero, err
 	}
-	var prepare *effect
+	var prepare, start *effect
 	for index := range found {
 		f := found[index]
 		// Image effects count here too: an unsettled load blocks the variant, a settled one does not.
@@ -158,9 +170,16 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 			return refused("an effect lies past the start stage")
 		}
 		if platformStartBearingKinds[f.kind] || f.stage == string(appplatform.StageStart) {
-			if !platformStartBearingKinds[f.kind] || f.state != "reverted" {
+			if !platformStartBearingKinds[f.kind] {
 				return refused("the start of the install is not reverted")
 			}
+			if f.state == "reverted" {
+				continue
+			}
+			if f.state != "applied" || start != nil || plan.Format != platformWritableInstallFormat || !platformStartedCandidateProved(f.stage, f.kind, f.id, f.digest, f.receipt, f.number, f.fence, f.observed, f.epoch, epoch, f.runtime, runtimeID, install.fence) {
+				return refused("the start of the install is not reverted")
+			}
+			start = &found[index]
 			continue
 		}
 		if f.stage == string(appplatform.StagePrepareData) && f.number == 1 {
@@ -209,7 +228,23 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 		OperationID: install.id, ReleaseSHA256: target.String, EffectID: prepare.id, PayloadSHA256: prepare.digest,
 		ReceiptSHA256: platformDigest([]byte(prepare.receipt)), AdmittedFence: prepare.fence,
 	}
+	if start != nil {
+		result.StartEffectID, result.StartPayloadSHA256, result.StartReceiptSHA256 = start.id, start.digest, platformDigest([]byte(start.receipt))
+	}
 	return result, nil
+}
+
+// platformStartedCandidateProved checks the shape of an applied writable start effect: the first start-candidate
+// effect, admitted and observed at the install's own fence on this runtime and epoch, whose running receipt
+// parses and names the effect and its payload. The removal's stop stage verifies the receipt against the signed
+// start command again before it sends anything.
+func platformStartedCandidateProved(stage, kind, id, digest, receipt string, number, admitted, observed int64, effectEpoch, epoch string, effectRuntime sql.NullString, runtimeID string, installFence int64) bool {
+	if stage != string(appplatform.StageStart) || kind != "start-candidate" || number != 1 || !platformValidUUID(id) || !platformValidSHA(digest) ||
+		!effectRuntime.Valid || effectRuntime.String != runtimeID || effectEpoch != epoch || admitted < 1 || admitted != installFence || observed != admitted {
+		return false
+	}
+	running, err := journal.ParseWritableCandidateRunningReceipt([]byte(receipt))
+	return err == nil && running.Claim.EffectID == id && running.Claim.PayloadSHA256 == digest && running.Claim.AdmittedFence == strconv.FormatInt(admitted, 10)
 }
 
 // platformOperationNeverStarted returns the never-started evidence a removal operation was admitted with, or nil
@@ -262,7 +297,7 @@ func (s *Server) advancePlatformNeverStartedRemoval(ctx context.Context, expecte
 	if err != nil {
 		return zero, err
 	}
-	if never == nil {
+	if never == nil || never.Started() {
 		return zero, errAppPlatformStageEvidence
 	}
 	var effects int

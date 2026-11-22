@@ -69,7 +69,8 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 		return errAppPlatformStageEvidence
 	}
 	if p.NeverStarted != nil && (p.Action != appplatform.ActionUninstall || !p.Managed || p.DesiredState != "enabled" || p.Generation != 1 || p.PortalSide || p.Data == nil ||
-		p.SourceReleaseSHA256 != "" || p.NeverStarted.OperationID == "") {
+		p.SourceReleaseSHA256 != "" || p.NeverStarted.OperationID == "" ||
+		(p.NeverStarted.Started() && (!platformValidUUID(p.NeverStarted.StartEffectID) || !platformValidSHA(p.NeverStarted.StartPayloadSHA256) || !platformValidSHA(p.NeverStarted.StartReceiptSHA256)))) {
 		return errAppPlatformStageEvidence
 	}
 	var currentApp, currentPublisher, currentDesired, currentPhase string
@@ -89,7 +90,7 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 		return errAppPlatformStageEvidence
 	}
 	if lease.snapshot.Managed {
-		if err := validatePlatformManagedRemovalEffects(e, lease, p.NeverStarted != nil); err != nil {
+		if err := validatePlatformManagedRemovalEffects(e, lease, p.NeverStarted != nil && !p.NeverStarted.Started()); err != nil {
 			return err
 		}
 	} else {

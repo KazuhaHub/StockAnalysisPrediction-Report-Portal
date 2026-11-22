@@ -180,11 +180,27 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 	} else {
 		var sourcePlanRaw, sourcePlanSHA string
 		var sourceCompleted int64
-		if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
+		// The source of a first-generation removal is the completed install, or, for an uninstall reviewed as a
+		// started-failed install, the failed install the reviewed plan names (its evidence was just compared with
+		// the database by validatePlatformAdmittedRemoval).
+		never, err := platformOperationNeverStarted(e, expected.id)
+		if err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		sourceQuery, sourceArgs := `SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
 			FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
 			WHERE o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
 			  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NULL
-			ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`, expected.installationID).
+			ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`, []any{expected.installationID}
+		if never != nil && never.Started() {
+			sourceQuery, sourceArgs = `SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
+				FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
+				WHERE o.id=? AND o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
+				  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NOT NULL`, []any{never.OperationID, expected.installationID}
+		} else if never != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		if err := e.queryRow(sourceQuery, sourceArgs...).
 			Scan(&sourceOperation, &sourcePlanRaw, &sourcePlanSHA, &sourceRelease, &descriptorRaw, &sourceGeneration, &sourceFence, &sourceCompleted); err != nil {
 			return zero, errAppPlatformStageEvidence
 		}
@@ -200,6 +216,9 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 		start, err := loadPlatformManagedHistoryEffect(e, platformManagedSource{operationID: sourceOperation, installationID: expected.installationID, epoch: expected.controllerEpoch, generation: uint64(sourceGeneration), fence: sourceFence}, runtime.id, "start", "start-candidate", facts.now)
 		if err != nil {
 			return zero, err
+		}
+		if never != nil && (start.id != never.StartEffectID || start.digest != never.StartPayloadSHA256 || platformDigest([]byte(start.receipt)) != never.StartReceiptSHA256) {
+			return zero, errAppPlatformStageEvidence
 		}
 		sourceEffectID = start.id
 		sourceReceiptSHA256 = platformDigest([]byte(start.receipt))
@@ -765,7 +784,8 @@ func (s *Server) runPlatformManagedUninstall(ctx context.Context, expected platf
 		if err != nil {
 			return zero, err
 		}
-		neverStarted = never != nil
+		// A started-failed install has a candidate to stop, so it takes the ordinary stop and remove_code stages.
+		neverStarted = never != nil && !never.Started()
 	}
 	for result.snapshot.Stage != appplatform.StageComplete {
 		switch result.snapshot.Stage {
