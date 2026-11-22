@@ -4090,7 +4090,7 @@
   "apps.v2ActionUncertain": "未能确认操作结果，请在应用中核对后再决定是否重试。",
   "apps.v2Unavailable": "应用暂时不可用，请检查访问权限或联系管理员。",
   "apps.v2Loading": "正在加载应用…",
-  "appStore.loadingPublisher": "正在加载发布者",
+  "appStore.catalogueFailed": "无法读取应用目录，更新和发布者名称可能缺失。",
   "apps.loadingName": "正在加载应用名称",
   "apps.v2Failed": "应用连接失败，请重新打开后重试。",
   "apps.v2Retry": "重新打开应用",

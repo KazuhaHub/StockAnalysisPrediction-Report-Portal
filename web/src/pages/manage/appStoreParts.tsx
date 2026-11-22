@@ -10,7 +10,6 @@ import { compareVersions, latestVersion, offeredUpdate } from '../../lib/semver'
 import type { PlatformMarketApp } from '../../api/appPlatform'
 import { appPath, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
-import PendingText from '../../components/apps/PendingText'
 import type { LifecycleAction } from './platformLifecycle'
 import type { Staging } from './platformMarket'
 
@@ -111,8 +110,6 @@ export interface InstalledCardProps extends InstalledActionProps {
   name: string
   description: string
   publisher?: string
-  /** The publisher's name has not arrived: the card shows a placeholder where the line would be, not the app id. */
-  publisherPending?: boolean
   source?: string
 }
 
@@ -120,7 +117,7 @@ export interface InstalledCardProps extends InstalledActionProps {
  * One installed app at Dify's density: icon, a line of name and "publisher · version", a line of description, a
  * tiny line of status. Small icon buttons sit top right. The name's link covers the whole card (stretched link).
  */
-export function InstalledCard({ name, description, publisher, publisherPending, source, ...actions }: InstalledCardProps) {
+export function InstalledCard({ name, description, publisher, source, ...actions }: InstalledCardProps) {
   const { t } = useTranslation()
   const { app } = actions
   const secondary = [publisher ?? app.appId ?? (app.builtin ? undefined : app.key), app.version].filter(Boolean).join(' · ')
@@ -135,8 +132,7 @@ export function InstalledCard({ name, description, publisher, publisherPending, 
           <div className="rp-app-card-line">
             {/* The link is the card's one way in: its ::after covers the card, so a click anywhere opens the app page while the controls stay separate. */}
             <Link to={appPath(app.key)} className="rp-app-card-name rp-app-card-link">{name}</Link>
-            {publisherPending && <span className="rp-app-card-sub"><PendingText width={96} height={16} label={t('appStore.loadingPublisher')} />{app.version && <Typography.Text type="secondary"> · {app.version}</Typography.Text>}</span>}
-            {!publisherPending && secondary && <PublisherLine publisherName={actions.catalogue?.publisher_name} publisherId={actions.catalogue?.publisher_id} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
+            {secondary && <PublisherLine publisherName={actions.catalogue?.publisher_name} publisherId={actions.catalogue?.publisher_id} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
           <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} compact /></div>

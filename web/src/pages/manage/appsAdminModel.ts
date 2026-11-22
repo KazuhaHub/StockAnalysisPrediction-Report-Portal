@@ -8,21 +8,16 @@ import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/
 import { parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
 
 /**
- * The publisher line of an installed platform app, and whether it is still on its way. The layout carries the verified
- * publisher name with the app, so it is there on first paint; the catalogue read after it can add one. While neither has
- * answered, the line is pending (a placeholder), never the identifier: the identifier is the fallback only once the
- * catalogue has settled and nothing carries a name.
+ * The publisher name of an installed platform app. The layout carries the verified name with the app, so it is known
+ * from the first paint; the catalogue, which the page has already waited for, can add one. The identifier is the
+ * fallback only when neither names the publisher.
  */
-export function installedPublisher(app: AdminApp, catalogue: { publisher_name?: string; publisher_id: string } | undefined, catalogueSettled: boolean): { label?: string; pending: boolean } {
+export function installedPublisher(app: AdminApp, catalogue: { publisher_name?: string; publisher_id: string } | undefined): string | undefined {
   const name = app.publisherName || catalogue?.publisher_name
-  if (name) return { label: name, pending: false }
-  if (!app.platform) return { pending: false }
-  if (catalogue) return { label: catalogue.publisher_id, pending: false }
-  return { pending: !catalogueSettled }
+  if (name) return name
+  return app.platform && catalogue ? catalogue.publisher_id : undefined
 }
 
-// The administrator's view of one app (ADR 0048): the layout entry (key, kind, per-OU access) joined
-// with what the installed list knows about an installed app (version, entry route, bridge scopes).
 export interface AdminApp {
   key: string // `builtin:<slug>`, the installed app's id, or `platform:<installation id>`
   builtin: boolean

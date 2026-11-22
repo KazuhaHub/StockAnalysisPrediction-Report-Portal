@@ -130,6 +130,59 @@ describe('Installed apps', () => {
   })
 })
 
+describe('The page settles once, then shows the cards complete', () => {
+  // The cards show what the catalogue adds, so the page waits for it with one loading state and renders every card at
+  // once: a name, a publisher or an update offer never appears or changes after the first card is on screen.
+  it('shows one page spinner and no card until the layout and the catalogue have both answered', async () => {
+    withPlatform('installed')
+    let answer: (value: unknown) => void = () => undefined
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
+    renderPage()
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    // Everything else has answered; only the catalogue is out.
+    expect(screen.getByText('common.loading')).toBeTruthy()
+    expect(screen.queryByText('Notes')).toBeNull()
+    expect(screen.queryByText('nav.batch')).toBeNull()
+    expect(screen.queryByText(/notes/)).toBeNull()
+    expect(document.querySelector('.rp-app-grid')).toBeNull()
+    await act(async () => { answer(catalogue()) })
+    // The first card on screen is already final: its name, version and update offer are all there, nothing arrives later.
+    const card = within(await screen.findByText('nav.batch').then(() => cardOf('Notes')))
+    expect(card.getByText(/kazuha.*1\.0\.0/)).toBeTruthy()
+    expect(card.getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    expect(screen.queryByText('common.loading')).toBeNull()
+  })
+
+  it('settles on a failed catalogue: the cards render with what is known and an inline retry, never an endless spinner', async () => {
+    withPlatform('installed')
+    const user = userEvent.setup()
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation(async (url: string, body: unknown) => {
+      if (url === `${root}/market/catalogue`) throw new Error('catalogue down')
+      return original(url, body)
+    })
+    renderPage()
+    expect(await screen.findByText('appStore.catalogueFailed')).toBeTruthy()
+    expect(screen.queryByText('common.loading')).toBeNull()
+    expect(within(cardOf('Notes')).getByText(/1\.0\.0/)).toBeTruthy()
+    expect(screen.getByText('nav.batch')).toBeTruthy()
+    // The retry asks again, and the page keeps its cards while it does.
+    apiMock.post.mockImplementation(original)
+    await user.click(screen.getByRole('button', { name: 'common.retry' }))
+    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    expect(screen.queryByText('appStore.catalogueFailed')).toBeNull()
+    expect(screen.queryByText('common.loading')).toBeNull()
+  })
+
+  it('does not wait for a catalogue that has no source', async () => {
+    apiMock.get.mockImplementation(async (url: string) => url === `${root}/market/sources` ? {} : url === '/api/admin/apps/layout' ? { apps: fx.entries } : { items: [], next_cursor: '' })
+    renderPage()
+    expect(await screen.findByText('nav.batch')).toBeTruthy()
+    expect(screen.queryByText('common.loading')).toBeNull()
+  })
+})
+
 describe('The cards and list view', () => {
   it('shows a dense list, with the same actions, when the list view is chosen, and remembers the choice', async () => {
     withPlatform('installed')

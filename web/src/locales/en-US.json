@@ -4090,7 +4090,7 @@
   "apps.v2ActionUncertain": "The action result could not be confirmed. Check the result in the app before trying again.",
   "apps.v2Unavailable": "This app is unavailable. Check your access or contact an administrator.",
   "apps.v2Loading": "Loading app…",
-  "appStore.loadingPublisher": "Loading the publisher",
+  "appStore.catalogueFailed": "The app catalogue could not be read, so updates and publisher names may be missing.",
   "apps.loadingName": "Loading the app name",
   "apps.v2Failed": "The app could not connect. Reopen it to try again.",
   "apps.v2Retry": "Reopen app",

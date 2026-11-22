@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
 import AppPageHeader from '../../components/apps/AppPageHeader'
-import { InstalledCard } from './appStoreParts'
 import { installedPublisher, type AdminApp } from './appsAdminModel'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
@@ -13,44 +11,21 @@ const app: AdminApp = {
   name: 'Market Monitor', version: '1.4.0', scopes: [], access: [], state: 'installed',
 }
 const noop = () => undefined
-const card = (publisherPending: boolean, publisher?: string) => render(
-  <MemoryRouter><InstalledCard app={app} name="Market Monitor" description="" publisher={publisher} publisherPending={publisherPending}
-    busy={false} onSwitchVersion={noop} onLifecycle={noop} onViewInCatalogue={noop} /></MemoryRouter>)
 
 afterEach(cleanup)
 
-describe('names are not replaced by identifiers while they load', () => {
-  it('keeps the publisher line pending until the layout or the catalogue names the publisher', () => {
-    // Nothing has answered: a placeholder, never the identifier.
-    expect(installedPublisher(app, undefined, false)).toEqual({ pending: true })
-    // The layout carries the verified name with the app: there on first paint, before the catalogue is read.
-    expect(installedPublisher({ ...app, publisherName: 'Kazuha Hub' }, undefined, false)).toEqual({ label: 'Kazuha Hub', pending: false })
-    // The catalogue's name counts too.
-    expect(installedPublisher(app, { publisher_name: 'Kazuha Hub', publisher_id: 'kazuha-hub' }, false)).toEqual({ label: 'Kazuha Hub', pending: false })
-    // The identifier is the fallback only once the catalogue has settled and nothing carries a name.
-    expect(installedPublisher(app, undefined, true)).toEqual({ pending: false })
-    expect(installedPublisher(app, { publisher_id: 'kazuha-hub' }, true)).toEqual({ label: 'kazuha-hub', pending: false })
-    // A built-in or retired app has no publisher to wait for.
-    expect(installedPublisher({ ...app, platform: false }, undefined, false)).toEqual({ pending: false })
-  })
-
-  it('renders a placeholder, not the app id, while the publisher is pending', () => {
-    card(true)
-    expect(screen.getByRole('status', { name: 'appStore.loadingPublisher' })).toBeTruthy()
-    expect(screen.queryByText(/market-monitor/)).toBeNull()
-    expect(screen.queryByText(/kazuha-hub/)).toBeNull()
-    expect(screen.getByText('Market Monitor')).toBeTruthy()
-    // The version needs no catalogue: it is there from the first paint.
-    expect(screen.getByText(/1\.4\.0/)).toBeTruthy()
-  })
-
-  it('shows the publisher name when it has arrived, and the app id only when nothing names the publisher', () => {
-    card(false, 'Kazuha Hub')
-    expect(screen.getByText(/Kazuha Hub/)).toBeTruthy()
-    expect(screen.queryByRole('status')).toBeNull()
-    cleanup()
-    card(false)
-    expect(screen.getByText(/market-monitor/)).toBeTruthy()
+describe('names are never replaced by identifiers', () => {
+  it('names the publisher from the layout, then the catalogue, and falls back to the id only when neither does', () => {
+    // The layout carries the verified name with the app: the first paint already has it.
+    expect(installedPublisher({ ...app, publisherName: 'Kazuha Hub' }, undefined)).toBe('Kazuha Hub')
+    // The catalogue the page waited for can name it too.
+    expect(installedPublisher(app, { publisher_name: 'Kazuha Hub', publisher_id: 'kazuha-hub' })).toBe('Kazuha Hub')
+    // A name from the layout wins over a different one later, so nothing swaps.
+    expect(installedPublisher({ ...app, publisherName: 'Kazuha Hub' }, { publisher_name: 'Other', publisher_id: 'kazuha-hub' })).toBe('Kazuha Hub')
+    expect(installedPublisher(app, { publisher_id: 'kazuha-hub' })).toBe('kazuha-hub')
+    expect(installedPublisher(app, undefined)).toBeUndefined()
+    // A built-in or retired app has no publisher.
+    expect(installedPublisher({ ...app, platform: false }, { publisher_id: 'kazuha-hub' })).toBeUndefined()
   })
 
   it('shows a placeholder of the title in the app header until the app has loaded', () => {
