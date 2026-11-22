@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Alert, Button, Descriptions, Modal, Select, Space, Spin, Steps, Typography } from 'antd'
-import { Link } from 'react-router'
+import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../prefs'
 import { appDisplayText } from '../../lib/appDisplayV2'
@@ -19,6 +19,7 @@ const OK = { install: 'appPlatform.confirm', update: 'appPlatform.confirmUpdate'
  */
 export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycle: PlatformLifecycle; backTo?: string }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { lang } = usePrefs()
   const { target, step, review, intent, busy, expired, progress, progressError, actionError, groups } = lifecycle
   const action = lifecycle.action ?? 'install'
@@ -53,6 +54,8 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
     : progress?.stage === 'complete' ? 'success' : 'processing'
   const complete = progress?.stage === 'complete'
   const installationId = progress?.installation_id
+  const uninstalled = action === 'uninstall' || progress?.action === 'uninstall'
+  const go = (path: string) => { lifecycle.close(); navigate(path) }
 
   const footer = () => {
     if (step === 'audience') return [
@@ -66,8 +69,10 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
     ]
     return [
       <Button key="refresh" disabled={busy} onClick={lifecycle.refreshProgress}>{t('appPlatform.refresh')}</Button>,
-      ...(complete && installationId ? [<Link key="settings" to={`/manage/apps/${encodeURIComponent(`platform:${installationId}`)}`}><Button>{t('appPlatform.openSettings')}</Button></Link>] : []),
-      ...(complete && backTo ? [<Link key="back" to={backTo}><Button>{t('appStore.backToApps')}</Button></Link>] : []),
+      // Plain buttons, not links around buttons: antd spaces footer buttons with `.ant-btn + .ant-btn`, which a
+      // wrapping link breaks. An uninstall leaves no settings to open.
+      ...(complete && installationId && !uninstalled ? [<Button key="settings" onClick={() => go(`/manage/apps/${encodeURIComponent(`platform:${installationId}`)}`)}>{t('appPlatform.openSettings')}</Button>] : []),
+      ...(complete && backTo ? [<Button key="back" onClick={() => go(backTo)}>{t('appStore.backToApps')}</Button>] : []),
       <Button key="done" type="primary" onClick={lifecycle.close}>{t('appPlatform.done')}</Button>,
     ]
   }
