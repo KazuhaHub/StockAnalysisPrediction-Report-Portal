@@ -34,15 +34,26 @@ import (
 
 // platformUpdateRaiseFacts is what the raise command binds, from the finalized plan and the update's own applied
 // checkpoint receipt: the checkpoint names the install evidence it was cut from, and the plan the limits.
-func platformUpdateRaiseFacts(plan platformManagedUpdatePlan, checkpoint journal.CheckpointReceipt) (platformRaiseFacts, error) {
+func platformUpdateRaiseFacts(e migExec, plan platformManagedUpdatePlan, checkpoint journal.CheckpointReceipt) (platformRaiseFacts, error) {
 	q := plan.DataQuota
 	if q == nil || !q.RaiseApplied || checkpoint.NamespaceID != plan.DataNamespaceID || checkpoint.ReleaseSHA256 != plan.SourceReleaseSHA256 {
+		return platformRaiseFacts{}, errAppPlatformStageEvidence
+	}
+	// The runner accepts a raise only at or below the fence its volume row holds. That row keeps the fence the
+	// namespace was prepared with, while an earlier update or enable has already moved the plan's source fence past it:
+	// the command carries the fence of the prepare-data receipt it names.
+	var dataReceipt string
+	if err := e.queryRow(`SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=? AND kind='prepare-data'`, checkpoint.SourceDataEffectID).Scan(&dataReceipt); err != nil {
+		return platformRaiseFacts{}, errAppPlatformStageEvidence
+	}
+	data, err := journal.ParseDataPreparationReceipt([]byte(dataReceipt))
+	if err != nil || platformDigest([]byte(dataReceipt)) != checkpoint.SourceDataReceiptSHA256 {
 		return platformRaiseFacts{}, errAppPlatformStageEvidence
 	}
 	return platformRaiseFacts{
 		namespaceID: plan.DataNamespaceID, releaseSHA256: plan.SourceReleaseSHA256, projectID: checkpoint.ProjectID,
 		namespaceInode: checkpoint.NamespaceInode, device: checkpoint.Device, dataEffectID: checkpoint.SourceDataEffectID,
-		dataReceiptSHA256: checkpoint.SourceDataReceiptSHA256, dataFormat: plan.DataFormat, writerFence: plan.SourceWriterFence,
+		dataReceiptSHA256: checkpoint.SourceDataReceiptSHA256, dataFormat: plan.DataFormat, writerFence: mustPlatformCheckpointInt(data.WriterFence),
 		oldBytes: q.CurrentBytes, oldInodes: q.CurrentInodes, newBytes: q.NewBytes, newInodes: q.NewInodes,
 	}, nil
 }
@@ -99,7 +110,7 @@ func loadPlatformUpdateRaiseEvidence(e migExec, lease platformOperationLease, ru
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate' AND effect_number=2`, lease.id).Scan(&migrations); err != nil || migrations != 0 {
 		return zero, fmt.Errorf("%w: raise comes before the migration", errAppPlatformStageEvidence)
 	}
-	facts, err := platformUpdateRaiseFacts(plan, checkpoint)
+	facts, err := platformUpdateRaiseFacts(e, plan, checkpoint)
 	if err != nil {
 		return zero, err
 	}

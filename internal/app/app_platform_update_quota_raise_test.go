@@ -687,3 +687,44 @@ func testUpdateRaiseLeaseReclaim(t *testing.T, pg bool) {
 
 func TestUpdateRaiseLeaseReclaimSQLite(t *testing.T)   { testUpdateRaiseLeaseReclaim(t, false) }
 func TestUpdateRaiseLeaseReclaimPostgres(t *testing.T) { testUpdateRaiseLeaseReclaim(t, true) }
+
+// An update after an enable (or an earlier update) has a source whose fence is past the one the volume row was
+// prepared with, and the runner refuses a raise above the volume's. The raise names the prepare-data receipt and
+// carries that receipt's fence.
+func TestUpdateRaiseFactsCarryTheVolumeFenceNotTheSourceFenceSQLite(t *testing.T) {
+	s, _, enabled, _, runtime := platformDataActionFixture(t, false)
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := platformOperationLease{installationID: enabled.installationID, controllerEpoch: runtime.controllerEpoch, snapshot: appplatform.OperationSnapshot{
+		Action: appplatform.ActionUpdate, Managed: true, Generation: 3, Revision: 1, Stage: appplatform.StageQueued}}
+	source, err := loadPlatformCheckpointSourceMode(s.st.poolExec(), probe, runtime, now, false, 0)
+	if err != nil {
+		t.Fatal("update source after an enable", err)
+	}
+	receipt, err := journal.ParseDataPreparationReceipt([]byte(scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=?`, source.dataEffectID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.writerFence == receipt.WriterFence {
+		t.Fatalf("the fixture's source fence %s is not past the volume's %s: the case is not reached", source.writerFence, receipt.WriterFence)
+	}
+	plan := platformManagedUpdatePlan{
+		DataNamespaceID: source.namespaceID, SourceReleaseSHA256: source.releaseSHA256, DataFormat: mustPlatformCheckpointInt(source.dataFormat),
+		SourceWriterFence: mustPlatformCheckpointInt(source.writerFence),
+		DataQuota:         &platformUpdateQuotaReview{RaiseApplied: true, CurrentBytes: 1, CurrentInodes: 1, NewBytes: 2, NewInodes: 2},
+	}
+	checkpoint := journal.CheckpointReceipt{
+		NamespaceID: source.namespaceID, ReleaseSHA256: source.releaseSHA256, SourceDataEffectID: source.dataEffectID,
+		SourceDataReceiptSHA256: source.sourceDataReceiptSHA256, ProjectID: source.projectID, NamespaceInode: source.namespaceInode, Device: source.device,
+	}
+	facts, err := platformUpdateRaiseFacts(s.st.poolExec(), plan, checkpoint)
+	if err != nil || strconv.FormatInt(facts.writerFence, 10) != receipt.WriterFence {
+		t.Fatalf("the raise carries fence %d, not the volume's %s (%v)", facts.writerFence, receipt.WriterFence, err)
+	}
+	checkpoint.SourceDataReceiptSHA256 = strings.Repeat("a", 64)
+	if _, err := platformUpdateRaiseFacts(s.st.poolExec(), plan, checkpoint); err == nil {
+		t.Fatal("a raise over a receipt that does not match its digest was built")
+	}
+}

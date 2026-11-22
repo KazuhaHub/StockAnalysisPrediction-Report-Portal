@@ -161,7 +161,7 @@ func (r platformRaiseSettlement) raiseFacts(e migExec) (facts platformRaiseFacts
 	if err != nil {
 		return facts, "", err
 	}
-	facts, err = platformUpdateRaiseFacts(plan, checkpoint)
+	facts, err = platformUpdateRaiseFacts(e, plan, checkpoint)
 	return facts, plan.DataNamespaceID, err
 }
 
