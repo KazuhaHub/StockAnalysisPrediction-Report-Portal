@@ -168,7 +168,7 @@ export default function AppView() {
             {t('apps.back')}
           </Button>
           <Typography.Text strong style={{ fontSize: 16 }}>
-            {meta.app.icon && <span style={{ marginInlineEnd: 6 }}><AppGlyph icon={meta.app.icon} /></span>}
+            <span style={{ marginInlineEnd: 6 }}><AppGlyph icon={meta.app.icon} /></span>
             {meta.app.name}
           </Typography.Text>
           {meta.app.version && <Typography.Text type="secondary">v{meta.app.version}</Typography.Text>}

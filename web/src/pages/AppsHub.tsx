@@ -142,7 +142,7 @@ export default function AppsHub() {
       )}
       {waiting ? (
         <LoadingPlaceholder minHeight={200} />
-      ) : isEmpty && !loadErr && !directory.failed ? (
+      ) : isEmpty && !loadErr && !directory.failed && !loading && !directory.loading ? (
         <Empty description={t('apps.empty')} />
       ) : (
         <Row gutter={[16, 16]}>

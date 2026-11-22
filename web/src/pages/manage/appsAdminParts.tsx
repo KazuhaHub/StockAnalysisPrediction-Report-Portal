@@ -44,7 +44,7 @@ export function ServiceStatus({ app, compact = false }: { app: AdminApp; compact
   if (s.kind === 'none') return <Badge status="default" text={t('apps.status.none')} />
   const full = t('apps.status.some', { open: s.open, total: s.total })
   if (!compact) return <Badge status="warning" text={full} />
-  return <Tooltip title={full}><span><Badge status="warning" text={t('apps.status.someShort', { open: s.open, total: s.total })} /></span></Tooltip>
+  return <Tooltip title={full}><span tabIndex={0} aria-label={full} className="rp-app-status-short"><Badge status="warning" text={t('apps.status.someShort', { open: s.open, total: s.total })} /></span></Tooltip>
 }
 
 /** Apps › name › (page). The ancestors are links; the last item is the current page. */

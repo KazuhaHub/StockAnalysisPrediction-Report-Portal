@@ -13,3 +13,9 @@ test('default status keeps the full label', () => {
   render(<ServiceStatus app={{ access: [] } as never} />)
   expect(screen.getByText(/apps\.status\.some\{/)).toBeTruthy()
 })
+
+test('compact trigger is keyboard reachable and carries the full text', () => {
+  render(<ServiceStatus app={{ access: [] } as never} compact />)
+  const trigger = screen.getByLabelText(/apps\.status\.some\{/)
+  expect(trigger.getAttribute('tabindex')).toBe('0')
+})

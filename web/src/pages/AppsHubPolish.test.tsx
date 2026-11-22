@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import AppsHub from './AppsHub'
@@ -19,7 +19,7 @@ test('built-ins wait for the directory: the first settled render already has the
     ? Promise.resolve(json({ apps: [{ id: 'legacy', name: 'Legacy app' }] }))
     : new Promise<Response>(r => { release = r })))
   render(host())
-  await new Promise(r => setTimeout(r, 30))
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBe(2))
   expect(screen.queryByText('Legacy app')).toBeNull()
   release(json({ items: [item], nextCursor: '' }))
   await screen.findByText('Legacy app')
@@ -53,4 +53,22 @@ test('a legacy icon key is not printed as text on the launcher', async () => {
   render(host())
   await screen.findByText('Legacy app')
   expect(screen.queryByText('dashboard')).toBeNull()
+})
+
+test('the empty state does not show while a retry is in flight', async () => {
+  let fail = true
+  let release: (r: Response) => void = () => {}
+  vi.stubGlobal('fetch', vi.fn((input: unknown) => {
+    if (String(input) === '/api/apps') return Promise.resolve(json({ apps: [] }))
+    if (fail) return Promise.resolve(new Response('boom', { status: 500 }))
+    return new Promise<Response>(r => { release = r })
+  }))
+  render(host())
+  const retry = await screen.findByRole('button', { name: 'common.retry' })
+  fail = false
+  fireEvent.click(retry)
+  await waitFor(() => expect(screen.queryByText('apps.v2ListUnavailable')).toBeNull())
+  expect(screen.queryByText('apps.empty')).toBeNull()
+  release(json({ items: [], nextCursor: '' }))
+  await screen.findByText('apps.empty')
 })
