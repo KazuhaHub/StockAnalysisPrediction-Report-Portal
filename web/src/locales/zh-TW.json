@@ -4090,6 +4090,8 @@
   "apps.v2ActionUncertain": "未能確認操作結果，請在應用程式中核對後再決定是否重試。",
   "apps.v2Unavailable": "應用程式暫時無法使用，請檢查存取權限或聯絡管理員。",
   "apps.v2Loading": "正在載入應用程式…",
+  "appStore.loadingPublisher": "正在載入發布者",
+  "apps.loadingName": "正在載入應用程式名稱",
   "apps.v2Failed": "應用程式連線失敗，請重新開啟後重試。",
   "apps.v2Retry": "重新開啟應用程式",
   "apps.adminHint": "上傳 .zip 應用包（app.json 清單 + 自包含的 index.html）。應用執行在沙箱 iframe 中，只能透過受限橋接存取介面。詳見 docs/adr/0003-downloadable-apps.md。",

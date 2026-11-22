@@ -92,7 +92,7 @@ function LaunchPage({ installation }: { installation: string }) {
   return (
     <section style={{ display: 'flex', flexDirection: 'column', flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>
       <AppDraftPrompt dirty={dirty} blocker={blocker} />
-      <AppPageHeader name={copy?.name ?? ''} icon={launch ? <AppDisplayIcon display={launch.display} /> : null}
+      <AppPageHeader name={copy?.name ?? ''} loading={!launch && !failed} icon={launch ? <AppDisplayIcon display={launch.display} /> : null}
         state={route ? page : null} onBack={() => { void navigate('/apps') }} />
       {failed || (launch && (!route || !presentation)) ? (
         <Alert type="error" showIcon title={t(launch && !route ? 'apps.v2InvalidRoute' : 'apps.v2Unavailable')}

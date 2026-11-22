@@ -5,6 +5,21 @@ import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
+import { parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
+
+/**
+ * The publisher line of an installed platform app, and whether it is still on its way. The layout carries the verified
+ * publisher name with the app, so it is there on first paint; the catalogue read after it can add one. While neither has
+ * answered, the line is pending (a placeholder), never the identifier: the identifier is the fallback only once the
+ * catalogue has settled and nothing carries a name.
+ */
+export function installedPublisher(app: AdminApp, catalogue: { publisher_name?: string; publisher_id: string } | undefined, catalogueSettled: boolean): { label?: string; pending: boolean } {
+  const name = app.publisherName || catalogue?.publisher_name
+  if (name) return { label: name, pending: false }
+  if (!app.platform) return { pending: false }
+  if (catalogue) return { label: catalogue.publisher_id, pending: false }
+  return { pending: !catalogueSettled }
+}
 
 // The administrator's view of one app (ADR 0048): the layout entry (key, kind, per-OU access) joined
 // with what the installed list knows about an installed app (version, entry route, bridge scopes).
@@ -14,6 +29,8 @@ export interface AdminApp {
   platform: boolean
   installationId?: string
   appId?: string // a platform installation's application id
+  publisherName?: string // the layout's verified publisher name, when it verifies
+  display?: AppDisplayView // the layout's verified display metadata, when it verifies
   publisherId?: string // and its publisher: an application id is only unique within one publisher
   state?: string // a platform installation's control state
   builtinDef?: BuiltinApp
@@ -63,6 +80,8 @@ function merge(entry: AppLayoutEntry): AdminApp {
     installationId: entry.installation_id,
     appId: entry.app_id,
     publisherId: entry.publisher_id,
+    publisherName: entry.publisher_name || undefined,
+    display: entry.display == null ? undefined : parseAppDisplay(entry.display) ?? undefined,
     state: entry.state,
     builtinDef: def,
     name: entry.name,

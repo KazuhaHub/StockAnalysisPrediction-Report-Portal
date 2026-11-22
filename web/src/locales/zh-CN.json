@@ -4090,6 +4090,8 @@
   "apps.v2ActionUncertain": "未能确认操作结果，请在应用中核对后再决定是否重试。",
   "apps.v2Unavailable": "应用暂时不可用，请检查访问权限或联系管理员。",
   "apps.v2Loading": "正在加载应用…",
+  "appStore.loadingPublisher": "正在加载发布者",
+  "apps.loadingName": "正在加载应用名称",
   "apps.v2Failed": "应用连接失败，请重新打开后重试。",
   "apps.v2Retry": "重新打开应用",
   "apps.adminHint": "上传 .zip 应用包（app.json 清单 + 自包含的 index.html）。应用运行在沙箱 iframe 中，只能通过受限桥接访问接口。详见 docs/adr/0003-downloadable-apps.md。",

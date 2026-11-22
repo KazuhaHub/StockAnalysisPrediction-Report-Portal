@@ -5,12 +5,13 @@ import { AppstoreOutlined, BarsOutlined, OrderedListOutlined, PlusOutlined } fro
 import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import CardTable from '../../components/CardTable'
-import { appDisplayText, publisherLabel } from '../../lib/appDisplayV2'
+import { appDisplayText } from '../../lib/appDisplayV2'
+import PendingText from '../../components/apps/PendingText'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
 import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, PublisherLine, RECOVERY_STATES } from './appStoreParts'
-import { appPath, useAppLabels, type AdminApp } from './appsAdminModel'
+import { appPath, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import { sourceName, useAppsConsoleFlow } from './appsConsoleFlow'
 import { loadInstalledRelease } from './platformMarket'
@@ -61,6 +62,9 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apps, user])
 
+  // The catalogue is a second, remote read: until it has answered (or can never answer) an installed app's publisher
+  // line is a placeholder, so the app id never shows first.
+  const catalogueSettled = market.sourcesState !== 'loading' && (!market.active || market.catalogue?.status === 'ready' || market.catalogue?.status === 'error')
   const activeSource = market.sources.find(s => s.url === market.active)
   const matches = (text: string) => !search.trim() || text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
   const shown = apps.filter(a => {
@@ -73,11 +77,13 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
   const describe = (a: AdminApp) => {
     const cat = flow.catalogueOf(a)
     const copy = cat ? appDisplayText(cat.app_id, cat.display, lang) : null
+    const publisher = installedPublisher(a, cat, catalogueSettled)
     return {
       app: a, catalogue: cat,
       name: copy?.name && copy.name !== cat?.app_id ? copy.name : labels.title(a),
       description: a.builtin ? labels.description(a) : copy?.description ?? '',
-      publisher: cat ? publisherLabel(cat.publisher_name, cat.publisher_id) : undefined,
+      publisher: publisher.label,
+      publisherPending: publisher.pending,
       source: !a.builtin && cat && activeSource ? sourceName(activeSource.name, activeSource.url, activeSource.official) : undefined,
       uninstallable: !!a.installationId && uninstallable[a.installationId],
       busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
@@ -96,14 +102,14 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           <AppIcon app={a} size={28} />
           <div className="rp-app-list-name">
             <Link to={appPath(a.key)}>{d.name}</Link>
-            <div><PublisherLine publisherName={d.catalogue?.publisher_name} publisherId={d.catalogue?.publisher_id} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
+            <div>{d.publisherPending ? <span className="rp-app-card-sub"><PendingText width={96} height={16} label={t('appStore.loadingPublisher')} />{a.version && <Typography.Text type="secondary"> · {a.version}</Typography.Text>}</span> : <PublisherLine publisherName={a.publisherName ?? d.catalogue?.publisher_name} publisherId={a.publisherId ?? d.catalogue?.publisher_id} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine>}</div>
           </div>
         </Space>
       },
     },
     { title: t('appStore.col.status'), render: (_: unknown, a: AdminApp) => <InstalledState app={a} /> },
     { title: t('appStore.col.access'), render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
-    { title: '', align: 'right', render: (_: unknown, a: AdminApp) => { const { app, name: _name, description: _desc, publisher: _pub, source: _src, ...controls } = describe(a); return <InstalledControls app={app} {...controls} /> } },
+    { title: '', align: 'right', render: (_: unknown, a: AdminApp) => { const { app, name: _name, description: _desc, publisher: _pub, publisherPending: _pending, source: _src, ...controls } = describe(a); return <InstalledControls app={app} {...controls} /> } },
   ]
 
   return <Space orientation="vertical" size={16} style={{ width: '100%' }}>
