@@ -19,7 +19,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -145,7 +144,7 @@ func walk(ctx context.Context, from string) ([]node, error) {
 		if err != nil {
 			return refuse(rel, "cannot read directory: %v", err)
 		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		data.SortArchiveOrder(entries)
 		for _, entry := range entries {
 			name := entry.Name()
 			child := path.Join(rel, name)
@@ -240,9 +239,10 @@ func walk(ctx context.Context, from string) ([]node, error) {
 	if outside != "" {
 		return nil, refuse(outside, "has a hard link outside the tree (%d more than the tree holds); a hard link must have all its links inside the tree, so copy the file or remove the outside link", missing)
 	}
-	// The restore reader requires strictly ascending full names with a directory written as "name/". A tree whose
-	// walk order differs (a directory "a" next to a sibling such as "a.txt", which sorts before "a/") cannot be
-	// restored, so it is refused here rather than at import.
+	// The restore reader requires strictly ascending full names with a directory written as "name/". The walk sorts
+	// siblings by archive name (data.SortArchiveOrder), so a directory "a" next to "a.txt" is written after it and
+	// the order is ascending by construction; this check is a defensive guard that fails the pack rather than
+	// producing an archive the importer would refuse.
 	last := ""
 	for _, n := range nodes {
 		name := n.rel
@@ -250,7 +250,7 @@ func walk(ctx context.Context, from string) ([]node, error) {
 			name += "/"
 		}
 		if name <= last {
-			return nil, refuse(n.rel, "sorts before the entry that precedes it in the archive (a directory next to a sibling whose name sorts between it and its contents, such as \"a\" and \"a.txt\"); rename one of them")
+			return nil, refuse(n.rel, "is out of archive order; this is a packer defect, please report it")
 		}
 		last = name
 	}

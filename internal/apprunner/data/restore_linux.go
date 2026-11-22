@@ -645,7 +645,7 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 	if err != nil {
 		return err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	SortArchiveOrder(entries)
 	for _, item := range entries {
 		if err := ctx.Err(); err != nil {
 			return err

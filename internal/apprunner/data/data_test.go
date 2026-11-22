@@ -3,9 +3,60 @@ package data
 import (
 	"encoding/json"
 	"math"
+	"os"
+	"sort"
 	"strings"
 	"testing"
 )
+
+type fakeEntry struct {
+	name string
+	dir  bool
+}
+
+func (f fakeEntry) Name() string               { return f.name }
+func (f fakeEntry) IsDir() bool                { return f.dir }
+func (f fakeEntry) Type() os.FileMode          { return 0 }
+func (f fakeEntry) Info() (os.FileInfo, error) { return nil, nil }
+
+// archiveWalk lists the full archive names of a tree given as nested maps, the way the checkpoint writer walks it.
+func archiveWalk(prefix string, tree map[string]any, out *[]string) {
+	entries := make([]os.DirEntry, 0, len(tree))
+	for name, child := range tree {
+		_, dir := child.(map[string]any)
+		entries = append(entries, fakeEntry{name, dir})
+	}
+	SortArchiveOrder(entries)
+	for _, e := range entries {
+		if e.IsDir() {
+			*out = append(*out, prefix+e.Name()+"/")
+			archiveWalk(prefix+e.Name()+"/", tree[e.Name()].(map[string]any), out)
+		} else {
+			*out = append(*out, prefix+e.Name())
+		}
+	}
+}
+
+func TestSortArchiveOrderIsAscendingFullNames(t *testing.T) {
+	tree := map[string]any{
+		"a":     map[string]any{"x": "", "x.y": "", "x-z": map[string]any{"q": ""}},
+		"a.txt": "", "a-b": "", "a0": "", "snapshot": map[string]any{"c": ""}, "snapshot.py": "",
+		"b": map[string]any{"b": map[string]any{"b.c": ""}, "b.a": ""},
+	}
+	var got []string
+	archiveWalk("", tree, &got)
+	if !sort.StringsAreSorted(got) {
+		t.Fatalf("walk order is not ascending: %q", got)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i] == got[i-1] {
+			t.Fatalf("duplicate %q", got[i])
+		}
+	}
+	if len(got) != 15 {
+		t.Fatalf("lost entries (%d): %q", len(got), got)
+	}
+}
 
 func TestRequestBounds(t *testing.T) {
 	r := Request{"00000000-0000-0000-0000-000000000001", 1, 8 << 20, 128}

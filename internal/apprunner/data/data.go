@@ -8,7 +8,28 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"sort"
 )
+
+// ArchiveKey is the name a directory entry has in a checkpoint or import archive, relative to its parent: a
+// directory is written as "name/" and anything else as "name".
+func ArchiveKey(name string, directory bool) string {
+	if directory {
+		return name + "/"
+	}
+	return name
+}
+
+// SortArchiveOrder sorts the entries of one directory into the order they are written to an archive. The restore
+// reader requires strictly ascending full archive names, and a directory's name carries a trailing "/" that sorts
+// after "." and "-" (and every other byte below 0x2F), so plain name order is wrong for a directory "a" beside
+// "a.txt" or "a-b": "a.txt" must precede "a/" and its contents. Sorting siblings by ArchiveKey, and walking each
+// directory's children right after it, gives ascending full names for the whole tree.
+func SortArchiveOrder(entries []os.DirEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return ArchiveKey(entries[i].Name(), entries[i].IsDir()) < ArchiveKey(entries[j].Name(), entries[j].IsDir())
+	})
+}
 
 var (
 	ErrUnsupported          = errors.New("native data profile is unsupported")

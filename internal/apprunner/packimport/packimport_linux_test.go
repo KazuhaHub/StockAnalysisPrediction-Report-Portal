@@ -123,10 +123,6 @@ func TestPackRefusesUnsafeTrees(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, []string{data.SchemaMarkerName, "hard link"}},
-		{"name order", func(t *testing.T, f fixture) {
-			f.write(t, "a/inside", "x", 0644)
-			f.write(t, "a.txt", "x", 0644)
-		}, []string{"a.txt", "sorts"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -329,6 +325,61 @@ func TestPackWritesInTreeHardLinksAsLinkEntries(t *testing.T) {
 		t.Fatalf("links: %v", links)
 	}
 	// The runner reader accepts the archive, including its link entries, and agrees with the manifest.
+	inspected, err := data.InspectImportArchive(context.Background(), file, 1000)
+	if err != nil || !inspectedMatches(inspected, result) {
+		t.Fatalf("inspect %+v %v", inspected, err)
+	}
+}
+
+// A directory next to siblings whose names sort between "name" and "name/" is packed in archive order, and the
+// archive passes the runner reader's ascending-name check, hard links across such siblings included.
+func TestPackOrdersSiblingsByArchiveName(t *testing.T) {
+	f := newFixture(t)
+	f.write(t, "snapshot/c", "c", 0600)
+	f.write(t, "snapshot.py", "py", 0600)
+	f.write(t, "a/x", "shared", 0600)
+	f.write(t, "a/x-z/q", "q", 0600)
+	f.write(t, "a-b", "ab", 0600)
+	f.write(t, "a0", "zero", 0600)
+	// The file carrying the content is the first path in archive order, here "a.txt" before "a/x".
+	f.write(t, "a.txt", "dummy", 0600)
+	if err := os.Remove(filepath.Join(f.from, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(f.from, "a/x"), filepath.Join(f.from, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.pack(t, "seed.tar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(f.out("seed.tar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader := tar.NewReader(file)
+	_, _ = reader.Next()
+	var names []string
+	types := map[string]byte{}
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, header.Name)
+		types[header.Name] = header.Typeflag
+	}
+	want := []string{"a-b", "a.txt", "a/", "a/x", "a/x-z/", "a/x-z/q", "a0", "snapshot.py", "snapshot/", "snapshot/c"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("entry order %v", names)
+	}
+	if types["a.txt"] != tar.TypeReg || types["a/x"] != tar.TypeLink {
+		t.Fatalf("the link target must precede its link: %v", types)
+	}
 	inspected, err := data.InspectImportArchive(context.Background(), file, 1000)
 	if err != nil || !inspectedMatches(inspected, result) {
 		t.Fatalf("inspect %+v %v", inspected, err)
