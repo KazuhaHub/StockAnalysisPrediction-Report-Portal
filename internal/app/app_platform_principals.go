@@ -288,6 +288,7 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		if err := rows.Scan(&name, &display, &created, &group, &expires); err != nil {
 			return zero, err
 		}
+		created = appplatform.AccountCreatedMarker(created)
 		if expires != "" {
 			if _, err := time.Parse("2006-01-02", expires); err != nil || today > expires {
 				continue

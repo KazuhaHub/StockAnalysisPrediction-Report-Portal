@@ -247,7 +247,7 @@ func (s *Server) platformHTTPReader(r *http.Request, user string) (platformActor
 	if err != nil {
 		return zero, err
 	}
-	return platformActorSession{username: user, created: account.CreatedAt, sessionID: id, sessionRevision: revision, generation: generation, expires: time.Unix(expires, 0)}, nil
+	return platformActorSession{username: user, created: appplatform.AccountCreatedMarker(account.CreatedAt), sessionID: id, sessionRevision: revision, generation: generation, expires: time.Unix(expires, 0)}, nil
 }
 func platformDocumentSource(binding platformLaunchAccess) string {
 	return "/app-documents/" + binding.installationID + "/" + binding.generation + "/" + binding.policyRevision + "/" + binding.releaseSHA + "/" + binding.frontendSHA + "/" + binding.entry
@@ -346,6 +346,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		return err
 	})
 	if err != nil || ctx.Err() != nil {
+		logPlatformRefusal(r, err)
 		platformDocumentFailure(w)
 		return
 	}
@@ -367,6 +368,7 @@ func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, use
 	defer cancel()
 	document, err := s.readPlatformLaunchDocumentContext(ctx, session, expected)
 	if err != nil || ctx.Err() != nil {
+		logPlatformRefusal(r, err)
 		platformDocumentFailure(w)
 		return
 	}

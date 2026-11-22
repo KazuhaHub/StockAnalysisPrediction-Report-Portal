@@ -28,6 +28,7 @@ func platformInstallSponsor(e migExec, username sql.NullString, created string, 
 	if err != nil {
 		return err
 	}
+	currentCreated = appplatform.AccountCreatedMarker(currentCreated)
 	currentGeneration, err := notificationAccountGeneration(e, username.String)
 	if err != nil {
 		return err

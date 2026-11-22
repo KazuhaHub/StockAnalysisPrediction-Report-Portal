@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 	"unicode/utf8"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 const maxPlatformInstallAudience = 128
@@ -46,6 +48,7 @@ func platformAudienceUser(e migExec, username string, now int64) (platformInstal
 	if err != nil {
 		return zero, err
 	}
+	created = appplatform.AccountCreatedMarker(created)
 	if len(actual) == 0 || len(actual) > 320 || !utf8.ValidString(actual) || created == "" || len(created) > 64 || active != 1 {
 		return zero, errAppPlatformPlanChanged
 	}

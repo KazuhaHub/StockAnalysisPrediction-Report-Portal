@@ -15,6 +15,22 @@ import (
 
 var ErrViewerIdentity = errors.New("application viewer identity unavailable")
 
+// LegacyAccountCreated stands in for the creation marker of accounts that
+// predate users.created_at (NULL or empty there). Real markers are timestamps,
+// which never equal this word. Every site that reads, compares or records a
+// user's account_created must pass the stored value through AccountCreatedMarker
+// so grants and viewer derivation agree; DeriveViewerIdentity itself stays strict.
+const LegacyAccountCreated = "legacy"
+
+// AccountCreatedMarker maps an empty stored creation value to LegacyAccountCreated
+// and returns every real value unchanged.
+func AccountCreatedMarker(created string) string {
+	if created == "" {
+		return LegacyAccountCreated
+	}
+	return created
+}
+
 // ViewerAccountIdentity and ViewerOUIdentity are trusted host inputs, never
 // fields accepted from an app. Creation identities prevent name/ID reuse.
 type ViewerAccountIdentity struct {
