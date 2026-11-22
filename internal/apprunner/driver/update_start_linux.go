@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -49,6 +50,29 @@ func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, r
 	if err != nil {
 		return err
 	}
+	client, closeClient := r.client()
+	defer closeClient()
+	if err := removeUpdateStartSourceContainer(ctx, client, request, image, r.roots); err != nil {
+		return err
+	}
+	if source != nil {
+		launch := UpdateStartLaunch{
+			launch: CandidateLaunch{state: source},
+		}
+		if err := launch.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeUpdateStartSourceContainer plans the stopped source the way the start that created it planned it, by its
+// origin, and removes it only if the live container is exactly that plan and is not running. Any other container, a
+// running one, or one that is already gone is refused: absence is proven by the start's settlement, never assumed here.
+func removeUpdateStartSourceContainer(ctx context.Context, client *http.Client, request UpdateStartLaunchRequest, image BackendImageInspection, roots containerRoots) error {
+	if request.Source == nil {
+		return ErrInvalidResponse
+	}
 	owner := containerOwner{
 		DeploymentID:    request.Identity.DeploymentID,
 		ControllerEpoch: request.Identity.ControllerEpoch,
@@ -62,37 +86,24 @@ func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, r
 		WriterFence:     request.Source.WriterFence,
 	}
 	var plan containerPlan
+	var err error
 	switch request.Source.Origin {
 	case UpdateStartSourceCandidate:
-		plan, err = planCandidateContainer(request.Descriptor, image, owner, r.roots)
+		plan, err = planCandidateContainer(request.Descriptor, image, owner, roots)
 	case UpdateStartSourceWritable:
 		if request.Source.Writable == nil {
 			return ErrInvalidResponse
 		}
-		plan, err = planWritableCandidateContainer(request.Descriptor, image, owner, r.roots, *request.Source.Writable)
+		plan, err = planWritableCandidateContainer(request.Descriptor, image, owner, roots, *request.Source.Writable)
 	default:
 		plan, err = planUpdateStartContainer(
-			request.Descriptor, image, owner, r.roots, request.Source.Binding,
+			request.Descriptor, image, owner, roots, request.Source.Binding,
 			request.Source.SandboxProfile)
 	}
 	if err != nil {
 		return err
 	}
-	client, closeClient := r.client()
-	defer closeClient()
-	if err := removeCandidateContainerHTTP(
-		ctx, client, request.Source.NativeID, plan); err != nil {
-		return err
-	}
-	if source != nil {
-		launch := UpdateStartLaunch{
-			launch: CandidateLaunch{state: source},
-		}
-		if err := launch.Close(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return removeCandidateContainerHTTP(ctx, client, request.Source.NativeID, plan)
 }
 
 // PrepareUpdateStart pins current native facts without changing data ownership
