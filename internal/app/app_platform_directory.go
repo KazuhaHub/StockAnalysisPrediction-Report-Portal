@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -16,11 +15,12 @@ const platformDirectoryPageSize = 32
 var platformDirectoryAppID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 type platformAppDirectoryItem struct {
-	InstallationID string                  `json:"installationId"`
-	ApplicationID  string                  `json:"applicationId"`
-	State          string                  `json:"state"`
-	Openable       bool                    `json:"openable"`
-	Display        *appplatform.AppDisplay `json:"display,omitempty"`
+	InstallationID string               `json:"installationId"`
+	ApplicationID  string               `json:"applicationId"`
+	State          string               `json:"state"`
+	Openable       bool                 `json:"openable"`
+	Display        *platformDisplayView `json:"display,omitempty"`
+	PublisherName  string               `json:"publisherName,omitempty"`
 }
 type platformAppDirectory struct {
 	Items      []platformAppDirectoryItem `json:"items"`
@@ -163,12 +163,12 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		if record == nil {
 			continue
 		}
-		display, valid := record.verified(trust, now, candidates[i].app, candidates[i].publisher)
+		display, publisherName, valid := record.verified(trust, now, candidates[i].app, candidates[i].publisher)
 		if !valid {
 			result.Items[i].State = "attention"
 			result.Items[i].Openable = false
 		} else {
-			result.Items[i].Display = display
+			result.Items[i].Display, result.Items[i].PublisherName = platformDisplayViewOf(display), publisherName
 		}
 	}
 	now, err = platformDatabaseNow(e)
@@ -181,7 +181,7 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	}
 	for i, record := range records {
 		if record != nil && !record.currentKeyTime(trust, now) {
-			result.Items[i].Display = nil
+			result.Items[i].Display, result.Items[i].PublisherName = nil, ""
 			result.Items[i].State = "attention"
 			result.Items[i].Openable = false
 		}

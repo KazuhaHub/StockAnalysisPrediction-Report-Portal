@@ -487,11 +487,12 @@ type appLayoutEntry struct {
 	// InstallationID, AppID, State and Display describe a platform installation. State is the control
 	// record's own projection (installed, disabled, pending, setup_required or attention); Display is
 	// the signed display metadata when it verifies.
-	InstallationID string                  `json:"installation_id,omitempty"`
-	AppID          string                  `json:"app_id,omitempty"`
-	PublisherID    string                  `json:"publisher_id,omitempty"`
-	State          string                  `json:"state,omitempty"`
-	Display        *appplatform.AppDisplay `json:"display,omitempty"`
+	InstallationID string               `json:"installation_id,omitempty"`
+	AppID          string               `json:"app_id,omitempty"`
+	PublisherID    string               `json:"publisher_id,omitempty"`
+	State          string               `json:"state,omitempty"`
+	Display        *platformDisplayView `json:"display,omitempty"`
+	PublisherName  string               `json:"publisher_name,omitempty"`
 	// Version, Entry and Scopes describe an installed app. The console reads them here rather than
 	// from the reader listing, which shows an administrator only what the switches leave open.
 	Version string        `json:"version,omitempty"`
@@ -549,7 +550,7 @@ func (s *Server) appLayout() ([]appLayoutEntry, error) {
 			e.Kind, e.InstallationID, e.AppID, e.PublisherID, e.State = "platform", p.id, p.appID, p.publisherID, platformLayoutState(p)
 			e.Name = p.appID
 			if d, ok := displays[p.id]; ok {
-				e.Version, e.Display = d.version, d.display
+				e.Version, e.Display, e.PublisherName = d.version, platformDisplayViewOf(d.display), d.publisherName
 				if d.display != nil {
 					e.Icon = d.display.Icon
 					if name := platformDisplayName(d.display); name != "" {
@@ -609,8 +610,9 @@ func platformDisplayName(d *appplatform.AppDisplay) string {
 }
 
 type platformLayoutDisplay struct {
-	version string
-	display *appplatform.AppDisplay
+	version       string
+	display       *appplatform.AppDisplay
+	publisherName string
 }
 
 // platformLayoutDisplays reads each active installation's version and signed display metadata in one
@@ -645,8 +647,8 @@ func (s *Server) platformLayoutDisplays(rows []platformInstallationRow) map[stri
 			continue
 		}
 		item := platformLayoutDisplay{version: record.version}
-		if display, ok := record.verified(trust, now, r.appID, record.publisher); ok {
-			item.display = display
+		if display, name, ok := record.verified(trust, now, r.appID, record.publisher); ok {
+			item.display, item.publisherName = display, name
 		}
 		out[r.id] = item
 	}

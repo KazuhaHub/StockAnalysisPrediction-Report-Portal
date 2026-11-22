@@ -77,7 +77,8 @@ type platformInstallationSettings struct {
 	PolicyRevision       string                       `json:"policy_revision"`
 	CurrentReleaseSHA256 string                       `json:"current_release_sha256,omitempty"`
 	Version              string                       `json:"version,omitempty"`
-	Display              *appplatform.AppDisplay      `json:"display,omitempty"`
+	Display              *platformDisplayView         `json:"display,omitempty"`
+	PublisherName        string                       `json:"publisher_name,omitempty"`
 	Audience             []platformSettingsAudience   `json:"audience"`
 	AudienceTotal        int                          `json:"audience_total"`
 	Capabilities         []platformSettingsCapability `json:"capabilities"`
@@ -275,7 +276,8 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 				return err
 			}
 			manifest := parsed.Manifest
-			result.Display = manifest.Presentation.Display
+			result.Display = platformDisplayViewOf(manifest.Presentation.Display)
+			result.PublisherName = platformManifestPublisherName(manifest)
 			result.Backend.Required = manifest.Backend != nil
 			for _, capability := range manifest.Capabilities.Required {
 				required[capability] = true
