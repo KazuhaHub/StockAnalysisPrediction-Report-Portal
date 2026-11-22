@@ -50,10 +50,15 @@ original handshake deadline.
 The host fixes its Window handles and sanitized context at construction. It
 accepts hello only from the exact frame Window and opaque origin `null`. The
 client accepts initialization/challenge only from its parent Window and the
-parent origin it derives from its own document URL, never from a message. This is
-safe because every app document is served with `frame-ancestors 'self'` (error
-and public documents with `'none'`), so only the Portal origin can embed it; an
-opaque document URL fails at once as `invalid_context`. Do not read the host DOM,
+parent origin it derives from its own document URL, never from a message.
+The client posts hello to, and accepts messages only from, the derived origin
+with `event.source` equal to its parent Window, so a framer on any other origin
+receives nothing and is ignored. The derivation is safe because (i) the Portal
+origin serves no unsandboxed attacker-controlled HTML (app documents and legacy
+`/app-assets/` are sandboxed without `allow-same-origin`) and (ii) every app
+document is served with `frame-ancestors 'self'` (error and public documents with
+`'none'`), so no other site can embed it. A document with an opaque URL
+(`about:srcdoc`, `data:`) fails immediately as `invalid_context`. Do not read the host DOM,
 infer permissions from a referrer or weaken sandbox flags.
 
 The design follows the [HTML messaging standard](https://html.spec.whatwg.org/multipage/web-messaging.html):

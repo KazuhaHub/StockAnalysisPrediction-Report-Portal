@@ -2272,27 +2272,42 @@ describe("derived parent origin", () => {
     });
   }
 
-  test("a message from the parent with a different origin is ignored", async () => {
+  test("a valid challenge from a different origin is ignored, from the right origin it is answered", async () => {
     vi.stubGlobal("MessageChannel", NodeMessageChannel);
     const w = windows();
-    const applied = vi.fn();
     const client = createBridgeClient({
       localWindow: w.child,
       parentWindow: w.host,
-      onPresentation: applied,
+      onPresentation: () => {},
     });
     cleanup.push(() => client.close());
-    const channel = new NodeMessageChannel();
-    for (const listener of w.listeners[1])
-      listener({
-        source: w.host,
-        origin: "https://evil.example.invalid",
-        data: { type: "app:init" },
-        ports: [channel.port1],
-      } as unknown as MessageEvent);
-    await Promise.resolve();
-    expect(applied).not.toHaveBeenCalled();
-    expect(client.state()).not.toBe("ready");
+    const hostNonce = "c".repeat(32);
+    const challenge = {
+      type: "app:challenge",
+      protocol: BRIDGE_PROTOCOL,
+      hostNonce,
+    };
+    const answered = () =>
+      w.sent.some(
+        (item) =>
+          item.from === 1 &&
+          item.data.type === "app:hello" &&
+          item.data.hostNonce === hostNonce,
+      );
+    const send = (origin: string) => {
+      for (const listener of w.listeners[1])
+        listener({
+          data: structuredClone(challenge),
+          origin,
+          source: w.host,
+          ports: [],
+        } as unknown as MessageEvent);
+    };
+    send("https://evil.example.invalid");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(answered()).toBe(false);
     expect(client.state()).not.toBe("failed");
+    send("https://portal.example.invalid");
+    await vi.waitFor(() => expect(answered()).toBe(true));
   });
 });

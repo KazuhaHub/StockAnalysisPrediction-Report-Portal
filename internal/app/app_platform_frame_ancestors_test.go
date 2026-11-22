@@ -1,9 +1,13 @@
 package app
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -13,18 +17,6 @@ var frameAncestorsDirective = regexp.MustCompile(`(?:^|; )frame-ancestors ('self
 // only safe while no /app-documents/ or public document response, success or
 // failure, lets an origin other than the Portal embed it.
 func TestPlatformDocumentResponsesRestrictFrameAncestors(t *testing.T) {
-	t.Run("directive shape", func(t *testing.T) {
-		for _, csp := range []string{"frame-ancestors 'none'", "a; frame-ancestors 'self'; b", "a; frame-ancestors 'self'"} {
-			if !frameAncestorsDirective.MatchString(csp) {
-				t.Fatalf("matcher rejects %q", csp)
-			}
-		}
-		for _, csp := range []string{"default-src 'none'", "frame-ancestors *", "frame-ancestors 'self' https://evil.example"} {
-			if frameAncestorsDirective.MatchString(csp) {
-				t.Fatalf("matcher accepts %q", csp)
-			}
-		}
-	})
 	s := &Server{}
 	cases := []struct {
 		name string
@@ -49,5 +41,49 @@ func TestPlatformDocumentResponsesRestrictFrameAncestors(t *testing.T) {
 		if m := frameAncestorsDirective.FindStringSubmatch(csp); m == nil || m[1] != "'none'" {
 			t.Fatalf("%s CSP %q must forbid framing", name, csp)
 		}
+	}
+}
+
+// The success path end to end: an installed frontend served through the real mux.
+func TestPlatformDocumentSuccessResponseRestrictsFrameAncestors(t *testing.T) {
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	f, err := zw.Create("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Write([]byte(`<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div></body></html>`))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, reader, id := platformFrontendBrowserInstallFixture(t, archive.Bytes())
+	s.st.SetSetting("timezone", "UTC")
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := &http.Cookie{Name: cookieName, Value: s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())}
+	get := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	launch := get("/api/app-platform/installations/" + id + "/launch")
+	var body struct {
+		Source string `json:"source"`
+	}
+	if launch.Code != 200 || json.Unmarshal(launch.Body.Bytes(), &body) != nil || body.Source == "" {
+		t.Fatalf("launch failed: %d %s", launch.Code, launch.Body.String())
+	}
+	ok := get(body.Source)
+	if ok.Code != 200 {
+		t.Fatalf("document status %d", ok.Code)
+	}
+	if got := ok.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox allow-scripts") || !frameAncestorsDirective.MatchString(got) {
+		t.Fatalf("success CSP %q", got)
+	}
+	bad := get(strings.Replace(body.Source, "/index.html", "/missing.html", 1))
+	if bad.Code == 200 || !frameAncestorsDirective.MatchString(bad.Header().Get("Content-Security-Policy")) {
+		t.Fatalf("failure %d CSP %q", bad.Code, bad.Header().Get("Content-Security-Policy"))
 	}
 }

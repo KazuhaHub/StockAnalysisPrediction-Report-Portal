@@ -44,13 +44,18 @@ python3 scripts/build-app-v2.py my-app
 
 The package carries no parent origin, so one build runs on any Portal. The bridge
 client derives it from its own document URL (`new URL(location.href).origin`,
-readable even inside the opaque-origin sandbox), posts hello with that exact
-`targetOrigin` and accepts messages only when `event.origin` equals it and
-`event.source` is the parent Window. This is safe because the Portal serves every
-app document with `frame-ancestors 'self'`, so only the Portal origin can embed
-it; error and public documents use `frame-ancestors 'none'`. A document with an
-opaque URL (`about:srcdoc`, `data:`) fails immediately as `invalid_context`.
-The developer guide explains each file, checks, output and error recovery.
+readable even inside the opaque-origin sandbox). The client posts hello to, and accepts messages only from, the derived origin
+with `event.source` equal to its parent Window, so a framer on any other origin
+receives nothing and is ignored. The derivation is safe because (i) the Portal
+origin serves no unsandboxed attacker-controlled HTML (app documents and legacy
+`/app-assets/` are sandboxed without `allow-same-origin`) and (ii) every app
+document is served with `frame-ancestors 'self'` (error and public documents with
+`'none'`), so no other site can embed it. A document with an opaque URL
+(`about:srcdoc`, `data:`) fails immediately as `invalid_context`.
+The command above requires the Apps repository SDK version that removed
+`--parent-origin` (see the matching Apps change; this repository's Apps pin bump
+follows its merge). The developer guide explains each file, checks, output and
+error recovery.
 
 ## Build and integrity
 

@@ -40,10 +40,16 @@ build-fixture test verifies that the actual ZIP compiles into the opaque sandbox
 document before the native tests start.
 
 The package embeds no parent origin; the client derives it from its document URL,
-served by the fixed loopback listener `http://127.0.0.1:31935`, and
-`frame-ancestors 'self'` keeps any other origin from embedding the document. The
-listener binds that exact endpoint exclusively and fails if occupied. It does not
-infer trust from a query, referrer, arbitrary message or user input. The signed descriptor binds
+served by the fixed loopback listener `http://127.0.0.1:31935`. The client posts hello to, and accepts messages only from, the derived origin
+with `event.source` equal to its parent Window, so a framer on any other origin
+receives nothing and is ignored. The derivation is safe because (i) the Portal
+origin serves no unsandboxed attacker-controlled HTML (app documents and legacy
+`/app-assets/` are sandboxed without `allow-same-origin`) and (ii) every app
+document is served with `frame-ancestors 'self'` (error and public documents with
+`'none'`), so no other site can embed it. A document with an opaque URL
+(`about:srcdoc`, `data:`) fails immediately as `invalid_context`.
+The listener binds that exact endpoint exclusively and fails if occupied. It does
+not infer trust from a query, referrer, arbitrary message or user input. The signed descriptor binds
 the compiled ZIP hash and the existing owned readiness-backend image. The
 background scheduler still starts from a new queued operation and zero effects.
 It alone advances real data/writer/start/registration/activation stages.
