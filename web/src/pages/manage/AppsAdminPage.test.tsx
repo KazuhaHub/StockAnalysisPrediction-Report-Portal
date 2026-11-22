@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router'
 import AppsAdminPage from './AppsAdminPage'
 import { layout } from './appsAdminFixtures'
-import { DESCRIPTOR_LOCALES } from '../../lib/descriptor-contract.generated'
-import type { AppLayoutEntry } from '../../api/types'
+import { cardOf, catalogue, chartsApp, display, fx, installationId, notesApp, operation, platformEntry, resetFixtures, root, sha, verifiedRow, withPlatform, catalogueUrl } from './appsConsoleFixtures'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), postBytes: vi.fn() }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: apiMock, errText: (e: unknown) => e instanceof Error && e.message !== 'boom' ? e.message : 'Request failed' }))
@@ -39,6 +41,7 @@ const pageTree = (path = '/manage/apps') => (
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/manage/apps" element={<AppsAdminPage />} />
+          <Route path="/manage/apps/install" element={<div>install-page</div>} />
           <Route path="/manage/apps/:key" element={<Detail />} />
         </Routes>
       </MemoryRouter>
@@ -47,78 +50,48 @@ const pageTree = (path = '/manage/apps') => (
 const renderPage = (path = '/manage/apps') => render(pageTree(path))
 
 
-const root = '/api/admin/app-platform'
-const installationId = '33333333-3333-4333-8333-333333333333'
-const plan = '22222222-2222-4222-8222-222222222222'
-const operation = '11111111-1111-4111-8111-111111111111'
-const planSha = 'd'.repeat(64)
-const sha = (c: string) => c.repeat(64)
-const catalogueUrl = 'https://market.example/index.json'
-const display = (name: string, description: string) => ({ icon: 'file-text', texts: DESCRIPTOR_LOCALES.map(locale => ({ locale, name, description })) })
-const notesApp = { publisher_id: 'kazuha', app_id: 'notes', versions: [{ version: '1.1.0', descriptor_sha256: sha('b') }, { version: '1.0.0', descriptor_sha256: sha('a') }], display: display('Notes', 'Personal notes'), publisher_trusted: true }
-const chartsApp = { publisher_id: 'kazuha', app_id: 'charts', versions: [{ version: '2.0.0', descriptor_sha256: sha('c') }, { version: '2.0.0-beta.1', descriptor_sha256: sha('e') }], display: display('Charts', 'Draw charts'), publisher_trusted: true }
-const strangerApp = { publisher_id: 'stranger', app_id: 'tools', versions: [{ version: '0.1.0', descriptor_sha256: sha('f') }], publisher_trusted: false }
-const catalogue = (apps: unknown[] = [notesApp, chartsApp, strangerApp]) => ({ catalogue_sha256: sha('9'), publisher_verified: false, apps, releases: (apps as typeof notesApp[]).flatMap(a => a.versions.map(v => ({ app_id: a.app_id, publisher_id: a.publisher_id, version: v.version, descriptor_sha256: v.descriptor_sha256, descriptor_url: 'https://market.example/d.json', signature_url: 'https://market.example/d.sig' }))) })
-const platformEntry = (state: string, version = '1.0.0'): AppLayoutEntry => ({ key: `platform:${installationId}`, kind: 'platform', name: 'Notes', builtin: false, icon: 'file-text', installation_id: installationId, app_id: 'notes', publisher_id: 'kazuha', state, version, access: [] })
-const verifiedRow = (c: string, version: string, extra: Record<string, unknown> = {}) => ({ release_sha256: sha(c), app_id: c === 'b' || c === 'a' ? 'notes' : 'charts', publisher_id: 'kazuha', version, trust_revision: '1', installable: true, display: display('Notes', 'Personal notes'), ...extra })
-const planFor = (action: string, release: string, app = 'notes') => ({ plan_id: plan, plan_sha256: planSha, expires_ms: String(Date.now() + 900000), review: action === 'install'
-  ? { action, app_id: app, publisher_id: 'kazuha', release_sha256: release, declined_capabilities: [], open_to_ous: [] }
-  : { action, installation_id: installationId, app_id: app, publisher_id: 'kazuha', release_sha256: release, generation: '1', target_generation: '2', source_generation: '1', managed: false, data_effect: 'preserve', source_release_sha256: sha('a'), policy_revision: '1', target_policy_revision: '1', declined_capabilities: [], previous_capabilities: [], target_capabilities: [], declared_data_schema: '1', grants_sha256: planSha, plugin_data_cleared: true, managed_data_cleared: false } })
 
-let entries: AppLayoutEntry[]
-let catalogueResponse: () => unknown
-let releaseRows: Record<string, Record<string, unknown>>
-beforeEach(() => {
-  auth.user = 'admin'
-  entries = layout()
-  catalogueResponse = () => catalogue()
-  releaseRows = { [sha('b')]: verifiedRow('b', '1.1.0'), [sha('a')]: verifiedRow('a', '1.0.0', { installation_id: installationId, installed: true, installable: false }), [sha('c')]: verifiedRow('c', '2.0.0') }
-  for (const m of Object.values(apiMock)) m.mockReset()
-  apiMock.get.mockImplementation(async (url: string) => {
-    if (url === '/api/admin/apps/layout') return { apps: entries }
-    if (url === `${root}/market/sources`) return { official: { name: 'Kazuha Hub', url: catalogueUrl, enabled: true } }
-    if (url === `${root}/storage-status`) return {}
-    if (url === `${root}/subjects?kind=ou`) return { items: [{ id: '7', name: 'Research' }], next_cursor: '' }
-    if (url === `${root}/installations/${installationId}/settings`) return { current_release_sha256: sha('a'), version: '1.0.0' }
-    if (url.startsWith(`${root}/releases?release_sha256=`)) { const row = releaseRows[url.split('=')[1]]; return { items: row ? [row] : [], next_cursor: '' } }
-    if (url.startsWith(`${root}/operations/`)) return { operation_id: operation, installation_id: installationId, action: 'install', stage: 'queued', terminal: false, control_paused: false }
-    return { items: [], next_cursor: '' }
-  })
-  apiMock.post.mockImplementation(async (url: string, body: { action?: string; release_sha256?: string }) => {
-    if (url === `${root}/market/catalogue`) return catalogueResponse()
-    if (url === `${root}/market/stage`) return { release_sha256: body.release_sha256 }
-    if (url === `${root}/plans`) return planFor(body.action!, body.release_sha256 ?? sha('a'))
-    if (url === `${root}/operations`) return { operation_id: operation }
-    throw new Error(`unexpected ${url}`)
-  })
-  apiMock.put.mockResolvedValue({ apps: layout() })
-})
+beforeEach(() => { auth.user = 'admin'; localStorage.clear(); resetFixtures(apiMock) })
 afterEach(() => vi.unstubAllGlobals())
 
-const cardOf = (name: string) => screen.getAllByText(name).map(n => n.closest('.rp-app-card') as HTMLElement).find(Boolean) as HTMLElement
-const withPlatform = (state: string, version = '1.0.0') => { entries = [...layout(), platformEntry(state, version)] }
-
 describe('Installed apps', () => {
-  it('lists every app as a card with where it is switched on, built-ins marked', async () => {
+  it('lists every app as a compact card with where it is switched on, built-ins marked once', async () => {
     renderPage()
     await screen.findByText('nav.batch')
     expect(within(cardOf('nav.batch')).getByText('apps.status.all')).toBeTruthy()
     expect(within(cardOf('nav.quotes')).getByText('apps.status.some:{"open":1,"total":2}')).toBeTruthy()
     expect(within(cardOf('Hello')).getByText('apps.status.none')).toBeTruthy()
-    expect(within(cardOf('nav.batch')).getByText('appStore.builtinBadge')).toBeTruthy()
+    expect(within(cardOf('nav.batch')).getAllByText('appStore.builtinBadge')).toHaveLength(1)
     expect(within(cardOf('Hello')).queryByText('appStore.builtinBadge')).toBeNull()
     expect(cardOf('nav.batch').querySelector('[data-icon="play-circle"]')).not.toBeNull()
-    expect(within(cardOf('Hello')).getByText('1.2.0')).toBeTruthy()
+    expect(within(cardOf('Hello')).getByText(/1\.2\.0/)).toBeTruthy()
   })
 
-  it('shows one page: no segmented switch, no preview or unverified notice, no separate platform tab', async () => {
+  it('has no catalogue on this page, no footer row and no unverified or preview notice', async () => {
     renderPage()
     await screen.findByText('nav.batch')
     expect(screen.queryByText('appPlatform.development')).toBeNull()
     expect(screen.queryByText('appMarket.unverified')).toBeNull()
     expect(screen.queryByRole('tab', { name: 'appPlatform.tab' })).toBeNull()
     expect(screen.getByRole('tab', { name: 'appTrust.tab' })).toBeTruthy()
-    expect(screen.getByText(/appStore\.fromCatalogue/)).toBeTruthy()
+    expect(document.querySelector('.rp-app-card-foot')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Charts' })).toBeNull()
+  })
+
+  it('reads the catalogue quietly, so a card can offer an update', async () => {
+    withPlatform('installed')
+    renderPage()
+    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
+    expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, { catalogue_url: catalogueUrl })
+  })
+
+  it('opens the install page from a plain Install app button', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const button = await screen.findByRole('button', { name: 'appStore.install' })
+    expect(button.getAttribute('aria-haspopup')).toBeNull()
+    await user.click(button)
+    expect(await screen.findByText('install-page')).toBeTruthy()
   })
 
   it('opens the app page from the card and offers the name as a link', async () => {
@@ -130,14 +103,12 @@ describe('Installed apps', () => {
     expect(await screen.findByText('detail:builtin:quotes')).toBeTruthy()
   })
 
-  it('filters both lists by the search box', async () => {
+  it('filters the apps by the search box', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('nav.batch')
-    await screen.findByText('Notes')
     await user.type(screen.getByRole('searchbox', { name: 'apps.search' }), 'hel')
     expect(screen.queryByText('nav.batch')).toBeNull()
-    expect(screen.queryByText('Notes')).toBeNull()
     expect(screen.getByText('Hello')).toBeTruthy()
   })
 
@@ -159,13 +130,50 @@ describe('Installed apps', () => {
   })
 })
 
+describe('The cards and list view', () => {
+  it('shows a dense list, with the same actions, when the list view is chosen, and remembers the choice', async () => {
+    withPlatform('installed')
+    const user = userEvent.setup()
+    const view = renderPage()
+    await screen.findByText('nav.batch')
+    expect(document.querySelector('.rp-app-grid')).not.toBeNull()
+    await user.click(screen.getByTitle('appStore.view.list'))
+    expect(document.querySelector('.rp-app-grid')).toBeNull()
+    expect(await screen.findByRole('columnheader', { name: 'appStore.col.status' })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: 'appStore.col.access' })).toBeTruthy()
+    expect(screen.getByText('nav.batch')).toBeTruthy()
+    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
+    expect(localStorage.getItem('rp.apps.view')).toBe('list')
+    view.unmount()
+    renderPage()
+    expect(await screen.findByRole('columnheader', { name: 'appStore.col.status' })).toBeTruthy()
+  })
+
+  it('starts on cards when storage holds nothing usable or throws', async () => {
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage unavailable') })
+    try {
+      renderPage()
+      await screen.findByText('nav.batch')
+      expect(document.querySelector('.rp-app-grid')).not.toBeNull()
+    } finally { get.mockRestore() }
+  })
+
+  it('uses one shared grid rule of 240px columns and 12px gaps, with compact cards', async () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'index.css'), 'utf8')
+    expect(css).toMatch(/\.rp-app-grid\s*\{[^}]*gap:\s*12px[^}]*repeat\(auto-fill,\s*minmax\(min\(100%,\s*240px\),\s*1fr\)\)/)
+    expect(css).toMatch(/\.rp-app-card > \.ant-card-body\s*\{[^}]*padding:\s*12px/)
+    expect(css).toMatch(/\.rp-app-glyph\s*\{[^}]*width:\s*32px;\s*height:\s*32px/)
+    expect(css).toMatch(/\.rp-app-card-desc\s*\{[^}]*white-space:\s*nowrap/)
+  })
+})
+
 describe('A platform app card', () => {
   it('shows its state as a status, its version and who can use it', async () => {
     withPlatform('installed')
     renderPage()
     const card = (await screen.findAllByText('Notes')).map(n => n.closest('.rp-app-card') as HTMLElement).find(c => c.querySelector('[data-icon]') && within(c).queryByText('appStore.state.enabled'))!
     expect(within(card).getByText('appStore.state.enabled')).toBeTruthy()
-    expect(within(card).getByText('1.0.0')).toBeTruthy()
+    expect(within(card).getByText(/1\.0\.0/)).toBeTruthy()
   })
 
   it('maps known states and shows an unknown one as it is', async () => {
@@ -217,7 +225,7 @@ describe('A platform app card', () => {
       if (url === `${root}/plans`) throw new Error('downgrade refused')
       throw new Error(`unexpected ${url}`)
     })
-    releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false })
+    fx.releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false })
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('nav.batch')
@@ -229,9 +237,9 @@ describe('A platform app card', () => {
   it('disables from the menu after reading the installation’s own release', async () => {
     withPlatform('installed')
     apiMock.get.mockImplementation(async (url: string) => {
-      if (url === '/api/admin/apps/layout') return { apps: entries }
+      if (url === '/api/admin/apps/layout') return { apps: fx.entries }
       if (url === `${root}/installations/${installationId}/settings`) return { current_release_sha256: sha('a') }
-      if (url.startsWith(`${root}/releases?release_sha256=`)) return { items: [releaseRows[sha('a')]], next_cursor: '' }
+      if (url.startsWith(`${root}/releases?release_sha256=`)) return { items: [fx.releaseRows[sha('a')]], next_cursor: '' }
       if (url === `${root}/market/sources`) return { official: { name: 'Kazuha Hub', url: catalogueUrl, enabled: false } }
       return { items: [], next_cursor: '' }
     })
@@ -264,7 +272,7 @@ describe('A platform app card', () => {
     expect(screen.queryByRole('menuitem', { name: 'appStore.uninstall' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'appStore.disable' })).toBeNull()
     view.unmount()
-    releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false, uninstallable: true })
+    fx.releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false, uninstallable: true })
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: 'appStore.more' }))
@@ -282,122 +290,6 @@ describe('A platform app card', () => {
     await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
     await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
     expect(await screen.findByRole('dialog')).toBeTruthy()
-  })
-})
-
-describe('Install from the catalogue', () => {
-  it('shows only apps that are not installed, once per app, loaded automatically', async () => {
-    withPlatform('installed')
-    renderPage()
-    await screen.findByText('Charts')
-    expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, { catalogue_url: catalogueUrl })
-    expect(screen.getByRole('button', { name: 'Charts' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Notes' })).toBeNull()
-    expect(screen.getAllByRole('button', { name: 'Charts' })).toHaveLength(1)
-  })
-
-  it('opens a detail dialog with the version choice defaulting to the newest, the version list and the signature note', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Draw charts')).toBeTruthy()
-    expect(within(dialog).getAllByText('appStore.latest').length).toBeGreaterThan(0)
-    expect(within(dialog).getByText('2.0.0-beta.1')).toBeTruthy()
-    expect(within(dialog).getByText('appStore.signatureCheck')).toBeTruthy()
-    expect(within(dialog).queryByText('appMarket.unverified')).toBeNull()
-  })
-
-  it('downloads and verifies the chosen version, then opens the install steps', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    await user.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: 'appStore.installAction' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/stage`, { catalogue_url: catalogueUrl, release_sha256: sha('c') }))
-    expect(apiMock.get).toHaveBeenCalledWith(`${root}/releases?release_sha256=${sha('c')}`)
-    expect(await screen.findByText('appPlatform.step.audience')).toBeTruthy()
-    expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/plans`)).toHaveLength(0)
-  })
-
-  it('installs an older version when it is chosen in the dialog', async () => {
-    releaseRows[sha('e')] = verifiedRow('e', '2.0.0-beta.1')
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    const dialog = await screen.findByRole('dialog')
-    await user.click(within(dialog).getByRole('combobox', { name: 'appStore.versions' }))
-    const option = Array.from(document.querySelectorAll('.ant-select-item-option')).find(o => o.textContent?.includes('2.0.0-beta.1'))!
-    await user.click(option)
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.installAction' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/stage`, { catalogue_url: catalogueUrl, release_sha256: sha('e') }))
-  })
-
-  it('refuses a verified release that is not the one asked for', async () => {
-    releaseRows[sha('c')] = verifiedRow('c', '9.9.9')
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    await user.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: 'appStore.installAction' }))
-    expect(await screen.findByText('appMarket.verificationChanged')).toBeTruthy()
-    expect(screen.queryByText('appPlatform.step.audience')).toBeNull()
-  })
-
-  it('does not offer to install from an untrusted publisher, and points to sources and trust', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'tools' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('appStore.untrusted')).toBeTruthy()
-    expect((within(dialog).getByRole('button', { name: 'appStore.installAction' }) as HTMLButtonElement).disabled).toBe(true)
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.openTrust' }))
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'appTrust.tab' }).getAttribute('aria-selected')).toBe('true'))
-  })
-
-  it('shows a failed catalogue as an error with a retry, never as an empty catalogue', async () => {
-    catalogueResponse = () => { throw new Error('catalogue down') }
-    renderPage()
-    expect(await screen.findByText('catalogue down')).toBeTruthy()
-    expect(screen.queryByText('appStore.catalogueEmpty')).toBeNull()
-    expect(screen.getByRole('button', { name: 'appStore.retry' })).toBeTruthy()
-  })
-})
-
-describe('Install app menu', () => {
-  it('opens a custom catalogue and lets the source switch return to the official one', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText('Charts')
-    await user.click(screen.getByRole('button', { name: /appStore\.install/ }))
-    await user.click(await screen.findByRole('menuitem', { name: /appStore\.install\.custom/ }))
-    const input = await screen.findByRole('textbox', { name: 'appStore.customPrompt' })
-    await user.type(input, 'http://insecure.example/index.json')
-    expect((screen.getByRole('button', { name: 'appStore.customOpen' }) as HTMLButtonElement).disabled).toBe(true)
-    await user.clear(input)
-    await user.type(input, 'https://custom.example/index.json')
-    await user.click(screen.getByRole('button', { name: 'appStore.customOpen' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, { catalogue_url: 'https://custom.example/index.json' }))
-    expect(screen.getByRole('combobox', { name: 'appStore.source' })).toBeTruthy()
-  })
-
-  it('stages an offline package and opens the install steps for it', async () => {
-    apiMock.postBytes.mockResolvedValue({ release_sha256: sha('c') })
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText('Charts')
-    const file = new File(['zip'], 'charts.portalapp')
-    await user.upload(screen.getByTestId('offline-package'), file)
-    await waitFor(() => expect(apiMock.postBytes).toHaveBeenCalledWith(`${root}/market/offline`, file, 'application/zip'))
-    expect(await screen.findByText('appPlatform.step.audience')).toBeTruthy()
-  })
-
-  it('reports a refused offline package without opening anything', async () => {
-    apiMock.postBytes.mockRejectedValue(new Error('package refused'))
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText('Charts')
-    await user.upload(screen.getByTestId('offline-package'), new File(['zip'], 'bad.portalapp'))
-    await waitFor(() => expect(apiMock.postBytes).toHaveBeenCalled())
-    expect(screen.queryByText('appPlatform.step.audience')).toBeNull()
   })
 })
 
@@ -429,82 +321,11 @@ describe('Sources and trust', () => {
   })
 })
 
-describe('Prerelease policy and publisher identity', () => {
-  const versioned = (versions: string[], extra: Record<string, unknown> = {}) => ({ ...chartsApp, ...extra, versions: versions.map((version, i) => ({ version, descriptor_sha256: sha('0123456789abcdef'[i])})) })
-
-  it('offers the newest stable version by default and marks it latest, while listing everything newest first', async () => {
-    catalogueResponse = () => catalogue([versioned(['3.0.0-beta.1', '2.0.0', '1.0.0'])])
-    releaseRows[sha('1')] = verifiedRow('1', '2.0.0')
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getAllByRole('listitem').map(i => i.textContent?.replace('appStore.latest', '').trim())).toEqual(['3.0.0-beta.1', '2.0.0', '1.0.0'])
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.installAction' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/stage`, { catalogue_url: catalogueUrl, release_sha256: sha('1') }))
-  })
-
-  it('defaults to the newest prerelease when there is no stable version', async () => {
-    catalogueResponse = () => catalogue([versioned(['0.1.0-beta.10', '0.1.0-beta.2'])])
-    releaseRows[sha('0')] = verifiedRow('0', '0.1.0-beta.10')
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'appStore.installAction' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/stage`, { catalogue_url: catalogueUrl, release_sha256: sha('0') }))
-  })
-
-  it('shows the plain version in the select, without a stray prefix', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Charts' }))
-    const dialog = await screen.findByRole('dialog')
-    const shown = dialog.querySelector('.ant-select')?.textContent ?? ''
-    expect(shown).toContain('2.0.0')
-    expect(shown).not.toMatch(/v\s*2\.0\.0/)
-  })
-
-  it('does not nudge a stable install toward a prerelease', async () => {
-    withPlatform('installed', '1.0.0')
-    catalogueResponse = () => catalogue([{ ...notesApp, versions: [{ version: '2.0.0-beta.1', descriptor_sha256: sha('e') }, { version: '1.0.0', descriptor_sha256: sha('a') }] }])
-    renderPage()
-    await screen.findByText('nav.batch')
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
-  })
-
-  it('offers a prerelease install the newer prerelease', async () => {
-    withPlatform('installed', '1.0.0-beta.1')
-    catalogueResponse = () => catalogue([{ ...notesApp, versions: [{ version: '1.0.0-beta.2', descriptor_sha256: sha('e') }, { version: '1.0.0-beta.1', descriptor_sha256: sha('a') }] }])
-    renderPage()
-    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })).toBeTruthy()
-  })
-
-  it('matches an installed card to the catalogue by publisher and app id, never by app id alone', async () => {
-    withPlatform('installed', '1.0.0')
-    const imposter = { ...notesApp, publisher_id: 'imposter', versions: [{ version: '9.0.0', descriptor_sha256: sha('9') }], display: display('Imposter Notes', 'Not yours') }
-    catalogueResponse = () => catalogue([imposter, notesApp])
-    renderPage()
-    // The other publisher's app is a different app: it is offered for install, and gives the installed card nothing.
-    expect(await screen.findByRole('button', { name: 'Imposter Notes' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo:\{"version":"9/ })).toBeNull()
-    expect(screen.getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Notes' })).toBeNull()
-  })
-
-  it('gives an installation with no publisher in its layout entry no catalogue match', async () => {
-    entries = [...layout(), { ...platformEntry('installed'), publisher_id: undefined }]
-    renderPage()
-    await screen.findByRole('button', { name: 'Notes' })
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
-  })
-})
-
 describe('A prerelease install', () => {
   const prereleaseCatalogue = () => catalogue([{ ...notesApp, versions: [{ version: '1.0.0-beta.2', descriptor_sha256: sha('e') }, { version: '0.9.0', descriptor_sha256: sha('7') }, { version: '1.0.0-beta.1', descriptor_sha256: sha('a') }] }])
   it('is offered the newer prerelease, and the dialog opens on it', async () => {
     withPlatform('installed', '1.0.0-beta.1')
-    catalogueResponse = prereleaseCatalogue
+    fx.catalogueResponse = prereleaseCatalogue
     const user = userEvent.setup()
     renderPage()
     await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })
@@ -552,73 +373,25 @@ describe('The catalogue dialog of an installed app', () => {
   })
 
   it('reviews an enable when the staged release is the disabled installation’s own', async () => {
-    releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, enableable: true })
+    fx.releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, enableable: true })
     const { user, dialog } = await openDialog()
     await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: installationId }))
   })
 
   it('reviews an uninstall when the staged release is one that can only be uninstalled', async () => {
-    releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, uninstallable: true })
+    fx.releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, uninstallable: true })
     const { user, dialog } = await openDialog()
     await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'uninstall', installation_id: installationId }))
   })
 
   it('says so instead of planning an update when the staged release is the installed one', async () => {
-    releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, installed: true })
+    fx.releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, installed: true })
     const { user, dialog } = await openDialog()
     await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
     expect(await within(dialog).findByText('appStore.alreadyInstalled')).toBeTruthy()
     expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/plans`)).toHaveLength(0)
-  })
-})
-
-describe('Platform not initialised', () => {
-  it('says the platform is not set up and points to sources and trust, instead of claiming no catalogue exists', async () => {
-    const { ApiError } = await import('../../api/client')
-    const base = apiMock.get.getMockImplementation()!
-    apiMock.get.mockImplementation(async (url: string) => {
-      if (url === `${root}/market/sources`) throw new ApiError(503, 'unavailable', 'app_platform_unavailable')
-      if (url === `${root}/publishers`) return { initialized: false, paused: false }
-      return base(url)
-    })
-    const user = userEvent.setup()
-    renderPage()
-    expect(await screen.findByText('appStore.platformNotReady')).toBeTruthy()
-    expect(screen.queryByText('appStore.sourceNone')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'appStore.openTrust' }))
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'appTrust.tab' }).getAttribute('aria-selected')).toBe('true'))
-  })
-})
-
-describe('Sources that cannot be read', () => {
-  it('reports a 503 as a failed read, not as an uninitialised platform, when the platform is initialised', async () => {
-    const { ApiError } = await import('../../api/client')
-    const base = apiMock.get.getMockImplementation()!
-    apiMock.get.mockImplementation(async (url: string) => {
-      if (url === `${root}/market/sources`) throw new ApiError(503, 'unavailable', 'app_platform_unavailable')
-      if (url === `${root}/publishers`) return { initialized: true, paused: false }
-      return base(url)
-    })
-    renderPage()
-    expect(await screen.findByText('appStore.sourcesFailed')).toBeTruthy()
-    expect(screen.queryByText('appStore.platformNotReady')).toBeNull()
-  })
-})
-
-describe('Source list', () => {
-  it('follows the official catalogue switch on Sources and trust without a remount', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText('Charts')
-    let official = true
-    const base = apiMock.get.getMockImplementation()!
-    apiMock.get.mockImplementation(async (url: string) => url === `${root}/market/sources` ? { official: { name: 'Kazuha Hub', url: catalogueUrl, enabled: official } } : base(url))
-    await user.click(screen.getByRole('tab', { name: 'appTrust.tab' }))
-    official = false
-    await user.click(screen.getByRole('tab', { name: 'nav.apps' }))
-    expect(await screen.findByText('appStore.sourceNone')).toBeTruthy()
   })
 })
 
@@ -639,3 +412,40 @@ describe('A different account', () => {
     expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/plans`)).toHaveLength(0)
   })
 })
+
+
+describe('Prerelease policy and publisher identity', () => {
+  it('does not nudge a stable install toward a prerelease', async () => {
+    withPlatform('installed', '1.0.0')
+    fx.catalogueResponse = () => catalogue([{ ...notesApp, versions: [{ version: '2.0.0-beta.1', descriptor_sha256: sha('e') }, { version: '1.0.0', descriptor_sha256: sha('a') }] }])
+    renderPage()
+    await screen.findByText('nav.batch')
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+  })
+
+  it('offers a prerelease install the newer prerelease', async () => {
+    withPlatform('installed', '1.0.0-beta.1')
+    fx.catalogueResponse = () => catalogue([{ ...notesApp, versions: [{ version: '1.0.0-beta.2', descriptor_sha256: sha('e') }, { version: '1.0.0-beta.1', descriptor_sha256: sha('a') }] }])
+    renderPage()
+    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })).toBeTruthy()
+  })
+
+  it('gives an installation with no publisher in its layout entry no catalogue match', async () => {
+    fx.entries = [...layout(), { ...platformEntry('installed'), publisher_id: undefined }]
+    renderPage()
+    await screen.findByText('nav.batch')
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+  })
+
+  it('does not give an installed card another publisher’s versions for the same app id', async () => {
+    withPlatform('installed', '1.0.0')
+    const imposter = { ...notesApp, publisher_id: 'imposter', versions: [{ version: '9.0.0', descriptor_sha256: sha('9') }], display: display('Imposter Notes', 'Not yours') }
+    fx.catalogueResponse = () => catalogue([imposter, notesApp])
+    renderPage()
+    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /appStore\.updateTo:\{"version":"9/ })).toBeNull()
+  })
+})
+

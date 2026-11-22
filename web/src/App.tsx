@@ -63,6 +63,7 @@ const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
 const AppViewV2 = lazyRetry(() => import('./pages/AppViewV2'))
 const AppsAdminPage = lazyRetry(() => import('./pages/manage/AppsAdminPage'))
+const AppsInstallPage = lazyRetry(() => import('./pages/manage/AppsInstallPage'))
 const AppDetailPage = lazyRetry(() => import('./pages/manage/AppDetailPage'))
 const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
 const AppCredentialsPage = lazyRetry(() => import('./pages/manage/AppCredentialsPage'))
@@ -264,6 +265,8 @@ function AppRoutes() {
           <Route path="rundefaults" element={<RunDefaultsPage />} />
           <Route path="assistant" element={<ChatAdminPage />} />
           <Route path="apps" element={<AppsAdminPage />} />
+          {/* Declared before apps/:key so "install" is never read as an app key. */}
+          <Route path="apps/install" element={<AppsInstallPage />} />
           <Route path="apps/:key" element={<AppDetailPage />} />
           <Route path="apps/installations/:installation" element={<AppPlatformSettingsPage />} />
           <Route path="apps/:key/access" element={<AppAccessPage />} />

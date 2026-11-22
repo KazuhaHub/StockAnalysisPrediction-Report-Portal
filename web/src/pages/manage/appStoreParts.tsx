@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { Alert, Badge, Button, Card, Dropdown, Modal, Select, Space, Tag, Typography } from 'antd'
-import { EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Dropdown, Modal, Select, Space, Tag, Typography } from 'antd'
+import { ArrowUpOutlined, EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
-import { clickable } from '../../lib/clickable'
 import { compareVersions, latestVersion, offeredUpdate } from '../../lib/semver'
 import type { PlatformMarketApp } from '../../api/appPlatform'
 import { appPath, type AdminApp } from './appsAdminModel'
@@ -27,12 +26,8 @@ export function platformStateTone(state: string | undefined): { tone: StatusTone
 export const RECOVERY_STATES = ['attention', 'recovery_required', 'failed']
 export const LIFECYCLE_STATES = ['installed', 'running', 'active', 'enabled', 'disabled', 'setup_required']
 
-export interface InstalledCardProps {
+export interface InstalledActionProps {
   app: AdminApp
-  name: string
-  description: string
-  publisher?: string
-  source?: string
   /** The catalogue's entry for this app, when the catalogue on show lists it. */
   catalogue?: PlatformMarketApp
   /** The installation's release can still be uninstalled although the app needs recovery. */
@@ -43,16 +38,18 @@ export interface InstalledCardProps {
   onViewInCatalogue: () => void
 }
 
-/** One installed app, the way Dify lists an installed plugin: wide, with version, state and a menu. */
-export function InstalledCard({ app, name, description, publisher, source, catalogue, uninstallable, busy, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledCardProps) {
+/** The version an installed platform app would be updated to, by the prerelease policy; undefined when none. */
+export function updateOffer(app: AdminApp, catalogue?: PlatformMarketApp): string | undefined {
+  return app.platform && app.version && catalogue ? offeredUpdate(app.version, catalogue.versions.map(v => v.version)) : undefined
+}
+
+/** Small icon buttons for an installed app: update, switch version, and the more menu. Used by the card and the list. */
+export function InstalledControls({ app, catalogue, uninstallable, busy, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
   const { t } = useTranslation()
-  // Only a newer stable version is an update for a stable install (a prerelease never is), as with Docker's latest.
-  const newest = app.platform && app.version && catalogue ? offeredUpdate(app.version, catalogue.versions.map(v => v.version)) : undefined
-  const updatable = !!newest
-  const state = app.platform ? platformStateTone(app.state) : null
+  const newest = updateOffer(app, catalogue)
   const lifecycleOK = app.platform && !!app.installationId && LIFECYCLE_STATES.includes(app.state ?? '')
-  const versionLabel = app.version ?? ''
-  const versionItems = catalogue ? [{
+  const recoveryUninstall = !lifecycleOK && app.platform && !!app.installationId && RECOVERY_STATES.includes(app.state ?? '') && !!uninstallable
+  const versionItems = catalogue && app.version ? [{
     type: 'group' as const,
     label: t('appStore.switchVersion'),
     children: catalogue.versions.map(v => ({
@@ -61,7 +58,6 @@ export function InstalledCard({ app, name, description, publisher, source, catal
       label: <Space size={8}><span>{v.version}</span>{v.version === app.version && <Tag>{t('appStore.current')}</Tag>}</Space>,
     })),
   }] : []
-  const recoveryUninstall = !lifecycleOK && app.platform && !!app.installationId && RECOVERY_STATES.includes(app.state ?? '') && !!uninstallable
   const lifecycleItems = [
     ...(recoveryUninstall ? [{ key: 'uninstall', label: t('appStore.uninstall'), danger: true }] : []),
     ...(lifecycleOK ? [
@@ -70,59 +66,93 @@ export function InstalledCard({ app, name, description, publisher, source, catal
     ] : []),
     ...(app.platform ? [{ key: 'view', label: t('appStore.viewInCatalogue'), disabled: !catalogue }] : []),
   ]
-  const footerLeft = [publisher, app.appId ?? (app.builtin ? app.key.replace(/^builtin:/, '') : app.key)].filter(Boolean).join(' / ')
+  if (!newest && !versionItems.length && !lifecycleItems.length) return null
+  const updateLabel = newest ? t('appStore.updateTo', { version: newest }) : ''
+  return (
+    <span className="rp-app-controls">
+      {newest && <Button size="small" type="text" className="rp-app-update" icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={updateLabel} loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); onSwitchVersion(newest) }} />}
+      {versionItems.length > 0 && (
+        <Dropdown trigger={['click']} menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} disabled={busy}>
+          <Button size="small" type="text" icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={t('appStore.switchVersion')} onClick={e => e.stopPropagation()} />
+        </Dropdown>
+      )}
+      {lifecycleItems.length > 0 && (
+        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction) } }} disabled={busy}>
+          <Button size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} title={t('appStore.more')} onClick={e => e.stopPropagation()} />
+        </Dropdown>
+      )}
+    </span>
+  )
+}
+
+/** A platform app's state as a status tag, or nothing for a built-in or legacy app. */
+export function InstalledState({ app }: { app: AdminApp }) {
+  const { t } = useTranslation()
+  if (!app.platform) return null
+  const state = platformStateTone(app.state)
+  return <StatusTag tone={state.tone}>{state.key ? t(state.key) : state.raw}</StatusTag>
+}
+
+export interface InstalledCardProps extends InstalledActionProps {
+  name: string
+  description: string
+  publisher?: string
+  source?: string
+}
+
+/**
+ * One installed app at Dify's density: icon, a line of name and "publisher · version", a line of description, a
+ * tiny line of status. Small icon buttons sit top right. The name's link covers the whole card (stretched link).
+ */
+export function InstalledCard({ name, description, publisher, source, ...actions }: InstalledCardProps) {
+  const { t } = useTranslation()
+  const { app } = actions
+  const secondary = [publisher ?? app.appId ?? (app.builtin ? undefined : app.key), app.version].filter(Boolean).join(' · ')
   return (
     <Card hoverable className="rp-app-card" size="small">
       {app.builtin && <span className="rp-app-card-corner">{t('appStore.builtinBadge')}</span>}
-      <div className="rp-app-card-head">
-        {catalogue?.display && app.platform
-          ? <span aria-hidden="true" className="rp-app-glyph"><AppDisplayIcon display={catalogue.display} /></span>
-          : <AppIcon app={app} />}
+      <div className="rp-app-card-row">
+        {actions.catalogue?.display && app.platform
+          ? <span aria-hidden="true" className="rp-app-glyph"><AppDisplayIcon display={actions.catalogue.display} /></span>
+          : <AppIcon app={app} size={32} />}
         <div className="rp-app-card-main">
-          <div className="rp-app-card-title">
-            {/* The link is the card's one way in: its ::after covers the card (stretched link), so a click anywhere opens the app page while the controls inside stay separate. */}
+          <div className="rp-app-card-line">
+            {/* The link is the card's one way in: its ::after covers the card, so a click anywhere opens the app page while the controls stay separate. */}
             <Link to={appPath(app.key)} className="rp-app-card-name rp-app-card-link">{name}</Link>
-            {app.version && (versionItems.length
-              ? <Badge dot={updatable}>
-                  <Dropdown trigger={['click']} menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} disabled={busy}>
-                    <Button size="small" icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} loading={busy} onClick={e => e.stopPropagation()}>{versionLabel}</Button>
-                  </Dropdown>
-                </Badge>
-              : <Tag className="rp-app-version">{versionLabel}</Tag>)}
-            {state && <StatusTag tone={state.tone}>{state.key ? t(state.key) : state.raw}</StatusTag>}
+            {secondary && <Typography.Text type="secondary" className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</Typography.Text>}
           </div>
-          {description && <Typography.Paragraph type="secondary" ellipsis={{ rows: 1 }} className="rp-app-card-desc">{description}</Typography.Paragraph>}
-          <div className="rp-app-card-status">
-            <ServiceStatus app={app} />
-            {updatable && newest && <Button size="small" type="primary" ghost loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); onSwitchVersion(newest) }}>{t('appStore.updateTo', { version: newest })}</Button>}
-          </div>
+          {description && <div className="rp-app-card-desc">{description}</div>}
+          <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} /></div>
         </div>
-        {lifecycleItems.length > 0 && (
-          <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction) } }} disabled={busy}>
-            <Button type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} onClick={e => e.stopPropagation()} />
-          </Dropdown>
-        )}
-      </div>
-      <div className="rp-app-card-foot">
-        <Typography.Text type="secondary" ellipsis>{footerLeft}</Typography.Text>
-        {source && <Typography.Text type="secondary" className="rp-app-card-source">{source}</Typography.Text>}
+        <InstalledControls {...actions} />
       </div>
     </Card>
   )
 }
 
-export function MarketCard({ app, name, description, onOpen }: { app: PlatformMarketApp; name: string; description: string; onOpen: () => void }) {
+/**
+ * One catalogue app at the same size: icon, name, publisher, description, and a small Install button top right.
+ * The name is a real button whose ::after covers the card, so a click anywhere else opens the details.
+ */
+export function MarketCard({ app, name, description, installing, blocked, error, onOpen, onInstall }: { app: PlatformMarketApp; name: string; description: string; installing: boolean; blocked: boolean; error?: string; onOpen: () => void; onInstall: () => void }) {
   const { t } = useTranslation()
   return (
-    <Card hoverable className="rp-app-card rp-market-card" size="small" {...clickable(onOpen, name)}>
-      <div className="rp-app-card-head">
+    <Card hoverable className="rp-app-card rp-market-card" size="small">
+      <div className="rp-app-card-row">
         <span aria-hidden="true" className="rp-app-glyph"><AppDisplayIcon display={app.display} /></span>
         <div className="rp-app-card-main">
-          <Typography.Text strong ellipsis className="rp-app-card-name">{name}</Typography.Text>
-          <Typography.Text type="secondary" ellipsis className="rp-app-card-publisher">{t('appStore.publishedBy', { publisher: app.publisher_id })}</Typography.Text>
+          <div className="rp-app-card-line">
+            <Button type="text" className="rp-app-card-name rp-app-card-link" onClick={onOpen}>{name}</Button>
+          </div>
+          <Typography.Text type="secondary" className="rp-app-card-sub rp-app-card-line">{t('appStore.publishedBy', { publisher: app.publisher_id })}</Typography.Text>
+          {error
+            ? <Typography.Text type="danger" className="rp-app-card-desc" title={error} role="alert">{error}</Typography.Text>
+            : <div className="rp-app-card-desc">{description || '\u00a0'}</div>}
         </div>
+        <span className="rp-app-controls">
+          <Button size="small" type="primary" loading={installing} disabled={!app.publisher_trusted || blocked} title={app.publisher_trusted ? undefined : t('appStore.untrusted')} onClick={onInstall}>{t('appStore.installAction')}</Button>
+        </span>
       </div>
-      <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} className="rp-market-card-desc">{description || ' '}</Typography.Paragraph>
     </Card>
   )
 }
@@ -173,6 +203,7 @@ export function MarketDetailModal({ app, installed, lang, stagingVersion, blocke
                 {staging ? t('appStore.staging') : actionLabel}
               </Button>}
         </Space>
+        {error && <Alert className="rp-market-detail-error" type="error" showIcon title={error} />}
       </div>}>
       {app && <div className="rp-market-detail-body">
         <div>
@@ -180,7 +211,6 @@ export function MarketDetailModal({ app, installed, lang, stagingVersion, blocke
             <Typography.Text type="secondary">{t('appStore.untrusted')}</Typography.Text>
             <Button type="link" size="small" onClick={onOpenTrust}>{t('appStore.openTrust')}</Button>
           </Space>}
-          {error && <Alert type="error" title={error} />}
           <Typography.Paragraph>{copy.description || t('appStore.noDescription')}</Typography.Paragraph>
         </div>
         <aside className="rp-market-detail-side">

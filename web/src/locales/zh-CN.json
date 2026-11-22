@@ -4305,12 +4305,10 @@
   "appPlatform.done": "完成",
   "appPlatform.version": "版本",
   "appStore.install": "安装应用",
-  "appStore.install.catalogue": "从应用目录",
   "appStore.install.custom": "从自定义目录…",
   "appStore.install.offline": "从离线软件包…",
   "appStore.offlineBusy": "正在上传并验证…",
   "appStore.installed": "已安装",
-  "appStore.fromCatalogue": "从应用目录安装",
   "appStore.source": "来源",
   "appStore.sourceNone": "没有可用的应用目录",
   "appStore.customTitle": "自定义目录",
@@ -4347,5 +4345,11 @@
   "appStore.platformNotReady": "应用平台尚未初始化。请先在“来源与信任”中完成初始化。",
   "appStore.updateTo": "更新到 {{version}}",
   "appStore.releaseMissing": "无法读取这个应用当前的发布。",
-  "appStore.sourcesFailed": "无法读取应用目录的来源。"
+  "appStore.sourcesFailed": "无法读取应用目录的来源。",
+  "appStore.backToApps": "返回应用列表",
+  "appStore.view.cards": "卡片",
+  "appStore.view.list": "列表",
+  "appStore.col.app": "应用",
+  "appStore.col.status": "状态",
+  "appStore.col.access": "开放范围"
 }

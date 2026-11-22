@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { Space, Tabs } from 'antd'
 import { useTranslation } from 'react-i18next'
 import LoadGate from '../../components/LoadGate'
@@ -20,7 +21,9 @@ export default function AppsAdminPage() {
   const { t } = useTranslation()
   const { apps, loading, error, reload } = useAppsCatalog()
   const [runtimeReload, setRuntimeReload] = useState(0)
-  const [activeTab, setActiveTab] = useState('apps')
+  // `?tab=publishers` opens Sources and trust, the way another page asks to be sent there.
+  const [params] = useSearchParams()
+  const [activeTab, setActiveTab] = useState(params.get('tab') === 'publishers' ? 'publishers' : 'apps')
 
   return <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
     {

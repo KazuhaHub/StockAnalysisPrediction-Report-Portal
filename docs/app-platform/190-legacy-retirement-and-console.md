@@ -83,18 +83,20 @@ No intermediate deprecation release: the only installation is the owner's.
 4. **Activity**: operations, tasks and event subscriptions across apps, filterable by app, each
    row linking to its app page.
 
-**Install** (`/manage/apps/install`) is one `Steps` flow; a step opens only when the previous one is
-done and says why it is not yet available:
+**Install** (`/manage/apps/install`) is a catalogue page, declared before `apps/:key` in the router. It has a
+breadcrumb (Apps › Install app), a source choice (the official catalogue, or a custom catalogue URL or an offline
+package from the top bar), and a grid of compact cards for the apps that are not installed. A card has a small
+Install button; the card itself opens a detail dialog (version choice, Install, the version list, the publisher, and
+a note that the publisher's signature is verified on install). Install downloads and verifies the chosen version,
+then opens the install dialog, whose `Steps` are: open it now to some organisational units (optional, written in
+the activation transaction; none leaves it closed to everyone), review (the existing review content, the confirm
+button says "Install"), and progress (polled, stages shown; when complete "Open app settings" and "Back to apps").
+The same dialog runs update, disable, enable and uninstall from the installed cards, without the first step. There
+is no "unverified" warning: a catalogue is a list, and every package is verified against its publisher's signature
+when chosen.
 
-1. Source: the official catalogue by default; a custom catalogue URL; an offline package. An info
-   note says the catalogue is a list and every package is verified against its publisher's
-   signature when chosen. It replaces the "unverified" warning.
-2. App and version: choosing a version downloads and verifies it in place; a failure is shown on
-   that row.
-3. Open it now to some organisational units (optional). The rows are written in the activation
-   transaction; choosing none leaves it closed to everyone.
-4. Review: the existing review content, on the page; the confirm button says "Install".
-5. Progress: polled automatically, stages shown; when complete, "Open app settings" and "Open app".
+The Apps tab lists what is installed as compact cards (or a dense list, chosen with a toggle and remembered in the
+browser) and has a plain Install app button that opens the catalogue page.
 
 Labels lead with the verb ("Update", not "Review update").
 

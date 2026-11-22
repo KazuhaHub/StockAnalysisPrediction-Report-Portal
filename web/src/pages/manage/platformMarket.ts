@@ -25,7 +25,8 @@ export interface CatalogueState {
 export interface MarketSource { url: string; name: string; official: boolean }
 /** What is known of the sources: still reading, read, the platform is not set up yet, or the read failed. */
 export type SourcesState = 'loading' | 'ready' | 'uninitialised' | 'failed'
-export type Staging = { appId: string; version: string } | null
+/** The download in progress. The byte counts are for progress, which a later server version will report. */
+export type Staging = { appId: string; version: string; bytesDone?: number; bytesTotal?: number } | null
 /** The result of a download-and-verify: the verified release, or the reason it failed. null means it was not attempted. */
 export type StageResult = { release: PlatformRelease } | { error: string } | null
 

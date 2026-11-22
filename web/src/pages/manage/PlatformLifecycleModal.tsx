@@ -17,7 +17,7 @@ const OK = { install: 'appPlatform.confirm', update: 'appPlatform.confirmUpdate'
  * the operation. A flow that is not an install has no first step. It shows no state of its own; everything comes
  * from the lifecycle hook, which keeps the safety rules.
  */
-export default function PlatformLifecycleModal({ lifecycle }: { lifecycle: PlatformLifecycle }) {
+export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycle: PlatformLifecycle; backTo?: string }) {
   const { t } = useTranslation()
   const { lang } = usePrefs()
   const { target, step, review, intent, busy, expired, progress, progressError, actionError, groups } = lifecycle
@@ -67,6 +67,7 @@ export default function PlatformLifecycleModal({ lifecycle }: { lifecycle: Platf
     return [
       <Button key="refresh" disabled={busy} onClick={lifecycle.refreshProgress}>{t('appPlatform.refresh')}</Button>,
       ...(complete && installationId ? [<Link key="settings" to={`/manage/apps/${encodeURIComponent(`platform:${installationId}`)}`}><Button>{t('appPlatform.openSettings')}</Button></Link>] : []),
+      ...(complete && backTo ? [<Link key="back" to={backTo}><Button>{t('appStore.backToApps')}</Button></Link>] : []),
       <Button key="done" type="primary" onClick={lifecycle.close}>{t('appPlatform.done')}</Button>,
     ]
   }

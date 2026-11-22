@@ -4305,12 +4305,10 @@
   "appPlatform.done": "完成",
   "appPlatform.version": "版本",
   "appStore.install": "安裝應用",
-  "appStore.install.catalogue": "從應用目錄",
   "appStore.install.custom": "從自訂目錄…",
   "appStore.install.offline": "從離線軟體套件…",
   "appStore.offlineBusy": "正在上傳並驗證…",
   "appStore.installed": "已安裝",
-  "appStore.fromCatalogue": "從應用目錄安裝",
   "appStore.source": "來源",
   "appStore.sourceNone": "沒有可用的應用目錄",
   "appStore.customTitle": "自訂目錄",
@@ -4347,5 +4345,11 @@
   "appStore.platformNotReady": "應用平台尚未初始化。請先在「來源與信任」中完成初始化。",
   "appStore.updateTo": "更新到 {{version}}",
   "appStore.releaseMissing": "無法讀取這個應用目前的發佈。",
-  "appStore.sourcesFailed": "無法讀取應用目錄的來源。"
+  "appStore.sourcesFailed": "無法讀取應用目錄的來源。",
+  "appStore.backToApps": "返回應用列表",
+  "appStore.view.cards": "卡片",
+  "appStore.view.list": "列表",
+  "appStore.col.app": "應用",
+  "appStore.col.status": "狀態",
+  "appStore.col.access": "開放範圍"
 }

@@ -4305,12 +4305,10 @@
   "appPlatform.done": "Done",
   "appPlatform.version": "Version",
   "appStore.install": "Install app",
-  "appStore.install.catalogue": "From the app catalogue",
   "appStore.install.custom": "From a custom catalogue…",
   "appStore.install.offline": "From an offline package…",
   "appStore.offlineBusy": "Uploading and verifying…",
   "appStore.installed": "Installed",
-  "appStore.fromCatalogue": "Install from the catalogue",
   "appStore.source": "Source",
   "appStore.sourceNone": "No catalogue is available",
   "appStore.customTitle": "Custom catalogue",
@@ -4347,5 +4345,11 @@
   "appStore.platformNotReady": "The application platform is not initialised yet. Set it up in Sources and trust first.",
   "appStore.updateTo": "Update to {{version}}",
   "appStore.releaseMissing": "Could not read this app’s current release.",
-  "appStore.sourcesFailed": "Could not read the catalogue sources."
+  "appStore.sourcesFailed": "Could not read the catalogue sources.",
+  "appStore.backToApps": "Back to apps",
+  "appStore.view.cards": "Cards",
+  "appStore.view.list": "List",
+  "appStore.col.app": "App",
+  "appStore.col.status": "Status",
+  "appStore.col.access": "Who can use it"
 }

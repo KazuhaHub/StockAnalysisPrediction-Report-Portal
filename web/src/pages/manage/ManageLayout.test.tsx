@@ -61,6 +61,14 @@ describe('ManageLayout — grouped rail', () => {
     expect(screen.getAllByText('nav.appsAdmin').length).toBeGreaterThan(0)
   })
 
+  it('highlights Apps and shows no list description on the install page', () => {
+    locState.pathname = '/manage/apps/install'
+    const { container } = render(<ManageLayout />)
+    expect(screen.queryByText('manage.description.apps')).toBeNull()
+    expect(screen.getAllByText('nav.appsAdmin').length).toBeGreaterThan(0)
+    expect(container.querySelector('.ant-menu-item-selected')?.textContent).toContain('nav.appsAdmin')
+  })
+
   it('collapses related features into a dropdown instead of a visible row of buttons', async () => {
     locState.pathname = '/manage/site'
     render(<ManageLayout />)

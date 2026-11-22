@@ -3372,48 +3372,48 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
   font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
 }
 
-/* Apps marketplace (installed apps and the catalogue, one page). One grid rule for every card list: installed
-   cards are wide (two across on a desktop), catalogue cards small (four across); on a phone each is one column. */
+/* Apps console: installed apps and the catalogue, as compact cards (Dify's density). One grid rule for every card
+   list: 240px columns, so four across in the console's ~1000px at 1280px, more on wider screens, one on a phone. */
 .rp-app-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .rp-app-search { flex: 1 1 220px; max-width: 360px; }
-.rp-app-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.rp-app-grid { display: grid; gap: 16px; }
-.rp-app-grid--installed { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
-.rp-app-grid--market { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+.rp-app-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
 .rp-app-grid-state { display: flex; justify-content: center; padding: 24px 0; }
 .rp-app-card { position: relative; height: 100%; min-width: 0; overflow: hidden; }
-.rp-app-card > .ant-card-body { display: flex; flex-direction: column; gap: 12px; height: 100%; min-width: 0; }
+.rp-app-card > .ant-card-body { padding: 12px; min-width: 0; }
+/* Icon, then the text column, then small icon buttons. min-width 0 lets the text column shrink and ellipsise. */
+.rp-app-card-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.rp-app-card-main { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.rp-app-card-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; line-height: 20px; }
+.rp-app-card-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; line-height: 20px; }
+.rp-app-card-sub { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 20px; }
+.rp-app-card-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; color: var(--ant-color-text-secondary); }
+.rp-app-card-meta { display: flex; align-items: center; gap: 8px; min-width: 0; height: 20px; overflow: hidden; font-size: 12px; white-space: nowrap; }
+.rp-app-card-meta .ant-tag { margin: 0; font-size: 11px; line-height: 18px; padding-inline: 6px; }
+.rp-app-card-meta .ant-badge-status-text { font-size: 12px; }
+.rp-app-controls { display: inline-flex; flex: none; align-items: center; gap: 2px; margin: -2px -4px 0 0; position: relative; z-index: 1; }
 .rp-app-card-corner {
-  position: absolute; top: 0; inset-inline-end: 0; padding: 0 8px; font-size: 11px; line-height: 18px;
-  border-top-right-radius: var(--ant-border-radius); border-bottom-left-radius: var(--ant-border-radius-sm);
+  position: absolute; top: 0; inset-inline-end: 0; padding: 0 6px; font-size: 10px; line-height: 16px;
+  border-bottom-left-radius: var(--ant-border-radius-sm);
   background: var(--ant-color-fill-secondary); color: var(--ant-color-text-secondary);
 }
-.rp-app-card-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
-.rp-app-card-main { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
-.rp-app-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.rp-app-card-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-.rp-app-card-title .ant-tag { margin-inline-end: 0; }
-/* Stretched link: the name's link covers the whole card; every control inside rises above it. */
+/* Stretched link: the name (a link on an installed card, a button on a catalogue card) covers the whole card;
+   the controls rise above it. The name itself takes no position, so the card is what ::after fills. */
+.rp-app-card-link.ant-btn { position: static; height: auto; padding: 0; border: 0; background: transparent; box-shadow: none; font-weight: 600; }
+.rp-app-card-link.ant-btn > span { overflow: hidden; text-overflow: ellipsis; }
 .rp-app-card-link::after { content: ''; position: absolute; inset: 0; z-index: 0; }
-.rp-app-card .ant-btn, .rp-app-card .ant-badge, .rp-app-card .ant-tag, .rp-app-card .ant-badge-status { position: relative; z-index: 1; }
-.rp-app-card-link:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
-.rp-app-card-desc, .rp-market-card-desc { margin: 0 !important; }
-/* A description that shows a tooltip would sit under the stretched link; it has none, and truncates quietly. */
-.rp-market-card-desc { min-height: calc(2 * 1.5715em); }
-.rp-app-card-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
-.rp-app-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--ant-color-border-secondary); font-size: 12px; min-width: 0; }
-.rp-app-card-source { flex: none; text-transform: uppercase; letter-spacing: 0.02em; font-size: 11px; }
-.rp-market-card > .ant-card-body { gap: 8px; }
-.rp-app-card:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
+.rp-app-card-link:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .rp-app-glyph {
-  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; font-size: 18px;
-  border-radius: var(--ant-border-radius-lg); background: var(--ant-color-fill-secondary); color: var(--ant-color-text-secondary);
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; font-size: 16px;
+  border-radius: var(--ant-border-radius); background: var(--ant-color-fill-secondary); color: var(--ant-color-text-secondary);
 }
-.rp-app-glyph--large { width: 44px; height: 44px; font-size: 22px; }
-.rp-market-card .rp-app-card-main { gap: 0; }
+.rp-app-glyph--large { width: 44px; height: 44px; font-size: 22px; border-radius: var(--ant-border-radius-lg); }
+.rp-app-list .ant-table-cell { vertical-align: middle; }
+.rp-app-list-app { min-width: 0; }
+.rp-app-list-name { min-width: 0; overflow-wrap: anywhere; }
 .rp-market-detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-inline-end: 32px; }
 .rp-market-detail-title { display: flex; flex: 1 1 160px; flex-direction: column; min-width: 0; }
 .rp-market-detail-actions { margin-inline-start: auto; }
+.rp-market-detail-error { flex: 1 1 100%; font-weight: 400; }
 .rp-market-detail-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 24px; }
 .rp-market-detail-body > div { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .rp-market-detail-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -3421,19 +3421,9 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-market-detail-note { margin-top: 8px; font-size: 12px; }
 .rp-lifecycle-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
 .rp-lifecycle-body > .ant-steps { flex: none; }
-/* The catalogue header holds the title and the source choice; on a phone the choice drops to its own line. */
-.rp-market-collapse > .ant-collapse-item > .ant-collapse-header { flex-wrap: wrap; row-gap: 8px; }
-.rp-market-collapse .ant-collapse-title { min-width: 0; }
-.rp-market-collapse .ant-collapse-extra { margin-inline-start: auto; max-width: 100%; min-width: 0; }
-.rp-market-collapse .ant-collapse-extra .ant-space { display: flex; max-width: 100%; }
-.rp-market-collapse .ant-collapse-extra .ant-space-item { min-width: 0; max-width: 100%; }
 .rp-market-source { width: 260px; max-width: 100%; min-width: 0; }
 @media (max-width: 575px) {
-  .rp-market-collapse .ant-collapse-extra { margin-inline-start: 0; width: 100%; }
-  .rp-market-collapse .ant-collapse-extra .ant-space-item { flex: 1; }
   .rp-market-source { width: 100%; }
-}
-@media (max-width: 575px) {
   .rp-market-detail-body { grid-template-columns: minmax(0, 1fr); }
   .rp-market-detail-actions { margin-inline-start: 0; width: 100%; }
 }
