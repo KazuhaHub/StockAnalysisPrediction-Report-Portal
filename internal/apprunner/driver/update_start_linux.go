@@ -70,36 +70,7 @@ func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, r
 // origin, and removes it only if the live container is exactly that plan and is not running. Any other container, a
 // running one, or one that is already gone is refused: absence is proven by the start's settlement, never assumed here.
 func removeUpdateStartSourceContainer(ctx context.Context, client *http.Client, request UpdateStartLaunchRequest, image BackendImageInspection, roots containerRoots) error {
-	if request.Source == nil {
-		return ErrInvalidResponse
-	}
-	owner := containerOwner{
-		DeploymentID:    request.Identity.DeploymentID,
-		ControllerEpoch: request.Identity.ControllerEpoch,
-		InstallationID:  request.Identity.InstallationID,
-		OperationID:     request.Source.OperationID,
-		ResourceID:      request.Source.ResourceID,
-		NamespaceID:     request.Identity.NamespaceID,
-		ReleaseSHA256:   request.Source.ReleaseSHA256,
-		Generation:      request.Source.Generation,
-		ControlFence:    request.Source.ControlFence,
-		WriterFence:     request.Source.WriterFence,
-	}
-	var plan containerPlan
-	var err error
-	switch request.Source.Origin {
-	case UpdateStartSourceCandidate:
-		plan, err = planCandidateContainer(request.Descriptor, image, owner, roots)
-	case UpdateStartSourceWritable:
-		if request.Source.Writable == nil {
-			return ErrInvalidResponse
-		}
-		plan, err = planWritableCandidateContainer(request.Descriptor, image, owner, roots, *request.Source.Writable)
-	default:
-		plan, err = planUpdateStartContainer(
-			request.Descriptor, image, owner, roots, request.Source.Binding,
-			request.Source.SandboxProfile)
-	}
+	plan, err := planUpdateStartSource(request, image, roots)
 	if err != nil {
 		return err
 	}

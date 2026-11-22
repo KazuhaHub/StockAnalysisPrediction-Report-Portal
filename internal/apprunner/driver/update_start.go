@@ -282,3 +282,33 @@ func planUpdateStartContainer(raw []byte, image BackendImageInspection, owner co
 	}
 	return plan, nil
 }
+
+// planUpdateStartSource is the plan of the stopped backend an enable start replaces, built the way the start that
+// created it built it: from the owner its labels carry, by its origin.
+func planUpdateStartSource(request UpdateStartLaunchRequest, image BackendImageInspection, roots containerRoots) (containerPlan, error) {
+	if request.Source == nil {
+		return containerPlan{}, ErrInvalidResponse
+	}
+	owner := containerOwner{
+		DeploymentID:    request.Identity.DeploymentID,
+		ControllerEpoch: request.Identity.ControllerEpoch,
+		InstallationID:  request.Identity.InstallationID,
+		OperationID:     request.Source.OperationID,
+		ResourceID:      request.Source.ResourceID,
+		NamespaceID:     request.Identity.NamespaceID,
+		ReleaseSHA256:   request.Source.ReleaseSHA256,
+		Generation:      request.Source.Generation,
+		ControlFence:    request.Source.ControlFence,
+		WriterFence:     request.Source.WriterFence,
+	}
+	switch request.Source.Origin {
+	case UpdateStartSourceCandidate:
+		return planCandidateContainer(request.Descriptor, image, owner, roots)
+	case UpdateStartSourceWritable:
+		if request.Source.Writable == nil {
+			return containerPlan{}, ErrInvalidResponse
+		}
+		return planWritableCandidateContainer(request.Descriptor, image, owner, roots, *request.Source.Writable)
+	}
+	return planUpdateStartContainer(request.Descriptor, image, owner, roots, request.Source.Binding, request.Source.SandboxProfile)
+}

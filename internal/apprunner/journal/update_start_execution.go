@@ -493,7 +493,9 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		},
 		SandboxProfile: c.Payload.SandboxProfile,
 	}
-	if c.Kind == "enable-start" {
+	// A source the journal already records as absent (removed by an earlier removal or a settlement) has nothing
+	// left to replace: removing it again would find no container and leave the start unknown for good.
+	if c.Kind == "enable-start" && !enableStartSourceRecordedAbsent(f.source.source) {
 		source, err := enableStartNativeSource(f.source.source)
 		if err != nil {
 			return zero, err
@@ -1046,6 +1048,14 @@ func settleEnableSourceAbsent(ctx context.Context, tx *sql.Tx, installationID, s
 	return releaseHeldReservationExactly(ctx, tx, sourceID, now)
 }
 
+// enableStartSourceRecordedAbsent is whether the journal's own record of the source container is the proven-absent one
+// (revision 4, desired and observed absent), as the checkpoint loader accepts it. It is never a fresh look at Docker.
+func enableStartSourceRecordedAbsent(source checkpointSource) bool {
+	return source.resource.revision == 4 &&
+		source.resource.observed == "absent" &&
+		source.resource.desired == "absent"
+}
+
 // enableStartNativeSource names the stopped backend an enable or repair start replaces: the backend of whichever start
 // produced the checkpoint it enables from. An update's own backend is bound by its update-start claim. An installation
 // whose latest lifecycle operation is its install has the install's backend, the candidate (or writable candidate) that
@@ -1077,7 +1087,7 @@ func enableStartNativeSource(source checkpointSource) (*driver.UpdateStartSource
 		OperationID:  source.command.Payload.SourceOperationID,
 		ControlFence: strconv.FormatInt(source.sourceFence, 10),
 		Generation:   "1",
-		// The install's backend was started under its data receipt's writer fence, which is what its labels carry.
+		// A writable install backend is always started at fence 1, which its receipt does not repeat.
 		WriterFence: source.data.WriterFence,
 	}
 	switch {
@@ -1094,6 +1104,8 @@ func enableStartNativeSource(source checkpointSource) (*driver.UpdateStartSource
 		}
 	case source.source.Claim.Preflight != nil:
 		install.Origin = driver.UpdateStartSourceCandidate
+		// The read-only backend's labels carry the writer fence of its own start receipt.
+		install.WriterFence = source.source.WriterFence
 		install.ResourceID, install.NativeID = source.source.Claim.ResourceID, source.source.NativeID
 		install.ReleaseSHA256 = source.source.ReleaseSHA256
 		install.SandboxProfile = driver.UpdateStartReadOnlySandboxProfile
