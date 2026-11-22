@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -309,7 +308,7 @@ func (w *checkpointWalker) walk(namespace *os.File) error {
 	if err != nil {
 		return checkpointIncomplete(err)
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	SortArchiveOrder(entries)
 	for _, entry := range entries {
 		if err := w.add(namespace, entry.Name(), entry.Name(), 1); err != nil {
 			return err
@@ -391,7 +390,7 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 		if err != nil {
 			return checkpointIncomplete(err)
 		}
-		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+		SortArchiveOrder(entries)
 		for _, entry := range entries {
 			if err := w.add(folder, entry.Name(), path.Join(relative, entry.Name()), depth+1); err != nil {
 				return err
