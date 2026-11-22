@@ -117,7 +117,8 @@ async function main() {
       if (!operationID) {
         throw new Error(`confirmed ${action} did not expose its operation`);
       }
-      await page.getByText("Operation progress", { exact: true }).waitFor();
+      // Progress is the last step of the apps console's lifecycle dialog, opened from ?operation=.
+      await page.getByRole("dialog").locator('div[role="status"]').waitFor();
       await page.screenshot({
         path: path.join(evidenceDir, `${action}-confirmed.png`),
         fullPage: true,
@@ -136,7 +137,8 @@ async function main() {
         `${target.origin}/manage/apps?operation=${encodeURIComponent(operation)}`,
         { waitUntil: "networkidle" },
       );
-      await page.getByText("Operation progress", { exact: true }).waitFor();
+      // Progress is the last step of the apps console's lifecycle dialog, opened from ?operation=.
+      await page.getByRole("dialog").locator('div[role="status"]').waitFor();
       await page
         .getByText("Operation complete", { exact: true })
         .waitFor({ timeout: 180_000 });
