@@ -371,3 +371,71 @@ func TestPlatformSetDataQuotaFailureLeavesTheInstallationAndQuotaAlone(t *testin
 		t.Fatal("the capacity code is not shown to the console")
 	}
 }
+
+// The runner accepts a raise only at or below the fence its volume row holds, and nothing raises that row: a disable
+// raises the namespace's fence and an update the container's. The plan must carry the fence of the prepare-data
+// receipt it names, whichever lifecycle operation the source is.
+func testPlatformDataQuotaPlanFenceAfterDisable(t *testing.T, s *Server, installation string, runtime platformRuntimeRegistration, target *platformManagedInstallTarget) {
+	t.Helper()
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespaceFence := scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+	quota := scalar[int64](t, s.st, `SELECT quota_bytes FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+	inodes := scalar[int64](t, s.st, `SELECT quota_inodes FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+	plan, _, source, err := platformBuildDataQuotaPlan(s.st.poolExec(), installation, target, runtime, 2*quota, 2*inodes, now, 0)
+	if err != nil {
+		t.Fatal("quota plan after a disable", err)
+	}
+	receipt, err := journal.ParseDataPreparationReceipt([]byte(scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=?`, source.dataEffectID)))
+	if err != nil || strconv.FormatInt(plan.WriterFence, 10) != receipt.WriterFence {
+		t.Fatalf("the quota plan's writer fence %d is not the prepare-data receipt's %s (%v)", plan.WriterFence, receipt.WriterFence, err)
+	}
+	if namespaceFence <= plan.WriterFence {
+		t.Fatalf("the fixture's namespace fence %d was not raised past the plan's %d", namespaceFence, plan.WriterFence)
+	}
+}
+
+func TestPlatformDataQuotaPlanFenceAfterDisableUpdateSourcedSQLite(t *testing.T) {
+	s, actor, enabled, target, runtime := platformDataActionFixture(t, false)
+	platformCompleteSyntheticDisable(t, s, actor, enabled)
+	testPlatformDataQuotaPlanFenceAfterDisable(t, s, enabled.installationID, runtime, target)
+}
+
+func TestPlatformDataQuotaPlanFenceAfterDisableInstallSourcedSQLite(t *testing.T) {
+	s, _, lease := platformManagedRemovalStopFixtureAction(t, false, appplatform.ActionDisable)
+	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := platformManagedRemovalFixtureEndpoint()
+	receipt, ok := validPlatformManagedRemovalObservation(platformManagedRemovalObservationFixture(intent, endpoint), intent, endpoint)
+	if !ok {
+		t.Fatal("disable stop receipt")
+	}
+	if _, err := s.settlePlatformManagedRemoval(context.Background(), lease, intent, receipt); err != nil {
+		t.Fatal(err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch FROM app_platform_installations WHERE id=?`, lease.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := platformOperationLease{installationID: lease.installationID, controllerEpoch: epoch, snapshot: appplatform.OperationSnapshot{
+		Action: appplatform.ActionSetDataQuota, Managed: true, Generation: 2, Revision: 1, Stage: appplatform.StageQueued}}
+	source, err := loadPlatformCheckpointSourceMode(s.st.poolExec(), probe, runtime, now, true, 0)
+	if err != nil || source.runtimeTarget == nil {
+		t.Fatal("install source after a disable", err)
+	}
+	testPlatformDataQuotaPlanFenceAfterDisable(t, s, lease.installationID, runtime, source.runtimeTarget)
+}

@@ -104,10 +104,18 @@ func platformBuildDataQuotaPlan(e migExec, installation string, target *platform
 	if err := e.queryRow(`SELECT revision FROM app_platform_publishers WHERE id=?`, publisher).Scan(&trustRevision); err != nil || trustRevision < 1 {
 		return zero, 0, noSource, errAppPlatformPlanChanged
 	}
-	writer := mustPlatformCheckpointInt(source.writerFence)
-	if source.currentWriterFence != "" {
-		writer = mustPlatformCheckpointInt(source.currentWriterFence)
+	// The runner accepts a raise only at or below the fence its volume row holds. Nothing raises that row: it keeps the
+	// fence the namespace was prepared with, which is the fence of the prepare-data receipt the command names. A
+	// disable or an update raises the namespace's and the container's fences, never the volume's.
+	var dataReceipt string
+	if err := e.queryRow(`SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=? AND kind='prepare-data'`, source.dataEffectID).Scan(&dataReceipt); err != nil {
+		return zero, 0, noSource, errAppPlatformPlanChanged
 	}
+	data, err := journal.ParseDataPreparationReceipt([]byte(dataReceipt))
+	if err != nil || platformDigest([]byte(dataReceipt)) != source.sourceDataReceiptSHA256 {
+		return zero, 0, noSource, errAppPlatformPlanChanged
+	}
+	writer := mustPlatformCheckpointInt(data.WriterFence)
 	return platformDataQuotaPlan{
 		Format: platformSetDataQuotaFormat, Action: appplatform.ActionSetDataQuota, InstallationID: installation,
 		AppID: appID, PublisherID: publisher, ReleaseSHA256: source.releaseSHA256, Generation: generation,

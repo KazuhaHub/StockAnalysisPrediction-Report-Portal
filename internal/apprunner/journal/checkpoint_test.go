@@ -163,7 +163,7 @@ func TestCheckpointAcceptsUpdateStartSource(t *testing.T) {
 }
 
 func TestCheckpointRejectsChangedSourceAndPendingWork(t *testing.T) {
-	for _, name := range []string{"source state", "source hash", "data hash", "resource", "pending", "target", "fence"} {
+	for _, name := range []string{"source state", "source hash", "data hash", "resource", "pending", "target", "fence", "raised writer fence"} {
 		t.Run(name, func(t *testing.T) {
 			f := newCheckpointFixture(t)
 			raw, sig := f.raw, f.sig
@@ -186,6 +186,12 @@ func TestCheckpointRejectsChangedSourceAndPendingWork(t *testing.T) {
 				}
 			case "target":
 				raw, sig = resignCheckpoint(t, f, func(c *control.CheckpointCommand) { c.TargetGeneration = "3" })
+			case "raised writer fence":
+				// What a Portal sends when it carries the namespace's fence, which a disable raised, and not the
+				// fence of the source's data receipt and stopped resource.
+				raw, sig = resignCheckpoint(t, f, func(c *control.CheckpointCommand) {
+					c.Payload.WriterFence = strconv.FormatInt(mustDataInt(c.Payload.WriterFence)+1, 10)
+				})
 			case "fence":
 				if _, err := f.store.db.Exec(`UPDATE runner_commands SET admitted_fence=2 WHERE effect_id=?`, f.source.Claim.EffectID); err != nil {
 					t.Fatal(err)
