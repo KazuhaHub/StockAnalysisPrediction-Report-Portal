@@ -37,3 +37,16 @@ test('Back is shown only when the page has a way back, and an extra control sits
   fireEvent.click(screen.getByRole('button',{name:/apps.back/}));expect(back).toHaveBeenCalledOnce()
   expect(screen.queryByRole('button',{name:'Manage'})).toBeNull()
 })
+test('lets the title group wrap below Back instead of squeezing the title on a narrow screen',()=>{
+  const view=render(<AppPageHeader name="Market Monitor" icon={<span>Icon</span>} onBack={()=>{}} state={null}/>)
+  const back=screen.getByRole('button',{name:/apps.back/})
+  const heading=screen.getByRole('heading',{name:'Market Monitor'})
+  const row=back.parentElement as HTMLElement
+  expect(row.className).toContain('ant-flex-wrap-wrap')
+  // The icon and title travel together as one item of that row, with a basis that forces a wrap before a squeeze.
+  const group=[...row.children].find(child=>child.contains(heading)) as HTMLElement
+  expect(group).not.toBe(back)
+  expect(group.contains(screen.getByText('Icon'))).toBe(true)
+  expect(group.style.flex).toMatch(/1 1 (1[6-9]\d|2\d\d)px/)
+  view.unmount()
+})
