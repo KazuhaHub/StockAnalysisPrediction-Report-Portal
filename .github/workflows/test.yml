@@ -908,7 +908,9 @@ jobs:
             sleep 1
           done
           worker_uid=$(docker exec rp-worker-smoke awk '/^Uid:/{print $2}' /proc/1/status || true)
-          worker_cmd=$(docker exec rp-worker-smoke tr '\0' ' ' </proc/1/cmdline || true)
+          # The redirect must run inside the container: a host-side </proc/... would read the runner's own file,
+          # and docker exec without -i passes no stdin anyway.
+          worker_cmd=$(docker exec rp-worker-smoke sh -c "tr '\0' ' ' </proc/1/cmdline" || true)
           docker logs rp-worker-smoke 2>&1 | tail -n 5
           docker rm -f rp-worker-smoke >/dev/null
           test "$started" = 1 || { echo "::error::app-task-worker did not start through the entrypoint"; exit 1; }
