@@ -19,15 +19,15 @@ const (
 
 var goldenV1PlanSHA256 = map[string]map[string]string{
 	testAppCPUs: {
-		"candidate":         "e74b980ec97271ff0ba8278a48c2b9270c6d71255b8a674ce3bbfefba37a1114",
-		"migration":         "5c6d9aa3bd6671762f9a4b22b0764f76c5c50a8ef9d4fcacdf1efbe357164c5a",
+		"candidate":          "e74b980ec97271ff0ba8278a48c2b9270c6d71255b8a674ce3bbfefba37a1114",
+		"migration":          "5c6d9aa3bd6671762f9a4b22b0764f76c5c50a8ef9d4fcacdf1efbe357164c5a",
 		"writable candidate": "77d3610c2242825345fe663e93957e876eede07f277adeec15b76dd9de380fc1",
 		"update start " + UpdateStartWritableSandboxProfile: "d88d06d6fe819d6f6c66639fe79e6c515c8324af6390d5e217b4275ad4d67dbe",
 		"update start " + UpdateStartReadOnlySandboxProfile: "6cb58c8fc95e28c01c71b1e1c99fb56c77879d1e179b3e7f322a11675432fc9c",
 	},
 	"": {
-		"candidate":         "68e789d2eb95e28e8ff5d6c8a0d2c9424532ef2fe485c63e2201a04840a4a51a",
-		"migration":         "9fa17da98942302fa76c6efc1483b7c4ef030b4b76c7a21db75474b8945c1d90",
+		"candidate":          "68e789d2eb95e28e8ff5d6c8a0d2c9424532ef2fe485c63e2201a04840a4a51a",
+		"migration":          "9fa17da98942302fa76c6efc1483b7c4ef030b4b76c7a21db75474b8945c1d90",
 		"writable candidate": "9c030bcb3d753e2c8217304fa5619bd3fd1beb9e89066ee8f0a9c46c3852593b",
 		"update start " + UpdateStartWritableSandboxProfile: "0e14611b5acd7f0f1e59aa6d0a78370568c4b0856d899cd7f3a6d8279d8b5d63",
 		"update start " + UpdateStartReadOnlySandboxProfile: "68f150c49c087a91e17355370fc416030e30318493d7947136b6ad8da473afac",
