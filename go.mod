@@ -8,7 +8,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/beevik/etree v1.8.1
 	github.com/coreos/go-oidc/v3 v3.20.0
-	github.com/crewjam/saml v0.5.1
+	github.com/crewjam/saml v0.5.2
 	github.com/descope/virtualwebauthn v1.0.5
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/gorilla/css v1.0.1
@@ -60,8 +60,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-// GO-2026-6909: crewjam/saml v0.5.1 is the latest release and is unfixed. The replacement is v0.5.1
-// with the upstream fix proposed in crewjam/saml#674 applied; see third_party/crewjam-saml/PATCHED.md
-// for provenance and the condition for removing this line.
-replace github.com/crewjam/saml => ./third_party/crewjam-saml
