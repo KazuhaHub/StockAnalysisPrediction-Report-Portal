@@ -676,7 +676,12 @@ jobs:
         run: npm run build
 
   # The vitest suite is the long pole of the web checks (over 1,500 tests, three and a half
-  # minutes in one job), and each file is independent, so vitest deals the files over three shards.
+  # minutes in one job), and each file is independent, so the files are dealt over three shards. The
+  # split is by recorded duration, not vitest's equal-count hash slices: web/vite.config.ts installs
+  # web/src/test/balancedSequencer.ts, which reads web/test-durations.json (refresh it with
+  # `npm run test:durations` after adding or reworking a heavy suite). A file missing from the table
+  # is weighed at the median, so a new test lands in exactly one shard and never breaks the split.
+  # The job and its name stay as they are: the required checks are the matrix legs.
   web-test:
     name: web tests (${{ matrix.shard }}/3)
     needs: changes
