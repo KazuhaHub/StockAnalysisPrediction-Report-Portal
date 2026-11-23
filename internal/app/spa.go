@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"html"
 	"io/fs"
 	"log"
@@ -51,7 +52,7 @@ func (s *Server) spaHandler() http.HandlerFunc {
 		}
 		return title, strings.TrimSpace(s.st.GetSetting("site_logo_url", ""))
 	}
-	return spaHandlerFS(sub, brand, version.Commit)
+	return spaHandlerFSWithBootstrap(sub, brand, version.Commit, s.siteSettingsJSON)
 }
 
 // spaHandlerFS builds the handler over a given filesystem (injectable for tests).
@@ -60,6 +61,12 @@ func (s *Server) spaHandler() http.HandlerFunc {
 // the ~1.2 MB antd vendor chunk alone previously cost several hundred ms of CPU to
 // re-gzip per request, directly adding to that asset's time-to-first-byte.
 func spaHandlerFS(sub fs.FS, brand spaBranding, swVersion string) http.HandlerFunc {
+	return spaHandlerFSWithBootstrap(sub, brand, swVersion, nil)
+}
+
+// spaHandlerFSWithBootstrap is spaHandlerFS with the public site settings embedded in the shell: the SPA reads them
+// synchronously on start, so its first paint is already branded and never waits for /api/site.
+func spaHandlerFSWithBootstrap(sub fs.FS, brand spaBranding, swVersion string, bootstrap func() map[string]any) http.HandlerFunc {
 	index, ierr := fs.ReadFile(sub, "index.html")
 	fileServer := http.FileServer(http.FS(sub))
 	gzipped := precompressAssets(sub)
@@ -131,8 +138,35 @@ func spaHandlerFS(sub fs.FS, brand spaBranding, swVersion string) http.HandlerFu
 				"object-src 'none'; base-uri 'self'; "+
 				"form-action 'self'; frame-ancestors 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Write(brandIndex(index, brand))
+		w.Write(injectBootstrap(brandIndex(index, brand), bootstrap))
 	}
+}
+
+// injectBootstrap embeds the public site settings in the shell as a JSON data block:
+//
+//	<script type="application/json" id="rp-bootstrap">{...}</script>
+//
+// A data block is never executed, so the script-src policy (no 'unsafe-inline') is untouched and no nonce is needed. The
+// JSON is encoded with encoding/json's HTML escaping, so "<", ">" and "&" (and U+2028/9) in an administrator's text
+// cannot close the block or open markup. Only the payload the public /api/site serves is embedded: the same frozen key
+// set, nothing per user, no secret. It is a no-op without a source or without a head to put it in.
+func injectBootstrap(index []byte, bootstrap func() map[string]any) []byte {
+	if bootstrap == nil {
+		return index
+	}
+	payload, err := json.Marshal(bootstrap())
+	if err != nil {
+		return index
+	}
+	marker := []byte("</head>")
+	i := bytes.Index(index, marker)
+	if i < 0 {
+		return index
+	}
+	block := append(append([]byte(`<script type="application/json" id="rp-bootstrap">`), payload...), []byte(`</script>`)...)
+	out := make([]byte, 0, len(index)+len(block))
+	out = append(append(append(out, index[:i]...), block...), index[i:]...)
+	return out
 }
 
 // precompressAssets gzip-compresses (best level) every file under sub whose

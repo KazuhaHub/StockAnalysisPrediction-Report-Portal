@@ -64,8 +64,6 @@ export default function HomePage() {
     return !!res && !!shortcutAppKey(res)?.startsWith(PLATFORM_PIN_PREFIX)
   })
   const directory = useAppDirectory(user ?? null, hasPlatformPin)
-  // The entry buttons pinned to apps are named by the directory: the strip waits for its answer and renders once.
-  const pinsWaiting = hasPlatformPin && !directory.answered
   const platformNames = useMemo(
     () => Object.fromEntries(directory.items.map((i) => [PLATFORM_PIN_PREFIX + i.installationId, appDisplayText(i.applicationId, i.display, i18n?.language || 'en-US').name])),
     [directory.items, i18n?.language],
@@ -410,7 +408,7 @@ export default function HomePage() {
 
       {/* Quick links: ungrouped buttons inline + admin-defined groups, each shown per its
           own mode (own row / inline expand / floating popover / modal dialog). */}
-      {!pinsWaiting && (topLinks.length > 0 || linkGroups.length > 0) && (
+      {(topLinks.length > 0 || linkGroups.length > 0) && (
         <div style={{ textAlign: 'center' }}>
           <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             {/* Row 1: the ungrouped top-level entry buttons. */}

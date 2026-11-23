@@ -162,17 +162,20 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
   (antd centres it in the whole block, far below the fold for a long report).
 - No hand-placed large spinners (`loadingStates.test.ts`). Never render defaults as if the server
   had sent them; a failed load says so and offers a retry.
-- **Render once.** A view waits for every request that feeds its first paint and renders complete:
-  one page-level loading state, then the cards, names and labels as they will stay. Never show an
-  identifier (an app id, a publisher id, a key, a slug) as a stand-in for a name that is still
-  loading, and never show a generic label that a second request will replace; no per-line
-  placeholders. An answer of any kind settles the view, so a failed request renders what is known
-  with an inline retry, never an endless spinner. Gate with `useSettled(answered)`
-  (`lib/useSettled.ts`): it is true from the first moment every request has answered and stays true
-  through later refreshes. The directory hook reports `answered`, the site settings gate the shell.
-  A value only a second, slower request can add is either waited for or left out of the first view;
-  it is never added to a view that is already showing. Each gated view has a test that its first
-  settled render is already final (`AppsAdminPage`, `AppViewV2`, `HomePage`, `LinksPage`, `site`).
+- **Render once; wait only for what is fast and needed.** A view's first paint waits for the one
+  fast, local request that carries what it shows (and requests started in parallel with it), and
+  renders complete: one page-level loading state, then names and labels as they will stay. Never show
+  an identifier (an app id, a publisher id, a key, a slug) as a stand-in for a name that is still
+  loading, and never show a generic label a later request will replace. Nothing waits on a remote or
+  slow source (a market catalogue, a third-party index): that loads in the background and is
+  **additive**: it adds an element (a badge, a button, a banner below the content) and never replaces
+  or reflows text already on screen. Data the shell needs on the first frame (the site title and logo)
+  is embedded in the served `index.html` as an inert JSON block (`rp-bootstrap`) and read
+  synchronously; the background refresh swaps nothing unless the values changed. An answer of any
+  kind settles a view, so a failure renders what is known with an inline retry, never an endless
+  spinner. `useSettled(answered)` (`lib/useSettled.ts`) gates a view on its requests and stays true
+  through later refreshes. Each such view has a test that its first settled render is already final
+  (`AppsAdminPage`, `AppViewV2`, `HomePage`, `LinksPage`, `site`).
 
 ## Feedback, status and confirmation
 

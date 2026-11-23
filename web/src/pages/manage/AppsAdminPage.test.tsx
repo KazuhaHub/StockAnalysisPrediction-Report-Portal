@@ -130,32 +130,50 @@ describe('Installed apps', () => {
   })
 })
 
-describe('The page settles once, then shows the cards complete', () => {
-  // The cards show what the catalogue adds, so the page waits for it with one loading state and renders every card at
-  // once: a name, a publisher or an update offer never appears or changes after the first card is on screen.
-  it('shows one page spinner and no card until the layout and the catalogue have both answered', async () => {
-    withPlatform('installed')
+describe('The first view needs the layout only', () => {
+  // The layout carries each app's verified name, publisher, version and display. The market catalogue is a remote read:
+  // it loads in the background and adds elements (an update offer), never text that is already on screen.
+  const entry = () => ({ ...platformEntry('installed'), publisher_name: 'Kazuha Hub', display: display('Notes', 'Personal notes') })
+  const withVerifiedEntry = () => { fx.entries = [...layout(), entry() as never] }
+
+  it('shows every card complete from the layout alone, without waiting for the catalogue', async () => {
+    withVerifiedEntry()
     let answer: (value: unknown) => void = () => undefined
     const original = apiMock.post.getMockImplementation()!
     apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
     renderPage()
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    // Everything else has answered; only the catalogue is out.
-    expect(screen.getByText('common.loading')).toBeTruthy()
-    expect(screen.queryByText('Notes')).toBeNull()
-    expect(screen.queryByText('nav.batch')).toBeNull()
-    expect(screen.queryByText(/notes/)).toBeNull()
-    expect(document.querySelector('.rp-app-grid')).toBeNull()
-    await act(async () => { answer(catalogue()) })
-    // The first card on screen is already final: its name, version and update offer are all there, nothing arrives later.
-    const card = within(await screen.findByText('nav.batch').then(() => cardOf('Notes')))
-    expect(card.getByText(/kazuha.*1\.0\.0/)).toBeTruthy()
-    expect(card.getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    // The catalogue is still out and the cards are already there, final.
+    const card = cardOf('Notes')
     expect(screen.queryByText('common.loading')).toBeNull()
+    expect(within(card).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
+    expect(within(card).getByText('Personal notes')).toBeTruthy()
+    expect(within(card).queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+    const before = card.textContent
+    await act(async () => { answer(catalogue()) })
+    // The catalogue adds the update offer to the card; the text that was there is untouched.
+    expect(await within(cardOf('Notes')).findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    expect(cardOf('Notes').textContent).toContain(before!)
+    expect(within(cardOf('Notes')).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
   })
 
-  it('settles on a failed catalogue: the cards render with what is known and an inline retry, never an endless spinner', async () => {
-    withPlatform('installed')
+  it('never names the publisher or the app from the catalogue: no text swaps when it arrives', async () => {
+    // The layout has no verified publisher name; the catalogue knows one. The card keeps what it showed.
+    fx.entries = [...layout(), platformEntry('installed')]
+    let answer: (value: unknown) => void = () => undefined
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
+    renderPage()
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    const before = within(cardOf('Notes')).getByText(/notes.*1\.0\.0/).textContent
+    await act(async () => { answer(catalogue([{ ...notesApp, publisher_name: 'Late Publisher' }])) })
+    await within(cardOf('Notes')).findByRole('button', { name: /appStore\.updateTo/ })
+    expect(within(cardOf('Notes')).getByText(/notes.*1\.0\.0/).textContent).toBe(before)
+    expect(screen.queryByText(/Late Publisher/)).toBeNull()
+  })
+
+  it('tells a failed catalogue below the cards with a retry, and the cards are untouched', async () => {
+    withVerifiedEntry()
     const user = userEvent.setup()
     const original = apiMock.post.getMockImplementation()!
     apiMock.post.mockImplementation(async (url: string, body: unknown) => {
@@ -163,16 +181,14 @@ describe('The page settles once, then shows the cards complete', () => {
       return original(url, body)
     })
     renderPage()
+    await screen.findAllByText('Notes')
+    expect(within(cardOf('Notes')).getByText('Personal notes')).toBeTruthy()
     expect(await screen.findByText('appStore.catalogueFailed')).toBeTruthy()
-    expect(screen.queryByText('common.loading')).toBeNull()
-    expect(within(cardOf('Notes')).getByText(/1\.0\.0/)).toBeTruthy()
-    expect(screen.getByText('nav.batch')).toBeTruthy()
-    // The retry asks again, and the page keeps its cards while it does.
+    expect(within(cardOf('Notes')).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
     apiMock.post.mockImplementation(original)
     await user.click(screen.getByRole('button', { name: 'common.retry' }))
     expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
     expect(screen.queryByText('appStore.catalogueFailed')).toBeNull()
-    expect(screen.queryByText('common.loading')).toBeNull()
   })
 
   it('does not wait for a catalogue that has no source', async () => {

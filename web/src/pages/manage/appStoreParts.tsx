@@ -125,14 +125,14 @@ export function InstalledCard({ name, description, publisher, source, ...actions
     <Card hoverable className="rp-app-card" size="small">
       {app.builtin && <span className="rp-app-card-corner">{t('appStore.builtinBadge')}</span>}
       <div className="rp-app-card-row">
-        {actions.catalogue?.display && app.platform
-          ? <span aria-hidden="true" className="rp-app-glyph"><AppDisplayIcon display={actions.catalogue.display} /></span>
+        {app.display && app.platform
+          ? <span aria-hidden="true" className="rp-app-glyph"><AppDisplayIcon display={app.display} /></span>
           : <AppIcon app={app} size={32} />}
         <div className="rp-app-card-main">
           <div className="rp-app-card-line">
             {/* The link is the card's one way in: its ::after covers the card, so a click anywhere opens the app page while the controls stay separate. */}
             <Link to={appPath(app.key)} className="rp-app-card-name rp-app-card-link">{name}</Link>
-            {secondary && <PublisherLine publisherName={actions.catalogue?.publisher_name} publisherId={actions.catalogue?.publisher_id} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
+            {secondary && <PublisherLine publisherName={app.publisherName} publisherId={app.publisherId} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
           <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} compact /></div>

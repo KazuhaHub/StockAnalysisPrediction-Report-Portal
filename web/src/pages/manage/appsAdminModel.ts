@@ -5,17 +5,22 @@ import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
-import { parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
+import { appDisplayText, parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
 
 /**
- * The publisher name of an installed platform app. The layout carries the verified name with the app, so it is known
- * from the first paint; the catalogue, which the page has already waited for, can add one. The identifier is the
- * fallback only when neither names the publisher.
+ * The publisher name of an installed platform app, from the layout alone: it carries the verified name with the app, so
+ * it is there on the first paint. The market catalogue is a remote read that arrives later; it adds elements (an
+ * update, a version switch) but never supplies text already shown, so it is not consulted here.
  */
-export function installedPublisher(app: AdminApp, catalogue: { publisher_name?: string; publisher_id: string } | undefined): string | undefined {
-  const name = app.publisherName || catalogue?.publisher_name
-  if (name) return name
-  return app.platform && catalogue ? catalogue.publisher_id : undefined
+export function installedPublisher(app: AdminApp): string | undefined {
+  return app.publisherName || undefined
+}
+
+/** The name and description an installed app shows, in the reader's language, from the layout's verified display. */
+export function installedDisplay(app: AdminApp, lang: string, fallbackName: string): { name: string; description: string } {
+  if (!app.display || !app.appId) return { name: fallbackName, description: '' }
+  const copy = appDisplayText(app.appId, app.display, lang)
+  return { name: copy.name && copy.name !== app.appId ? copy.name : fallbackName, description: copy.description }
 }
 
 export interface AdminApp {
