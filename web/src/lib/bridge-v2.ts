@@ -1197,10 +1197,14 @@ export function parseBridgeRoutes(
   }
   return !requireRoot || paths.has("/") ? Object.freeze(routes) : null;
 }
-function parseNavigation(value: unknown): BridgeNavigation | null {
+function parseNavigation(
+  value: unknown,
+  surface: BridgeSurface,
+): BridgeNavigation | null {
   if (!exact(value, ["path", "search", "routes"]) || !isString(value.path))
     return null;
-  const routes = parseBridgeRoutes(value.routes, false);
+  // A reader registry always has a root route; an admin one names its own entry route.
+  const routes = parseBridgeRoutes(value.routes, surface === "reader");
   const route = routes?.find((route) => route.path === value.path);
   if (!routes || !route) return null;
   const query = parseRouteSearch(route.query ?? [], value.search);
@@ -1210,6 +1214,9 @@ function parseNavigation(value: unknown): BridgeNavigation | null {
 }
 export function parseBridgePresentation(
   value: unknown,
+  // The surface the presentation is for, known from the host options or the init message. It decides
+  // whether the navigation registry must have a root route.
+  surface: BridgeSurface = "reader",
 ): BridgePresentation | null {
   if (
     (!exact(value, ["locale", "timeZone", "layout", "theme"]) &&
@@ -1228,7 +1235,9 @@ export function parseBridgePresentation(
     return null;
   }
   const navigation =
-    "navigation" in value ? parseNavigation(value.navigation) : undefined;
+    "navigation" in value
+      ? parseNavigation(value.navigation, surface)
+      : undefined;
   if (
     navigation === null ||
     (navigation &&
@@ -1317,7 +1326,10 @@ export function createBridgeHost(
     outbound: MessagePort | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let currentEnvelope: Record<string, string> | undefined;
-  let latest = parseBridgePresentation(options.presentation),
+  let latest = parseBridgePresentation(
+      options.presentation,
+      options.surface === "admin" ? "admin" : "reader",
+    ),
     current: BridgePresentation | null = null;
   const binding = bindingOf(options.binding),
     granted = capabilityList(options.capabilities),
@@ -2923,7 +2935,10 @@ export function createBridgeHost(
     },
     updatePresentation(value: unknown) {
       if (terminal()) return false;
-      const parsed = parseBridgePresentation(value);
+      const parsed = parseBridgePresentation(
+        value,
+        options.surface === "admin" ? "admin" : "reader",
+      );
       if (!parsed) return false;
       if (
         JSON.stringify([
@@ -3998,7 +4013,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       fail("protocol_error");
       return;
     }
-    const presentation = parseBridgePresentation(data.presentation);
+    const presentation = parseBridgePresentation(
+      data.presentation,
+      context?.surface ?? "reader",
+    );
     if (!presentation) {
       fail("protocol_error");
       return;
@@ -4102,10 +4120,12 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       "capabilities",
       "backend",
     ];
-    const adminInit = Object.prototype.hasOwnProperty.call(data, "surface");
+    // A host that predates admin pages omits the key; one that sends it names "reader" or "admin".
+    const surfaceKey = Object.prototype.hasOwnProperty.call(data, "surface");
+    const surface: BridgeSurface = data.surface === "admin" ? "admin" : "reader";
     if (
-      !exact(data, adminInit ? [...initKeys, "surface"] : initKeys) ||
-      (adminInit && data.surface !== "admin") ||
+      !exact(data, surfaceKey ? [...initKeys, "surface"] : initKeys) ||
+      (surfaceKey && data.surface !== "admin" && data.surface !== "reader") ||
       !BRIDGE_PROTOCOLS.includes(data.protocol as string) ||
       !nonce(data.hostNonce) ||
       !nonce(data.channelNonce) ||
@@ -4119,7 +4139,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     const binding = bindingOf(
       Object.fromEntries(bindingKeys.map((key) => [key, data[key]])),
     );
-    const presentation = parseBridgePresentation(data.presentation),
+    const presentation = parseBridgePresentation(data.presentation, surface),
       granted = capabilityList(data.capabilities);
     if (
       !binding ||
@@ -4140,7 +4160,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       binding,
       capabilities: granted,
       backendAvailable: data.backend,
-      surface: adminInit ? "admin" : "reader",
+      surface,
     });
     const captured = port;
     port.onmessage = (message) => {

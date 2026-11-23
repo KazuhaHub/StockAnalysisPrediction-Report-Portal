@@ -17,9 +17,10 @@ const root = '/api/admin/app-platform'
 /**
  * The users a Portal administrator delegated an installation's administration page to. Portal administrators can
  * always manage every app and are not listed; only a Portal administrator grants or withdraws, so this card is
- * part of the console's settings tab and nowhere else.
+ * part of the console's settings tab and nowhere else. It is shown for a version with no admin page too, so
+ * delegations left over from an earlier version can still be seen and withdrawn; nothing can be added then.
  */
-export default function AppAdministratorsCard({ installation }: { installation: string }) {
+export default function AppAdministratorsCard({ installation, adminPage = true }: { installation: string; adminPage?: boolean }) {
   const { t } = useTranslation()
   const { lang } = usePrefs()
   const url = `${root}/installations/${installation}/app-admins`
@@ -54,9 +55,10 @@ export default function AppAdministratorsCard({ installation }: { installation: 
     }
   }
 
-  return <Card title={t('appAdmin.admins.title')} extra={admins
+  return <Card title={t('appAdmin.admins.title')} extra={admins && adminPage
     ? <Button icon={<PlusOutlined aria-hidden="true" />} onClick={() => setAdding(true)}>{t('appAdmin.admins.add')}</Button>
     : undefined}>
+    {!adminPage && <Alert type="info" showIcon title={t('appAdmin.admins.noAdminPage')} />}
     <Typography.Paragraph type="secondary">{t('appAdmin.admins.portalAdminsNote')}</Typography.Paragraph>
     <LoadGate loading={admins === null && !error} error={error} onRetry={() => { setAdmins(null); setAttempt(value => value + 1) }} minHeight={120}>
       <CardTable<AppAdmin> rowKey="username" size="small" pagination={false} dataSource={admins ?? []}

@@ -78,31 +78,3 @@ export function useAppDirectory(owner: string | null, enabled = true) {
 export function manageHref(installation: string, portalAdmin: boolean): string {
   return portalAdmin ? `/manage/apps/installations/${installation}/admin` : `/apps/manage/${installation}`
 }
-
-const MAX_MANAGE_PAGES = 16
-
-/**
- * Whether the directory marks this installation manageable. It reads the pages until the installation shows up,
- * and says false until then and on any failure: the Manage button it gates is additive, so a slow or failed
- * directory only leaves it out.
- */
-export function useManageable(installation: string): boolean {
-  const [found, setFound] = useState<{ installation: string; manageable: boolean } | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    void (async () => {
-      let after = ''
-      for (let page = 0; page < MAX_MANAGE_PAGES; page++) {
-        const value = await api.get<unknown>(`/api/app-platform/apps${after ? `?after=${encodeURIComponent(after)}` : ''}`, { signal: controller.signal })
-        const parsed = parseAppDirectory(value)
-        if (!parsed || (after && parsed.nextCursor === after)) return
-        const item = parsed.items.find(candidate => candidate.installationId === installation)
-        if (item) { setFound({ installation, manageable: item.manageable }); return }
-        if (!parsed.nextCursor) return
-        after = parsed.nextCursor
-      }
-    })().catch(() => { /* the button stays out */ })
-    return () => controller.abort()
-  }, [installation])
-  return found?.installation === installation && found.manageable
-}

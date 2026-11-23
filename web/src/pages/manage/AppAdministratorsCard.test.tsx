@@ -29,8 +29,8 @@ const users = { users: [
   { username: 'old', display_name: 'Old Account', role: 'user', active: false, primary_group: 0 },
 ], me: 'root', roles: [], groups: [] }
 
-function mount() {
-  return render(<App><AppAdministratorsCard installation={id} /></App>)
+function mount(adminPage?: boolean) {
+  return render(<App><AppAdministratorsCard installation={id} adminPage={adminPage} /></App>)
 }
 function serve(admins: unknown[]) {
   apiMock.get.mockImplementation(async (path: string) => path === url ? { admins } : users)
@@ -48,6 +48,26 @@ describe('app administrators card', () => {
     expect(screen.getByText(/2026/)).toBeTruthy()
     expect(screen.getByText('appAdmin.admins.portalAdminsNote')).toBeTruthy()
     expect(apiMock.get).toHaveBeenCalledWith(url, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
+
+  it('for a version without an admin page says so, still lists stale delegations, lets them be revoked, and offers no add', async () => {
+    serve([ada])
+    apiMock.del.mockResolvedValue(undefined)
+    mount(false)
+    expect(await screen.findByText('Ada Lovelace')).toBeTruthy()
+    expect(screen.getByText('appAdmin.admins.noAdminPage')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /appAdmin.admins.add/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /appAdmin.admins.remove/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'appAdmin.admins.removeAction' }))
+    await waitFor(() => expect(apiMock.del).toHaveBeenCalledWith(`${url}/ada`))
+  })
+
+  it('with an admin page does not show the no-admin-page note', async () => {
+    serve([ada])
+    mount(true)
+    await screen.findByText('Ada Lovelace')
+    expect(screen.queryByText('appAdmin.admins.noAdminPage')).toBeNull()
+    expect(screen.getByRole('button', { name: /appAdmin.admins.add/ })).toBeTruthy()
   })
 
   it('shows a loading state, then an empty state when nobody was delegated', async () => {

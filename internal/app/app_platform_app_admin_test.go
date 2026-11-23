@@ -384,8 +384,10 @@ func TestPlatformAppAdminSettingsProjection(t *testing.T) {
 	}
 }
 
-// Fails unless exactly one admin_request row is written per non-GET admin backend request, none for GET.
-// The static fixture has no runtime, so every request is refused; the refusal is what is audited here.
+// Fails if a request that did not pass the admin gate is audited: the audit row says "an administrator
+// sent this", so refusals of non-administrators (and of an installation with no backend to reach) keep only
+// the server log. The admitted paths are covered by TestPlatformWritableAdminSurfaceBackend and
+// TestPlatformAdminRequestAuditWriter.
 func TestPlatformAppAdminRequestAudit(t *testing.T) {
 	e := platformAdminPageFixture(t, true)
 	body := func(method, path string) string {
@@ -393,27 +395,24 @@ func TestPlatformAppAdminRequestAudit(t *testing.T) {
 		return string(raw)
 	}
 	url := "/api/app-platform/installations/" + e.id + "/admin/backend"
-	if w := e.call("POST", url, e.adminCookie, body("GET", "/v1/status")); w.Code != 404 || e.audits(platformAdminRequestAudit) != 0 {
-		t.Fatalf("GET: %d, %d events", w.Code, e.audits(platformAdminRequestAudit))
-	}
-	if w := e.call("POST", url, e.adminCookie, body("POST", "/v1/run-now")); w.Code != 404 || e.audits(platformAdminRequestAudit) != 1 {
-		t.Fatalf("POST: %d, %d events", w.Code, e.audits(platformAdminRequestAudit))
-	}
-	var actor, detail string
-	if err := e.s.st.queryRow(`SELECT actor,detail FROM audit_log WHERE action=?`, platformAdminRequestAudit).Scan(&actor, &detail); err != nil || actor != e.admin.username {
-		t.Fatal(err, actor)
-	}
-	var d map[string]any
-	if json.Unmarshal([]byte(detail), &d) != nil || d["method"] != "POST" || d["path"] != "/v1/run-now" || d["outcome"] != "refused" || d["status"] != float64(404) {
-		t.Fatalf("detail: %s", detail)
-	}
-	// A plain user is refused and the attempt is audited as a refusal too: still exactly one row per request.
-	if w := e.call("POST", url, e.readerCookie, body("DELETE", "/v1/runs/1")); w.Code != 404 || e.audits(platformAdminRequestAudit) != 2 {
-		t.Fatalf("plain user: %d, %d events", w.Code, e.audits(platformAdminRequestAudit))
-	}
-	// Malformed input never reached a request and writes nothing.
-	if w := e.call("POST", url, e.adminCookie, `{"method":"POST"}`); w.Code != 400 || e.audits(platformAdminRequestAudit) != 2 {
-		t.Fatalf("malformed: %d", w.Code)
+	for name, call := range map[string]func() *httptest.ResponseRecorder{
+		"GET": func() *httptest.ResponseRecorder {
+			return e.call("POST", url, e.adminCookie, body("GET", "/v1/status"))
+		},
+		"POST without a backend": func() *httptest.ResponseRecorder {
+			return e.call("POST", url, e.adminCookie, body("POST", "/v1/run-now"))
+		},
+		"plain user": func() *httptest.ResponseRecorder {
+			return e.call("POST", url, e.readerCookie, body("DELETE", "/v1/runs/1"))
+		},
+		"malformed": func() *httptest.ResponseRecorder { return e.call("POST", url, e.adminCookie, `{"method":"POST"}`) },
+	} {
+		if w := call(); w.Code != 404 && w.Code != 400 {
+			t.Fatalf("%s: %d", name, w.Code)
+		}
+		if n := e.audits(platformAdminRequestAudit); n != 0 {
+			t.Fatalf("%s wrote %d admin_request rows", name, n)
+		}
 	}
 }
 
@@ -645,7 +644,7 @@ func TestPlatformWritableAdminSurfaceBackend(t *testing.T) {
 	if _, err := signed(delegate); err == nil {
 		t.Fatal("a delegation opened the reader backend")
 	}
-	// The handler: past the gate it answers 503 (no runner endpoint here) and audits a POST once, a GET never.
+	// The handler: past the gate it answers 503 (no runner endpoint here) and audits an admitted POST once, a GET never.
 	a, err := s.preparePlatformWritableBackendAccess(ctx, actor, installation)
 	if err != nil {
 		platformOpenDefault(t, s, installation)
@@ -681,7 +680,8 @@ func TestPlatformWritableAdminSurfaceBackend(t *testing.T) {
 	if _, err := signed(admin(delegate)); err == nil {
 		t.Fatal("a revoked delegation still passes the gate")
 	}
-	if w := sessionTestRequest(mux, "POST", url, delegateCookie, request("POST")); w.Code != 404 || count() != 2 {
+	// A refusal at the gate was not an administrator's request: no new row.
+	if w := sessionTestRequest(mux, "POST", url, delegateCookie, request("POST")); w.Code != 404 || count() != 1 {
 		t.Fatalf("revoked POST: %d, %d audit rows", w.Code, count())
 	}
 }

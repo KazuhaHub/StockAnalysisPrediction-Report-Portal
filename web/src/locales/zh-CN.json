@@ -4392,6 +4392,7 @@
   "appAdmin.manage": "管理",
   "appAdmin.admins.title": "应用管理员",
   "appAdmin.admins.portalAdminsNote": "门户管理员始终可以管理此应用，不需要在这里添加。只有门户管理员可以授予或撤销。",
+  "appAdmin.admins.noAdminPage": "该应用的当前版本没有管理页面，授权暂时不起作用。仍列出已有授权，以便撤销。",
   "appAdmin.admins.empty": "尚未委派任何用户。",
   "appAdmin.admins.user": "用户",
   "appAdmin.admins.grantedBy": "授予人",

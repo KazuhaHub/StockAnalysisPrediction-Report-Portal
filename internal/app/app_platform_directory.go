@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -252,44 +253,90 @@ func (s *Server) apiPlatformApps(w http.ResponseWriter, r *http.Request, user st
 
 // platformAdministeredInstallations maps the installations the account administers to whether their
 // active release declares an admin page: every live installation for a Portal administrator, the
-// delegations still bound to this account's creation for anyone else. Unparseable releases count as
-// no admin page; the listing verifies the signature of the ones it shows.
+// delegations still bound to this account's creation for anyone else. This is only the prefilter that
+// decides which installations the page lists; the listing verifies the signature of the ones it shows and
+// takes the final admin_routes bit from the verified descriptor.
+//
+// The bit is memoised by release SHA-256 (platformAdminRoutesCache) rather than parsed per page: a
+// release is immutable and its SHA-256 is the digest of its descriptor, so the bit can never change for a
+// key. Reading it once per page outside the OU mutation lock was the alternative, but this runs inside the
+// directory transaction and the reads must see the same activation the page lists; the cache keeps that
+// and costs one indexed query per page plus a descriptor read only for a release not seen before.
 func platformAdministeredInstallations(e migExec, account platformActorAccount) (map[string]bool, error) {
-	query, args := `SELECT id FROM app_platform_installations WHERE desired_state<>'removed'`, []any{}
+	query, args := `SELECT i.id,a.release_sha256 FROM app_platform_installations i JOIN app_platform_activations a ON a.installation_id=i.id AND a.state='active' WHERE i.desired_state<>'removed'`, []any{}
 	if !can(account.role, PermManage) {
-		query = `SELECT a.installation_id FROM app_platform_app_admins a JOIN app_platform_installations i ON i.id=a.installation_id WHERE a.username=? AND a.account_created=? AND i.desired_state<>'removed'`
+		query = `SELECT i.id,a.release_sha256 FROM app_platform_app_admins d JOIN app_platform_installations i ON i.id=d.installation_id JOIN app_platform_activations a ON a.installation_id=i.id AND a.state='active' WHERE d.username=? AND d.account_created=? AND i.desired_state<>'removed'`
 		args = []any{account.username, account.created}
 	}
 	rows, err := e.query(query+` ORDER BY 1`, args...)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	type candidate struct{ id, release string }
+	var found []candidate
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.release); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		ids = append(ids, id)
+		found = append(found, c)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		record, err := platformReadDisplayRecord(e, id)
-		if err != nil {
-			return nil, err
-		}
-		if record != nil {
-			if parsed, err := appplatform.ParseDescriptor(record.raw); err == nil {
-				record.adminPage = len(parsed.Manifest.Presentation.AdminRoutes) > 0
+	result := make(map[string]bool, len(found))
+	for _, c := range found {
+		adminPage, ok := platformAdminRoutesCacheLoad(c.release)
+		if !ok {
+			lock := ""
+			if e.s.driver == "postgres" {
+				lock = " FOR SHARE"
 			}
+			var descriptor []byte
+			if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`+lock, c.release).Scan(&descriptor); err != nil {
+				return nil, err
+			}
+			// An unparseable descriptor counts as no admin page; that is as immutable as the descriptor.
+			if parsed, err := appplatform.ParseDescriptor(descriptor); err == nil {
+				adminPage = len(parsed.Manifest.Presentation.AdminRoutes) > 0
+			}
+			platformAdminRoutesCacheStore(c.release, adminPage)
 		}
-		result[id] = record != nil && record.adminPage
+		result[c.id] = adminPage
 	}
 	return result, nil
+}
+
+// platformAdminRoutesCacheMax bounds the cache. A Portal has a handful of releases; when the bound is
+// reached the cache starts over, which costs a re-parse and never a wrong answer.
+const platformAdminRoutesCacheMax = 256
+
+var platformAdminRoutesCache = struct {
+	sync.Mutex
+	bits map[string]bool
+}{bits: map[string]bool{}}
+
+func platformAdminRoutesCacheLoad(release string) (adminPage, ok bool) {
+	platformAdminRoutesCache.Lock()
+	defer platformAdminRoutesCache.Unlock()
+	adminPage, ok = platformAdminRoutesCache.bits[release]
+	return
+}
+
+func platformAdminRoutesCacheStore(release string, adminPage bool) {
+	platformAdminRoutesCache.Lock()
+	defer platformAdminRoutesCache.Unlock()
+	if len(platformAdminRoutesCache.bits) >= platformAdminRoutesCacheMax {
+		platformAdminRoutesCache.bits = map[string]bool{}
+	}
+	platformAdminRoutesCache.bits[release] = adminPage
+}
+
+func platformAdminRoutesCacheLen() int {
+	platformAdminRoutesCache.Lock()
+	defer platformAdminRoutesCache.Unlock()
+	return len(platformAdminRoutesCache.bits)
 }

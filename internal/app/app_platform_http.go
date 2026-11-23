@@ -310,8 +310,9 @@ func (s *Server) platformLaunch(w http.ResponseWriter, r *http.Request, user str
 	var display *appplatform.AppDisplay
 	var routes []appplatform.Route
 	var entryPath string
+	var manageable bool
 	capabilities := []string{}
-	binding, err := s.withPlatformLaunchReadContext(ctx, session, r.PathValue("installation"), func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
+	binding, err := s.withPlatformLaunchAccountReadContext(ctx, session, r.PathValue("installation"), func(e migExec, current platformLaunchAccess, m appplatform.Manifest, account platformActorAccount) error {
 		var archive []byte
 		if err := e.queryRow(`SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, current.frontendSHA).Scan(&archive); err != nil {
 			return err
@@ -338,6 +339,9 @@ func (s *Server) platformLaunch(w http.ResponseWriter, r *http.Request, user str
 			return err
 		}
 		rows.Close()
+		// manageable is decided in this transaction, with the same check the admin surface uses, so the
+		// reader page can offer the admin entry without a directory scan (doc 191).
+		manageable = len(m.Presentation.AdminRoutes) > 0 && platformAppAdmin(e, account, current.installationID) == nil
 		display = m.Presentation.Display
 		routes = append([]appplatform.Route(nil), m.Presentation.Routes...)
 		for _, route := range routes {
@@ -376,11 +380,23 @@ func (s *Server) platformLaunch(w http.ResponseWriter, r *http.Request, user str
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	payload := map[string]any{"source": platformDocumentSource(binding), "surface": "reader", "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": capabilities, "backendAvailable": backendAvailable, "applicationId": applicationID, "display": platformDisplayViewOf(display), "routes": routes, "layout": layout, "timeZone": timeZone}
+	payload := map[string]any{"source": platformDocumentSource(binding), "surface": "reader", "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": platformLaunchCapabilities(admin, capabilities), "backendAvailable": backendAvailable, "manageable": manageable, "applicationId": applicationID, "display": platformDisplayViewOf(display), "routes": routes, "layout": layout, "timeZone": timeZone}
 	if admin {
 		payload["source"], payload["surface"], payload["entryPath"] = platformAdminDocumentSource(binding), "admin", entryPath
 	}
 	json.NewEncoder(w).Encode(payload)
+}
+
+// platformLaunchCapabilities is the capability list a launch advertises. On the admin surface it is always
+// empty: only the backend transport is admin-scoped in this version, and every other transport (network,
+// storage, reports, notifications, principals) goes through reader endpoints gated by the audience, which
+// an app administrator outside the audience would not pass (doc 191, section 9). The list is never nil, so
+// it encodes as [].
+func platformLaunchCapabilities(admin bool, granted []string) []string {
+	if admin || granted == nil {
+		return []string{}
+	}
+	return granted
 }
 func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, user string) {
 	s.platformDocument(w, r, user, false)

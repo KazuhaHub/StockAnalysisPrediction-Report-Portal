@@ -62,7 +62,8 @@ removal transaction) and with the user (`Store.DeleteUser`). There is no foreign
 ## 5. Who is an app administrator
 
 One decision, `platformAppAdmin`, replaces `platformLaunchAudience` on the admin surface: a Portal administrator (role holding
-the manage permission), or an active user with a row whose `account_created` matches. Audience membership is not required.
+the manage permission), or an active user with a row whose `account_created` matches. Audience membership is not required, but
+a delegate must still have a sound OU chain (`platformAccessChain`), as on the reader path: a broken chain refuses them.
 Every other check of the launch, document and backend gates is unchanged: installation state, epoch, activation, release trust,
 session revision, unresolved operations, and the final recheck after the backend IO. The admin surface additionally needs the
 active release to declare `admin_routes`. Only Portal administrators grant and revoke; a delegated administrator cannot.
@@ -83,7 +84,9 @@ Sessions (`/api/app-platform/installations/{installation}`, the chains of `launc
 
 - `GET /admin/launch` has the shape of `launch` with `routes` the admin routes, `layout` the layout of the first, `surface`
   `"admin"`, `entryPath` the path of the first, and `source` an admin document URL. The reader launch gains
-  `"surface":"reader"`.
+  `"surface":"reader"` and `"manageable"`: true when the viewer passes the admin check and the release declares `admin_routes`,
+computed in the launch's own transaction, so the reader page can offer the way to the admin page without scanning the
+directory. The admin launch returns `capabilities: []` (section 9).
 - `GET /app-documents/{installation}/admin/{generation}/{policy}/{release}/{frontend}/{entry...}` serves the same document
   bytes through the admin gate.
 - `POST /admin/backend` has the contract of `backend`, admitted by the admin check, signed with `SignAdmin`, rechecked after
@@ -95,16 +98,39 @@ The app directory (`GET /api/app-platform/apps`) items gain `manageable`: the vi
 declares an admin page and it is installed. An administrator outside the audience gets the item with `openable: false` and
 `manageable: true`. Ordering, paging and cursors are unchanged.
 
+The directory decides which extra installations to list before paging, which needs the "release declares `admin_routes`" bit
+for every installation the viewer administers. That bit is memoised by release SHA-256 in a small bounded in-process cache
+(256 entries, reset when full): a release is immutable and its SHA-256 is the digest of its descriptor, so the bit never changes
+for a key, and a page costs one query plus a descriptor read only for a release not seen before. The bit is only a prefilter;
+the listing still verifies the signature of each item it shows and takes the final answer from the verified descriptor.
+
 ## 7. Audit
 
 - `app_platform.app_admin_granted` and `app_platform.app_admin_revoked`: actor, installation, `app_id` and target `username`,
   written in the transaction of the change. A repeated grant and a revoke of a row that does not exist write nothing.
-- `app_platform.admin_request`: one row for every non-GET admin backend request that reached the backend gate, with `method`,
+- `app_platform.admin_request`: one row for every non-GET admin backend request that passed the admin gate, with `method`,
   `path`, `status` (the Portal's answer), `outcome` and, when the app answered, `backend_status`. Outcomes: `ok` (the app
-  answered), `refused` (the Portal refused it before it reached the app), `uncertain` (it may have reached the app and the
-  answer is unknown). GET requests and malformed requests are not audited. Bodies are never recorded.
+  answered), `refused` (the gate admitted the administrator, but the Portal refused the request before it reached the app,
+  for example `503` when no runtime is available), `uncertain` (it may have reached the app and the answer is unknown, `502`).
+  The row says "an administrator sent this", so a request refused at the gate (not an administrator, no admin page, no
+  backend, a binding that does not match) writes no row and keeps only the server log (`logPlatformRefusal`). GET requests
+  and malformed requests are not audited. Bodies are never recorded.
 
 ## 8. Run now
 
 "Run now" is a route of the app's own backend, called through `POST /admin/backend` and audited like any non-GET admin
 request. It is not a platform task: the platform neither schedules nor records it beyond the audit row.
+
+## 9. Capabilities on the admin surface
+
+Admin pages get the backend only in this version. Only the backend transport (`POST /admin/backend`) is admin-scoped. Network,
+storage, reports, notifications and principals still go through reader endpoints, which are gated by the audience; an app
+administrator outside the audience (a Portal administrator or a delegate with the audience closed) would be refused there, so
+advertising them on the admin surface would offer a capability the frame cannot use.
+
+- The admin launch returns `capabilities: []`; `backendAvailable` is unchanged. The web launch parser refuses an admin launch
+  that lists any capability.
+- The admin frame is told no capability and wires no transport but the backend, whatever its launch said, so the bridge
+  refuses those requests locally, without a network request (fail closed). A reader frame is unchanged.
+- Admin-scoped versions of those transports would each need their own gate decision (what an administrator outside the audience
+  may read or write) and are left for a later version.

@@ -4392,6 +4392,7 @@
   "appAdmin.manage": "Manage",
   "appAdmin.admins.title": "App administrators",
   "appAdmin.admins.portalAdminsNote": "Portal administrators can always manage this app and do not need to be added here. Only Portal administrators can grant or withdraw this.",
+  "appAdmin.admins.noAdminPage": "The current version of this app has no admin page, so delegation has no effect for now. Existing delegations are listed so they can be removed.",
   "appAdmin.admins.empty": "No users have been delegated yet.",
   "appAdmin.admins.user": "User",
   "appAdmin.admins.grantedBy": "Granted by",

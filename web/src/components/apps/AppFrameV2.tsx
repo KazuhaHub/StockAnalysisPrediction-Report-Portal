@@ -57,14 +57,19 @@ function safeSource(source: string, binding: BridgeBinding, surface: BridgeSurfa
 }
 export default function AppFrameV2(props: AppFrameV2Props) {
   const { t } = useTranslation()
-  if (!safeSource(props.source, props.binding, props.surface) || !parseBridgePresentation(props.presentation) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
+  if (!safeSource(props.source, props.binding, props.surface) || !parseBridgePresentation(props.presentation, props.surface) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
     return <Alert type="error" showIcon title={t('apps.v2Failed')} />
   }
   const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true, props.surface === 'admin'])
   return <FrameDocument key={identity} {...props} />
 }
-function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, surface, canReviewNetwork, onNetworkPolicyChanged, onDraftChange, onNavigate, onPageChange }: AppFrameV2Props) {
+function FrameDocument({ source, title, binding, presentation, capabilities: launched, height, backendAvailable, surface, canReviewNetwork, onNetworkPolicyChanged, onDraftChange, onNavigate, onPageChange }: AppFrameV2Props) {
   const { t } = useTranslation()
+  // Only the backend transport is admin-scoped (doc 191): every other transport goes to a reader endpoint
+  // gated by the audience, which an app administrator outside the audience would not pass. So the admin
+  // surface has no capability here whatever its launch said: nothing is advertised to the app and nothing
+  // is wired, and the bridge refuses those requests locally without a single network request.
+  const capabilities: readonly string[] = surface === 'admin' ? [] : launched
   const frame = useRef<HTMLIFrameElement>(null)
   const navigationObserver=useRef(onNavigate)
   navigationObserver.current=onNavigate

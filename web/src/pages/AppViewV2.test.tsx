@@ -9,8 +9,7 @@ import { CrumbTailProvider, useCrumbTailValue } from '../lib/crumbTail'
 function CrumbProbe(){const tail=useCrumbTailValue();return <div data-testid="crumb-tail">{tail===undefined?'pending':tail===null?'none':tail}</div>}
 const prefs=vi.hoisted(()=>({lang:'zh-CN',dark:true}))
 const frames=vi.hoisted(()=>[] as any[])
-const gates=vi.hoisted(()=>({manageable:false,admin:false}))
-vi.mock('../lib/appDirectoryV2',async original=>({...await original<typeof import('../lib/appDirectoryV2')>(),useManageable:()=>gates.manageable}))
+const gates=vi.hoisted(()=>({admin:false}))
 vi.mock('../auth',async original=>({...await original<typeof import('../auth')>(),useIsAdmin:()=>gates.admin}))
 const PrefsPulse=createContext('');
 vi.mock('../prefs',()=>({usePrefs:()=>{useContext(PrefsPulse);return prefs}}))
@@ -22,7 +21,7 @@ const response={source:`/app-documents/${installation}/${binding.generation}/1/$
 const routers:ReturnType<typeof createMemoryRouter>[]=[];
 function Page({path=`/apps/v2/${installation}`,algorithm=theme.defaultAlgorithm}:{path?:string;algorithm?:typeof theme.defaultAlgorithm}){const [router]=useState(()=>{const value=createMemoryRouter([{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>},{path:'/apps/manage/:installation',element:<div>User admin page</div>},{path:'/manage/apps/installations/:installation/admin',element:<div>Console admin tab</div>}],{initialEntries:[path]});routers.push(value);return value});return <ConfigProvider theme={{algorithm}}><PrefsPulse.Provider value={prefs.lang+String(prefs.dark)}><RouterProvider router={router}/></PrefsPulse.Provider></ConfigProvider>}
 function page(){return <Page/>}
-beforeEach(()=>{routers.splice(0);frames.length=0;gates.manageable=false;gates.admin=false;prefs.lang='zh-CN';prefs.dark=true;vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(response),{status:200})))})
+beforeEach(()=>{routers.splice(0);frames.length=0;gates.admin=false;prefs.lang='zh-CN';prefs.dark=true;vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(response),{status:200})))})
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals()})
 test('loads an authorized launch and inherits host appearance without a language selector',async()=>{
  const view=render(page());await screen.findByTestId('v2-frame')
@@ -186,17 +185,23 @@ test('a changed network policy relaunches the frame from a fresh launch, and onl
  expect(fetch).toHaveBeenCalledTimes(1)
 })
 
-test('the Manage button appears only for an app the directory marks manageable',async()=>{
+const serve=(patch:Record<string,unknown>)=>vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,...patch}),{status:200})))
+test('the Manage button appears only for a launch the server marks manageable, and costs no directory request',async()=>{
  render(page());await screen.findByRole('heading')
  expect(screen.queryByRole('button',{name:'appAdmin.manage'})).toBeNull()
+ expect(vi.mocked(fetch).mock.calls.map(call=>call[0])).toEqual([`/api/app-platform/installations/${installation}/launch`])
+})
+test('a launch with a non-boolean manageable never mounts',async()=>{
+ serve({manageable:'yes'});render(page());await screen.findByRole('alert');expect(frames).toHaveLength(0)
 })
 test('a delegated administrator goes to the user-side admin page',async()=>{
- gates.manageable=true
+ serve({manageable:true})
  render(page());fireEvent.click(await screen.findByRole('button',{name:'appAdmin.manage'}))
  expect(await screen.findByText('User admin page')).toBeTruthy()
+ expect(vi.mocked(fetch).mock.calls.map(call=>call[0])).toEqual([`/api/app-platform/installations/${installation}/launch`])
 })
 test('a Portal administrator goes to the console tab',async()=>{
- gates.manageable=true;gates.admin=true
+ serve({manageable:true});gates.admin=true
  render(page());fireEvent.click(await screen.findByRole('button',{name:'appAdmin.manage'}))
  expect(await screen.findByText('Console admin tab')).toBeTruthy()
 })

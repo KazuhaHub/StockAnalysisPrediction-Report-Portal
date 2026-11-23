@@ -30,12 +30,16 @@ var (
 // platformAppAdmin is the one access decision of the admin surface, the counterpart of
 // platformLaunchAudience: a Portal administrator, or an active account with a delegation row whose
 // account_created still equals the account's users.created_at (a recreated account with the same name
-// has another one and inherits nothing). Admin views do not need audience membership. The caller holds
+// has another one and inherits nothing). Admin views do not need audience membership, but a delegate
+// still needs a sound OU chain, as on the reader path: a broken chain refuses them. The caller holds
 // the OU mutation lock, which every grant and revoke also takes, and the account came from the same
 // transaction's session read, so role, activity and created_at are current.
 func platformAppAdmin(e migExec, account platformActorAccount, installationID string) error {
 	if can(account.role, PermManage) {
 		return nil
+	}
+	if _, err := platformAccessChain(e, account); err != nil {
+		return errAppPlatformLaunchUnavailable
 	}
 	lock := ""
 	if e.s.driver == "postgres" {

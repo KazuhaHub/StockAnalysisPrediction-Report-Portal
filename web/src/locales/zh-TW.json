@@ -4392,6 +4392,7 @@
   "appAdmin.manage": "管理",
   "appAdmin.admins.title": "應用程式管理員",
   "appAdmin.admins.portalAdminsNote": "入口網站管理員始終可以管理此應用程式，不需要在這裡新增。只有入口網站管理員可以授予或撤銷。",
+  "appAdmin.admins.noAdminPage": "此應用程式的目前版本沒有管理頁面，授權暫時不會生效。仍列出既有授權，以便撤銷。",
   "appAdmin.admins.empty": "尚未委派任何使用者。",
   "appAdmin.admins.user": "使用者",
   "appAdmin.admins.grantedBy": "授予者",

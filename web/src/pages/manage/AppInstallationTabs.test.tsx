@@ -1,14 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider } from 'react-router'
+import { createMemoryRouter, RouterProvider, useOutletContext } from 'react-router'
 import AppInstallationTabs from './AppInstallationTabs'
 import AppAdminTab from './AppAdminTab'
+import SettingsPage from './AppPlatformSettingsPage'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: apiMock }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-vi.mock('./AppPlatformSettingsPage', () => ({ default: () => <div>settings page</div> }))
+const mounts = vi.hoisted(() => ({ settings: 0 }))
+vi.mock('./AppPlatformSettingsPage', async () => {
+  const { useEffect } = await import('react')
+  return { default: () => {
+    const shared = useOutletContext<{ settings: { admin_page?: boolean; revision?: string } | null; reload: () => void } | undefined>()
+    useEffect(() => { mounts.settings++ }, [])
+    return <div>settings page<span data-testid="shared">{shared?.settings ? `${String(shared.settings.admin_page)}|${shared.settings.revision ?? ''}` : 'none'}</span><button onClick={() => shared?.reload()}>reload</button></div>
+  } }
+})
 vi.mock('../../components/apps/AppSurfaceView', () => ({
   default: (props: { installation: string; surface: string; base: string; crumbTail?: boolean; onBack?: unknown }) =>
     <div data-testid="surface">{`${props.surface}|${props.installation}|${props.base}|${String(props.crumbTail)}|${typeof props.onBack}`}</div>,
@@ -21,14 +30,14 @@ const settingsUrl = `/api/admin/app-platform/installations/${id}/settings`
 function mount(path = base) {
   const router = createMemoryRouter([{
     path: '/manage/apps/installations/:installation', element: <AppInstallationTabs />,
-    children: [{ index: true, element: <div>settings page</div> }, { path: 'admin/*', element: <AppAdminTab /> }],
+    children: [{ index: true, element: <SettingsPage /> }, { path: 'admin/*', element: <AppAdminTab /> }],
   }], { initialEntries: [path] })
   render(<RouterProvider router={router} />)
   return router
 }
 const serve = (admin_page: boolean | undefined) => apiMock.get.mockImplementation(async () => ({ installation_id: id, ...(admin_page === undefined ? {} : { admin_page }) }))
 
-beforeEach(() => { apiMock.get.mockReset() })
+beforeEach(() => { apiMock.get.mockReset(); mounts.settings = 0 })
 afterEach(cleanup)
 
 describe('installation page tabs', () => {
@@ -87,5 +96,34 @@ describe('installation page tabs', () => {
     mount()
     expect(await screen.findByText('settings page')).toBeTruthy()
     expect(screen.queryByRole('tab')).toBeNull()
+  })
+
+  it('hands the one loaded settings to the page, so a single request serves both', async () => {
+    serve(true)
+    mount()
+    await screen.findByRole('tab', { name: 'appPlatform.settings.tabSettings' })
+    expect(screen.getByTestId('shared').textContent).toBe('true|')
+    expect(apiMock.get.mock.calls.filter(([url]) => url === settingsUrl)).toHaveLength(1)
+    expect(apiMock.get).toHaveBeenCalledTimes(1)
+  })
+
+  it('reloads on the page\'s request without unmounting the page or the tab bar, with one request per reload', async () => {
+    let revision = 1
+    apiMock.get.mockImplementation(async () => ({ installation_id: id, admin_page: true, revision: String(revision++) }))
+    mount()
+    await screen.findByRole('tab', { name: 'appAdmin.tab' })
+    expect(screen.getByTestId('shared').textContent).toBe('true|1')
+    await userEvent.click(screen.getByRole('button', { name: 'reload' }))
+    await waitFor(() => expect(screen.getByTestId('shared').textContent).toBe('true|2'))
+    expect(apiMock.get).toHaveBeenCalledTimes(2)
+    expect(mounts.settings).toBe(1)
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+  })
+
+  it('on a failed read gives the page no settings, so it loads and reports its own', async () => {
+    apiMock.get.mockImplementation(async () => { throw new Error('down') })
+    mount()
+    expect(await screen.findByText('settings page')).toBeTruthy()
+    expect(screen.getByTestId('shared').textContent).toBe('none')
   })
 })

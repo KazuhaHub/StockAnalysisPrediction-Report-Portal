@@ -30,7 +30,7 @@ export interface AppSurfaceViewProps {
   /** Back leads the title. Omitted where the surrounding page already has its own way out. */
   onBack?: () => void
   /** Rendered in the header beside the app's own actions, once the launch has named the app. */
-  headerExtra?: ReactNode
+  headerExtra?: ReactNode | ((launch: AppLaunchV2) => ReactNode)
   /** The shell breadcrumb ends with the app's name (an app page), or is left alone (a console tab has its own). */
   crumbTail?: boolean
 }
@@ -106,7 +106,7 @@ function LaunchPage({ installation, surface, base, onBack, headerExtra, crumbTai
       colorText: token.colorText, colorBorder: token.colorBorder,
       colorBgLayout: token.colorBgLayout, borderRadius: token.borderRadius,
     },
-  }) : null, [launch,lang,dark,layout,path,location.search,token])
+  }, surface) : null, [launch,lang,dark,layout,path,location.search,token,surface])
 
   const copy = launch ? appDisplayText(launch.applicationId, launch.display, lang) : null
   // The shell's breadcrumb ends with the app's name, rendered with the page from the same launch data.
@@ -116,7 +116,7 @@ function LaunchPage({ installation, surface, base, onBack, headerExtra, crumbTai
     <section style={{ display: 'flex', flexDirection: 'column', flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>
       <AppDraftPrompt dirty={dirty} blocker={blocker} />
       {launch || failed ? <AppPageHeader name={copy?.name ?? ''} icon={launch ? <AppDisplayIcon display={launch.display} /> : null}
-        state={route ? page : null} onBack={onBack} extra={launch ? headerExtra : null} /> : null}
+        state={route ? page : null} onBack={onBack} extra={launch ? (typeof headerExtra === 'function' ? headerExtra(launch) : headerExtra) : null} /> : null}
       {failed || (launch && (!route || !presentation)) ? (
         <Alert type="error" showIcon title={t(launch && !route ? 'apps.v2InvalidRoute' : 'apps.v2Unavailable')}
           action={launch && !route ? <Button className="rp-safe-primary" type="primary" onClick={() => { void navigate(base, { replace:true }) }}>{t('apps.v2Home')}</Button> : <Button className="rp-safe-primary" type="primary" onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />

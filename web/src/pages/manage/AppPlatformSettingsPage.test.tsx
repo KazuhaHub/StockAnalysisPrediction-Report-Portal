@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
+import AppInstallationTabs from './AppInstallationTabs'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 const translate = vi.hoisted(() => (key: string, options?: Record<string, unknown>) => options ? `${key}:${JSON.stringify(options)}` : key)
@@ -107,12 +108,44 @@ describe('application installation settings', () => {
       expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
     })
 
-    it('has no administrators card, and asks for no list, when the app has no admin page', async () => {
+    it('keeps the administrators card when the app has no admin page, so stale delegations can be seen and revoked', async () => {
       serve({ ...settings, admin_page: false })
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
-      expect(screen.queryByText('appAdmin.admins.title')).toBeNull()
-      expect(apiMock.get).not.toHaveBeenCalledWith(admins, expect.anything())
+      expect(await screen.findByText('Ada Lovelace')).toBeTruthy()
+      expect(screen.getByText('appAdmin.admins.title')).toBeTruthy()
+      expect(screen.getByText('appAdmin.admins.noAdminPage')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /appAdmin.admins.add/ })).toBeNull()
+      expect(screen.getByRole('button', { name: /appAdmin.admins.remove/ })).toBeTruthy()
+      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
+    })
+  })
+
+  describe('under the installation tabs', () => {
+    const admins = `${root}/installations/${installation}/app-admins`
+    const settingsUrl = `${root}/installations/${installation}/settings`
+    const mountTabs = () => render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<AppInstallationTabs />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    const serve = () => apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) return { ...settings, admin_page: true }
+      if (url.endsWith('/app-admins')) return { admins: [] }
+      return { bindings: [] }
+    })
+
+    it('makes one settings request for the tab bar and the page together', async () => {
+      serve()
+      mountTabs()
+      expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
+      await screen.findByText('appAdmin.admins.empty')
+      expect(screen.getAllByRole('tab')).toHaveLength(2)
+      expect(apiMock.get.mock.calls.filter(([url]) => url === settingsUrl)).toHaveLength(1)
+      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
     })
   })
 

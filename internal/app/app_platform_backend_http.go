@@ -125,13 +125,6 @@ func (s *Server) platformBackend(w http.ResponseWriter, r *http.Request, user st
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	installation := r.PathValue("installation")
-	// Exactly one audit row per non-GET admin request, whatever happens to it (doc 191).
-	status, outcome, backendStatus := http.StatusNotFound, "refused", 0
-	if admin && request.method != http.MethodGet {
-		defer func() {
-			s.auditPlatformAdminRequest(r, user, installation, request.method, request.path, status, backendStatus, outcome)
-		}()
-	}
 	// Check current authority before exposing whether a runtime was configured.
 	access, err := s.withPlatformWritableBackendAccess(ctx, session, installation, func(a platformWritableBackendAccess, _ []byte) error {
 		if !request.binding.matches(a) {
@@ -145,13 +138,26 @@ func (s *Server) platformBackend(w http.ResponseWriter, r *http.Request, user st
 		return
 	}
 	access.Close()
+	// The gate admitted this administrator: from here on exactly one audit row per non-GET admin request,
+	// whatever happens to it. Requests refused at the gate (not an administrator, no admin page, no
+	// backend) are not an administrator's request and keep only the server log (doc 191).
+	status, outcome, backendStatus := http.StatusNotFound, "refused", 0
+	if admin && request.method != http.MethodGet {
+		defer func() {
+			s.auditPlatformAdminRequest(r, user, installation, request.method, request.path, status, backendStatus, outcome)
+		}()
+	}
 	endpoint := s.platformBackendEndpoint.Load()
 	if endpoint == nil {
 		status = 503
 		jsonErrorCode(w, 503, "app_platform_runtime_unavailable", "application runtime unavailable")
 		return
 	}
-	response, err := s.requestPlatformBoundWritableBackend(ctx, session, installation, request.binding, request.method, request.path, []byte(request.body), *endpoint)
+	send := s.platformBackendSend
+	if send == nil {
+		send = s.requestPlatformBoundWritableBackend
+	}
+	response, err := send(ctx, session, installation, request.binding, request.method, request.path, []byte(request.body), *endpoint)
 	if err != nil {
 		if errors.Is(err, errAppPlatformBackendRequestUncertain) {
 			status, outcome = 502, "uncertain"
@@ -171,8 +177,8 @@ func (s *Server) platformBackend(w http.ResponseWriter, r *http.Request, user st
 }
 
 // auditPlatformAdminRequest records one non-GET request of an app's admin page: who sent which method and
-// path, what the Portal answered, and whether the app took it (ok), the Portal refused it before it
-// reached the app (refused) or the outcome is unknown because it may have reached the app (uncertain).
+// path, what the Portal answered, and whether the app took it (ok), the Portal refused it after the
+// admin gate admitted it but before it reached the app (refused) or the outcome is unknown because it may have reached the app (uncertain).
 // The body is never recorded.
 func (s *Server) auditPlatformAdminRequest(r *http.Request, actor, installation, method, path string, status, backendStatus int, outcome string) {
 	var appID string

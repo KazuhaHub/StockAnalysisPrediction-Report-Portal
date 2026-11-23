@@ -2345,8 +2345,50 @@ test("a presentation may carry an admin route registry that has no root route", 
     search: "",
     routes: [{ id: "settings", path: "/settings", layout: "document" }],
   };
-  expect(parseBridgePresentation({ ...presentation, navigation })).not.toBeNull();
-  expect(parseBridgePresentation({ ...presentation, navigation: { ...navigation, path: "/other" } })).toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation }, "admin")).not.toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation: { ...navigation, path: "/other" } }, "admin")).toBeNull();
   const admin = await surfacePair("admin", { navigation });
   expect(admin.client.presentation()?.navigation?.path).toBe("/settings");
 });
+
+test("a reader registry needs the root route and an admin one does not", async () => {
+  const rootless = { path: "/settings", search: "", routes: [{ id: "settings", path: "/settings", layout: "document" }] };
+  const rooted = { path: "/", search: "", routes: [{ id: "home", path: "/", layout: "document" }] };
+  // The surface defaults to the reader, which always has a root route.
+  expect(parseBridgePresentation({ ...presentation, navigation: rootless })).toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation: rootless }, "reader")).toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation: rooted })).not.toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation: rooted }, "reader")).not.toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation: rootless }, "admin")).not.toBeNull();
+  // An admin registry may still carry a root route; it is just not required.
+  expect(parseBridgePresentation({ ...presentation, navigation: rooted }, "admin")).not.toBeNull();
+  // The client applies the surface its init announced to the presentation in the same message.
+  const reader = clientOnly();
+  reader.deliver({ ...reader.init, presentation: { ...presentation, navigation: rootless } });
+  expect(reader.client.state()).toBe("failed");
+  const admin = clientOnly();
+  admin.deliver({ ...admin.init, surface: "admin", presentation: { ...presentation, navigation: rootless } });
+  await vi.waitFor(() => expect(admin.client.state()).toBe("ready"));
+  const explicit = clientOnly();
+  explicit.deliver({ ...explicit.init, surface: "reader", presentation: { ...presentation, navigation: rootless } });
+  expect(explicit.client.state()).toBe("failed");
+});
+
+for (const surface of ["x", null, 1, "Admin", ""]) {
+  test(`init refuses the surface ${JSON.stringify(surface)}`, () => {
+    const w = clientOnly();
+    w.deliver({ ...w.init, surface });
+    expect(w.client.state()).toBe("failed");
+    expect(w.failed).toHaveBeenCalledExactlyOnceWith("protocol_error");
+    expect(w.apply).not.toHaveBeenCalled();
+  });
+}
+
+for (const [given, expected] of [["reader", "reader"], ["admin", "admin"], [undefined, "reader"]] as const) {
+  test(`init surface ${given === undefined ? "absent" : given} is the ${expected} surface`, async () => {
+    const w = clientOnly();
+    w.deliver(given === undefined ? w.init : { ...w.init, surface: given });
+    await vi.waitFor(() => expect(w.client.state()).toBe("ready"));
+    expect(w.client.context()?.surface).toBe(expected);
+  });
+}
