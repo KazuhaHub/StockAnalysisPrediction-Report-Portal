@@ -275,19 +275,50 @@ describe('A platform app card', () => {
     expect(await screen.findByText('appPlatform.confirmUpdate')).toBeTruthy()
   })
 
-  it('never leaves the update button enabled while a click cannot act: a pending change disables it and says why', async () => {
+  it('never leaves the update button enabled while a click cannot act: a pending change blocks it, says why, and stays reachable by keyboard', async () => {
     // A change whose answer was lost stays pending after its dialog is closed. Every other action waits for it, so
-    // the buttons say so instead of accepting clicks that do nothing.
+    // the controls say so (and answer a press) instead of accepting clicks that do nothing.
     withPlatform('installed')
     sessionStorage.setItem('portal.app-install.pending:admin', JSON.stringify({ plan_id: plan, plan_sha256: planSha, idempotency_key: plan, action: 'update', app_id: 'notes' }))
     const user = userEvent.setup()
     renderPage()
     await user.click(await screen.findByRole('button', { name: 'appPlatform.cancel' }))
     const button = await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
+    // Not `disabled`: that would drop it from the tab order and hide the reason.
+    expect(button.disabled).toBe(false)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
     expect(button.title).toBe('appStore.busyPending')
-    expect((screen.getByRole('button', { name: 'appStore.switchVersion' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'appStore.more' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toBe('appStore.busyPending')
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    await user.click(button)
+    expect(apiMock.post.mock.calls.some(([url]) => url === `${root}/market/stage`)).toBe(false)
+    expect(await screen.findByText('appStore.busyPending')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'appStore.switchVersion' }).getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('keeps View in catalogue usable while an action is blocked, and gates only the lifecycle items', async () => {
+    withPlatform('installed')
+    sessionStorage.setItem('portal.app-install.pending:admin', JSON.stringify({ plan_id: plan, plan_sha256: planSha, idempotency_key: plan, action: 'update', app_id: 'notes' }))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.cancel' }))
+    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
+    expect((await screen.findByRole('menuitem', { name: 'appStore.disable' })).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('menuitem', { name: 'appStore.uninstall' }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('menuitem', { name: 'appStore.viewInCatalogue' }).getAttribute('aria-disabled')).not.toBe('true')
+  })
+
+  it('gives a reason while the console is only busy, too', async () => {
+    withPlatform('installed')
+    const base = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/stage` ? new Promise(() => undefined) : base(url, body))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
+    const swap = screen.getByRole('button', { name: 'appStore.switchVersion' })
+    expect(swap.getAttribute('aria-disabled')).toBe('true')
+    expect(swap.title).toBe('appStore.busyWorking')
   })
 
   it('shows the button busy the moment it is pressed, not when the download answers', async () => {

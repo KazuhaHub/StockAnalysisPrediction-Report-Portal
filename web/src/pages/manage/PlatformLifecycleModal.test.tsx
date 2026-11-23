@@ -377,8 +377,8 @@ describe('application installation flow', () => {
       expect(status('start')).toBeUndefined()
     })
 
-    it('adds the runtime stages for an app with a backend', async () => {
-      mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? reading('start') : { items: [], next_cursor: '' }))
+    it('adds the runtime stages for an operation the backend says is managed', async () => {
+      mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? reading('start', { managed: true, revision: '6' }) : { items: [], next_cursor: '' }))
       mount(base, 'install', `/manage/apps?operation=${operation}`)
       await screen.findByRole('button', { name: 'appPlatform.done' })
       expect(status('start')).toBe('process')
@@ -392,8 +392,29 @@ describe('application installation flow', () => {
       expect(['queued', 'download', 'activate', 'complete'].map(status)).toEqual(['finish', 'finish', 'finish', 'finish'])
     })
 
+    it('marks the failed step by the revision on a page opened after the failure, with no earlier poll', async () => {
+      // Install, unmanaged: stage is the 4th stage (revision 4), and a failure in it leaves revision 5.
+      mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? reading('failed', { terminal: true, revision: '5', error_code: 'app_platform_unavailable' }) : { items: [], next_cursor: '' }))
+      mount(base, 'install', `/manage/apps?operation=${operation}`)
+      await screen.findByRole('button', { name: 'appPlatform.done' })
+      expect(status('stage')).toBe('error')
+      expect(status('download')).toBe('finish')
+      expect(status('prepare_data')).toBe('wait')
+    })
+
+    it('keeps the steps it showed: a managed flag from the backend does not change while polling', async () => {
+      const answers = [reading('stage', { managed: true, revision: '5' }), reading('probe', { managed: true, revision: '8' })]
+      mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? answers.shift() ?? answers[0] : { items: [], next_cursor: '' }))
+      mount(base, 'install', `/manage/apps?operation=${operation}`)
+      await screen.findByRole('button', { name: 'appPlatform.done' })
+      expect(status('start')).toBe('wait')
+      await userEvent.setup().click(screen.getByRole('button', { name: 'appPlatform.refresh' }))
+      await waitFor(() => expect(status('probe')).toBe('process'))
+      expect(['queued', 'validate', 'download', 'stage', 'prepare_data', 'start', 'activate', 'complete'].every(stage => status(stage) !== undefined)).toBe(true)
+    })
+
     it('marks the step a failure stopped at, and says it in words as well', async () => {
-      const answers = [reading('stage'), reading('failed', { terminal: true, error_code: 'app_platform_unavailable' })]
+      const answers = [reading('stage'), reading('failed', { terminal: true, revision: '5', error_code: 'app_platform_unavailable' })]
       mock.get.mockImplementation((url: string) => Promise.resolve(url.includes('/operations/') ? answers.shift() ?? answers[0] : { items: [], next_cursor: '' }))
       mount(base, 'install', `/manage/apps?operation=${operation}`)
       await screen.findByRole('button', { name: 'appPlatform.done' })

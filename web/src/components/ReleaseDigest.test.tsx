@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ReleaseDigest from './ReleaseDigest'
+
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
 afterEach(cleanup)
 
@@ -23,9 +25,13 @@ describe('ReleaseDigest', () => {
     expect((await screen.findByRole('tooltip')).textContent).toBe(digest)
   })
 
-  it('has a copy button for the full value', () => {
+  it('has a copy button named for what it copies, and it copies the full 64-hex value', async () => {
+    const user = userEvent.setup()
+    const copied: string[] = []
     render(<ReleaseDigest value={digest} />)
-    expect(screen.getByRole('button')).toBeTruthy()
+    vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(async text => { copied.push(text) })
+    await user.click(screen.getByRole('button', { name: 'appPlatform.copyReleaseDigest' }))
+    await waitFor(() => expect(copied).toEqual([digest]))
   })
 
   it('leaves a value that is already short as it is', () => {

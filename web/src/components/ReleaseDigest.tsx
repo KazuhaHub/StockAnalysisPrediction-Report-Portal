@@ -1,4 +1,5 @@
 import { Tooltip, Typography } from 'antd'
+import { useTranslation } from 'react-i18next'
 
 /** How many leading hex characters stand for a digest: enough to tell two releases apart at a glance. */
 export const DIGEST_SHORT = 12
@@ -10,10 +11,11 @@ export const DIGEST_SHORT = 12
  * fingerprint, a typed archive digest) is not a release digest and stays whole.
  */
 export default function ReleaseDigest({ value }: { value: string }) {
+  const { t } = useTranslation()
   return <span className="rp-digest">
     <Tooltip title={value} trigger={['hover', 'focus']}>
       <Typography.Text code tabIndex={0} className="rp-digest__value">{value.slice(0, DIGEST_SHORT)}</Typography.Text>
     </Tooltip>
-    <Typography.Text copyable={{ text: value }} />
+    <Typography.Text copyable={{ text: value, tooltips: [t('appPlatform.copyReleaseDigest'), t('common.copied')] }} />
   </span>
 }

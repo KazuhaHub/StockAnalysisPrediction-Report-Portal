@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { Alert, Button, Card, Dropdown, Modal, Progress, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { ArrowUpOutlined, EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
@@ -38,6 +38,8 @@ export interface InstalledActionProps {
   busy: boolean
   /** Another action holds the console (`pending`: an unfinished change that needs the administrator). Every control that would be refused is disabled, never left to ignore a click. */
   blocked?: '' | 'pending' | 'working'
+  /** A press on a control that is blocked: it answers with the reason instead of going quiet. */
+  onRefuse?: () => void
   onSwitchVersion: (version: string) => void
   /** `opener` is the more-actions button, where focus returns when the flow ends (the menu item itself is gone by then). */
   onLifecycle: (action: LifecycleAction, opener?: HTMLElement | null) => void
@@ -50,10 +52,17 @@ export function updateOffer(app: AdminApp, catalogue?: PlatformMarketApp): strin
 }
 
 /** Small icon buttons for an installed app: update, switch version, and the more menu. Used by the card and the list. */
-export function InstalledControls({ app, catalogue, uninstallable, busy, blocked = '', onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
+export function InstalledControls({ app, catalogue, uninstallable, busy, blocked = '', onRefuse, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
   const { t } = useTranslation()
   const more = useRef<HTMLButtonElement>(null)
+  const reasonId = useId()
   const newest = updateOffer(app, catalogue)
+  // One rule for every control here: it acts exactly when pressing it can. A blocked control is not `disabled` (that
+  // would take it out of the keyboard's reach and hide the reason): it stays focusable, says it is unavailable, names
+  // the reason in its description, and a press answers with that reason.
+  const idle = !busy && !blocked
+  const reason = blocked === 'pending' ? t('appStore.busyPending') : blocked ? t('appStore.busyWorking') : ''
+  const inert = blocked ? { 'aria-disabled': true as const, 'aria-describedby': reasonId, className: 'rp-app-inert' } : {}
   const lifecycleOK = app.platform && !!app.installationId && LIFECYCLE_STATES.includes(app.state ?? '')
   const recoveryUninstall = !lifecycleOK && app.platform && !!app.installationId && RECOVERY_STATES.includes(app.state ?? '') && !!uninstallable
   const versionItems = catalogue && app.version ? [{
@@ -66,29 +75,27 @@ export function InstalledControls({ app, catalogue, uninstallable, busy, blocked
     })),
   }] : []
   const lifecycleItems = [
-    ...(recoveryUninstall ? [{ key: 'uninstall', label: t('appStore.uninstall'), danger: true }] : []),
+    ...(recoveryUninstall ? [{ key: 'uninstall', label: t('appStore.uninstall'), danger: true, disabled: !idle }] : []),
     ...(lifecycleOK ? [
-      app.state === 'disabled' ? { key: 'enable', label: t('appStore.enable') } : { key: 'disable', label: t('appStore.disable') },
-      { key: 'uninstall', label: t('appStore.uninstall'), danger: true },
+      app.state === 'disabled' ? { key: 'enable', label: t('appStore.enable'), disabled: !idle } : { key: 'disable', label: t('appStore.disable'), disabled: !idle },
+      { key: 'uninstall', label: t('appStore.uninstall'), danger: true, disabled: !idle },
     ] : []),
     ...(app.platform ? [{ key: 'view', label: t('appStore.viewInCatalogue'), disabled: !catalogue }] : []),
   ]
   if (!newest && !versionItems.length && !lifecycleItems.length) return null
   const updateLabel = newest ? t('appStore.updateTo', { version: newest }) : ''
-  // The one rule for every control here: it can be pressed exactly when pressing it can act.
-  const idle = !busy && !blocked
-  const why = (label: string) => blocked === 'pending' ? t('appStore.busyPending') : label
   return (
     <span className="rp-app-controls">
-      {newest && <Button size="small" type="text" className="rp-app-update" icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={why(updateLabel)} loading={busy} disabled={!idle} onClick={e => { e.stopPropagation(); onSwitchVersion(newest) }} />}
+      {reason && <span id={reasonId} className="rp-sr-only">{reason}</span>}
+      {newest && <Button size="small" type="text" {...inert} className={['rp-app-update', inert.className].filter(Boolean).join(' ')} icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={reason || updateLabel} loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); if (blocked) onRefuse?.(); else onSwitchVersion(newest) }} />}
       {versionItems.length > 0 && (
         <Dropdown trigger={['click']} menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} disabled={!idle}>
-          <Button size="small" type="text" icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={why(t('appStore.switchVersion'))} disabled={!idle} onClick={e => e.stopPropagation()} />
+          <Button size="small" type="text" {...inert} icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={reason || t('appStore.switchVersion')} onClick={e => { e.stopPropagation(); if (blocked) onRefuse?.() }} />
         </Dropdown>
       )}
       {lifecycleItems.length > 0 && (
-        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction, more.current) } }} disabled={!idle}>
-          <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} title={why(t('appStore.more'))} disabled={!idle} onClick={e => e.stopPropagation()} />
+        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction, more.current) } }}>
+          <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} onClick={e => e.stopPropagation()} />
         </Dropdown>
       )}
     </span>
@@ -178,7 +185,7 @@ export function MarketCard({ app, name, description, staging, blocked, error, on
           <div className="rp-app-card-line">
             <Button type="text" className="rp-app-card-name rp-app-card-link" onClick={onOpen}>{name}</Button>
           </div>
-          <PublisherLine publisherName={app.publisher_name} publisherId={app.publisher_id} className="rp-app-card-sub rp-app-card-line">{t('appStore.publishedBy', { publisher: publisherLabel(app.publisher_name, app.publisher_id) })}</PublisherLine>
+          {publisherLabel(app.publisher_name) && <PublisherLine publisherName={app.publisher_name} publisherId={app.publisher_id} className="rp-app-card-sub rp-app-card-line">{t('appStore.publishedBy', { publisher: publisherLabel(app.publisher_name) })}</PublisherLine>}
           {error
             ? <Typography.Text type="danger" className="rp-app-card-desc" title={error} role="alert">{error}</Typography.Text>
             : <div className="rp-app-card-desc">{description || '\u00a0'}</div>}
@@ -227,7 +234,7 @@ export function MarketDetailModal({ app, installed, lang, staging: download, blo
         <span aria-hidden="true" className="rp-app-glyph rp-app-glyph--large"><AppDisplayIcon display={app.display} /></span>
         <div className="rp-market-detail-title">
           <Typography.Text strong ellipsis>{copy.name}</Typography.Text>
-          <Typography.Text type="secondary" ellipsis>{t('appStore.publishedBy', { publisher: publisherLabel(app.publisher_name, app.publisher_id) })}</Typography.Text>
+          {publisherLabel(app.publisher_name) && <Typography.Text type="secondary" ellipsis>{t('appStore.publishedBy', { publisher: publisherLabel(app.publisher_name) })}</Typography.Text>}
         </div>
         <Space wrap className="rp-market-detail-actions">
           <Select size="middle" aria-label={t('appStore.versions')} value={download?.version ?? version} disabled={staging} onChange={setChosen} popupMatchSelectWidth={false}

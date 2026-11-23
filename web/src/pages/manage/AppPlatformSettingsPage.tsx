@@ -214,6 +214,8 @@ export default function AppPlatformSettingsPage() {
   const [refresh, setRefresh] = useState(0)
   // A read that replaces the settings in place, without the page's loading state (see `reloadQuietly`).
   const quiet = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -295,14 +297,17 @@ export default function AppPlatformSettingsPage() {
    * Reads the settings again after an action whose effect on the installation is known or uncertain, and swaps them in
    * where they stand: the page, its dialogs and the reader's place stay. A read that fails leaves what is shown.
    */
-  const reloadQuietly = async () => {
+  const reloadQuietly = async (): Promise<Settings | null> => {
     quiet.current?.abort()
     const abort = new AbortController()
     quiet.current = abort
     try {
       const next = await api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal })
-      if (!abort.signal.aborted) setSettings(next)
+      if (abort.signal.aborted) return null
+      setSettings(next)
+      return next
     } catch { /* the page keeps the settings it has; Retry is one click away */ }
+    return null
   }
 
   if (loading) return <LoadingPlaceholder minHeight={320} />
@@ -482,10 +487,12 @@ export default function AppPlatformSettingsPage() {
       await reloadQuietly()
     } catch (failure) {
       setResolveError(errText(failure, t))
-      // The server may have acted before the answer was lost or refused: show what it says now, behind the message.
-      await reloadQuietly()
+      // The server may have acted before the answer was lost or refused: read what it holds now. If the data is
+      // already accepted, the plan is spent: close the dialog and show the page as it is, not a confirm that cannot apply.
+      const now = await reloadQuietly()
+      if (now && !now.resolve_keep_data_eligible && mounted.current) { setResolvePlan(null); setResolveError(''); setResolveAck(false) }
     } finally {
-      setResolving(false)
+      if (mounted.current) setResolving(false)
     }
   }
   const openRaise = () => {

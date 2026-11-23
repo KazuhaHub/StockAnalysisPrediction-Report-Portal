@@ -3738,6 +3738,7 @@
   "appPlatform.frontendOnly": "Static frontend only",
   "appPlatform.resourceSummary": "{{platforms}} · {{memory}} MiB memory · {{cpu}} mCPU · {{pids}} PIDs",
   "appPlatform.releaseDigest": "Release digest",
+  "appPlatform.copyReleaseDigest": "Copy release digest",
   "appPlatform.dataSchema": "Data schema {{schema}}",
   "appPlatform.confirmHint": "Confirmation starts background installation. Listed optional permissions remain declined; administrators receive no implicit app-use access.",
   "appPlatform.updateConfirmHint": "The current generation remains active until the reviewed update is verified. Failed updates leave the current generation in place.",

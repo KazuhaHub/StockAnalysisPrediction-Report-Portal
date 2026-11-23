@@ -68,7 +68,7 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     if (release.installed) return t('appStore.alreadyInstalled')
     const target = installation ?? release.installation_id
     // A flow that cannot start (another change is pending) says so; it is never a silent success.
-    const start = (item: PlatformRelease, action: LifecycleAction) => lifecycle.begin(item, action, opener) ? '' : t('appStore.busyPending')
+    const start = (item: PlatformRelease, action: LifecycleAction) => { const result = lifecycle.begin(item, action, opener); return result === 'started' ? '' : t(result === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking') }
     if (release.uninstallable && target) return start({ ...release, installation_id: target }, 'uninstall')
     if (release.enableable && target) return start({ ...release, installation_id: target }, 'enable')
     // A version chosen for an installed app is always an update: the server, not this page, refuses a downgrade.
@@ -126,7 +126,10 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     setActing(a.key)
     try {
       const release = await loadInstalledRelease(a.installationId, t)
-      if (live(account, epoch) && !lifecycle.begin(release, action, opener)) notifyError(t('appStore.busyPending'))
+      if (live(account, epoch)) {
+        const result = lifecycle.begin(release, action, opener)
+        if (result !== 'started') notifyError(t(result === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking'))
+      }
     } catch (e) { if (live(account, epoch)) notifyError(errText(e, t)) }
     finally { if (live(account, epoch)) setActing('') }
   }

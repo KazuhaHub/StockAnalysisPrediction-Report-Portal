@@ -3460,3 +3460,5 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 /* The apps console tabs: antd's dark primary is too dark for the active tab's label on a black surface (below 4.5:1). */
 :root[data-theme='dark'] .rp-apps-tabs > .ant-tabs-nav .ant-tabs-tab-active .ant-tabs-tab-btn,
 :root[data-theme='dark'] .rp-apps-tabs > .ant-tabs-nav .ant-tabs-tab:hover .ant-tabs-tab-btn { color: #69b1ff; }
+/* A control that cannot act right now but stays in the keyboard's reach so its reason can be read (see InstalledControls). */
+.rp-app-inert.ant-btn { opacity: 0.45; cursor: not-allowed; }

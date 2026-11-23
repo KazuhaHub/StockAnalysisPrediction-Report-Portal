@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { operationStages, stepModel } from './operationSteps'
+
+// internal/appplatform/operation_stages_contract_test.go writes this file from the backend's own stage lists.
+const contract = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'lib', 'operation-stages.generated.json'), 'utf8')) as Record<string, { managed: string[]; unmanaged: string[] }>
+
+describe('the stage lists are the backend\'s', () => {
+  it('match the checked-in contract for every action, managed or not', () => {
+    expect(Object.keys(contract).length).toBeGreaterThan(8)
+    for (const [action, lists] of Object.entries(contract)) {
+      expect(operationStages(action, true), `${action} managed`).toEqual(lists.managed)
+      expect(operationStages(action, false), `${action} unmanaged`).toEqual(lists.unmanaged)
+    }
+  })
+  it('give an unmanaged app no stages for the actions only a backend has', () => {
+    expect(operationStages('set_data_quota', false)).toEqual([])
+    expect(operationStages('import_data', false)).toEqual([])
+  })
+})
 
 describe('operationStages mirrors the order the backend runs an action in', () => {
   it('install: download, stage and prepare data, then activate (a managed app starts and is probed first)', () => {
@@ -30,7 +50,7 @@ describe('operationStages mirrors the order the backend runs an action in', () =
 
 describe('stepModel', () => {
   it('marks what is behind as finished, the current stage as running, and what is ahead as waiting', () => {
-    const model = stepModel({ action: 'install', stage: 'stage', terminal: false }, true, undefined)
+    const model = stepModel({ action: 'install', stage: 'stage', terminal: false, revision: '4' }, true, undefined)
     expect(model.map(s => [s.stage, s.status])).toEqual([
       ['queued', 'finish'], ['validate', 'finish'], ['download', 'finish'], ['stage', 'process'], ['prepare_data', 'wait'], ['start', 'wait'], ['probe', 'wait'], ['activate', 'wait'], ['complete', 'wait'],
     ])
@@ -38,13 +58,25 @@ describe('stepModel', () => {
   it('finishes every step, the last included, when the operation is complete', () => {
     expect(stepModel({ action: 'disable', stage: 'complete', terminal: true }, false, undefined).every(s => s.status === 'finish')).toBe(true)
   })
-  it('marks the stage a failure happened in as failed, from the last one seen running', () => {
-    const model = stepModel({ action: 'update', stage: 'failed', terminal: true }, false, 'migrate')
+  it('places a failure by the revision, so a page opened after a reload marks the right step', () => {
+    // update, unmanaged: queued=1 ... migrate=7, so a failure in migrate leaves revision 8.
+    const model = stepModel({ action: 'update', stage: 'failed', terminal: true, revision: '8' }, false, undefined)
     expect(model.map(s => s.status)).toEqual(['finish', 'finish', 'finish', 'finish', 'finish', 'finish', 'error', 'wait', 'wait'])
+    // recovery_required is read the same way.
+    expect(stepModel({ action: 'install', stage: 'recovery_required', terminal: true, revision: '4' }, false, undefined).find(s => s.status === 'error')?.stage).toBe('download')
   })
-  it('does not invent where a failure happened when no running stage was seen', () => {
-    const model = stepModel({ action: 'update', stage: 'recovery_required', terminal: true }, false, undefined)
-    expect(model.every(s => s.status === 'wait')).toBe(true)
+  it('trusts the revision over the last stage seen running', () => {
+    const model = stepModel({ action: 'update', stage: 'failed', terminal: true, revision: '6' }, false, 'migrate')
+    expect(model.find(s => s.status === 'error')?.stage).toBe('quiesce')
+  })
+  it('does not invent where a failure happened without a revision or a stage seen', () => {
+    expect(stepModel({ action: 'update', stage: 'recovery_required', terminal: true }, false, undefined).every(s => s.status === 'wait')).toBe(true)
+  })
+  it('finishes a stage the polls skipped over', () => {
+    // Seen at quiesce, then at migrate: snapshot was never observed but is behind.
+    const model = stepModel({ action: 'update', stage: 'migrate', terminal: false, revision: '7' }, false, 'quiesce')
+    expect(model.find(s => s.stage === 'snapshot')?.status).toBe('finish')
+    expect(model.find(s => s.stage === 'migrate')?.status).toBe('process')
   })
   it('puts a stage the list does not know where it was seen, never dropping it', () => {
     const model = stepModel({ action: 'install', stage: 'start', terminal: false }, false, undefined)

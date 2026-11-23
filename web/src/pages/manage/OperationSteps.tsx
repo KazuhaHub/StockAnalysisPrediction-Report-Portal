@@ -4,10 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { stepModel } from './operationSteps'
 
 const SETTLED = ['complete', 'failed', 'recovery_required']
-/** Stages only a backend app's operation has: seeing one tells a resumed page that the app is managed. */
-const MANAGED_STAGES = ['start', 'probe', 'stop', 'remove_data']
-
-interface Reading { operation_id: string; action: string; stage: string; terminal: boolean }
+interface Reading { operation_id: string; action: string; stage: string; terminal: boolean; revision?: string; managed?: boolean }
 
 /**
  * The last stage this page saw an operation running in. A failure arrives without the stage it happened in, so this
@@ -23,11 +20,12 @@ export function useLastRunning(progress: Reading | null): string | undefined {
 /**
  * The stages of a running operation as a list: the ones behind, the one running now, the ones to come, and the one a
  * failure stopped at. The stage names and their order are the backend's (`operationSteps.ts`); nothing is added here.
- * `managed` is what the release says when the page knows it; a page resumed after a reload infers it from the stage.
+ * `managed` is the operation's own flag from the status reply, which a page resumed after a reload has too; the
+ * release's is only for a reply without it. It never changes while the operation runs, so no step comes or goes.
  */
 export default function OperationSteps({ progress, managed, lastRunning }: { progress: Reading; managed?: boolean; lastRunning?: string }) {
   const { t } = useTranslation()
-  const known = managed ?? MANAGED_STAGES.includes(progress.stage)
+  const known = progress.managed ?? managed ?? false
   const items = stepModel(progress, known, lastRunning)
   if (!items.length) return null
   const current = Math.max(0, items.findIndex(item => item.status === 'process' || item.status === 'error'))

@@ -83,6 +83,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
       uninstallable: !!a.installationId && uninstallable[a.installationId],
       busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
       blocked: flow.busyReason,
+      onRefuse: refuse,
       // The controls are disabled whenever these would refuse, so this is only a race (state changed between render and
       // click): it still answers instead of dropping the click.
       onSwitchVersion: (version: string) => {

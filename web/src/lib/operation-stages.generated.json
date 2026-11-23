@@ -1,0 +1,199 @@
+{
+  "delete_data": {
+    "managed": [
+      "queued",
+      "validate",
+      "revoke",
+      "remove_data",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "revoke",
+      "remove_data",
+      "complete"
+    ]
+  },
+  "disable": {
+    "managed": [
+      "queued",
+      "validate",
+      "revoke",
+      "stop",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "revoke",
+      "complete"
+    ]
+  },
+  "enable": {
+    "managed": [
+      "queued",
+      "validate",
+      "snapshot",
+      "start",
+      "probe",
+      "activate",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "activate",
+      "complete"
+    ]
+  },
+  "import_data": {
+    "managed": [
+      "queued",
+      "validate",
+      "quiesce",
+      "snapshot",
+      "import",
+      "start",
+      "probe",
+      "activate",
+      "complete"
+    ],
+    "unmanaged": []
+  },
+  "install": {
+    "managed": [
+      "queued",
+      "validate",
+      "download",
+      "stage",
+      "prepare_data",
+      "start",
+      "probe",
+      "activate",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "download",
+      "stage",
+      "prepare_data",
+      "activate",
+      "complete"
+    ]
+  },
+  "repair": {
+    "managed": [
+      "queued",
+      "validate",
+      "download",
+      "stage",
+      "quiesce",
+      "start",
+      "probe",
+      "activate",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "download",
+      "stage",
+      "quiesce",
+      "activate",
+      "complete"
+    ]
+  },
+  "restore": {
+    "managed": [
+      "queued",
+      "validate",
+      "revoke",
+      "quiesce",
+      "snapshot",
+      "restore_data",
+      "start",
+      "probe",
+      "activate",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "revoke",
+      "quiesce",
+      "snapshot",
+      "restore_data",
+      "activate",
+      "complete"
+    ]
+  },
+  "restore_import": {
+    "managed": [
+      "queued",
+      "validate",
+      "restore_data",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "restore_data",
+      "complete"
+    ]
+  },
+  "set_data_quota": {
+    "managed": [
+      "queued",
+      "validate",
+      "prepare_data",
+      "complete"
+    ],
+    "unmanaged": []
+  },
+  "uninstall": {
+    "managed": [
+      "queued",
+      "validate",
+      "revoke",
+      "stop",
+      "remove_code",
+      "remove_data",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "revoke",
+      "remove_code",
+      "complete"
+    ]
+  },
+  "update": {
+    "managed": [
+      "queued",
+      "validate",
+      "download",
+      "stage",
+      "quiesce",
+      "snapshot",
+      "migrate",
+      "start",
+      "probe",
+      "activate",
+      "complete"
+    ],
+    "unmanaged": [
+      "queued",
+      "validate",
+      "download",
+      "stage",
+      "quiesce",
+      "snapshot",
+      "migrate",
+      "activate",
+      "complete"
+    ]
+  }
+}

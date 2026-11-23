@@ -53,6 +53,32 @@ beforeEach(() => { auth.user = 'admin'; localStorage.clear(); resetFixtures(apiM
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Install from the catalogue', () => {
+  it('names no publisher id on a catalogue card or in the dialog header when the publisher has no name', async () => {
+    renderPage()
+    await screen.findByText('Charts')
+    expect(document.body.textContent).not.toContain('appStore.publishedBy:stranger')
+    const user = userEvent.setup()
+    await user.click((await screen.findAllByRole('button', { name: /tools|Tools/ }))[0])
+    const head = document.querySelector('.rp-market-detail-head')!
+    expect(head.textContent).not.toContain('stranger')
+  })
+
+  it('keeps the list on screen while the same source is read again', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('Charts')
+    let answer: (value: unknown) => void = () => undefined
+    const base = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : base(url, body))
+    await user.click(screen.getByRole('button', { name: 'appStore.install.custom' }))
+    await user.type(screen.getByRole('textbox', { name: 'appStore.customPrompt' }), catalogueUrl)
+    await user.click(screen.getByRole('button', { name: 'appStore.customOpen' }))
+    await waitFor(() => expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/market/catalogue`).length).toBeGreaterThan(1))
+    expect(screen.getByText('Charts')).toBeTruthy()
+    await act(async () => { answer(catalogue()) })
+    expect(await screen.findByText('Charts')).toBeTruthy()
+  })
+
   it('shows only apps that are not installed, once per app, loaded automatically', async () => {
     withPlatform('installed')
     renderPage()

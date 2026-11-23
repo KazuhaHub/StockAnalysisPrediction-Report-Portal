@@ -43,7 +43,8 @@ function InstallBody({ apps, reload }: { apps: AdminApp[]; reload: (opts?: { qui
     const state = market.catalogue
     if (market.sourcesState === 'uninitialised') return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('appStore.platformNotReady')}><Button onClick={goTrust}>{t('appStore.openTrust')}</Button></Empty>
     if (!market.sources.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={market.sourcesState === 'loading' ? <Spin /> : market.sourcesState === 'failed' ? t('appStore.sourcesFailed') : t('appStore.sourceNone')} />
-    if (!state || state.status === 'loading') return <div className="rp-app-grid-state"><Spin /></div>
+    // A source read again keeps showing what it listed; only a first read waits behind the spinner.
+    if (!state || (state.status === 'loading' && !state.apps.length)) return <div className="rp-app-grid-state"><Spin /></div>
     if (state.status === 'error') return <Alert type="error" title={state.error} action={<Button onClick={market.reload}>{t('appStore.retry')}</Button>} />
     if (!shown.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search.trim() ? t('appStore.noMatches') : t('appStore.catalogueEmpty')} />
     return <div className="rp-app-grid">

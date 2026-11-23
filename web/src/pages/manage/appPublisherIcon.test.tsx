@@ -31,9 +31,10 @@ describe('publisher name', () => {
     expect(screen.getByText('appStore.publishedBy:Kazuha Hub')).toBeTruthy()
     expect(screen.queryByText('appStore.publishedBy:kazuha')).toBeNull()
   })
-  it('falls back to the publisher ID without a name', () => {
-    card(app())
-    expect(screen.getByText('appStore.publishedBy:kazuha')).toBeTruthy()
+  it('shows no publisher line without a name: the ID is never a stand-in', () => {
+    const { container } = card(app())
+    expect(screen.queryByText(/appStore\.publishedBy/)).toBeNull()
+    expect(container.textContent).not.toContain('kazuha')
   })
   it('puts the publisher ID in a keyboard-focusable tooltip on the name', async () => {
     card(app({ publisher_name: 'Kazuha Hub' }))

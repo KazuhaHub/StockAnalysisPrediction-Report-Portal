@@ -41,7 +41,7 @@ export function AppDisplayIcon({ display, iconSha256 }: { display?: AppDisplayVi
   }
   return <Icon aria-hidden />
 }
-/** The name to show for a publisher: its self-declared name, else its ID. Trust stays keyed on the ID. */
-export const publisherLabel = (name: string | undefined, id: string) => name || id
+/** The name to show for a publisher: its self-declared name, or nothing. An ID is never a stand-in for a name; it shows in a details view (`publisherWithId`) and in the tooltip of a name. */
+export const publisherLabel = (name: string | undefined): string | undefined => name || undefined
 /** Details views keep the ID visible: the name when there is one, with the ID that trust is keyed on beside it. */
 export const publisherWithId = (name: string | undefined, id: string) => (name ? `${name} (${id})` : id)
