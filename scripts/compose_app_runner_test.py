@@ -122,5 +122,68 @@ class PortalServiceTests(unittest.TestCase):
         self.assertIn('mkdir -p app-runner-control', compose().split('\nservices:\n', 1)[0])
 
 
+class TaskWorkerServiceTests(unittest.TestCase):
+    def setUp(self):
+        self.worker = service(compose(), 'app-task-worker')
+        self.portal = service(compose(), 'report-portal')
+
+    def test_runs_the_worker_binary_of_the_portal_image(self):
+        self.assertIn('image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal:${PORTAL_VERSION:-latest}', self.worker)
+        self.assertIn('command: ["/app/app-task-worker", "--config", "/app/config/config.yaml"]', self.worker)
+        self.assertIn('restart: unless-stopped', self.worker)
+
+    def test_is_a_single_unpublished_instance_without_the_http_healthcheck(self):
+        for forbidden in ('ports', 'expose', 'replicas', 'scale', 'profiles'):
+            self.assertNotRegex(self.worker, rf'(?m)^\s*{forbidden}\s*:', forbidden)
+        self.assertRegex(self.worker, r'(?m)^    healthcheck:\n\s+disable: true')
+        self.assertNotIn('container_name: report-portal\n', self.worker)
+
+    def test_shares_config_database_uid_and_runner_endpoint_with_the_portal(self):
+        for line in ('- ./config:/app/config', '- rp-data:/app/data', 'source: ${RP_APP_RUNNER_CONTROL_DIR:-./app-runner-control}',
+                     'target: /var/lib/portal-app-runner/control', 'read_only: true', 'create_host_path: false',
+                     'RP_DB_DRIVER: postgres', 'PUID: ${PORTAL_UID:-10001}', 'PGID: ${PORTAL_GID:-10001}',
+                     'RP_APP_RUNNER_SOCKET: ${RP_APP_RUNNER_SOCKET:-}',
+                     'RP_APP_RUNNER_CONTROLLER_UID: ${RP_APP_RUNNER_CONTROLLER_UID:-}',
+                     'RP_APP_RUNNER_CONTROLLER_GID: ${RP_APP_RUNNER_CONTROLLER_GID:-}'):
+            self.assertIn(line, self.worker, line)
+            self.assertIn(line, self.portal, line)
+        dsn = re.search(r'RP_DB_DSN: .*', self.portal)[0]
+        self.assertIn(dsn, self.worker)
+
+    def test_starts_after_the_portal_has_made_the_config_and_schema(self):
+        self.assertRegex(self.worker, r'depends_on:\n\s+report-portal:\n\s+condition: service_healthy')
+
+    def test_gains_no_privilege(self):
+        for forbidden in ('docker.sock', 'privileged', 'pid: host', 'network_mode', 'cap_add'):
+            self.assertNotIn(forbidden, self.worker, forbidden)
+
+
+class ReleaseImageShipsTheTaskWorkerTests(unittest.TestCase):
+    def read(self, *parts):
+        with open(os.path.join(HERE, '..', *parts)) as f:
+            return f.read()
+
+    def test_dockerfile_copies_and_marks_executable(self):
+        text = self.read('Dockerfile.release')
+        self.assertIn('COPY bin/linux-${TARGETARCH}/app-task-worker /app/app-task-worker', text)
+        self.assertRegex(text, r'chmod \+x /app/report-portal /app/app-task-worker\b')
+
+    def test_entrypoint_starts_only_the_portal_or_the_worker(self):
+        text = self.read('docker-entrypoint.sh')
+        self.assertIn('/app/app-task-worker) ;;', text)
+        self.assertIn('*) set -- /app/report-portal ;;', text)
+        self.assertIn('exec gosu "$PUID:$PGID" "$@"', text)
+
+    def test_every_workflow_that_builds_the_image_builds_the_worker(self):
+        release = self.read('.github', 'workflows', 'release.yml')
+        self.assertIn('-o out/app-task-worker ./cmd/app-task-worker', release)
+        self.assertIn('out/app-task-worker "$GOOS" "$GOARCH" "$COMMIT" app-task-worker', release)
+        self.assertIn('bin/linux-amd64/app-task-worker', release)
+        self.assertIn('bin/linux-arm64/app-task-worker', release)
+        for name in ('test.yml', 'ops-deployment-drills.yml'):
+            text = self.read('.github', 'workflows', name)
+            self.assertIn('-o bin/linux-amd64/app-task-worker ./cmd/app-task-worker', text, name)
+
+
 if __name__ == '__main__':
     unittest.main()

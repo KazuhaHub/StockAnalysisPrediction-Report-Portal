@@ -832,6 +832,8 @@ jobs:
           ldflags+=" -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
           go build -trimpath -ldflags "${ldflags}" -o bin/linux-amd64/report-portal ./cmd/report-portal
           sh scripts/check-release-build.sh bin/linux-amd64/report-portal linux amd64 "$sha"
+          go build -trimpath -ldflags "${ldflags}" -o bin/linux-amd64/app-task-worker ./cmd/app-task-worker
+          sh scripts/check-release-build.sh bin/linux-amd64/app-task-worker linux amd64 "$sha" app-task-worker
       - uses: docker/setup-buildx-action@v4
       - name: Build the release image
         uses: docker/build-push-action@v7
@@ -884,6 +886,13 @@ jobs:
             "ci (${sha:0:7}, "*) ;;
             *) echo "::error::version output is missing the injected build id or commit"; exit 1 ;;
           esac
+          # The task worker ships in the same image (a granted network.proxy needs its egress coordinator).
+          # Run without a config path it prints its usage and exits 2: proof it is present, executable and
+          # runs as the unprivileged uid.
+          rc=0
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --user 10001:10001 --entrypoint /app/app-task-worker -e RP_CONFIG= report-portal:ci >/dev/null || rc=$?
+          test "$rc" = 2 || { echo "::error::app-task-worker exited ${rc} without a config, want 2"; exit 1; }
       - name: End-to-end checks against the release image
         run: |
           set -euo pipefail
@@ -961,6 +970,11 @@ jobs:
             out="bin/${goos}-${goarch}/report-portal${ext}"
             GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/report-portal
             sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha"
+            if [ "$goos" = linux ]; then
+              out="bin/${goos}-${goarch}/app-task-worker"
+              GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/app-task-worker
+              sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha" app-task-worker
+            fi
           done
       # release.yml's build-runner job ships app-runner for linux/amd64 and linux/arm64 only (doc 182 D8); the same
       # compile and provenance check run here so a break is found before a tag.

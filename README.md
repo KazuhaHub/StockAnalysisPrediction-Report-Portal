@@ -39,6 +39,8 @@ To update an installation:
 docker compose pull && docker compose up -d
 ~~~
 
+The compose file also starts `app-task-worker`, a second process from the same image that runs background tasks and the egress coordinator behind `network.proxy`. Keep exactly one instance; without it granted network access is refused. See [the handbook](docs/app-platform/07-handbook.md) section 4.4a.
+
 The image tags are `:latest` for the recommended full release, `:beta` for the newest published release including pre-releases, and `:vYYYY.W[.R]` for a pinned release. The first startup creates `./config/config.yaml`; normally only `secret_key` needs to be set manually. Generate one with `openssl rand -hex 32`.
 
 Before upgrading a deployment that predates the CalVer line, read [docs/releases/README.md](docs/releases/README.md). The first CalVer release reads only the **v0.4.72** database schema and converts nothing: a database older than that has to be started once by v0.4.72 first, and one that is older is refused rather than half-upgraded.

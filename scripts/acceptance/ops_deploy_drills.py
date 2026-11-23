@@ -101,11 +101,17 @@ def manifest_digest(imagetools_json):
 
 # ------------------------------------------------------------------ compose
 
+# The Portal image is named by the report-portal service and by the app-task-worker service, which runs the same
+# image and must move with it.
+PORTAL_IMAGE_SERVICES = ("app-task-worker", "report-portal")
+
+
 def compose_image_ref(text):
-    """The report-portal image reference in a compose file; exactly one ghcr.io image line must exist."""
+    """The report-portal image reference in a compose file. One ghcr.io image line per Portal-image service
+    (report-portal and app-task-worker) must exist, and they must name the same reference."""
     refs = [m.group(2) for m in (IMAGE_LINE_RE.match(line) for line in text.splitlines()) if m]
-    if len(refs) != 1:
-        raise ValueError(f"expected one ghcr.io image line in the compose file, found {len(refs)}")
+    if len(refs) != len(PORTAL_IMAGE_SERVICES) or len(set(refs)) != 1:
+        raise ValueError(f"expected {len(PORTAL_IMAGE_SERVICES)} identical ghcr.io image lines in the compose file, found {refs}")
     return refs[0]
 
 
@@ -131,13 +137,10 @@ def changed_line_numbers(a, b):
     return [i + 1 for i in range(n) if (la[i] if i < len(la) else None) != (lb[i] if i < len(lb) else None)]
 
 
-def image_line_number(text):
-    """1-based number of the report-portal image line (the one line the procedure rewrites)."""
+def image_line_numbers(text):
+    """1-based numbers of the report-portal image lines (the only lines the procedure rewrites)."""
     compose_image_ref(text)
-    for number, line in enumerate(text.splitlines(), 1):
-        if IMAGE_LINE_RE.match(line):
-            return number
-    raise ValueError("no image line")
+    return [number for number, line in enumerate(text.splitlines(), 1) if IMAGE_LINE_RE.match(line)]
 
 
 def config_diff_paths(a, b, prefix=""):
@@ -545,9 +548,9 @@ def ops05_checks(f):
     build = f["build"]
     c = []
     c.append(check_result("deployed_compose_differs_from_reference_only_in_the_image_line",
-                          f["config_diff_paths"] == ["services.report-portal.image"], ", ".join(f["config_diff_paths"])))
+                          f["config_diff_paths"] == [f"services.{name}.image" for name in PORTAL_IMAGE_SERVICES], ", ".join(f["config_diff_paths"])))
     c.append(check_result("deployed_compose_text_changes_only_the_image_line",
-                          f["changed_lines"] == [f["image_line_number"]], f"lines {f['changed_lines']}"))
+                          f["changed_lines"] == f["image_line_numbers"], f"lines {f['changed_lines']}"))
     c.append(check_result("container_reference_is_the_built_reference", f["container_config_image"] == build["ref"],
                           f["container_config_image"]))
     c.append(check_result("registry_digest_of_tag_equals_built_digest", f["registry_digest"] == build["digest"],
@@ -756,7 +759,7 @@ class DockerHost:
         os.makedirs(os.path.join(os.path.dirname(self.compose_file), "app-runner-control"), exist_ok=True)
         with open(self.reference_file, "w", encoding="utf-8") as f:  # verbatim, beside the deployed file so paths resolve alike
             f.write(template)
-        return text, changed_line_numbers(template, text), image_line_number(template)
+        return text, changed_line_numbers(template, text), image_line_numbers(template)
 
     def compose_config(self, path):
         out = self.sh(["docker", "compose", "-p", PROJECT, "--project-directory", self.beta, "-f", path, "config",
@@ -1120,7 +1123,7 @@ def drill_ops05(host, rec, build):
     ident = host.loaded_identity()
     facts = {"mode": "candidate", "image_ref": ref, "build": build, "run_commit": host.env.get("GITHUB_SHA", ""),
              "expected_commit": host.env.get("OPS_DRILL_EXPECTED_COMMIT", ""),
-             "config_diff_paths": host.config_diff(), "changed_lines": changed, "image_line_number": image_line,
+             "config_diff_paths": host.config_diff(), "changed_lines": changed, "image_line_numbers": image_line,
              "registry_digest": host.tag_digest(ref), "healthy": healthy, **ident}
     return ops05_checks(facts), facts
 

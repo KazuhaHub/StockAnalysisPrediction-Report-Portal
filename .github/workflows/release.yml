@@ -393,10 +393,18 @@ jobs:
           # the binary itself, so a wrong module path (which makes every -X a silent no-op) or a
           # checkout of the wrong commit cannot pass.
           sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT"
+          # The application task worker owns the background egress coordinator (doc 174 section 9): without
+          # it no service egress session is ever opened and a granted network.proxy is always refused. It is
+          # built exactly like the portal and ships beside it on Linux, where the image and the runner live.
+          if [ "$GOOS" = linux ]; then
+            go build -trimpath -ldflags="${ldflags}" -o out/app-task-worker ./cmd/app-task-worker
+            sh scripts/check-release-build.sh out/app-task-worker "$GOOS" "$GOARCH" "$COMMIT" app-task-worker
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: report-portal-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: out/report-portal${{ matrix.ext }}
+          # The whole directory: report-portal everywhere, plus app-task-worker on Linux.
+          path: out
           if-no-files-found: error
           retention-days: 1
 
@@ -610,6 +618,10 @@ jobs:
             mkdir -p "build/${pkg}"
             cp "${dir}/report-portal${ext}" "build/${pkg}/"
             chmod +x "build/${pkg}/report-portal${ext}" || true
+            if [ "$goos" = "linux" ]; then
+              cp "${dir}/app-task-worker" "build/${pkg}/"
+              chmod +x "build/${pkg}/app-task-worker"
+            fi
             # README + example config + LICENSE are tracked files; a missing one must fail the
             # release loudly rather than ship an incomplete archive.
             cp README.md config.example.yaml LICENSE "build/${pkg}/"
@@ -750,7 +762,7 @@ jobs:
         with: { name: report-portal-linux-amd64, path: bin/linux-amd64 }
       - uses: actions/download-artifact@v8
         with: { name: report-portal-linux-arm64, path: bin/linux-arm64 }
-      - run: chmod +x bin/linux-amd64/report-portal bin/linux-arm64/report-portal
+      - run: chmod +x bin/linux-amd64/report-portal bin/linux-amd64/app-task-worker bin/linux-arm64/report-portal bin/linux-arm64/app-task-worker
       - name: Recheck the immutable tag before image publication
         shell: bash
         env:
