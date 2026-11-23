@@ -30,6 +30,17 @@ func validPlatformUpdateStartBootForActivation(boot platformUpdateStartBootObser
 }
 
 func (s *Server) activatePlatformUpdateStart(ctx context.Context, lease platformOperationLease, endpoint platformRuntimeEndpoint) (platformActivationResult, error) {
+	return s.activatePlatformUpdateStartWith(ctx, lease, endpoint, s.probePlatformUpdateStartBoot)
+}
+
+// activatePlatformUpdateStartWith activates with the given boot probe. The runner is asked about a carried proxy
+// grant first, as a real proxy approval would be, so that its time cannot use up the freshness window of the boot
+// evidence the probe returns.
+func (s *Server) activatePlatformUpdateStartWith(ctx context.Context, lease platformOperationLease, endpoint platformRuntimeEndpoint, probe func(context.Context, platformOperationLease, platformRuntimeEndpoint) (platformUpdateStartBootObservation, error)) (platformActivationResult, error) {
+	var check *platformProxyRunnerCheck
+	if lease.snapshot.Action == appplatform.ActionUpdate {
+		check = s.observePlatformProxyCheck(ctx, s.st.poolExec(), lease.installationID, endpoint)
+	}
 	intent, err := s.preparePlatformUpdateStartRegistration(ctx, lease)
 	if err != nil {
 		return platformActivationResult{}, err
@@ -38,14 +49,20 @@ func (s *Server) activatePlatformUpdateStart(ctx context.Context, lease platform
 	if !intent.applied {
 		return platformActivationResult{}, errAppPlatformStageEvidence
 	}
-	boot, err := s.probePlatformUpdateStartBoot(ctx, lease, endpoint)
+	boot, err := probe(ctx, lease, endpoint)
 	if err != nil {
 		return platformActivationResult{}, err
 	}
-	return s.commitPlatformUpdateStartActivation(ctx, lease, intent, boot)
+	return s.commitPlatformUpdateStartActivationChecked(ctx, lease, intent, boot, check)
 }
 
+// commitPlatformUpdateStartActivation activates with no runner check; the scheduler's path is
+// activatePlatformUpdateStart, which passes the runner's answer.
 func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, boot platformUpdateStartBootObservation) (platformActivationResult, error) {
+	return s.commitPlatformUpdateStartActivationChecked(ctx, lease, intent, boot, nil)
+}
+
+func (s *Server) commitPlatformUpdateStartActivationChecked(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, boot platformUpdateStartBootObservation, proxyCheck *platformProxyRunnerCheck) (platformActivationResult, error) {
 	var zero platformActivationResult
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
@@ -136,11 +153,12 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	}
 	var capabilities []platformSelectedCapability
 	if lease.snapshot.Action == appplatform.ActionUpdate {
-		capabilities, err = platformInstallCapabilitySelection(
-			manifest.Manifest, source.runtimeTarget)
+		chosen, err := platformUpdateCapabilities(
+			e, lease.installationID, manifest.Manifest, source.runtimeTarget, proxyCheck)
 		if err != nil {
 			return zero, err
 		}
+		capabilities = chosen.capabilities
 	}
 	var sourceActivation, sourceRelease, sourceState string
 	var sourceGeneration, sourcePolicy, sourceFormat int64
@@ -288,6 +306,17 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 			e, lease.installationID, capabilities, true,
 			plan.TargetPolicyRevision, planID, nil,
 			errAppPlatformStageEvidence); err != nil {
+			return zero, err
+		}
+		// A carried network.proxy grant needs the consumed plan that backs it under the new release.
+		carried, carriedFrom, err := platformCarryProxyPlan(
+			e, lease.installationID, planID, plan.TargetReleaseSHA256,
+			plan.TargetGeneration, plan.SourcePolicyRevision, capabilities, now)
+		if err != nil {
+			return zero, err
+		}
+		if err := platformAuditUpdateKept(
+			e, lease.installationID, planID, carried, carriedFrom, capabilities, now); err != nil {
 			return zero, err
 		}
 	} else {

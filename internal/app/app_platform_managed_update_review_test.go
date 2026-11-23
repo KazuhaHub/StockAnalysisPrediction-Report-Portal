@@ -53,6 +53,9 @@ func platformManagedUpdateProjectionFixtureWith(t *testing.T, pg bool, mutate fu
 		access = platformWritableAccessFixture
 	}
 	s, actor, lease := access(t, pg)
+	if platformUpdateFixtureAfterInstall != nil {
+		platformUpdateFixtureAfterInstall(t, s, lease.installationID)
+	}
 	var planRaw string
 	var revision, policy, format int64
 	var active, epoch, runtimeID string

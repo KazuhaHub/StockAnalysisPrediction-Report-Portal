@@ -11,6 +11,12 @@ import (
 // fixture flips the row the way the enable action does.
 func platformPrincipalsFixture(t *testing.T, pg bool) (*Server, platformActorSession, string) {
 	t.Helper()
+	s, _, reader, id := platformPrincipalsFixtureAdmin(t, pg)
+	return s, reader, id
+}
+
+func platformPrincipalsFixtureAdmin(t *testing.T, pg bool) (*Server, platformActorSession, platformActorSession, string) {
+	t.Helper()
 	s, admin := platformTrustTestServer(t, pg)
 	platformRegisterTestPublisher(t, s, admin)
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.1")
@@ -37,7 +43,7 @@ func platformPrincipalsFixture(t *testing.T, pg bool) (*Server, platformActorSes
 		t.Fatal("install must leave the optional principals.read grant off")
 	}
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='principals.read'`, id)
-	return s, reader, id
+	return s, admin, reader, id
 }
 
 func TestPlatformPrincipalsReadDoesNotBlockStaticLaunch(t *testing.T) {

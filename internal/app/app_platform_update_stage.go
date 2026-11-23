@@ -297,7 +297,7 @@ func (s *Store) activatePlatformStaticUpdate(ctx context.Context, expected platf
 	if err != nil {
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
-	selection, err := platformInstallCapabilitySelection(manifest.Manifest, nil)
+	selection, err := platformUpdateCapabilitySelection(e, expected.installationID, manifest.Manifest, nil)
 	if err != nil {
 		return platformOperationLease{}, err
 	}
@@ -395,6 +395,9 @@ func (s *Store) activatePlatformStaticUpdate(ctx context.Context, expected platf
 			expected.installationID, capability.capability, boolInt(capability.granted), capability.policy, admitted.plan.TargetPolicyRevision, admitted.planID, now, now); err != nil {
 			return platformOperationLease{}, err
 		}
+	}
+	if err := platformAuditUpdateKept(e, expected.installationID, admitted.planID, "", "", selection, now); err != nil {
+		return platformOperationLease{}, err
 	}
 	if _, err := e.exec(`UPDATE app_platform_operations SET stage='complete',state_revision=?,row_revision=row_revision+1,completed_ms=?,lease_owner=NULL,lease_until_ms=NULL,updated_ms=? WHERE id=? AND stage='activate' AND state_revision=? AND row_revision=?`,
 		int64(completed.Snapshot().Revision), now, now, expected.id, int64(expected.snapshot.Revision), expected.rowRevision); err != nil {

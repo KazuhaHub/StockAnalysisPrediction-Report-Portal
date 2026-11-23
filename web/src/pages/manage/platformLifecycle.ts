@@ -35,6 +35,11 @@ export type UpdateReview = {
   declined_capabilities: string[]
   previous_capabilities: string[]
   target_capabilities: string[]
+  // Optional grants the update keeps with their current policy, the proxy policy among them, and the network
+  // capabilities whose policy becomes the release default. Absent in a review from an older server.
+  kept_capabilities?: string[]
+  kept_proxy?: { hosts: string[]; pins: { host: string; address: string; port: number }[]; daily_bytes: number }
+  policy_reset?: string[]
   declared_data_schema: string
   grants_sha256: string
   // The quota the update raises before the new release starts (doc 185 section 3.2). All fields are decimal strings.

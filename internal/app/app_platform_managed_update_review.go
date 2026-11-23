@@ -552,7 +552,7 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 	return result, nil
 }
 
-func platformBuildManagedUpdateProjection(e migExec, installation string, source platformManagedUpdateSource, sourceRevision, sourcePolicy, currentFormat int64, actor platformActorFacts, control platformActorControl, target *platformManagedInstallTarget, release platformStagedRelease) (platformUpdateProjection, error) {
+func platformBuildManagedUpdateProjection(e migExec, installation string, source platformManagedUpdateSource, sourceRevision, sourcePolicy, currentFormat int64, actor platformActorFacts, control platformActorControl, target *platformManagedInstallTarget, release platformStagedRelease, proxyChecks ...*platformProxyRunnerCheck) (platformUpdateProjection, error) {
 	if target == nil || !platformManagedFormat(source.format) ||
 		!samePlatformManagedUpdateRuntime(source.runtime, target) ||
 		source.generation < 1 || source.generation == math.MaxInt64 ||
@@ -582,11 +582,16 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 		parsed.Manifest, source.format, target); err != nil {
 		return platformUpdateProjection{}, err
 	}
-	selection, err := platformInstallCapabilitySelection(
-		parsed.Manifest, target)
+	var proxyCheck *platformProxyRunnerCheck
+	if len(proxyChecks) > 0 {
+		proxyCheck = proxyChecks[0]
+	}
+	chosen, err := platformUpdateCapabilities(
+		e, installation, parsed.Manifest, target, proxyCheck)
 	if err != nil {
 		return platformUpdateProjection{}, err
 	}
+	selection := chosen.capabilities
 	previous, err := platformCurrentCapabilities(e, installation)
 	if err != nil {
 		return platformUpdateProjection{}, err
@@ -640,6 +645,7 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 		CurrentDataFormat:    currentFormat,
 		PreviousCapabilities: previous, TargetCapabilities: targetCapabilities,
 		GrantsSHA256: grants, Target: targetProjection,
+		KeptCapabilities: chosen.kept, KeptProxy: chosen.keptProxy, PolicyReset: chosen.reset,
 		Migration: migration,
 	}, nil
 }
@@ -670,6 +676,9 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 		return platformRemovalReview{}, err
 	}
 	var result platformRemovalReview
+	// A granted proxy the update would carry is checked against the runner now, outside any transaction: the
+	// review refuses when the runner no longer lists every pin or serves another profile.
+	proxyCheck := s.observePlatformProxyCheck(ctx, s.st.poolExec(), installation, endpoint)
 	// An update that raises the quota asks the runner whether its capacity can hold the raise, in two phases: the
 	// question is signed in one transaction, the runner is asked outside any transaction, and the review is built
 	// again and written in a second one with the answer. An update that raises nothing is written in the first.
@@ -733,7 +742,7 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 				}
 				projection, err := platformBuildManagedUpdateProjection(
 					e, installation, source, revision, policy, activeFormat,
-					actor, control, target, verified)
+					actor, control, target, verified, proxyCheck)
 				if err != nil {
 					return err
 				}

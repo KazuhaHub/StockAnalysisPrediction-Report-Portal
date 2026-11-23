@@ -101,6 +101,13 @@ func platformUpdateStartEndpointFixture() platformRuntimeEndpoint {
 	return platformRuntimeEndpoint{path: "/run/portal-test/update-start.sock", controllerUID: 1000, controllerGID: 1001}
 }
 
+// platformUpdateFixtureAfterInstall runs once the update-start fixture has installed the application and before
+// the update operation exists, so a test can change the installation the way an administrator would (a proxy
+// review, say). platformUpdateFixtureTargetHook changes the manifest of the release the update goes to. Tests that
+// set them do not run in parallel and restore them.
+var platformUpdateFixtureAfterInstall func(t *testing.T, s *Server, installation string)
+var platformUpdateFixtureTargetHook func(*appplatform.Manifest)
+
 func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt, platformManagedUpdatePlan) {
 	t.Helper()
 	return platformManagedUpdateStartFixtureMode(t, pg, false)
@@ -115,10 +122,17 @@ func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Se
 	t.Helper()
 	var s *Server
 	var checkpointLease platformOperationLease
-	if writable {
-		s, checkpointLease = platformWritableCheckpointUpdateFixture(t, pg)
-	} else {
-		s, checkpointLease = platformCheckpointUpdateFixture(t, pg)
+	{
+		var install platformOperationLease
+		if writable {
+			s, _, install = platformWritableAccessFixture(t, pg)
+		} else {
+			s, _, install = platformManagedAccessFixture(t, pg)
+		}
+		if platformUpdateFixtureAfterInstall != nil {
+			platformUpdateFixtureAfterInstall(t, s, install.installationID)
+		}
+		s, checkpointLease = platformCheckpointUpdateForInstall(t, s, install)
 	}
 	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(
 		operation_id,stage,effect_number,effect_id,kind,payload_sha256,
@@ -195,6 +209,16 @@ func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Se
 	if err != nil {
 		t.Fatal(err)
 	}
+	if platformUpdateFixtureTargetHook != nil {
+		var typed appplatform.Manifest
+		if err := json.Unmarshal(rawManifest, &typed); err != nil {
+			t.Fatal(err)
+		}
+		platformUpdateFixtureTargetHook(&typed)
+		if rawManifest, err = json.Marshal(typed); err != nil {
+			t.Fatal(err)
+		}
+	}
 	targetRelease, err := s.stagePlatformRelease(session, rawManifest, platformSignTestDescriptor(t, rawManifest), archive)
 	if err != nil {
 		t.Fatal(err)
@@ -218,12 +242,13 @@ func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Se
 		sourcePlan.Runtime == nil {
 		t.Fatal("source runtime plan", err)
 	}
+	sourcePolicy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_installations WHERE id=?`, startLease.installationID)
 	plan := platformManagedUpdatePlan{
 		Format: platformManagedUpdateFormat, InstallationID: startLease.installationID,
 		AppID: sourceApp, PublisherID: publisher,
 		SourceReleaseSHA256: checkpoint.ReleaseSHA256, TargetReleaseSHA256: targetRelease.sha256,
 		SourceGeneration: 1, TargetGeneration: 2,
-		SourcePolicyRevision: 1, TargetPolicyRevision: 2,
+		SourcePolicyRevision: sourcePolicy, TargetPolicyRevision: sourcePolicy + 1,
 		ControllerEpoch: startLease.controllerEpoch, RecoverySetID: recoverySetID,
 		CheckpointOperationID: startLease.id, CheckpointEffectID: checkpoint.EffectID,
 		CheckpointID: checkpoint.CheckpointID, CheckpointManifestSHA256: checkpoint.ManifestSHA256,
@@ -238,7 +263,7 @@ func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Se
 	}
 	planID := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, startLease.id)
 	mustExec(t, s.st, `UPDATE app_platform_review_plans SET action='update',source_release_sha256=?,target_release_sha256=?,installation_revision=?,policy_revision=?,trust_revision=?,controller_epoch=?,plan_json=?,plan_sha256=?,updated_ms=? WHERE id=?`,
-		checkpoint.ReleaseSHA256, targetRelease.sha256, startLease.rowRevision, 1,
+		checkpoint.ReleaseSHA256, targetRelease.sha256, startLease.rowRevision, sourcePolicy,
 		targetRelease.trustRevision, startLease.controllerEpoch, string(planRaw),
 		platformDigest(planRaw), now, planID)
 	return s, startLease, checkpoint, plan

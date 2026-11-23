@@ -290,7 +290,7 @@ func loadPlatformLatestProxyPlan(e migExec, installation string) (platformProxyP
 		FROM app_platform_review_plans
 		WHERE installation_id=? AND action='update' AND consumed_ms IS NOT NULL AND target_release_sha256 IS NULL
 		AND plan_json LIKE ?
-		ORDER BY policy_revision DESC,consumed_ms DESC,id DESC LIMIT 1`, installation, platformProxyPlanPattern()).
+		ORDER BY policy_revision DESC,id DESC LIMIT 1`, installation, platformProxyPlanPattern()).
 		Scan(&row.id, &raw, &digest, &source, &epoch); err != nil {
 		return row, err
 	}
