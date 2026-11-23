@@ -504,7 +504,8 @@ async function progressScenario(browser, url, expected, name, options = {}) {
     await dialog.waitFor();
     const status = dialog.locator('div[role="status"]');
     await status.waitFor();
-    await page.getByText(expected, { exact: true }).waitFor();
+    // The status tag and the step list can both carry the stage name ("Queued"), so wait for the first match.
+    await page.getByText(expected, { exact: true }).first().waitFor();
     const text = await status.innerText();
     if (!text.includes(expected)) {
       throw new Error(`progress state ${expected} missing: ${text}`);

@@ -525,7 +525,7 @@ jobs:
           chmod +x "$worker"
           # Without a config path it prints its usage and exits 2: the arm64 build loads and runs natively.
           rc=0
-          RP_CONFIG= "$worker" >/dev/null || rc=$?
+          RP_CONFIG='' "$worker" >/dev/null || rc=$?
           test "$rc" = 2 || { echo "::error::app-task-worker exited ${rc} without a config, want 2"; exit 1; }
       - name: Run version and probe /healthz
         shell: bash
