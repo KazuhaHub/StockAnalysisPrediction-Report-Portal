@@ -54,6 +54,12 @@ const (
 	EffectsUnknown  EffectOutcome = "unknown"
 )
 
+// AllActions lists every operation action. The web console's stage lists are generated from it, so an action added to
+// the constants above must be added here too (a test reads the constants and fails when one is missing).
+func AllActions() []Action {
+	return []Action{ActionInstall, ActionUpdate, ActionDisable, ActionEnable, ActionRepair, ActionUninstall, ActionDeleteData, ActionRestore, ActionSetDataQuota, ActionImportData, ActionRestoreImport}
+}
+
 var (
 	ErrInvalidTransition = errors.New("invalid application operation transition")
 	ErrRevisionConflict  = errors.New("application operation revision conflict")

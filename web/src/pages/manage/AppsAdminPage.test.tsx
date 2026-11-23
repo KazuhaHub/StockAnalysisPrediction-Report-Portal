@@ -294,7 +294,16 @@ describe('A platform app card', () => {
     await user.click(button)
     expect(apiMock.post.mock.calls.some(([url]) => url === `${root}/market/stage`)).toBe(false)
     expect(await screen.findByText('appStore.busyPending')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'appStore.switchVersion' }).getAttribute('aria-disabled')).toBe('true')
+    const swap = screen.getByRole('button', { name: 'appStore.switchVersion' }) as HTMLButtonElement
+    expect(swap.getAttribute('aria-disabled')).toBe('true')
+    // Reachable by keyboard like the update button: not `disabled`, focusable, and a press answers with the reason.
+    expect(swap.hasAttribute('disabled')).toBe(false)
+    swap.focus()
+    expect(document.activeElement).toBe(swap)
+    expect(swap.getAttribute('aria-describedby')).toBe(button.getAttribute('aria-describedby'))
+    await user.click(swap)
+    expect(screen.queryByRole('menuitem')).toBeNull()
+    expect((await screen.findAllByText('appStore.busyPending')).length).toBeGreaterThan(0)
   })
 
   it('keeps View in catalogue usable while an action is blocked, and gates only the lifecycle items', async () => {

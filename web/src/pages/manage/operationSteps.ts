@@ -30,15 +30,19 @@ export function operationStages(action: string, managed: boolean): OperationStag
 const FAILED = ['failed', 'recovery_required']
 export interface StepReading { action: string; stage: string; terminal: boolean; revision?: string }
 
+/** Actions a failed operation can be settled in afterwards (Go: Settle, SettleNeverStarted, SettleStartNeverRan). */
+const SETTLEABLE = ['install', 'enable', 'repair', 'import_data', 'restore', 'restore_import', 'set_data_quota']
+
 /**
  * Where a failed operation failed. Revision n is the n-th stage (queued is 1) and a failure leaves it one past the
  * stage it happened in, so the failed stage is the one at revision - 2 (Go: SettleStartNeverRan reads it the same
- * way). A failure settled afterwards (the restore, import and never-started cases) sits one revision further, so that
- * rare case marks the step after the failed one. Without a usable revision it falls back to the last stage seen running,
- * or to nothing: no guess.
+ * way). That holds for recovery_required, and for `failed` on an action with no settle path. A `failed` operation of an
+ * action that can be settled may have been settled afterwards, which leaves it one revision further, and the reply cannot
+ * tell the two apart: there no step is marked unless this page saw that stage running itself. Never a guess.
  */
 export function failedStage(progress: StepReading, stages: OperationStage[], lastRunning: OperationStage | undefined): OperationStage | undefined {
   const revision = Number(progress.revision)
+  if (progress.stage === 'failed' && SETTLEABLE.includes(progress.action)) return lastRunning
   if (Number.isInteger(revision) && revision >= 2 && revision - 2 < stages.length - 1) return stages[revision - 2]
   return lastRunning
 }

@@ -3,7 +3,12 @@ package appplatform
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +18,7 @@ import (
 const operationStagesContract = "../../web/src/lib/operation-stages.generated.json"
 
 func TestOperationStagesMatchTheWebContract(t *testing.T) {
-	actions := []Action{ActionInstall, ActionUpdate, ActionDisable, ActionEnable, ActionRepair, ActionUninstall, ActionDeleteData, ActionRestore, ActionSetDataQuota, ActionImportData, ActionRestoreImport}
+	actions := AllActions()
 	type lists struct {
 		Managed   []Stage `json:"managed"`
 		Unmanaged []Stage `json:"unmanaged"`
@@ -45,5 +50,37 @@ func TestOperationStagesMatchTheWebContract(t *testing.T) {
 	}
 	if !bytes.Equal(have, want) {
 		t.Fatal("web/src/lib/operation-stages.generated.json is out of date; regenerate it (see the comment above) and update web/src/pages/manage/operationSteps.ts")
+	}
+}
+
+// A new Action constant must be listed in AllActions, or the contract would silently leave it without stages.
+func TestAllActionsListsEveryActionConstant(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "operation.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value := spec.(*ast.ValueSpec)
+			if ident, ok := value.Type.(*ast.Ident); ok && ident.Name == "Action" {
+				for _, literal := range value.Values {
+					declared = append(declared, strings.Trim(literal.(*ast.BasicLit).Value, `"`))
+				}
+			}
+		}
+	}
+	var listed []string
+	for _, action := range AllActions() {
+		listed = append(listed, string(action))
+	}
+	sort.Strings(declared)
+	sort.Strings(listed)
+	if strings.Join(declared, ",") != strings.Join(listed, ",") {
+		t.Fatalf("AllActions %v does not match the Action constants %v", listed, declared)
 	}
 }

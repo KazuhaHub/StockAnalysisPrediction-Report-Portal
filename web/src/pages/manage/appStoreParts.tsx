@@ -89,7 +89,7 @@ export function InstalledControls({ app, catalogue, uninstallable, busy, blocked
       {reason && <span id={reasonId} className="rp-sr-only">{reason}</span>}
       {newest && <Button size="small" type="text" {...inert} className={['rp-app-update', inert.className].filter(Boolean).join(' ')} icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={reason || updateLabel} loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); if (blocked) onRefuse?.(); else onSwitchVersion(newest) }} />}
       {versionItems.length > 0 && (
-        <Dropdown trigger={['click']} menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} disabled={!idle}>
+        <Dropdown menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} trigger={idle ? ['click'] : []}>
           <Button size="small" type="text" {...inert} icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={reason || t('appStore.switchVersion')} onClick={e => { e.stopPropagation(); if (blocked) onRefuse?.() }} />
         </Dropdown>
       )}

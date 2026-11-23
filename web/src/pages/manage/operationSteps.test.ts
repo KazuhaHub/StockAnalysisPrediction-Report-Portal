@@ -69,6 +69,20 @@ describe('stepModel', () => {
     const model = stepModel({ action: 'update', stage: 'failed', terminal: true, revision: '6' }, false, 'migrate')
     expect(model.find(s => s.status === 'error')?.stage).toBe('quiesce')
   })
+  it('marks no step for a failed operation of an action that can be settled, unless the stage was seen running', () => {
+    // Managed install: start is the 6th stage. A failure there leaves revision 7; SettleNeverStarted makes it 8, which
+    // reads like a failure at probe. The reply cannot tell them apart, so nothing is marked.
+    const settled = stepModel({ action: 'install', stage: 'failed', terminal: true, revision: '8' }, true, undefined)
+    expect(settled.every(s => s.status === 'wait')).toBe(true)
+    // SettleStartNeverRan closes an enable or repair that ended at start.
+    expect(stepModel({ action: 'enable', stage: 'failed', terminal: true, revision: '5' }, true, undefined).every(s => s.status === 'wait')).toBe(true)
+    expect(stepModel({ action: 'repair', stage: 'failed', terminal: true, revision: '9' }, true, undefined).every(s => s.status === 'wait')).toBe(true)
+    // Seen live, a direct failure marks the right step.
+    expect(stepModel({ action: 'install', stage: 'failed', terminal: true, revision: '7' }, true, 'start').find(s => s.status === 'error')?.stage).toBe('start')
+  })
+  it('still reads recovery_required from the revision, for any action', () => {
+    expect(stepModel({ action: 'enable', stage: 'recovery_required', terminal: true, revision: '5' }, true, undefined).find(s => s.status === 'error')?.stage).toBe('start')
+  })
   it('does not invent where a failure happened without a revision or a stage seen', () => {
     expect(stepModel({ action: 'update', stage: 'recovery_required', terminal: true }, false, undefined).every(s => s.status === 'wait')).toBe(true)
   })
