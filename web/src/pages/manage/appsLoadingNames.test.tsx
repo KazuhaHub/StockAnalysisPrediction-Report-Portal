@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup } from '@testing-library/react'
-import { installedDisplay, installedPublisher, type AdminApp } from './appsAdminModel'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, renderHook } from '@testing-library/react'
+import { installedDisplay, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
+
+const language = vi.hoisted(() => ({ value: 'zh-CN' }))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: language.value } }) }))
 
 const display = { icon: 'dashboard', texts: [
   { locale: 'en-US', name: 'Market Monitor', description: 'Live watchlists' },
@@ -26,5 +29,22 @@ describe('an installed app shows what the layout carries, from the first paint',
     expect(installedDisplay(app, 'en-US', 'Market Monitor')).toEqual({ name: 'Market Monitor', description: 'Live watchlists' })
     // Without a verified display the layout's own name stands, and the id is never the name.
     expect(installedDisplay({ ...app, display: undefined }, 'zh-CN', 'Market Monitor')).toEqual({ name: 'Market Monitor', description: '' })
+  })
+})
+
+describe('every console place that names a platform app speaks in the reader’s language', () => {
+  // The layout's own `name` is the English display name; the verified display carries every language.
+  const named: AdminApp = { ...app, name: 'Market Monitor' }
+  it.each([['zh-CN', '市场监控'], ['zh-TW', '市場監控'], ['en-US', 'Market Monitor']])('titles the app in %s from its verified display', (lang, expected) => {
+    language.value = lang
+    const { result } = renderHook(() => useAppLabels())
+    expect(result.current.title(named)).toBe(expected)
+  })
+
+  it('keeps the layout name for an app without a verified display, and a built-in or v1 app as it was', () => {
+    language.value = 'zh-CN'
+    const { result } = renderHook(() => useAppLabels())
+    expect(result.current.title({ ...named, display: undefined })).toBe('Market Monitor')
+    expect(result.current.title({ ...named, platform: false, display: undefined, name: 'Hello' })).toBe('Hello')
   })
 })

@@ -8,10 +8,11 @@ import AppDetailPage from './AppDetailPage'
 import { installed, layout } from './appsAdminFixtures'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), del: vi.fn() }))
+const lang = vi.hoisted(() => ({ value: 'en-US' }))
 vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request failed', ApiError: class extends Error {} }))
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: unknown) => (o === undefined ? k : `${k}:${JSON.stringify(o)}`)
-  const hook = { t, i18n: { language: 'en-US' } }
+  const hook = { t, i18n: { get language() { return lang.value } } }
   return { useTranslation: () => hook }
 })
 // The backend dialog has its own behaviour; here only whether this page opens it matters.
@@ -41,6 +42,7 @@ const renderAt = (path: string, algorithm = theme.defaultAlgorithm) =>
   )
 
 beforeEach(() => {
+  lang.value = 'en-US'
   apiMock.get.mockReset()
   apiMock.del.mockReset()
   apiMock.get.mockImplementation(async (url: string) => {
@@ -49,6 +51,24 @@ beforeEach(() => {
     throw new Error(`unexpected ${url}`)
   })
   apiMock.del.mockResolvedValue({})
+})
+
+describe('App detail: platform app names', () => {
+  const key = '33333333-3333-4333-8333-333333333333'
+  const display = { icon: 'dashboard', texts: [
+    { locale: 'en-US', name: 'Market Monitor', description: 'Live watchlists' },
+    { locale: 'zh-CN', name: '市场监控', description: '实时看板' },
+    { locale: 'zh-TW', name: '市場監控', description: '即時看板' },
+  ] }
+  const entry = { key: `platform:${key}`, kind: 'platform', name: 'Market Monitor', builtin: false, installation_id: key, app_id: 'market-monitor', publisher_id: 'kazuha-hub', state: 'installed', version: '1.4.0', display, access: [] }
+  it.each([['zh-CN', '市场监控'], ['en-US', 'Market Monitor']])('titles the header and the breadcrumb in %s from the verified display', async (language, expected) => {
+    lang.value = language
+    apiMock.get.mockImplementation(async (url: string) => url === '/api/admin/apps/layout' ? { apps: [entry] } : { apps: installed })
+    renderAt(`/manage/apps/${encodeURIComponent(`platform:${key}`)}`)
+    expect(await screen.findByRole('heading', { name: expected })).toBeTruthy()
+    const crumb = screen.getByRole('navigation', { name: 'apps.breadcrumb' })
+    expect(within(crumb).getByText(expected)).toBeTruthy()
+  })
 })
 
 describe('App detail: built-in app', () => {

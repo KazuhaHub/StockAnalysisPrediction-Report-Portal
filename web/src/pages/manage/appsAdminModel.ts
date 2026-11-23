@@ -64,9 +64,12 @@ export const appPath = (key: string) => `/manage/apps/${encodeURIComponent(key)}
 
 /** Display strings for an app: a built-in one is translated, an installed one speaks for itself. */
 export function useAppLabels() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const lang = i18n?.language || 'en-US'
   return {
-    title: (a: AdminApp) => (a.builtinDef ? t(a.builtinDef.titleKey) : a.name),
+    // A platform app speaks in the reader's language from its verified display (the layout's own `name` is the English
+    // one); an installed v1 app uses its declared name. Every console place that names an app goes through here.
+    title: (a: AdminApp) => (a.builtinDef ? t(a.builtinDef.titleKey) : a.platform ? installedDisplay(a, lang, a.name).name : a.name),
     description: (a: AdminApp) => (a.builtinDef ? t(a.builtinDef.descKey) : ''),
   }
 }
