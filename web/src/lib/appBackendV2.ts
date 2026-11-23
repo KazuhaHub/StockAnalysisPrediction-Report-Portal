@@ -6,11 +6,13 @@ import {
   type BridgeBinding,
   type BridgeBackendRequest,
   type BridgeBackendResponse,
+  type BridgeSurface,
 } from "./bridge-v2";
 
 // Parent-only transport. App data never supplies a URL, headers or identity.
 // A failure after fetch starts may follow a successful app write; never retry.
-export function createAppBackendTransport(binding: BridgeBinding) {
+// `surface` picks the endpoint the server signs the request for; it is fixed by the launch, never by the app.
+export function createAppBackendTransport(binding: BridgeBinding, surface: BridgeSurface = "reader") {
   const { installationId, generation, policyRevision, releaseSha256 } = binding;
   if (
     !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(installationId) ||
@@ -22,7 +24,7 @@ export function createAppBackendTransport(binding: BridgeBinding) {
   )
     throw new BridgeBackendError("unavailable");
   const bound = Object.freeze({ generation, policyRevision, releaseSha256 });
-  const url = `/api/app-platform/installations/${installationId}/backend`;
+  const url = `/api/app-platform/installations/${installationId}/${surface === "admin" ? "admin/" : ""}backend`;
   return async (
     value: BridgeBackendRequest,
     signal: AbortSignal,

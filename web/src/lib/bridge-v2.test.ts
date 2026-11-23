@@ -2311,3 +2311,42 @@ describe("derived parent origin", () => {
     await vi.waitFor(() => expect(answered()).toBe(true));
   });
 });
+
+async function surfacePair(surface?: "reader" | "admin", extra: Record<string, unknown> = {}) {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation: { ...presentation, ...extra } as typeof presentation,
+    capabilities: [],
+    ...(surface ? { surface } : {}),
+  });
+  const client = createBridgeClient({ localWindow: w.child, parentWindow: w.host, onPresentation: () => {} });
+  cleanup.push(() => client.close(), () => host.close());
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  return { ...w, client };
+}
+
+test("the bridge context tells the app which surface it serves", async () => {
+  const reader = await surfacePair();
+  expect(reader.client.context()?.surface).toBe("reader");
+  // A reader's init message stays byte-compatible with an SDK that predates admin pages.
+  expect(reader.sent.find((item) => item.data.type === "app:init")!.data).not.toHaveProperty("surface");
+  const admin = await surfacePair("admin");
+  expect(admin.client.context()?.surface).toBe("admin");
+  expect(admin.sent.find((item) => item.data.type === "app:init")!.data.surface).toBe("admin");
+});
+
+test("a presentation may carry an admin route registry that has no root route", async () => {
+  const navigation = {
+    path: "/settings",
+    search: "",
+    routes: [{ id: "settings", path: "/settings", layout: "document" }],
+  };
+  expect(parseBridgePresentation({ ...presentation, navigation })).not.toBeNull();
+  expect(parseBridgePresentation({ ...presentation, navigation: { ...navigation, path: "/other" } })).toBeNull();
+  const admin = await surfacePair("admin", { navigation });
+  expect(admin.client.presentation()?.navigation?.path).toBe("/settings");
+});

@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "7d987fb45b3233fd8daa2f45b3ff2a948959ce8055f5beeafb00b3705d6011a1";
+export const DESCRIPTOR_SCHEMA_SHA256 = "dbc0d4182564847d898a320854af08a9c37c6ee5963bef6bea71d22e172f3b5e";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -26,6 +26,7 @@ export interface Presentation {
  description_key: string;
  locales: ("en-US" | "zh-CN" | "zh-TW")[];
  routes: (Route)[];
+ admin_routes?: (Route)[] | null;
  entry: string;
  display?: AppDisplay | null;
 }
@@ -145,6 +146,7 @@ export const DESCRIPTOR_LIMITS = {
   "maxRouteQueryInteger": 1000000000,
   "maxRouteQueryValues": 16,
   "maxDescriptorRoutes": 32,
+  "maxDescriptorAdminRoutes": 8,
   "maxDescriptorReadableSchemas": 32,
   "maxDescriptorMigrations": 8,
   "maxMigrationEntrypointArgs": 16,
@@ -276,6 +278,7 @@ export const DESCRIPTOR_FIELDS = {
     "description_key",
     "locales",
     "routes",
+    "admin_routes",
     "entry",
     "display"
   ],

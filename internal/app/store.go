@@ -1283,6 +1283,9 @@ func (s *Store) DeleteUser(name string) error {
 		// one's tasks, their files and their daily usage. A running worker's finalizing UPDATE is
 		// conditional on the row, so it finds nothing to update and removes its own file.
 		{"DELETE FROM export_jobs WHERE requested_by=?", name},
+		// A delegated app administrator (doc 191): the row names the person, and the next holder of a
+		// reusable username must not inherit the delegation.
+		{"DELETE FROM app_platform_app_admins WHERE username=?", name},
 	}
 	for _, st := range steps {
 		if err := run(st.q, st.arg); err != nil {

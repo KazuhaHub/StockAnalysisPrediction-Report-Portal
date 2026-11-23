@@ -1,7 +1,7 @@
 import {parseAppDisplay, type AppDisplayView} from './appDisplayV2'
 import {DESCRIPTOR_PATTERNS} from './descriptor-contract.generated'
-import {parseBridgeRoutes,type BridgeRoute,type BridgeBinding,type BridgePresentation} from './bridge-v2'
-export interface AppLaunchV2 {routes:readonly BridgeRoute[];backendAvailable:boolean;display?:AppDisplayView;source:string;binding:BridgeBinding;capabilities:readonly string[];applicationId:string;layout:BridgePresentation['layout'];timeZone:string}
+import {parseBridgeRoutes,type BridgeRoute,type BridgeBinding,type BridgePresentation,type BridgeSurface} from './bridge-v2'
+export interface AppLaunchV2 {routes:readonly BridgeRoute[];backendAvailable:boolean;display?:AppDisplayView;source:string;binding:BridgeBinding;capabilities:readonly string[];applicationId:string;layout:BridgePresentation['layout'];timeZone:string;surface:BridgeSurface;entryPath:string}
 const hostCapabilities=new Set([
   'network.http',
   'notifications.publish',
@@ -20,8 +20,13 @@ export function validInstallationId(value:string):boolean{return uuid.test(value
 export function parseAppLaunchV2(value:unknown,installation:string):AppLaunchV2|null{
  if(!value||typeof value!=='object')return null
  const v=value as Record<string,unknown>,b=v.binding as Record<string,unknown>|undefined
- const routes=parseBridgeRoutes(v.routes)
- if(!routes||routes.find(route=>route.path==='/')?.layout!==v.layout)return null
+ const routes=parseBridgeRoutes(v.routes,v.surface!=='admin')
+ // Absent means reader, for a server that predates admin pages. An admin launch names its own entry route.
+ if(v.surface!==undefined&&v.surface!=='reader'&&v.surface!=='admin')return null
+ const surface:BridgeSurface=v.surface==='admin'?'admin':'reader'
+ if(surface==='reader'?v.entryPath!==undefined:typeof v.entryPath!=='string')return null
+ const entryPath=surface==='admin'?v.entryPath as string:'/'
+ if(!routes||routes.find(route=>route.path===entryPath)?.layout!==v.layout)return null
  const display=v.display==null?null:parseAppDisplay(v.display)
  if(v.display!=null&&!display)return null
  if(!b||typeof b!=='object'||b.installationId!==installation||!uuid.test(installation)||!counter(b.generation)||!counter(b.policyRevision)||typeof b.releaseSha256!=='string'||!digest.test(b.releaseSha256))return null
@@ -29,9 +34,10 @@ export function parseAppLaunchV2(value:unknown,installation:string):AppLaunchV2|
  if(typeof v.applicationId!=='string'||!new RegExp(DESCRIPTOR_PATTERNS.slug).test(v.applicationId)||(v.layout!=='document'&&v.layout!=='viewport')||typeof v.timeZone!=='string'||v.timeZone.length>64||!v.timeZone||!Array.isArray(v.capabilities)||v.capabilities.length>hostCapabilities.size||new Set(v.capabilities).size!==v.capabilities.length||!v.capabilities.every(capability=>typeof capability==='string'&&hostCapabilities.has(capability)))return null
  try{new Intl.DateTimeFormat('en-US',{timeZone:v.timeZone})}catch{return null}
  if(typeof v.source!=='string'||v.source.length>1024||/[\\\s%?#]/.test(v.source))return null
- const prefix=`/app-documents/${installation}/${b.generation}/${b.policyRevision}/${b.releaseSha256}/`
+ // The admin document is the same bytes served through the admin gate, under its own URL space.
+ const prefix=`/app-documents/${installation}/${surface==='admin'?'admin/':''}${b.generation}/${b.policyRevision}/${b.releaseSha256}/`
  if(!v.source.startsWith(prefix))return null
  const tail=v.source.slice(prefix.length),slash=tail.indexOf('/'),frontend=tail.slice(0,slash),entry=tail.slice(slash+1)
  if(slash<0||!digest.test(frontend)||!entry||entry.length>256||!new RegExp(DESCRIPTOR_PATTERNS.path).test(entry)||entry.includes('..')||entry.split('/').includes('.')||entry.includes('//')||entry.startsWith('/')||entry.endsWith('/'))return null
- return {routes,backendAvailable:v.backendAvailable===true,...(display?{display}:{}),source:v.source,binding:{installationId:installation,generation:b.generation,policyRevision:b.policyRevision,releaseSha256:b.releaseSha256},capabilities:[...v.capabilities],applicationId:v.applicationId,layout:v.layout,timeZone:v.timeZone}
+ return {routes,backendAvailable:v.backendAvailable===true,...(display?{display}:{}),source:v.source,binding:{installationId:installation,generation:b.generation,policyRevision:b.policyRevision,releaseSha256:b.releaseSha256},capabilities:[...v.capabilities],applicationId:v.applicationId,layout:v.layout,timeZone:v.timeZone,surface,entryPath}
 }

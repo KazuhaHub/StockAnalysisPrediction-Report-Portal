@@ -10,6 +10,9 @@ export interface AppDirectoryItem {
   applicationId: string
   state: AppDirectoryState
   openable: boolean
+  // The viewer administers this app (a Portal administrator, or one the app was delegated to). It can be
+  // true while `openable` is false: an administrator need not be in the audience.
+  manageable: boolean
   display?: AppDisplayView
   publisherName?: string
 }
@@ -27,11 +30,11 @@ export function parseAppDirectory(value: unknown): Page | null {
   for (const raw of v.items) {
     if (!raw || typeof raw !== 'object') return null
     const item = raw as Record<string, unknown>
-    if (typeof item.installationId !== 'string' || !validInstallationId(item.installationId) || item.installationId <= previous || typeof item.applicationId !== 'string' || !applicationId.test(item.applicationId) || !states.includes(item.state) || typeof item.openable !== 'boolean' || (item.openable && item.state !== 'installed')) return null
+    if (typeof item.installationId !== 'string' || !validInstallationId(item.installationId) || item.installationId <= previous || typeof item.applicationId !== 'string' || !applicationId.test(item.applicationId) || !states.includes(item.state) || typeof item.openable !== 'boolean' || (item.openable && item.state !== 'installed') || (item.manageable !== undefined && typeof item.manageable !== 'boolean')) return null
     const display = item.display == null ? null : parseAppDisplay(item.display)
     if (item.display != null && !display) return null
     previous = item.installationId
-    items.push({ installationId: item.installationId, applicationId: item.applicationId, state: item.state as AppDirectoryState, openable: item.openable, ...(display ? { display } : {}), ...(typeof item.publisherName === 'string' && item.publisherName !== '' ? { publisherName: item.publisherName } : {}) })
+    items.push({ installationId: item.installationId, applicationId: item.applicationId, state: item.state as AppDirectoryState, openable: item.openable, manageable: item.manageable === true, ...(display ? { display } : {}), ...(typeof item.publisherName === 'string' && item.publisherName !== '' ? { publisherName: item.publisherName } : {}) })
   }
   if (v.nextCursor !== '' && (items.length === 0 || previous !== v.nextCursor)) return null
   return { items, nextCursor: v.nextCursor }
@@ -69,4 +72,37 @@ export function useAppDirectory(owner: string | null, enabled = true) {
   }, [load, cancel, enabled])
   // Hide a previous account's cards during render, before the new effect runs.
   return { ...(state.owner === owner ? state : { owner, items: [], nextCursor: '', loading: true, failed: false }), load }
+}
+
+/** Where an app's administration page lives for this viewer: a console tab for a Portal administrator, a page of the app shell otherwise. */
+export function manageHref(installation: string, portalAdmin: boolean): string {
+  return portalAdmin ? `/manage/apps/installations/${installation}/admin` : `/apps/manage/${installation}`
+}
+
+const MAX_MANAGE_PAGES = 16
+
+/**
+ * Whether the directory marks this installation manageable. It reads the pages until the installation shows up,
+ * and says false until then and on any failure: the Manage button it gates is additive, so a slow or failed
+ * directory only leaves it out.
+ */
+export function useManageable(installation: string): boolean {
+  const [found, setFound] = useState<{ installation: string; manageable: boolean } | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    void (async () => {
+      let after = ''
+      for (let page = 0; page < MAX_MANAGE_PAGES; page++) {
+        const value = await api.get<unknown>(`/api/app-platform/apps${after ? `?after=${encodeURIComponent(after)}` : ''}`, { signal: controller.signal })
+        const parsed = parseAppDirectory(value)
+        if (!parsed || (after && parsed.nextCursor === after)) return
+        const item = parsed.items.find(candidate => candidate.installationId === installation)
+        if (item) { setFound({ installation, manageable: item.manageable }); return }
+        if (!parsed.nextCursor) return
+        after = parsed.nextCursor
+      }
+    })().catch(() => { /* the button stays out */ })
+    return () => controller.abort()
+  }, [installation])
+  return found?.installation === installation && found.manageable
 }

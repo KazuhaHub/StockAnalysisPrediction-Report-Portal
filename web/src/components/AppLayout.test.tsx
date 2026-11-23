@@ -106,6 +106,7 @@ function renderAt(path: string, state?: unknown) {
         <Route element={<AppLayout />}>
           <Route path="chat" element={<div>chat-body</div>} />
           <Route path="apps/v2/:installation" element={<div>application-body</div>} />
+          <Route path="apps/manage/:installation" element={<div>application-admin-body</div>} />
           <Route path="forecast" element={<div>forecast-body</div>} />
           <Route path="queue" element={<div>queue-body</div>} />
           <Route path="review" element={<div>review-body</div>} />
@@ -453,6 +454,13 @@ it('gives application documents one Portal scroll region while chat retains its 
  app.unmount()
  const chat=renderAt('/chat');await screen.findByText('chat-body')
  expect(chat.container.querySelector<HTMLElement>('.ant-layout-content')!.style.overflow).toBe('hidden')
+})
+
+it('treats an app administration page like an application page: one Portal scroll region',async()=>{
+ const app=renderAt('/apps/manage/00000000-0000-0000-0000-000000000001')
+ await screen.findByText('application-admin-body')
+ const content=app.container.querySelector<HTMLElement>('.ant-layout-content')!
+ expect(content.style.overflow).toBe('auto');expect(content.style.minHeight).toBe('0px')
 })
 
 describe('AppLayout mobile chat focus mode', () => {

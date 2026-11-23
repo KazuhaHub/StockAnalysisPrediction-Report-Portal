@@ -75,7 +75,8 @@ function AppShell() {
   // below the header, has no page footer, and only its message thread scrolls — so there's
   // a single scrollbar, not one for the page plus one for the thread.
   const onChat = loc.pathname === '/chat'
-  const onAppV2 = loc.pathname.startsWith('/apps/v2/')
+  // An app's own page and its administration page are the same sandboxed document in the same shell.
+  const onAppV2 = loc.pathname.startsWith('/apps/v2/') || loc.pathname.startsWith('/apps/manage/')
   const boundedSurface = onChat || onAppV2
   // Mobile chat is a focused, messenger-like surface: collapse global navigation chrome so
   // the thread and composer get nearly the full viewport. Desktop keeps the full portal header.
@@ -103,7 +104,7 @@ function AppShell() {
     if (p.startsWith('/apps/x/')) return [home, apps]
     // An app's page names its own last item once its data is in (useCrumbTail): until then there is no trail, so the
     // breadcrumb appears with the page, whole, and is never the shorter one grown later.
-    if (p.startsWith('/apps/v2/')) return crumbTail === undefined ? [] : crumbTail ? [home, apps, { label: crumbTail }] : [home, apps]
+    if (p.startsWith('/apps/v2/') || p.startsWith('/apps/manage/')) return crumbTail === undefined ? [] : crumbTail ? [home, apps, { label: crumbTail }] : [home, apps]
     if (p === '/queue') return [home, { label: t('nav.queue') }]
     if (p === '/notifications') return [home, { label: t('inbox.title') }]
     if (p === '/chat') return [home, { label: t('nav.chat') }]

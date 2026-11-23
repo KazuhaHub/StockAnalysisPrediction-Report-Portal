@@ -9,6 +9,9 @@ import { CrumbTailProvider, useCrumbTailValue } from '../lib/crumbTail'
 function CrumbProbe(){const tail=useCrumbTailValue();return <div data-testid="crumb-tail">{tail===undefined?'pending':tail===null?'none':tail}</div>}
 const prefs=vi.hoisted(()=>({lang:'zh-CN',dark:true}))
 const frames=vi.hoisted(()=>[] as any[])
+const gates=vi.hoisted(()=>({manageable:false,admin:false}))
+vi.mock('../lib/appDirectoryV2',async original=>({...await original<typeof import('../lib/appDirectoryV2')>(),useManageable:()=>gates.manageable}))
+vi.mock('../auth',async original=>({...await original<typeof import('../auth')>(),useIsAdmin:()=>gates.admin}))
 const PrefsPulse=createContext('');
 vi.mock('../prefs',()=>({usePrefs:()=>{useContext(PrefsPulse);return prefs}}))
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}))
@@ -17,9 +20,9 @@ const installation='00000000-0000-4000-8000-000000000001'
 const binding={installationId:installation,generation:'9007199254740993',policyRevision:'1',releaseSha256:'a'.repeat(64)}
 const response={source:`/app-documents/${installation}/${binding.generation}/1/${'a'.repeat(64)}/${'b'.repeat(64)}/index.html`,binding,capabilities:[],applicationId:'notes-sample',routes:[{id:'home',path:'/',layout:'document'}],layout:'document',timeZone:'Asia/Shanghai'}
 const routers:ReturnType<typeof createMemoryRouter>[]=[];
-function Page({path=`/apps/v2/${installation}`,algorithm=theme.defaultAlgorithm}:{path?:string;algorithm?:typeof theme.defaultAlgorithm}){const [router]=useState(()=>{const value=createMemoryRouter([{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>}],{initialEntries:[path]});routers.push(value);return value});return <ConfigProvider theme={{algorithm}}><PrefsPulse.Provider value={prefs.lang+String(prefs.dark)}><RouterProvider router={router}/></PrefsPulse.Provider></ConfigProvider>}
+function Page({path=`/apps/v2/${installation}`,algorithm=theme.defaultAlgorithm}:{path?:string;algorithm?:typeof theme.defaultAlgorithm}){const [router]=useState(()=>{const value=createMemoryRouter([{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>},{path:'/apps/manage/:installation',element:<div>User admin page</div>},{path:'/manage/apps/installations/:installation/admin',element:<div>Console admin tab</div>}],{initialEntries:[path]});routers.push(value);return value});return <ConfigProvider theme={{algorithm}}><PrefsPulse.Provider value={prefs.lang+String(prefs.dark)}><RouterProvider router={router}/></PrefsPulse.Provider></ConfigProvider>}
 function page(){return <Page/>}
-beforeEach(()=>{routers.splice(0);frames.length=0;prefs.lang='zh-CN';prefs.dark=true;vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(response),{status:200})))})
+beforeEach(()=>{routers.splice(0);frames.length=0;gates.manageable=false;gates.admin=false;prefs.lang='zh-CN';prefs.dark=true;vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(response),{status:200})))})
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals()})
 test('loads an authorized launch and inherits host appearance without a language selector',async()=>{
  const view=render(page());await screen.findByTestId('v2-frame')
@@ -181,4 +184,29 @@ test('a changed network policy relaunches the frame from a fresh launch, and onl
  act(()=>frames[frames.length-1].onNetworkPolicyChanged('2'))
  await waitFor(()=>expect(frames[frames.length-1].binding.policyRevision).toBe('2'))
  expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+test('the Manage button appears only for an app the directory marks manageable',async()=>{
+ render(page());await screen.findByRole('heading')
+ expect(screen.queryByRole('button',{name:'appAdmin.manage'})).toBeNull()
+})
+test('a delegated administrator goes to the user-side admin page',async()=>{
+ gates.manageable=true
+ render(page());fireEvent.click(await screen.findByRole('button',{name:'appAdmin.manage'}))
+ expect(await screen.findByText('User admin page')).toBeTruthy()
+})
+test('a Portal administrator goes to the console tab',async()=>{
+ gates.manageable=true;gates.admin=true
+ render(page());fireEvent.click(await screen.findByRole('button',{name:'appAdmin.manage'}))
+ expect(await screen.findByText('Console admin tab')).toBeTruthy()
+})
+test('the reader page refuses an admin launch and never mounts it',async()=>{
+ const admin={...response,surface:'admin',entryPath:'/'}
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(admin),{status:200})))
+ render(page());await screen.findByRole('alert');expect(frames).toHaveLength(0)
+ expect(fetch).toHaveBeenCalledWith(`/api/app-platform/installations/${installation}/launch`,expect.anything())
+})
+test('the reader frame is told its surface',async()=>{
+ render(page());await screen.findByTestId('v2-frame')
+ expect(frames[frames.length-1].surface).toBe('reader')
 })

@@ -147,7 +147,7 @@ func TestMigration0023UpgradePostgres(t *testing.T) { testMigration0023Upgrade(t
 
 func TestMigration0023AnOlderDumpRestoresWithAnEmptyTable(t *testing.T) {
 	src := newTestStore(t)
-	dump := withoutSections(t, dumpOf(t, src), migration0023().tables, []string{"0023", "0024"})
+	dump := withoutSections(t, dumpOf(t, src), migration0023().tables, []string{"0023", "0024", "0025"})
 	if bytes.Contains(dump, []byte("app_platform_machine_tokens")) || bytes.Contains(dump, []byte(`"0023"`)) {
 		t.Fatal("fixture still describes 0023")
 	}

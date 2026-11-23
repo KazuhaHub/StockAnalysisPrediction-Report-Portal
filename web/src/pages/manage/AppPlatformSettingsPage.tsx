@@ -12,6 +12,7 @@ import ReleaseDigest from '../../components/ReleaseDigest'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { confirmAction } from '../../components/Confirm'
 import { AppsBreadcrumb } from './appsAdminParts'
+import AppAdministratorsCard from './AppAdministratorsCard'
 import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
 import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
@@ -45,6 +46,8 @@ type Settings = {
   version?: string
   display?: AppDisplayView
   audience: Audience[]
+  // The app declares an administration page of its own (admin routes in its descriptor).
+  admin_page?: boolean
   audience_total?: number
   capabilities: Capability[]
   // The reviewed network.http destinations, present while that grant is on.
@@ -736,6 +739,8 @@ export default function AppPlatformSettingsPage() {
       {(settings.audience_total ?? 0) > settings.audience.length && <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>{t('appPlatform.settings.audienceMore', { count: (settings.audience_total ?? 0) - settings.audience.length })}</Typography.Paragraph>}
       <div style={{ marginTop: 12 }}><Link to={`/manage/apps/${encodeURIComponent(`platform:${settings.installation_id}`)}/access`}>{t('appPlatform.settings.manageAccess')}</Link></div>
     </Card>
+
+    {settings.admin_page && <AppAdministratorsCard installation={installation} />}
 
     <Card title={t('appPlatform.settings.capabilities')}>
       {settings.capabilities.length

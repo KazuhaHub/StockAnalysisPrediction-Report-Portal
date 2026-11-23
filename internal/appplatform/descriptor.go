@@ -124,7 +124,23 @@ func validManifest(m Manifest) bool {
 		}
 		routeIDs[route.ID], routePaths[route.Path] = true, true
 	}
-	if !routePaths["/"] || !safeRelativePath(m.Frontend.Artifact) || !digestPattern.MatchString(m.Frontend.SHA256) || !validCapabilities(m.Capabilities, m.Backend != nil) {
+	// A reader home path is required before the admin routes join the same ID and path namespace.
+	if !routePaths["/"] {
+		return false
+	}
+	// The optional admin page (doc 191): absent or null keeps today's meaning, while an
+	// explicit empty array is refused. IDs and paths stay unique across both lists.
+	if p.AdminRoutes != nil && (len(p.AdminRoutes) == 0 || len(p.AdminRoutes) > maxDescriptorAdminRoutes) {
+		return false
+	}
+	for _, route := range p.AdminRoutes {
+		if !slugPattern.MatchString(route.ID) || !validRoutePath(route.Path) || routeIDs[route.ID] || routePaths[route.Path] ||
+			!descriptorLayoutNames[route.Layout] || !validRouteQueryRules(route.Query) {
+			return false
+		}
+		routeIDs[route.ID], routePaths[route.Path] = true, true
+	}
+	if !safeRelativePath(m.Frontend.Artifact) || !digestPattern.MatchString(m.Frontend.SHA256) || !validCapabilities(m.Capabilities, m.Backend != nil) {
 		return false
 	}
 	if m.Backend != nil && !validBackend(*m.Backend) {

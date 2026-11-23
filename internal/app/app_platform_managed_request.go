@@ -22,7 +22,7 @@ var errAppPlatformBackendRequestUncertain = errors.New("application request outc
 func samePlatformManagedBackendAccess(a, b platformManagedBackendAccess) bool {
 	c, d := a.intent.candidate.command, b.intent.candidate.command
 	c.IssuedMS, c.ExpiresMS = d.IssuedMS, d.ExpiresMS
-	return a.account == b.account && a.policy == b.policy && a.fence == b.fence && a.activationID == b.activationID && a.viewer.Subject == b.viewer.Subject && a.viewer.Role == b.viewer.Role && a.viewer.SessionRevision == b.viewer.SessionRevision && slices.Equal(a.viewer.OUs, b.viewer.OUs) && c == d && samePlatformManagedRuntime(a.intent.candidate.runtime, b.intent.candidate.runtime) && a.intent.applied && b.intent.applied && a.intent.receipt == b.intent.receipt && a.intent.command.PayloadSHA256 == b.intent.command.PayloadSHA256 && a.intent.command.DocumentSHA256 == b.intent.command.DocumentSHA256 && bytes.Equal(a.intent.candidate.descriptor, b.intent.candidate.descriptor)
+	return a.account == b.account && a.admin == b.admin && a.policy == b.policy && a.fence == b.fence && a.activationID == b.activationID && a.viewer.Subject == b.viewer.Subject && a.viewer.Role == b.viewer.Role && a.viewer.SessionRevision == b.viewer.SessionRevision && slices.Equal(a.viewer.OUs, b.viewer.OUs) && c == d && samePlatformManagedRuntime(a.intent.candidate.runtime, b.intent.candidate.runtime) && a.intent.applied && b.intent.applied && a.intent.receipt == b.intent.receipt && a.intent.command.PayloadSHA256 == b.intent.command.PayloadSHA256 && a.intent.command.DocumentSHA256 == b.intent.command.DocumentSHA256 && bytes.Equal(a.intent.candidate.descriptor, b.intent.candidate.descriptor)
 }
 
 // Private host execution path, not an HTTP route. Neither destination nor
@@ -145,7 +145,7 @@ func signPlatformManagedBackendRequest(a platformManagedBackendAccess, seed []by
 		return nil, nil, "", zero, err
 	}
 	defer clear(signer.Key)
-	assertion, err := signer.Sign(method, path, body, a.viewer, time.Now())
+	assertion, err := platformSignViewerAssertion(signer, a.admin, method, path, body, a.viewer, time.Now())
 	if err != nil {
 		return nil, nil, "", zero, err
 	}

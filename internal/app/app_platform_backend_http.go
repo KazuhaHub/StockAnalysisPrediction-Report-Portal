@@ -75,6 +75,17 @@ func readPlatformBackendHTTPRequest(w http.ResponseWriter, r *http.Request) (pla
 }
 
 func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user string) {
+	s.platformBackend(w, r, user, false)
+}
+
+// apiPlatformAdminBackend carries a request of the app's admin page to its backend (doc 191): the same
+// contract as the reader endpoint, admitted by the app-admin check, signed with the admin surface claim,
+// and audited when it is not a GET.
+func (s *Server) apiPlatformAdminBackend(w http.ResponseWriter, r *http.Request, user string) {
+	s.platformBackend(w, r, user, true)
+}
+
+func (s *Server) platformBackend(w http.ResponseWriter, r *http.Request, user string, admin bool) {
 	// Bound response backpressure as well as execution. Global SSE responses
 	// remain long-lived, but a slow app client must not retain an admission slot.
 	controller := http.NewResponseController(w)
@@ -99,6 +110,7 @@ func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user
 		jsonErrorCode(w, 401, "session_expired", "session unavailable")
 		return
 	}
+	session.adminSurface = admin
 	release, ok := s.platformBackendRequests.acquire()
 	if !ok {
 		platformJSONBusy(w)
@@ -113,6 +125,13 @@ func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	installation := r.PathValue("installation")
+	// Exactly one audit row per non-GET admin request, whatever happens to it (doc 191).
+	status, outcome, backendStatus := http.StatusNotFound, "refused", 0
+	if admin && request.method != http.MethodGet {
+		defer func() {
+			s.auditPlatformAdminRequest(r, user, installation, request.method, request.path, status, backendStatus, outcome)
+		}()
+	}
 	// Check current authority before exposing whether a runtime was configured.
 	access, err := s.withPlatformWritableBackendAccess(ctx, session, installation, func(a platformWritableBackendAccess, _ []byte) error {
 		if !request.binding.matches(a) {
@@ -128,12 +147,14 @@ func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user
 	access.Close()
 	endpoint := s.platformBackendEndpoint.Load()
 	if endpoint == nil {
+		status = 503
 		jsonErrorCode(w, 503, "app_platform_runtime_unavailable", "application runtime unavailable")
 		return
 	}
 	response, err := s.requestPlatformBoundWritableBackend(ctx, session, installation, request.binding, request.method, request.path, []byte(request.body), *endpoint)
 	if err != nil {
 		if errors.Is(err, errAppPlatformBackendRequestUncertain) {
+			status, outcome = 502, "uncertain"
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(502)
 			json.NewEncoder(w).Encode(map[string]any{"code": "app_platform_request_uncertain", "message": "application request outcome uncertain", "retryable": false})
@@ -144,6 +165,21 @@ func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user
 	}
 	// Never forward application cookies, redirects, authentication status or
 	// headers into the Portal session. Preserve exact JSON bytes as a string.
+	status, outcome, backendStatus = http.StatusOK, "ok", response.Status
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]any{"status": response.Status, "body": string(response.Body)})
+}
+
+// auditPlatformAdminRequest records one non-GET request of an app's admin page: who sent which method and
+// path, what the Portal answered, and whether the app took it (ok), the Portal refused it before it
+// reached the app (refused) or the outcome is unknown because it may have reached the app (uncertain).
+// The body is never recorded.
+func (s *Server) auditPlatformAdminRequest(r *http.Request, actor, installation, method, path string, status, backendStatus int, outcome string) {
+	var appID string
+	s.st.queryRow(`SELECT app_id FROM app_platform_installations WHERE id=?`, installation).Scan(&appID)
+	detail := map[string]any{"app_id": appID, "method": method, "path": path, "status": status, "outcome": outcome}
+	if outcome == "ok" {
+		detail["backend_status"] = backendStatus
+	}
+	s.recordChange(r, actor, platformAdminRequestAudit, "app_platform_installation", installation, detail)
 }

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { parseAppDirectory, useAppDirectory } from './appDirectoryV2'
+import { manageHref, parseAppDirectory, useAppDirectory, useManageable } from './appDirectoryV2'
 
 const first = '00000000-0000-4000-8000-000000000001'
 const second = '00000000-0000-4000-8000-000000000002'
@@ -83,4 +83,39 @@ test('unmount cancels the current pagination request', async () => {
 
 test('invalid display cannot pass the directory metadata boundary',()=>{
  expect(parseAppDirectory({items:[{...item(),display:{icon:'appstore',texts:[]}}],nextCursor:''})).toBeNull()
+})
+
+test('manageable is an optional boolean, false when absent, and may mark an app the viewer cannot open', () => {
+  expect(parseAppDirectory({ items: [item()], nextCursor: '' })?.items[0].manageable).toBe(false)
+  expect(parseAppDirectory({ items: [{ ...item(), manageable: true }], nextCursor: '' })?.items[0].manageable).toBe(true)
+  const adminOnly = parseAppDirectory({ items: [{ ...item(), openable: false, manageable: true }], nextCursor: '' })?.items[0]
+  expect(adminOnly).toMatchObject({ openable: false, manageable: true })
+  for (const manageable of ['true', 1, null]) expect(parseAppDirectory({ items: [{ ...item(), manageable }], nextCursor: '' })).toBeNull()
+})
+
+test('the manage page of an installation is the console tab for a Portal administrator and the user page for anyone else', () => {
+  expect(manageHref(first, true)).toBe(`/manage/apps/installations/${first}/admin`)
+  expect(manageHref(first, false)).toBe(`/apps/manage/${first}`)
+})
+
+test('useManageable follows the directory pages until the installation is found', async () => {
+  const fetcher = vi.fn(async input => String(input).includes('?after=') ? response([{ ...item(second), manageable: true }]) : response([item()], first))
+  vi.stubGlobal('fetch', fetcher)
+  const { result } = renderHook(() => useManageable(second))
+  expect(result.current).toBe(false)
+  await waitFor(() => expect(result.current).toBe(true))
+  expect(fetcher).toHaveBeenCalledTimes(2)
+})
+
+test('useManageable stays false for a plain reader, an unlisted installation and a failed directory', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response([item()])))
+  const plain = renderHook(() => useManageable(first))
+  const unlisted = renderHook(() => useManageable(second))
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+  expect(plain.result.current).toBe(false)
+  expect(unlisted.result.current).toBe(false)
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 500 })))
+  const failed = renderHook(() => useManageable(first))
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+  expect(failed.result.current).toBe(false)
 })

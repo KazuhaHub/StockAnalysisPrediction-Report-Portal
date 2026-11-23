@@ -3,7 +3,7 @@ module github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal
 go 1.26.11
 
 require (
-	github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a
+	github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261123072308-4c3ea7d4141c
 	github.com/KazuhaHub/authcore v0.6.2
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/beevik/etree v1.8.1

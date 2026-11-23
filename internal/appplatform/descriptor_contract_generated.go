@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "7d987fb45b3233fd8daa2f45b3ff2a948959ce8055f5beeafb00b3705d6011a1"
+const descriptorContractSHA256 = "dbc0d4182564847d898a320854af08a9c37c6ee5963bef6bea71d22e172f3b5e"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -31,6 +31,7 @@ type Presentation struct {
 	DescriptionKey string      `json:"description_key"`
 	Locales        []string    `json:"locales"`
 	Routes         []Route     `json:"routes"`
+	AdminRoutes    []Route     `json:"admin_routes,omitempty"`
 	Entry          string      `json:"entry"`
 	Display        *AppDisplay `json:"display,omitempty"`
 }
@@ -150,6 +151,7 @@ const maxRouteQueryTextBytes = 256
 const maxRouteQueryInteger = 1000000000
 const maxRouteQueryValues = 16
 const maxDescriptorRoutes = 32
+const maxDescriptorAdminRoutes = 8
 const maxDescriptorReadableSchemas = 32
 const maxDescriptorMigrations = 8
 const maxMigrationEntrypointArgs = 16

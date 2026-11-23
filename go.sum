@@ -1,5 +1,5 @@
-github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a h1:Ulsql9QkXAyn5msTL21mDlD53G+s3WrDYLzIj0v/xug=
-github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a/go.mod h1:nKsohoVbRr768/uQCwJTGV0Mq7g9mzJCyx1g92UwwP4=
+github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261123072308-4c3ea7d4141c h1:wLoYdF1pdtHUdMUrYWo3R4F4WsNJ6Q2t+2WOsdTYOVY=
+github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261123072308-4c3ea7d4141c/go.mod h1:kPYpsvtsXtvyQ12lMT9pQfGXhX1tMowB9/TRNF4jhbY=
 github.com/KazuhaHub/authcore v0.6.2 h1:2BEmJk1LO6a0anWC1VhO2iugmn+/i+3yoPNnJm46L9g=
 github.com/KazuhaHub/authcore v0.6.2/go.mod h1:DZoOd2YYIDnc4E87so+mEFVTG2rryj2JBhei9eJBgYg=
 github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=

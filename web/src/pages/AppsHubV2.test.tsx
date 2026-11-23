@@ -2,7 +2,8 @@ import {render,screen,fireEvent} from '@testing-library/react'
 import {MemoryRouter,useLocation} from 'react-router'
 import {beforeEach,afterEach,expect,test,vi} from 'vitest'
 import AppsHub from './AppsHub'
-vi.mock('../auth',()=>({useAuth:()=>({user:'fixture',can:()=>false})}))
+const auth=vi.hoisted(()=>({admin:false}))
+vi.mock('../auth',()=>({useAuth:()=>({user:'fixture',can:()=>false,admin:auth.admin})}))
 vi.mock('../lib/builtinApps',()=>({BUILTIN_APPS:[],BUILTIN_PIN_PREFIX:'builtin:'}))
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}))
 const prefs=vi.hoisted(()=>({lang:'en-US'}))
@@ -11,7 +12,7 @@ const id='00000000-0000-4000-8000-000000000001'
 const item={installationId:id,applicationId:'notes-sample',state:'installed',openable:true}
 function Location(){return <div data-testid="location">{useLocation().pathname}</div>}
 function host(){return <MemoryRouter initialEntries={['/apps']}><AppsHub/><Location/></MemoryRouter>}
-beforeEach(()=>{vi.stubGlobal('fetch',vi.fn(async input=>new Response(JSON.stringify(String(input)==='/api/apps'?{apps:[]}:{items:[item],nextCursor:''}),{status:200})))})
+beforeEach(()=>{auth.admin=false;vi.stubGlobal('fetch',vi.fn(async input=>new Response(JSON.stringify(String(input)==='/api/apps'?{apps:[]}:{items:[item],nextCursor:''}),{status:200})))})
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals()})
 test('authorized v2 app opens the new protected launch page',async()=>{
  render(host());fireEvent.click(await screen.findByRole('button',{name:'notes-sample'}));expect(screen.getByTestId('location').textContent).toBe(`/apps/v2/${id}`)
@@ -51,4 +52,37 @@ test('platform installations sit in the one saved order beside legacy apps, and 
  expect(at('second-app')).toBeLessThan(at('Legacy app'))
  expect(at('Legacy app')).toBeLessThan(at('notes-sample'))
  expect(at('notes-sample')).toBeLessThan(at('third-app'))
+})
+
+const directory=(items:unknown[])=>vi.stubGlobal('fetch',vi.fn(async input=>new Response(JSON.stringify(String(input)==='/api/apps'?{apps:[]}:{items,nextCursor:''}),{status:200})))
+
+test('an app the viewer cannot manage has no Manage item',async()=>{
+ render(host());await screen.findByRole('button',{name:'notes-sample'})
+ expect(screen.queryByRole('button',{name:/appAdmin.manage/})).toBeNull()
+})
+test('a manageable app has a Manage item that opens the user-side admin page without opening the app',async()=>{
+ directory([{...item,manageable:true}])
+ render(host());await screen.findByRole('button',{name:'notes-sample'})
+ fireEvent.click(screen.getByRole('button',{name:/appAdmin.manage/}))
+ expect(screen.getByTestId('location').textContent).toBe(`/apps/manage/${id}`)
+})
+test('for a Portal administrator the Manage item opens the console tab',async()=>{
+ auth.admin=true;directory([{...item,manageable:true}])
+ render(host());await screen.findByRole('button',{name:'notes-sample'})
+ fireEvent.click(screen.getByRole('button',{name:/appAdmin.manage/}))
+ expect(screen.getByTestId('location').textContent).toBe(`/manage/apps/installations/${id}/admin`)
+})
+test('an app the viewer can only manage is listed and opens its admin page when clicked, instead of being inert',async()=>{
+ directory([{...item,openable:false,manageable:true}])
+ render(host());fireEvent.click(await screen.findByRole('button',{name:'notes-sample'}))
+ expect(screen.getByTestId('location').textContent).toBe(`/apps/manage/${id}`)
+})
+test('an app that is neither openable nor manageable stays inert for a reader',async()=>{
+ directory([{...item,state:'attention',openable:false,manageable:false}])
+ render(host());await screen.findByText('apps.empty')
+})
+test('a manageable app that needs attention is listed but its card does not open the admin page',async()=>{
+ directory([{...item,state:'attention',openable:false,manageable:true}])
+ render(host());await screen.findByText('notes-sample')
+ expect(screen.queryByRole('button',{name:'notes-sample'})).toBeNull()
 })

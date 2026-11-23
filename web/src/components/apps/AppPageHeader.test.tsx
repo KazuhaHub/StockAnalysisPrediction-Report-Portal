@@ -28,3 +28,12 @@ test('falls back to signed name with no page and exposes a fixed uncertain resul
   expect(view.container.textContent).not.toContain('secret')
   actions.close()
 })
+test('Back is shown only when the page has a way back, and an extra control sits in the header with the actions',()=>{
+  const back=vi.fn()
+  const view=render(<AppPageHeader name="Signed application" icon={null} state={null} extra={<button>Manage</button>}/>)
+  expect(screen.queryByRole('button',{name:/apps.back/})).toBeNull()
+  expect(screen.getByRole('button',{name:'Manage'})).toBeTruthy()
+  view.rerender(<AppPageHeader name="Signed application" icon={null} state={null} onBack={back}/>)
+  fireEvent.click(screen.getByRole('button',{name:/apps.back/}));expect(back).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button',{name:'Manage'})).toBeNull()
+})

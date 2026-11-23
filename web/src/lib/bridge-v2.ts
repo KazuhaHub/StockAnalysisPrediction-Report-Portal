@@ -117,7 +117,11 @@ export interface BridgeContext {
   readonly binding: Readonly<BridgeBinding>;
   readonly capabilities: readonly string[];
   readonly backendAvailable: boolean;
+  // Which audience the frame serves. Absent from the init message for a reader, so an SDK that
+  // predates admin pages keeps working for them; only an admin frame carries the key.
+  readonly surface: BridgeSurface;
 }
+export type BridgeSurface = "reader" | "admin";
 export interface BridgeBackendRequest {
   readonly method: string;
   readonly path: string;
@@ -996,6 +1000,7 @@ export interface BridgeHostOptions extends BaseOptions {
   binding: BridgeBinding;
   presentation: BridgePresentation;
   capabilities: readonly string[];
+  surface?: BridgeSurface;
   onReady?: (presentation: BridgePresentation) => void;
   onBackendRequest?: (
     request: BridgeBackendRequest,
@@ -1144,6 +1149,8 @@ function validColor(value: unknown): value is string {
 }
 export function parseBridgeRoutes(
   value: unknown,
+  // A reader registry always has a root route; an admin one names its own entry route.
+  requireRoot = true,
 ): readonly BridgeRoute[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 32)
     return null;
@@ -1188,12 +1195,12 @@ export function parseBridgeRoutes(
       }),
     );
   }
-  return paths.has("/") ? Object.freeze(routes) : null;
+  return !requireRoot || paths.has("/") ? Object.freeze(routes) : null;
 }
 function parseNavigation(value: unknown): BridgeNavigation | null {
   if (!exact(value, ["path", "search", "routes"]) || !isString(value.path))
     return null;
-  const routes = parseBridgeRoutes(value.routes);
+  const routes = parseBridgeRoutes(value.routes, false);
   const route = routes?.find((route) => route.path === value.path);
   if (!routes || !route) return null;
   const query = parseRouteSearch(route.query ?? [], value.search);
@@ -2896,6 +2903,7 @@ export function createBridgeHost(
           presentation: current,
           capabilities: granted,
           backend: typeof options.onBackendRequest === "function",
+          ...(options.surface === "admin" ? { surface: "admin" } : {}),
         },
         "*",
         [outbound],
@@ -4086,15 +4094,18 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       closeTransfers(event);
       return;
     }
+    const initKeys = [
+      "type",
+      ...envelopeKeys,
+      "revision",
+      "presentation",
+      "capabilities",
+      "backend",
+    ];
+    const adminInit = Object.prototype.hasOwnProperty.call(data, "surface");
     if (
-      !exact(data, [
-        "type",
-        ...envelopeKeys,
-        "revision",
-        "presentation",
-        "capabilities",
-        "backend",
-      ]) ||
+      !exact(data, adminInit ? [...initKeys, "surface"] : initKeys) ||
+      (adminInit && data.surface !== "admin") ||
       !BRIDGE_PROTOCOLS.includes(data.protocol as string) ||
       !nonce(data.hostNonce) ||
       !nonce(data.channelNonce) ||
@@ -4129,6 +4140,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       binding,
       capabilities: granted,
       backendAvailable: data.backend,
+      surface: adminInit ? "admin" : "reader",
     });
     const captured = port;
     port.onmessage = (message) => {

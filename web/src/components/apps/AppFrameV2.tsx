@@ -3,7 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Alert, Button, Spin } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type BridgeBinding, type BridgePresentation, type PageActionSnapshot } from '../../lib/bridge-v2'
+import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type BridgeBinding, type BridgePresentation, type BridgeSurface, type PageActionSnapshot } from '../../lib/bridge-v2'
 import './AppFrameV2.css'
 import { errText } from '../../api/client'
 import { consumeNetworkPlan, planNetworkChange, readNetworkPolicy, type CapabilityPlan } from '../../lib/appNetworkTargetsV2'
@@ -24,6 +24,9 @@ export interface AppFrameV2Props {
   presentation: BridgePresentation
   capabilities: readonly string[]
   backendAvailable?: boolean
+  // The audience this launch serves. It picks the backend endpoint and is told to the app; the same
+  // frame serves readers and app administrators.
+  surface?: BridgeSurface
   onPageChange?: (snapshot:PageActionSnapshot|null)=>void
   onDraftChange?: (dirty: boolean) => void
   // Only an administrator may answer an app's request for network destinations; for anyone else the
@@ -35,13 +38,16 @@ export interface AppFrameV2Props {
   // Viewport height, also used as the initial document loading-cover height.
   height: number
 }
-function safeSource(source: string, binding: BridgeBinding): boolean {
+function safeSource(source: string, binding: BridgeBinding, surface: BridgeSurface | undefined): boolean {
   if (source.length > 2048 || (!source.startsWith('/app-assets/') && !source.startsWith('/app-documents/')) || /[\\\s?#]/.test(source)) return false
   try {
     const url = new URL(source, window.location.origin)
     const decoded = decodeURIComponent(url.pathname)
     if (source.startsWith('/app-documents/')) {
+      // An admin document lives under /app-documents/<installation>/admin/…; a reader's never does.
       const parts = source.split('/')
+      const admin = surface === 'admin'
+      if (admin) { if (parts[3] !== 'admin') return false; parts.splice(3, 1) }
       if (parts.length < 8 || parts[2] !== binding.installationId || parts[3] !== binding.generation ||
         parts[4] !== binding.policyRevision || parts[5] !== binding.releaseSha256 ||
         !/^[a-f0-9]{64}$/.test(parts[6]) || decoded !== source) return false
@@ -51,13 +57,13 @@ function safeSource(source: string, binding: BridgeBinding): boolean {
 }
 export default function AppFrameV2(props: AppFrameV2Props) {
   const { t } = useTranslation()
-  if (!safeSource(props.source, props.binding) || !parseBridgePresentation(props.presentation) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
+  if (!safeSource(props.source, props.binding, props.surface) || !parseBridgePresentation(props.presentation) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
     return <Alert type="error" showIcon title={t('apps.v2Failed')} />
   }
-  const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true])
+  const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true, props.surface === 'admin'])
   return <FrameDocument key={identity} {...props} />
 }
-function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, canReviewNetwork, onNetworkPolicyChanged, onDraftChange, onNavigate, onPageChange }: AppFrameV2Props) {
+function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, surface, canReviewNetwork, onNetworkPolicyChanged, onDraftChange, onNavigate, onPageChange }: AppFrameV2Props) {
   const { t } = useTranslation()
   const frame = useRef<HTMLIFrameElement>(null)
   const navigationObserver=useRef(onNavigate)
@@ -158,7 +164,8 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       binding,
       presentation: latest.current,
       capabilities,
-      onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
+      surface,
+      onBackendRequest: backendAvailable ? createAppBackendTransport(binding, surface) : undefined,
       onNetworkRequest: capabilities.includes('network.http') ? createAppNetworkTransport(binding) : undefined,
       onNetworkTargetsRequest: capabilities.includes('network.http') && canReviewNetwork ? askNetworkTargets : undefined,
       onNetworkTargetsApplied: revision => { if (live.current && epoch.current === generation) policyObserver.current?.(revision) },

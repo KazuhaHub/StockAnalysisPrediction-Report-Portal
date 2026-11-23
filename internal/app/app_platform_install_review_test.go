@@ -13,6 +13,11 @@ import (
 )
 
 func platformInstallFixture(t *testing.T, pg bool) (*Server, platformActorSession, platformStagedRelease) {
+	return platformInstallFixtureWith(t, pg, nil)
+}
+
+// platformInstallFixtureWith is platformInstallFixture with a last edit of the manifest before it is signed.
+func platformInstallFixtureWith(t *testing.T, pg bool, edit func(*appplatform.Manifest)) (*Server, platformActorSession, platformStagedRelease) {
 	t.Helper()
 	s, session := platformTrustTestServer(t, pg)
 	platformRegisterTestPublisher(t, s, session)
@@ -29,6 +34,9 @@ func platformInstallFixture(t *testing.T, pg bool) (*Server, platformActorSessio
 		if name != "public.projection" && name != "ingress.webhook" && name != "machine.read" {
 			manifest.Capabilities.Optional = append(manifest.Capabilities.Optional, name)
 		}
+	}
+	if edit != nil {
+		edit(&manifest)
 	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {

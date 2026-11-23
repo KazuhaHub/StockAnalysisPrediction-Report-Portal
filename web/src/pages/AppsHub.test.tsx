@@ -21,7 +21,8 @@ const directoryState = vi.hoisted(() => ({
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'failed' }))
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: authState.admin, can: (p: string) => authState.can(p) }) }))
 vi.mock('../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
-vi.mock('../lib/appDirectoryV2', () => ({
+vi.mock('../lib/appDirectoryV2', async (original) => ({
+  ...(await original<typeof import('../lib/appDirectoryV2')>()),
   useAppDirectory: () => ({ items: directoryState.items, loading: false, failed: false, nextCursor: '', load: () => undefined }),
 }))
 vi.mock('react-i18next', () => ({

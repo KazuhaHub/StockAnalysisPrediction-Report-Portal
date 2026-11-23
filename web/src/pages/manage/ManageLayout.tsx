@@ -32,6 +32,9 @@ export default function ManageLayout() {
   const active = loc.pathname.split('/')[2] || 'overview'
   const page = adminPage(active)
   const nested = loc.pathname.split('/').filter(Boolean).length > 2
+  // The page body is replaced on every route change, which would reload an app's sandboxed administration page
+  // each time it moves between its own routes; those share one body, the way an app's reader page shares one.
+  const bodyKey = loc.pathname.replace(/^(\/manage\/apps\/installations\/[^/]+\/admin)(\/.*)?$/, '$1')
   const group = ADMIN_GROUPS.find((entry) => entry.pages.some((item) => item.key === active))
   const activeLabel = page ? t(page.label) : t('manage.overview')
   const [openKeys, setOpenKeys] = useState<string[]>(() => {
@@ -129,7 +132,7 @@ export default function ManageLayout() {
   const content = (
     <div className={`rp-admin-content${active === 'users' ? ' rp-admin-content--directory' : ''}`} id="rp-admin-content">
       {header}
-      <div className="rp-admin-page-body" key={loc.pathname}>
+      <div className="rp-admin-page-body" key={bodyKey}>
       <Suspense fallback={<LoadingPlaceholder minHeight="40vh" />}>
         <Outlet />
       </Suspense>

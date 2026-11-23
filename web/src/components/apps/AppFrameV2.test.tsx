@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { BridgeHostOptions } from '../../lib/bridge-v2'
 import AppFrameV2 from './AppFrameV2'
@@ -175,3 +175,33 @@ test('page metadata cannot return through a retired document observer',()=>{
  view.unmount();expect(changed).toHaveBeenLastCalledWith(null);
  act(()=>sessions[1].options.onPageChange?.(state));expect(changed).toHaveBeenLastCalledWith(null);
 });
+
+test('an admin frame tells the bridge its surface and relays backend requests to the admin endpoint only',async()=>{
+ const fetch=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:200,body:'{}'})));vi.stubGlobal('fetch',fetch)
+ render(<AppFrameV2 {...props} backendAvailable surface="admin"/>);fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[0].options.surface).toBe('admin')
+ await sessions[0].options.onBackendRequest!({method:'GET',path:'/v1/x',body:''},new AbortController().signal)
+ expect(fetch.mock.calls.map(call=>call[0])).toEqual([`/api/app-platform/installations/${binding.installationId}/admin/backend`])
+ vi.unstubAllGlobals()
+})
+test('a reader frame keeps the reader endpoint and a surface change retires the frame',async()=>{
+ const fetch=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:200,body:'{}'})));vi.stubGlobal('fetch',fetch)
+ const view=render(<AppFrameV2 {...props} backendAvailable/>);const old=screen.getByTitle('Fixture');fireEvent.load(old)
+ expect(sessions[0].options.surface).not.toBe('admin')
+ await sessions[0].options.onBackendRequest!({method:'GET',path:'/v1/x',body:''},new AbortController().signal)
+ expect(fetch.mock.calls[0][0]).toBe(`/api/app-platform/installations/${binding.installationId}/backend`)
+ view.rerender(<AppFrameV2 {...props} backendAvailable surface="admin"/>);expect(screen.getByTitle('Fixture')).not.toBe(old)
+ vi.unstubAllGlobals()
+})
+
+const documentSource=(admin:boolean)=>`/app-documents/${binding.installationId}/${admin?'admin/':''}${binding.generation}/${binding.policyRevision}/${binding.releaseSha256}/${'b'.repeat(64)}/index.html`
+test('an admin frame loads only the admin document URL and a reader frame never loads it',()=>{
+ const admin=render(<AppFrameV2 {...props} surface="admin" source={documentSource(true)}/>)
+ expect(screen.getByTitle('Fixture').getAttribute('src')).toBe(documentSource(true))
+ admin.unmount()
+ render(<AppFrameV2 {...props} surface="admin" source={documentSource(false)}/>);expect(screen.queryByTitle('Fixture')).toBeNull()
+ cleanup()
+ render(<AppFrameV2 {...props} source={documentSource(true)}/>);expect(screen.queryByTitle('Fixture')).toBeNull()
+ cleanup()
+ render(<AppFrameV2 {...props} source={documentSource(false)}/>);expect(screen.getByTitle('Fixture')).toBeTruthy()
+})

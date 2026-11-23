@@ -33,6 +33,10 @@ type platformActorSession struct {
 	// ingress handler sets it; like anonymousPublic it admits no account, audience or viewer, and it
 	// must show the ingress.webhook grant and the active endpoint binding instead.
 	anonymousIngress string
+	// adminSurface marks the admission of an app's own admin page (doc 191). Only the admin handlers
+	// set it. Every gate keeps its checks and decides access with platformAppAdmin instead of the
+	// audience, and the release must declare admin_routes.
+	adminSurface bool
 }
 
 type platformActorFacts struct {

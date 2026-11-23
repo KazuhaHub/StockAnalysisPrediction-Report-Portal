@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 const platformDirectoryPageSize = 32
@@ -15,12 +18,16 @@ const platformDirectoryPageSize = 32
 var platformDirectoryAppID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 type platformAppDirectoryItem struct {
-	InstallationID string               `json:"installationId"`
-	ApplicationID  string               `json:"applicationId"`
-	State          string               `json:"state"`
-	Openable       bool                 `json:"openable"`
-	Display        *platformDisplayView `json:"display,omitempty"`
-	PublisherName  string               `json:"publisherName,omitempty"`
+	InstallationID string `json:"installationId"`
+	ApplicationID  string `json:"applicationId"`
+	State          string `json:"state"`
+	Openable       bool   `json:"openable"`
+	// Manageable is true when the viewer administers the installation and its active release declares an
+	// admin page (doc 191). It is independent of Openable: an app administrator outside the audience
+	// sees the installation as manageable but not openable.
+	Manageable    bool                 `json:"manageable"`
+	Display       *platformDisplayView `json:"display,omitempty"`
+	PublisherName string               `json:"publisherName,omitempty"`
 }
 type platformAppDirectory struct {
 	Items      []platformAppDirectoryItem `json:"items"`
@@ -69,6 +76,22 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	if err != nil {
 		return zero, err
 	}
+	audience := map[string]bool{}
+	for _, id := range open {
+		audience[id] = true
+	}
+	// App administrators also see the installations whose admin page they manage (doc 191), listed
+	// by the same keyset as the audience so the order and the cursor rules stay one.
+	administered, err := platformAdministeredInstallations(e, account)
+	if err != nil {
+		return zero, err
+	}
+	for id, adminPage := range administered {
+		if !audience[id] && adminPage {
+			open = append(open, id)
+		}
+	}
+	slices.Sort(open)
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE OF i"
@@ -125,8 +148,10 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		if !platformValidUUID(c.id) || !platformDirectoryAppID.MatchString(c.app) {
 			return zero, errAppPlatformLaunchUnavailable
 		}
-		if err := platformAudienceGrant(e, c.id, chain); err != nil {
-			return zero, err
+		if audience[c.id] {
+			if err := platformAudienceGrant(e, c.id, chain); err != nil {
+				return zero, err
+			}
 		}
 		item := platformAppDirectoryItem{InstallationID: c.id, ApplicationID: c.app, State: "attention"}
 		switch {
@@ -147,13 +172,15 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 			}
 			if eligible {
 				item.State = "installed"
-				item.Openable = true
+				item.Openable = audience[c.id]
 			}
 		}
 		record, err := platformReadDisplayRecord(e, c.id)
 		if err != nil {
 			return zero, err
 		}
+		_, item.Manageable = administered[c.id]
+		item.Manageable = item.Manageable && item.State == "installed" && record != nil
 		records = append(records, record)
 		result.Items = append(result.Items, item)
 	}
@@ -166,9 +193,10 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		display, publisherName, valid := record.verified(trust, now, candidates[i].app, candidates[i].publisher)
 		if !valid {
 			result.Items[i].State = "attention"
-			result.Items[i].Openable = false
+			result.Items[i].Openable, result.Items[i].Manageable = false, false
 		} else {
 			result.Items[i].Display, result.Items[i].PublisherName = platformDisplayViewOf(display), publisherName
+			result.Items[i].Manageable = result.Items[i].Manageable && record.adminPage
 		}
 	}
 	now, err = platformDatabaseNow(e)
@@ -183,7 +211,7 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		if record != nil && !record.currentKeyTime(trust, now) {
 			result.Items[i].Display, result.Items[i].PublisherName = nil, ""
 			result.Items[i].State = "attention"
-			result.Items[i].Openable = false
+			result.Items[i].Openable, result.Items[i].Manageable = false, false
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -220,4 +248,48 @@ func (s *Server) apiPlatformApps(w http.ResponseWriter, r *http.Request, user st
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(result)
+}
+
+// platformAdministeredInstallations maps the installations the account administers to whether their
+// active release declares an admin page: every live installation for a Portal administrator, the
+// delegations still bound to this account's creation for anyone else. Unparseable releases count as
+// no admin page; the listing verifies the signature of the ones it shows.
+func platformAdministeredInstallations(e migExec, account platformActorAccount) (map[string]bool, error) {
+	query, args := `SELECT id FROM app_platform_installations WHERE desired_state<>'removed'`, []any{}
+	if !can(account.role, PermManage) {
+		query = `SELECT a.installation_id FROM app_platform_app_admins a JOIN app_platform_installations i ON i.id=a.installation_id WHERE a.username=? AND a.account_created=? AND i.desired_state<>'removed'`
+		args = []any{account.username, account.created}
+	}
+	rows, err := e.query(query+` ORDER BY 1`, args...)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		record, err := platformReadDisplayRecord(e, id)
+		if err != nil {
+			return nil, err
+		}
+		if record != nil {
+			if parsed, err := appplatform.ParseDescriptor(record.raw); err == nil {
+				record.adminPage = len(parsed.Manifest.Presentation.AdminRoutes) > 0
+			}
+		}
+		result[id] = record != nil && record.adminPage
+	}
+	return result, nil
 }

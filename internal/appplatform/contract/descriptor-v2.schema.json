@@ -212,6 +212,23 @@
           "maxItems": 32,
           "description": "Strict parsing also requires unique route IDs/paths and a home path."
         },
+        "admin_routes": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Route"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-omitempty": true,
+          "description": "Optional routes of the app-owned admin page; the first is its entry. Strict parsing requires IDs and paths unique across routes and admin_routes together; no home path is required."
+        },
         "entry": {
           "type": "string",
           "minLength": 1,

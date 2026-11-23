@@ -91,6 +91,31 @@ describe('application installation settings', () => {
     expect(apiMock.get).toHaveBeenCalledWith(`/api/admin/app-platform/installations/${installation}/settings`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
+  describe('app administrators (delegated admin page)', () => {
+    const admins = `${root}/installations/${installation}/app-admins`
+    const serve = (value: typeof settings & { admin_page?: boolean }) => apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) return value
+      if (url.endsWith('/app-admins')) return { admins: [{ username: 'ada', displayName: 'Ada Lovelace', grantedBy: 'root', grantedAt: 1767268800000 }] }
+      return { bindings: [] }
+    })
+
+    it('lists the delegated administrators in the settings tab of an app that has an admin page', async () => {
+      serve({ ...settings, admin_page: true })
+      mount()
+      expect(await screen.findByText('Ada Lovelace')).toBeTruthy()
+      expect(screen.getByText('appAdmin.admins.title')).toBeTruthy()
+      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
+    })
+
+    it('has no administrators card, and asks for no list, when the app has no admin page', async () => {
+      serve({ ...settings, admin_page: false })
+      mount()
+      await screen.findByRole('heading', { name: 'notes' })
+      expect(screen.queryByText('appAdmin.admins.title')).toBeNull()
+      expect(apiMock.get).not.toHaveBeenCalledWith(admins, expect.anything())
+    })
+  })
+
   describe('principals.read grant (doc 181 section 4)', () => {
     const route = `${root}/installations/${installation}/principals-read`
     const withPrincipals = (granted: boolean, required = false) => ({ ...settings, capabilities: [...settings.capabilities, { capability: 'principals.read', granted, required }] })

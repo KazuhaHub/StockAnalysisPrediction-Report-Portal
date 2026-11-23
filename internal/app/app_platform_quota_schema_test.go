@@ -167,14 +167,15 @@ func withoutColumn(t *testing.T, dump []byte, table, column string) []byte {
 
 func TestMigration0024IsTheLastStepAndAnOlderDumpRestoresWithDefaultInodes(t *testing.T) {
 	steps := newTestStore(t).migrations()
-	if steps[len(steps)-1].id != "0024" {
-		t.Fatalf("last step = %s", steps[len(steps)-1].id)
+	// 0024 is the last step that changes a shared table; 0025 only adds a table of its own (doc 191).
+	if steps[len(steps)-2].id != "0024" || steps[len(steps)-1].id != "0025" {
+		t.Fatalf("last steps = %s, %s", steps[len(steps)-2].id, steps[len(steps)-1].id)
 	}
 	src := newTestStore(t)
 	platformSeedActionFixtures(t, src)
 	mustExec(t, src, `INSERT INTO app_platform_data_namespaces(id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms,quota_inodes)
 		VALUES('`+platformFixtureID(70)+`','`+platformFixtureID(1)+`','`+platformFixtureID(1)+`','active',1,268435456,0,1,1,NULL,NULL,1,1,100000)`)
-	dump := withoutSections(t, dumpOf(t, src), nil, []string{"0024"})
+	dump := withoutSections(t, dumpOf(t, src), nil, []string{"0024", "0025"})
 	dump = withoutColumn(t, dump, "app_platform_data_namespaces", "quota_inodes")
 	if bytes.Contains(dump, []byte("quota_inodes")) || bytes.Contains(dump, []byte(`"0024"`)) {
 		t.Fatal("fixture still describes 0024")
