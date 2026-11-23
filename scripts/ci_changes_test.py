@@ -4,7 +4,7 @@ import re
 import subprocess
 import unittest
 
-from ci_changes import classify, kind, GO_READS, WEB_READS
+from ci_changes import classify, kind, needs_platform, GO_READS, WEB_READS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
@@ -40,6 +40,48 @@ class ClassifyTests(unittest.TestCase):
 
     def test_the_union_of_the_files(self):
         self.assertEqual(classify(['docs/x.md', 'web/src/a.ts', 'internal/app/a.go']), {'go': True, 'web': True})
+
+
+class PlatformTests(unittest.TestCase):
+    """The app platform's own race lane (and journal's race shards) run only for a change that can
+    reach them. The list errs towards running: anything that is not a plain Go or docs file counts."""
+
+    def test_portal_only_go_and_docs_need_no_platform_lane(self):
+        self.assertFalse(needs_platform(['internal/app/server.go', 'internal/app/sso_admin.go',
+                                         'internal/batch/run.go', 'docs/x.md', 'web/src/a.ts']))
+
+    def test_platform_ground_needs_it(self):
+        for path in ('internal/app/app_platform_launch.go', 'internal/app/app_platform_x_test.go',
+                     'internal/apprunner/journal/store.go', 'internal/appplatform/descriptor.go',
+                     'cmd/app-runner/main.go', 'internal/app/apps_store.go'):
+            with self.subTest(path=path):
+                self.assertTrue(needs_platform([path]))
+
+    def test_shared_core_needs_it(self):
+        # What the platform's tests stand on: the store, its schema checks and migrations, the keyring
+        # and secret box its credentials are sealed with, the sessions its viewer requests check.
+        for path in ('internal/app/store.go', 'internal/app/store_stmtcache.go', 'internal/app/migrate.go',
+                     'internal/app/migrate_steps.go', 'internal/app/schema_catalog.go',
+                     'internal/app/keyring_store.go', 'internal/app/secretbox.go', 'internal/app/sessions.go',
+                     'internal/queue/queue.go'):
+            with self.subTest(path=path):
+                self.assertTrue(needs_platform([path]))
+
+    def test_anything_not_plain_go_or_docs_needs_it(self):
+        for path in ('.github/workflows/test.yml', 'go.mod', 'go.sum', 'internal/app/testdata/x.json',
+                     'scripts/ci_shard.py', 'web/src/locales/en-US.json'):
+            with self.subTest(path=path):
+                self.assertTrue(needs_platform([path]))
+
+    def test_no_files_runs_it(self):
+        self.assertTrue(needs_platform([]))
+
+    def test_main_prints_platform(self):
+        import io
+        from ci_changes import main
+        out = io.StringIO()
+        main(['internal/app/server.go'], stdout=out)
+        self.assertEqual(out.getvalue(), 'go=true\nweb=false\nplatform=false\n')
 
 
 def tracked(*patterns):

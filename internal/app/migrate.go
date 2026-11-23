@@ -171,10 +171,15 @@ func (s *Store) verifyBaseSchema() error { return s.checkBaseShape(true) }
 // mid-create database has only a prefix, so there only what EXISTS has to match.
 func (s *Store) checkBaseShape(requireEverything bool) error {
 	renamed := baseRenames(s.migrations())
+	// One catalog read answers every probe below (schema_catalog.go); nothing here changes the schema.
+	c, err := s.poolExec().withCatalog()
+	if err != nil {
+		return fmt.Errorf("reading the schema catalog: %w", err)
+	}
 	for _, stmt := range s.baseSchemaStmts() {
 		if isIndexDDL(stmt) {
 			name, ok := parseIndexName(stmt)
-			if !ok || s.indexExists(name) || !requireEverything {
+			if !ok || c.indexExists(name) || !requireEverything {
 				continue
 			}
 			return s.shapeError("index " + name)
@@ -183,21 +188,21 @@ func (s *Store) checkBaseShape(requireEverything bool) error {
 		if !ok {
 			continue
 		}
-		if !s.tableExists(table) {
+		if !c.tableExists(table) {
 			if !requireEverything {
 				continue
 			}
 			return s.shapeError("table " + table)
 		}
-		for _, c := range cols {
-			if r, ok := renamed[table+"."+c.name]; ok {
-				if err := s.checkRenamedBaseColumn(r); err != nil {
+		for _, col := range cols {
+			if r, ok := renamed[table+"."+col.name]; ok {
+				if err := s.checkRenamedBaseColumn(c, r); err != nil {
 					return err
 				}
 				continue
 			}
-			if !s.columnExists(table, c.name) {
-				return s.shapeError("column " + table + "." + c.name)
+			if !c.columnExists(table, col.name) {
+				return s.shapeError("column " + table + "." + col.name)
 			}
 		}
 	}
@@ -215,9 +220,9 @@ func (s *Store) checkBaseShape(requireEverything bool) error {
 //
 // Both names at once, or neither, is a database no release produced, and neither column can be
 // trusted to hold the value — so it is refused rather than guessed at.
-func (s *Store) checkRenamedBaseColumn(r stepRename) error {
-	hasFrom := s.columnExists(r.table, r.from)
-	hasTo := s.columnExists(r.table, r.to)
+func (s *Store) checkRenamedBaseColumn(e migExec, r stepRename) error {
+	hasFrom := e.columnExists(r.table, r.from)
+	hasTo := e.columnExists(r.table, r.to)
 	if s.GetSetting(migrationLedgerKey(r.step), "") != "" {
 		if !hasTo {
 			return fmt.Errorf("unsupported database: migration %s renamed %s.%s to %s, and %s.%s is missing",
