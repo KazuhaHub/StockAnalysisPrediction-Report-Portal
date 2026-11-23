@@ -22,10 +22,12 @@ GO_READS = (
     'web/src/locales/',                             # internal/app/audit_gaps_test.go
     'web/src/api/types.ts',                         # internal/app/forecast_ops_test.go
     'docs/app-platform/183-machine-read-api.md',    # internal/app/app_platform_machine_token_schema_test.go
+    'web/src/lib/operation-stages.generated.json',  # internal/appplatform/operation_stages_contract_test.go
 )
 # Go sources that web tests read.
 WEB_READS = (
     'internal/app/export_sources.go',               # web/src/lib/exportFilter.test.ts
+    'internal/appplatform/operation.go',            # web/src/pages/manage/operationSteps.test.ts (via the generated stage contract)
 )
 
 
