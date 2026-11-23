@@ -29,6 +29,19 @@ interface SiteCtx {
 
 const Ctx = createContext<SiteCtx | null>(null)
 
+/**
+ * The logo address, only when it can be nothing but an image location: a web URL, a path (same-site or protocol-relative)
+ * or an image data URL. Anything with another scheme (javascript:, data:text/html, ...) is dropped, so an administrator's
+ * text never reaches the favicon link or an img element as a script URL.
+ */
+export function safeLogoUrl(raw: unknown): string {
+  const value = String(raw ?? '').trim()
+  if (/^(https?:\/\/|\/|data:image\/)/i.test(value)) return value
+  // A relative path has no scheme: no ":" before the first "/", "?" or "#".
+  if (value && !/^[^/?#]*:/.test(value)) return value
+  return ''
+}
+
 function normalizeSettings(s?: Partial<SiteSettings> | null): SiteSettings {
   const moreStyle = String(s?.homeMoreStyle ?? '').trim().toLowerCase()
   const rawVersionDisplay = String(s?.versionDisplay ?? '').trim().toLowerCase()
@@ -42,7 +55,7 @@ function normalizeSettings(s?: Partial<SiteSettings> | null): SiteSettings {
   ) as VersionDisplay
   return {
     siteTitle: (s?.siteTitle ?? '').trim(),
-    siteLogoUrl: (s?.siteLogoUrl ?? '').trim(),
+    siteLogoUrl: safeLogoUrl(s?.siteLogoUrl),
     homeMoreStyle: (['expand', 'modal', 'popover'].includes(moreStyle) ? moreStyle : 'expand') as HomeMoreStyle,
     footerText: (s?.footerText ?? '').trim(),
     footerShowInfo: s?.footerShowInfo !== false,

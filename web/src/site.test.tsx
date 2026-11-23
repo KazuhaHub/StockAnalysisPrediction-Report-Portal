@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { SiteProvider, useSite } from './site'
+import { SiteProvider, useSite, safeLogoUrl } from './site'
 
 const apiMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -170,5 +170,23 @@ describe('SiteProvider', () => {
     await user.click(screen.getByRole('button', { name: 'refresh' }))
     await waitFor(() => expect(screen.getByTestId('title').textContent).toBe('二次刷新'))
     expect(settings().pwaIconUrl).toBe('/b.png')
+  })
+})
+
+describe('safeLogoUrl', () => {
+  it('keeps same-site paths, web URLs and image data URLs', () => {
+    expect(safeLogoUrl('/static/logo.png')).toBe('/static/logo.png')
+    expect(safeLogoUrl('https://cdn.example.com/a.svg')).toBe('https://cdn.example.com/a.svg')
+    expect(safeLogoUrl('http://example.com/a.png')).toBe('http://example.com/a.png')
+    expect(safeLogoUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA')
+    expect(safeLogoUrl('//cdn.example.com/a.png')).toBe('//cdn.example.com/a.png')
+    expect(safeLogoUrl('logo.png')).toBe('logo.png')
+  })
+
+  it('drops script and non-image data URLs', () => {
+    expect(safeLogoUrl('javascript:alert(1)')).toBe('')
+    expect(safeLogoUrl(' JavaScript:alert(1)')).toBe('')
+    expect(safeLogoUrl('data:text/html,<b>x</b>')).toBe('')
+    expect(safeLogoUrl('')).toBe('')
   })
 })
