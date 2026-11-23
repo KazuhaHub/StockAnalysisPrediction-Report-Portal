@@ -117,3 +117,22 @@ func TestSchemaCatalogReadsThroughTheTransaction(t *testing.T) {
 		}
 	})
 }
+
+// The per-name probes only ever looked at declared tables, so an unrelated view that no longer resolves
+// (SQLite lets a view outlive its table) never stopped a start-up. The catalog read must not either.
+func TestSchemaCatalogIgnoresABrokenUnrelatedViewSQLite(t *testing.T) {
+	st := platformTestStore(t, false)
+	plain := st.poolExec()
+	for _, stmt := range []string{
+		`CREATE TABLE operator_scratch (x INTEGER)`,
+		`CREATE VIEW operator_view AS SELECT x FROM operator_scratch`,
+		`DROP TABLE operator_scratch`,
+	} {
+		if _, err := plain.exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := plain.withCatalog(); err != nil {
+		t.Fatalf("a broken unrelated view stopped the catalog read: %v", err)
+	}
+}

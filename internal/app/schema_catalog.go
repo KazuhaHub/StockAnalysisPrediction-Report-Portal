@@ -32,7 +32,7 @@ func (e migExec) withCatalog() (migExec, error) {
 	cat := &schemaCatalog{tables: map[string]bool{}, indexes: map[string]bool{}, columns: map[string]bool{}}
 	tablesQ := `SELECT name FROM sqlite_master WHERE type='table'`
 	indexesQ := `SELECT name FROM sqlite_master WHERE type='index'`
-	columnsQ := `SELECT m.name, p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type IN ('table','view')`
+	columnsQ := `SELECT m.name, p.name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type='table'`
 	if e.s.driver == "postgres" {
 		tablesQ = `SELECT table_name FROM information_schema.tables WHERE table_schema='public'`
 		indexesQ = `SELECT indexname FROM pg_indexes WHERE schemaname='public'`
