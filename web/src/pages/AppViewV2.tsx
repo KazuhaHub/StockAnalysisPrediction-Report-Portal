@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Spin, theme } from 'antd'
+import { Alert, Button, theme } from 'antd'
+import { LoadingPlaceholder } from '../components/LoadGate'
 import { useNavigate, useParams, useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
@@ -10,6 +11,7 @@ import { parseBridgePresentation } from '../lib/bridge-v2'
 import { parseAppLaunchV2, validInstallationId, type AppLaunchV2 } from '../lib/appLaunchV2'
 import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
 import AppPageHeader from '../components/apps/AppPageHeader'
+import { useCrumbTail } from '../lib/crumbTail'
 import type { PageActionSnapshot } from '../lib/page-v2'
 import AppFrameV2 from '../components/apps/AppFrameV2'
 import { AppDraftPrompt, useAppDraftBlocker } from '../components/apps/AppDraftGuard'
@@ -88,19 +90,19 @@ function LaunchPage({ installation }: { installation: string }) {
   }) : null, [launch,lang,dark,layout,path,location.search,token])
 
   const copy = launch ? appDisplayText(launch.applicationId, launch.display, lang) : null
+  // The shell's breadcrumb ends with the app's name, rendered with the page from the same launch data.
+  useCrumbTail(copy ? copy.name : failed ? null : undefined)
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>
       <AppDraftPrompt dirty={dirty} blocker={blocker} />
-      <AppPageHeader name={copy?.name ?? ''} icon={launch ? <AppDisplayIcon display={launch.display} /> : null}
-        state={route ? page : null} onBack={() => { void navigate('/apps') }} />
+      {launch || failed ? <AppPageHeader name={copy?.name ?? ''} icon={launch ? <AppDisplayIcon display={launch.display} /> : null}
+        state={route ? page : null} onBack={() => { void navigate('/apps') }} /> : null}
       {failed || (launch && (!route || !presentation)) ? (
         <Alert type="error" showIcon title={t(launch && !route ? 'apps.v2InvalidRoute' : 'apps.v2Unavailable')}
           action={launch && !route ? <Button className="rp-safe-primary" type="primary" onClick={() => { void navigate(base, { replace:true }) }}>{t('apps.v2Home')}</Button> : <Button className="rp-safe-primary" type="primary" onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
       ) : !launch ? (
-        <div role="status" style={{ display: 'grid', placeItems: 'center', minHeight: 160 }}>
-          <Spin /><span>{t('apps.v2Loading')}</span>
-        </div>
+        <LoadingPlaceholder minHeight={320} label={t('apps.v2Loading')} />
       ) : (
         <div ref={panel} style={{ flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}

@@ -54,6 +54,10 @@ When in doubt, look at how they solve it before inventing a pattern.
   own `gap` and is left to it. An `Alert` sets no margin of its own (`alertSpacing.test.ts`).
 - **Forms keep a readable width** (`.rp-settings-panel > .ant-form-item`, 720 px); tables and cards
   use the full width.
+- **A detail page ends its breadcrumb with the item's name.** The shell knows the route, not the name:
+  the page hands the name it renders its header from to the shell (`useCrumbTail`), and until it has
+  it the shell shows no trail, never the shorter one grown later. Console detail pages use
+  `AppsBreadcrumb` with the name from the same first-paint data.
 - **Back leads the title.** A page reached from a list (a stock, a run, an editor, an app) puts its
   Back button at the top left, before the page or card title, never in the top-right corner.
 - **Columns align.** Side-by-side panels start on the same line. A sticky rail's offset is measured
@@ -162,6 +166,20 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
   (antd centres it in the whole block, far below the fold for a long report).
 - No hand-placed large spinners (`loadingStates.test.ts`). Never render defaults as if the server
   had sent them; a failed load says so and offers a retry.
+- **Render once; wait only for what is fast and needed.** A view's first paint waits for the one
+  fast, local request that carries what it shows (and requests started in parallel with it), and
+  renders complete: one page-level loading state, then names and labels as they will stay. Never show
+  an identifier (an app id, a publisher id, a key, a slug) as a stand-in for a name that is still
+  loading, and never show a generic label a later request will replace. Nothing waits on a remote or
+  slow source (a market catalogue, a third-party index): that loads in the background and is
+  **additive**: it adds an element (a badge, a button, a banner below the content) and never replaces
+  or reflows text already on screen. Data the shell needs on the first frame (the site title and logo)
+  is embedded in the served `index.html` as an inert JSON block (`rp-bootstrap`) and read
+  synchronously; the background refresh swaps nothing unless the values changed. An answer of any
+  kind settles a view, so a failure renders what is known with an inline retry, never an endless
+  spinner. `useSettled(answered)` (`lib/useSettled.ts`) gates a view on its requests and stays true
+  through later refreshes. Each such view has a test that its first settled render is already final
+  (`AppsAdminPage`, `AppViewV2`, `HomePage`, `LinksPage`, `site`).
 
 ## Feedback, status and confirmation
 
@@ -210,5 +228,5 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
 - [ ] All copy through `t()`, in all three locales.
 - [ ] Verified at 320 / 375 / 768 / 1280 px, light and dark, reduced motion.
 - [ ] No sideways page scroll on a phone; nothing overlaps or is squeezed to an ellipsis.
-- [ ] Loading, empty, filtered-empty and error states all shown.
+- [ ] Loading, empty, filtered-empty and error states all shown; the view renders once (no id-then-name swap).
 - [ ] Tests written first; guard tests pass; reviewed; shown on `preview/all` before the PR.

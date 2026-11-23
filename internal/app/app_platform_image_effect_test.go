@@ -224,6 +224,7 @@ var computedSQLAllowList = map[string]string{
 	"platformUnresolvedOperationEffectCount": "a read with a closed predicate",
 	"writePlatformOperationLease":            "updates the lease columns of an existing operation; never the installation",
 	"applyPlatformAbandonRuntime":            "loops over literal statements; none inserts an operation",
+	"loadPlatformResolveKeepDataPlan":        "a read with the closed unresolved-operation predicate",
 }
 
 // Fails if any non-test Go file of the module can write the operations table other than the one helper.

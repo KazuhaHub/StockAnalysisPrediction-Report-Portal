@@ -205,14 +205,19 @@ func (s *Server) createPlatformManagedSameReleaseReviewWithRuntimeContext(
 			return errAppPlatformRuntimeConflict
 		}
 		var generation int64
-		if err := e.queryRow(`SELECT generation FROM app_platform_installations
-			WHERE id=?`, installation).Scan(&generation); err != nil {
+		var desiredState, phaseState string
+		if err := e.queryRow(`SELECT generation,desired_state,phase FROM app_platform_installations
+			WHERE id=?`, installation).Scan(&generation, &desiredState, &phaseState); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return errAppPlatformPlanChanged
 			}
 			return err
 		}
-		if generation < 2 || generation == math.MaxInt64 {
+		minimum := int64(2)
+		if action == appplatform.ActionRepair && platformRepairFromRecovery(desiredState, phaseState) {
+			minimum = 1
+		}
+		if generation < minimum || generation == math.MaxInt64 {
 			return errAppPlatformPlanChanged
 		}
 		expected := platformOperationLease{
@@ -1093,4 +1098,10 @@ func platformLoadManagedEnableFailurePlan(e migExec, lease platformOperationLeas
 		return zero, errAppPlatformStageEvidence
 	}
 	return plan, nil
+}
+
+// platformRepairFromRecovery is whether an installation is in the state a repair is reviewed from after a failed enable,
+// import or repair: disabled, and in recovery_required or review_required.
+func platformRepairFromRecovery(desired, phase string) bool {
+	return desired == "disabled" && (phase == "recovery_required" || phase == "review_required")
 }

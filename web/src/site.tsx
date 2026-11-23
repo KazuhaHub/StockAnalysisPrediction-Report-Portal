@@ -29,6 +29,19 @@ interface SiteCtx {
 
 const Ctx = createContext<SiteCtx | null>(null)
 
+/**
+ * The logo address, only when it can be nothing but an image location: a web URL, a path (same-site or protocol-relative)
+ * or an image data URL. Anything with another scheme (javascript:, data:text/html, ...) is dropped, so an administrator's
+ * text never reaches the favicon link or an img element as a script URL.
+ */
+export function safeLogoUrl(raw: unknown): string {
+  const value = String(raw ?? '').trim()
+  if (/^(https?:\/\/|\/|data:image\/)/i.test(value)) return value
+  // A relative path has no scheme: no ":" before the first "/", "?" or "#".
+  if (value && !/^[^/?#]*:/.test(value)) return value
+  return ''
+}
+
 function normalizeSettings(s?: Partial<SiteSettings> | null): SiteSettings {
   const moreStyle = String(s?.homeMoreStyle ?? '').trim().toLowerCase()
   const rawVersionDisplay = String(s?.versionDisplay ?? '').trim().toLowerCase()
@@ -42,13 +55,27 @@ function normalizeSettings(s?: Partial<SiteSettings> | null): SiteSettings {
   ) as VersionDisplay
   return {
     siteTitle: (s?.siteTitle ?? '').trim(),
-    siteLogoUrl: (s?.siteLogoUrl ?? '').trim(),
+    siteLogoUrl: safeLogoUrl(s?.siteLogoUrl),
     homeMoreStyle: (['expand', 'modal', 'popover'].includes(moreStyle) ? moreStyle : 'expand') as HomeMoreStyle,
     footerText: (s?.footerText ?? '').trim(),
     footerShowInfo: s?.footerShowInfo !== false,
     versionDisplay,
     pwaEnabled: s?.pwaEnabled !== false,
     pwaIconUrl: (s?.pwaIconUrl ?? '').trim(),
+  }
+}
+
+/**
+ * The public site settings the server embedded in the shell as an inert JSON block
+ * (`<script type="application/json" id="rp-bootstrap">`), read synchronously before the first render. Null when the shell
+ * carries none (the dev server, a test) or the block is not valid: the defaults stand until /api/site answers.
+ */
+export function readBootstrap(): SiteSettings | null {
+  try {
+    const text = document.getElementById('rp-bootstrap')?.textContent
+    return text ? normalizeSettings(JSON.parse(text) as Partial<SiteSettings>) : null
+  } catch {
+    return null
   }
 }
 
@@ -65,18 +92,22 @@ function faviconLink(): HTMLLinkElement {
 export function SiteProvider({ children }: { children: ReactNode }) {
   const { t, i18n } = useTranslation()
   const loc = useLocation()
-  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SETTINGS)
+  // The server embeds the public site settings in the shell (see readBootstrap), so the first paint is already branded
+  // and nothing waits for /api/site. The read below only keeps them current.
+  const [settings, setSettings] = useState<SiteSettings>(() => readBootstrap() ?? DEFAULT_SETTINGS)
 
   const refresh = useCallback(async () => {
     const next = normalizeSettings(await api.get<SiteSettings>('/api/site'))
-    setSettings(next)
+    // Nothing is swapped unless the settings actually changed (an administrator just edited them): the same values keep
+    // the same object, so nothing that shows them renders again.
+    setSettings((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next))
     return next
   }, [])
 
   useEffect(() => {
     // Load once on mount whatever the tab's visibility — a link opened in a background tab
     // still has to show this portal's title and favicon in the tab strip.
-    refresh().catch(() => setSettings(DEFAULT_SETTINGS))
+    refresh().catch(() => {})
     const onRestored = () => { void refresh().catch(() => {}) }
     window.addEventListener('rp:connection-restored', onRestored)
     // Then keep the chrome live without a full reload, but only while

@@ -5,12 +5,12 @@ import { AppstoreOutlined, BarsOutlined, OrderedListOutlined, PlusOutlined } fro
 import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import CardTable from '../../components/CardTable'
-import { appDisplayText, publisherLabel } from '../../lib/appDisplayV2'
+import { appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
 import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, PublisherLine, RECOVERY_STATES } from './appStoreParts'
-import { appPath, useAppLabels, type AdminApp } from './appsAdminModel'
+import { appPath, installedDisplay, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import { sourceName, useAppsConsoleFlow } from './appsConsoleFlow'
 import { loadInstalledRelease } from './platformMarket'
@@ -61,23 +61,22 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apps, user])
 
+  // The first view needs only the layout (one local read, already behind the page's gate): it carries each app's verified
+  // name, publisher, version and display. The market catalogue is a remote read that loads in the background; what it
+  // knows (an update, a version switch) joins a card as a new element and never replaces text already shown.
   const activeSource = market.sources.find(s => s.url === market.active)
   const matches = (text: string) => !search.trim() || text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
-  const shown = apps.filter(a => {
-    const cat = flow.catalogueOf(a)
-    const copy = cat ? appDisplayText(cat.app_id, cat.display, lang) : null
-    return matches(`${copy?.name ?? labels.title(a)} ${a.key} ${a.appId ?? ''} ${a.name}`)
-  })
+  const shown = apps.filter(a => matches(`${installedDisplay(a, lang, labels.title(a)).name} ${a.key} ${a.appId ?? ''} ${a.name}`))
 
   // Everything one app needs to show itself, in either view.
   const describe = (a: AdminApp) => {
     const cat = flow.catalogueOf(a)
-    const copy = cat ? appDisplayText(cat.app_id, cat.display, lang) : null
+    const copy = installedDisplay(a, lang, labels.title(a))
     return {
       app: a, catalogue: cat,
-      name: copy?.name && copy.name !== cat?.app_id ? copy.name : labels.title(a),
-      description: a.builtin ? labels.description(a) : copy?.description ?? '',
-      publisher: cat ? publisherLabel(cat.publisher_name, cat.publisher_id) : undefined,
+      name: copy.name,
+      description: a.builtin ? labels.description(a) : copy.description,
+      publisher: installedPublisher(a),
       source: !a.builtin && cat && activeSource ? sourceName(activeSource.name, activeSource.url, activeSource.official) : undefined,
       uninstallable: !!a.installationId && uninstallable[a.installationId],
       busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
@@ -96,7 +95,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           <AppIcon app={a} size={28} />
           <div className="rp-app-list-name">
             <Link to={appPath(a.key)}>{d.name}</Link>
-            <div><PublisherLine publisherName={d.catalogue?.publisher_name} publisherId={d.catalogue?.publisher_id} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
+            <div><PublisherLine publisherName={a.publisherName} publisherId={a.publisherId} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
           </div>
         </Space>
       },
@@ -128,6 +127,9 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           ? <div className="rp-app-grid">{shown.map(a => <InstalledCard key={a.key} {...describe(a)} />)}</div>
           : <CardTable<AdminApp> className="rp-app-list" rowKey="key" dataSource={shown} columns={columns} pagination={false} size="small" filtered={!!search.trim()} onClearFilters={() => setSearch('')} />}
     </section>
+
+    {/* The catalogue's failure is told below the cards, so it moves nothing that is already on screen. */}
+    {market.catalogue?.status === 'error' && <Alert type="warning" showIcon title={t('appStore.catalogueFailed')} description={market.catalogue.error || undefined} action={<Button size="small" onClick={market.reload}>{t('common.retry')}</Button>} />}
 
     <MarketDetailModal app={flow.detail} installed={flow.detail ? flow.installedOf(flow.detail) : undefined} lang={lang} staging={market.staging && flow.detail && market.staging.appId === flow.detail.app_id ? market.staging : null}
       blocked={busy} error={flow.detailError || market.stageError} onClose={() => flow.setDetail(null)}

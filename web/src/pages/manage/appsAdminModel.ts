@@ -5,15 +5,32 @@ import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
+import { appDisplayText, parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
 
-// The administrator's view of one app (ADR 0048): the layout entry (key, kind, per-OU access) joined
-// with what the installed list knows about an installed app (version, entry route, bridge scopes).
+/**
+ * The publisher name of an installed platform app, from the layout alone: it carries the verified name with the app, so
+ * it is there on the first paint. The market catalogue is a remote read that arrives later; it adds elements (an
+ * update, a version switch) but never supplies text already shown, so it is not consulted here.
+ */
+export function installedPublisher(app: AdminApp): string | undefined {
+  return app.publisherName || undefined
+}
+
+/** The name and description an installed app shows, in the reader's language, from the layout's verified display. */
+export function installedDisplay(app: AdminApp, lang: string, fallbackName: string): { name: string; description: string } {
+  if (!app.display || !app.appId) return { name: fallbackName, description: '' }
+  const copy = appDisplayText(app.appId, app.display, lang)
+  return { name: copy.name && copy.name !== app.appId ? copy.name : fallbackName, description: copy.description }
+}
+
 export interface AdminApp {
   key: string // `builtin:<slug>`, the installed app's id, or `platform:<installation id>`
   builtin: boolean
   platform: boolean
   installationId?: string
   appId?: string // a platform installation's application id
+  publisherName?: string // the layout's verified publisher name, when it verifies
+  display?: AppDisplayView // the layout's verified display metadata, when it verifies
   publisherId?: string // and its publisher: an application id is only unique within one publisher
   state?: string // a platform installation's control state
   builtinDef?: BuiltinApp
@@ -47,9 +64,12 @@ export const appPath = (key: string) => `/manage/apps/${encodeURIComponent(key)}
 
 /** Display strings for an app: a built-in one is translated, an installed one speaks for itself. */
 export function useAppLabels() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const lang = i18n?.language || 'en-US'
   return {
-    title: (a: AdminApp) => (a.builtinDef ? t(a.builtinDef.titleKey) : a.name),
+    // A platform app speaks in the reader's language from its verified display (the layout's own `name` is the English
+    // one); an installed v1 app uses its declared name. Every console place that names an app goes through here.
+    title: (a: AdminApp) => (a.builtinDef ? t(a.builtinDef.titleKey) : a.platform ? installedDisplay(a, lang, a.name).name : a.name),
     description: (a: AdminApp) => (a.builtinDef ? t(a.builtinDef.descKey) : ''),
   }
 }
@@ -63,6 +83,8 @@ function merge(entry: AppLayoutEntry): AdminApp {
     installationId: entry.installation_id,
     appId: entry.app_id,
     publisherId: entry.publisher_id,
+    publisherName: entry.publisher_name || undefined,
+    display: entry.display == null ? undefined : parseAppDisplay(entry.display) ?? undefined,
     state: entry.state,
     builtinDef: def,
     name: entry.name,

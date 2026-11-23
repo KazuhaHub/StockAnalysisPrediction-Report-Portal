@@ -1,3 +1,4 @@
+import { useCrumbTailValue } from '../lib/crumbTail'
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, theme } from 'antd'
 import { AppstoreOutlined, AuditOutlined, DownOutlined, DownloadOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
@@ -84,6 +85,7 @@ function AppShell() {
   // chat, reader) but not on the home page (nothing to trace) or /manage (it has its own left rail).
   // Ancestors are links; the current page is plain text. Third-party app pages (/apps/x/:id) show
   // Home > Apps with both linked, since the app's own name isn't available in the layout.
+  const crumbTail = useCrumbTailValue()
   const crumbs = useMemo<{ label: string; to?: string }[]>(() => {
     const p = loc.pathname
     const home = { label: t('nav.home'), to: '/' }
@@ -98,14 +100,17 @@ function AppShell() {
       return [home, apps, { label: t('nav.recurring'), to: '/apps/recurring' }, { label }]
     }
     if (p === '/apps/batch') return [home, apps, { label: t('nav.batch') }]
-    if (p.startsWith('/apps/x/') || p.startsWith('/apps/v2/')) return [home, apps]
+    if (p.startsWith('/apps/x/')) return [home, apps]
+    // An app's page names its own last item once its data is in (useCrumbTail): until then there is no trail, so the
+    // breadcrumb appears with the page, whole, and is never the shorter one grown later.
+    if (p.startsWith('/apps/v2/')) return crumbTail === undefined ? [] : crumbTail ? [home, apps, { label: crumbTail }] : [home, apps]
     if (p === '/queue') return [home, { label: t('nav.queue') }]
     if (p === '/notifications') return [home, { label: t('inbox.title') }]
     if (p === '/chat') return [home, { label: t('nav.chat') }]
     if (p === '/forecast') return [home, { label: t('nav.forecast_record') }]
     if (p.startsWith('/stock/') || p.startsWith('/run/')) return [home, { label: decodeURIComponent(p.split('/')[2] || '') }]
     return []
-  }, [loc.pathname, loc.state, t])
+  }, [loc.pathname, loc.state, t, crumbTail])
   const showCrumbs = crumbs.length > 0 && !onManage && !chatFocus
   // Reset the routed Suspense boundary when the top-level page changes, so navigating to a not-yet-
   // loaded chunk shows the spinner at once instead of freezing on the previous page (React 19 + RR7

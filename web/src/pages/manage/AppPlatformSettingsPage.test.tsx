@@ -73,7 +73,7 @@ afterEach(cleanup)
 describe('application installation settings', () => {
   it('shows the current package, audience, permissions, data, recovery and credential metadata', async () => {
     mount()
-    expect(await screen.findByText('notes')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
     expect(screen.getByText('appPlatform.settings.title')).toBeTruthy()
     expect(screen.getByText('2.0.0')).toBeTruthy()
     expect(screen.getByText(release)).toBeTruthy()
@@ -149,7 +149,7 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'public.projection', granted: false, required: true }] } : { bindings: [] })
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.public\./ })).toBeNull()
     })
 
@@ -160,7 +160,7 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: true }] } : { bindings: [] })
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.machine\./ })).toBeNull()
     })
 
@@ -172,13 +172,13 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/postgres-policy') ? { ...preview, declared: false } : url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'network.postgres', granted: false, required: false }] } : { bindings: [] })
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByText('appPostgres.title')).toBeNull()
     })
 
     it('offers no control for other capabilities or without the capability', async () => {
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.principals\./ })).toBeNull()
     })
   })
@@ -267,6 +267,18 @@ describe('application installation settings', () => {
     expect(await screen.findByText('apps')).toBeTruthy()
   })
 
+  it('ends its breadcrumb with the app name, rendered with the page', async () => {
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings')
+      ? { ...settings, display: { icon: 'file-text', texts: ['en-US', 'zh-CN', 'zh-TW'].map(locale => ({ locale, name: 'Market Monitor', description: 'd' })) } }
+      : { bindings: [] })
+    mount()
+    const crumb = await screen.findByRole('navigation', { name: 'apps.breadcrumb' })
+    // The first render that has the page has the full trail: Apps / Market Monitor, the app's name and never its id.
+    expect(within(crumb).getByRole('link', { name: 'apps.title' })).toBeTruthy()
+    expect(within(crumb).getByText('Market Monitor')).toBeTruthy()
+    expect(within(crumb).queryByText('notes')).toBeNull()
+  })
+
   it('reviews and confirms repair of the current managed release without changing grants', async () => {
     const user = userEvent.setup()
     const plan = '66666666-6666-4666-8666-666666666666'
@@ -324,6 +336,82 @@ describe('application installation settings', () => {
       idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })))
     expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('reviews and accepts the data a failed import left, only after an explicit acknowledgement', async () => {
+    const user = userEvent.setup()
+    const plan = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    const operation = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    const recovery = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+    let resolved = false
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        return {
+          ...settings,
+          desired_state: 'disabled',
+          phase: 'recovery_required',
+          generation: '1',
+          repair_eligible: resolved,
+          resolve_keep_data_eligible: !resolved,
+          operation_pending: !resolved,
+        }
+      }
+      return { bindings: [] }
+    })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) {
+        return {
+          plan_id: plan,
+          plan_sha256: 'c'.repeat(64),
+          expires_ms: String(Date.now() + 900000),
+          review: {
+            action: 'resolve_keep_data',
+            installation_id: installation,
+            operation_id: operation,
+            operation_action: 'import_data',
+            release_sha256: release,
+            observed_bytes: '780615680',
+            checkpoint_recovery_set_id: recovery,
+            abandoned_effects: [
+              { operation_id: operation, operation_action: 'import_data', operation_completed_ms: '1795345430805', effect_id: operation, stage: 'import', kind: 'restore' },
+              { operation_id: recovery, operation_action: 'import_data', operation_completed_ms: '1795339211708', effect_id: plan, stage: 'snapshot', kind: 'snapshot', recovery_set_id: 'abcdef12-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+            ],
+            keeps_data: true,
+            keeps_checkpoint: true,
+            runs_rollback: false,
+          },
+        }
+      }
+      resolved = true
+      return { resolved: true, operation_id: operation, installation_id: installation, abandoned_effects: '1' }
+    })
+    mount()
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.repair' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.resolve' }))
+    expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'resolve_keep_data', installation_id: installation })
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveWarning')
+    expect(dialog.textContent).toContain(operation)
+    expect(dialog.textContent).toContain(recovery)
+    // Each unfinished item is listed with its operation, kind and the recovery set closed with it.
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffectRestore')
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffectSnapshot')
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffectSet')
+    expect(dialog.textContent).toContain(operation.slice(0, 8))
+    expect(dialog.textContent).toContain('appPlatform.settings.resolveEffects:{"count":2}')
+    const confirm = screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))
+    expect(confirm.disabled).toBe(false)
+    await user.click(confirm)
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'c'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    // The page reads the settings again: the data stays, and a repair is now the way forward.
+    expect(await screen.findByRole('button', { name: 'appPlatform.settings.repair' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolve' })).toBeNull()
   })
 
   it('reviews and admits restore from the exact verified recovery point', async () => {
@@ -460,13 +548,13 @@ describe('application installation settings', () => {
 
     it('shows no re-upload notice when the image is intact', async () => {
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByTestId('image-delivery-reupload')).toBeNull()
     })
 
     it('renders nothing when the field is absent', async () => {
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByText('appPlatform.settings.migrationRecovery.title')).toBeNull()
     })
 
