@@ -3,6 +3,7 @@ import { cleanup, renderHook } from '@testing-library/react'
 import { installedDisplay, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
 
 const language = vi.hoisted(() => ({ value: 'zh-CN' }))
+vi.mock('../../prefs', () => ({ useOptionalPrefs: () => null }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: language.value } }) }))
 
 const display = { icon: 'dashboard', texts: [

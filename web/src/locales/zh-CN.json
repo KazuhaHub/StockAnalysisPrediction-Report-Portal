@@ -4347,6 +4347,8 @@
   "appStore.current": "当前",
   "appStore.latest": "最新",
   "appStore.more": "更多操作",
+  "appStore.busyPending": "请先完成或查看待处理的变更。",
+  "appStore.busyWorking": "另一项操作仍在进行，请稍后再试。",
   "appStore.disable": "停用",
   "appStore.enable": "启用",
   "appStore.uninstall": "卸载",

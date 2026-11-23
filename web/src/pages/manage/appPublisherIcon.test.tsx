@@ -5,6 +5,7 @@ import { MarketCard, MarketDetailModal, PublisherLine } from './appStoreParts'
 import { AppDisplayIcon, parseAppDisplay } from '../../lib/appDisplayV2'
 import { parsePlatformMarketApps, type PlatformMarketApp } from '../../api/appPlatform'
 
+vi.mock('../../prefs', () => ({ useOptionalPrefs: () => null }))
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: Record<string, unknown>) => (o === undefined ? k : `${k}:${o.publisher ?? JSON.stringify(o)}`)
   const hook = { t, i18n: { language: 'en-US' } }

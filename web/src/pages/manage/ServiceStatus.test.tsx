@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { ServiceStatus } from './appsAdminParts'
+vi.mock('../../prefs', () => ({ useOptionalPrefs: () => null }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, o?: Record<string, unknown>) => `${key}${o ? JSON.stringify(o) : ''}` }) }))
 vi.mock('./appsAdminModel', async (orig) => ({ ...(await orig<object>()), serviceStatus: () => ({ kind: 'some', open: 2, total: 4 }) }))
 

@@ -53,10 +53,13 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     return () => { mounted.current = false; generation.current = {} }
   }, [user])
 
-  const catalogueApps = market.catalogue?.status === 'ready' ? market.catalogue.apps : []
+  // What a source listed stays usable while it is read again (a loading state carries the previous list).
+  const catalogueApps = market.catalogue && market.catalogue.status !== 'error' ? market.catalogue.apps : []
   const catalogueOf = (a: AdminApp) => catalogueApps.find(c => sameApp(a, c))
   const installedOf = (c: PlatformMarketApp) => apps.find(a => sameApp(a, c))
   const busy = lifecycle.busy || !!lifecycle.intent || !!acting || !!market.staging || market.uploading
+  // Why every action waits, for the control's own title: an unfinished change needs the administrator; anything else passes.
+  const busyReason: 'pending' | 'working' | '' = lifecycle.intent ? 'pending' : busy ? 'working' : ''
 
   // A staged release goes to the lifecycle modal: as an install, as an update when it is for an installed app, as
   // an enable when it is the disabled installation's own release, or as an uninstall when that is all it allows.
@@ -64,12 +67,14 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
   const openStaged = (release: PlatformRelease, installation?: string, opener?: HTMLElement | null): string => {
     if (release.installed) return t('appStore.alreadyInstalled')
     const target = installation ?? release.installation_id
-    if (release.uninstallable && target) { lifecycle.begin({ ...release, installation_id: target }, 'uninstall', opener); return '' }
-    if (release.enableable && target) { lifecycle.begin({ ...release, installation_id: target }, 'enable', opener); return '' }
+    // A flow that cannot start (another change is pending) says so; it is never a silent success.
+    const start = (item: PlatformRelease, action: LifecycleAction) => lifecycle.begin(item, action, opener) ? '' : t('appStore.busyPending')
+    if (release.uninstallable && target) return start({ ...release, installation_id: target }, 'uninstall')
+    if (release.enableable && target) return start({ ...release, installation_id: target }, 'enable')
     // A version chosen for an installed app is always an update: the server, not this page, refuses a downgrade.
-    if (installation) { lifecycle.begin({ ...release, installation_id: installation }, 'update', opener); return '' }
-    if (release.installable) { lifecycle.begin(release, 'install', opener); return '' }
-    if (target) { lifecycle.begin({ ...release, installation_id: target }, 'update', opener); return '' }
+    if (installation) return start({ ...release, installation_id: installation }, 'update')
+    if (release.installable) return start(release, 'install')
+    if (target) return start({ ...release, installation_id: target }, 'update')
     return t(`appPlatform.reason.${release.reason}`, { defaultValue: t('appMarket.verificationChanged') })
   }
 
@@ -121,7 +126,7 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     setActing(a.key)
     try {
       const release = await loadInstalledRelease(a.installationId, t)
-      if (live(account, epoch)) lifecycle.begin(release, action, opener)
+      if (live(account, epoch) && !lifecycle.begin(release, action, opener)) notifyError(t('appStore.busyPending'))
     } catch (e) { if (live(account, epoch)) notifyError(errText(e, t)) }
     finally { if (live(account, epoch)) setActing('') }
   }
@@ -141,7 +146,7 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
   const openDetail = (app: PlatformMarketApp) => { market.clearStageError(); setDetailError(''); setDetail(app) }
 
   return {
-    user, live, generation, lifecycle, market, busy, acting,
+    user, live, generation, lifecycle, market, busy, busyReason, acting,
     detail, setDetail, detailError, openDetail, cardErrors,
     catalogueApps, catalogueOf, installedOf,
     stageAndOpen, installFromDetail, quickInstall, switchVersion, act, uploaded,

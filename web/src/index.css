@@ -3436,8 +3436,19 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-market-detail-note { margin-top: 8px; font-size: 12px; }
 .rp-lifecycle-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
 .rp-lifecycle-body > .ant-steps { flex: none; }
+/* The operation's stage list scrolls inside the dialog, so a long list never pushes the footer off a short phone screen. */
+.rp-lifecycle-progress { display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.rp-operation-steps { flex: none; }
+/* A release digest: the short form and its copy button stay on one line. */
+.rp-digest { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; white-space: nowrap; }
+.rp-digest__value { margin: 0; }
+.rp-digest__value:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
 .rp-market-source { width: 260px; max-width: 100%; min-width: 0; }
 @media (max-width: 575px) {
+  /* A card is a full row on a phone: the publisher and version drop to their own line instead of being cut to "1.…",
+     and a description gets two lines. */
+  .rp-app-card-line { flex-wrap: wrap; column-gap: 6px; row-gap: 0; }
+  .rp-app-card-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
   .rp-market-source { width: 100%; }
   .rp-market-detail-body { grid-template-columns: minmax(0, 1fr); }
   .rp-market-detail-actions { margin-inline-start: 0; width: 100%; }

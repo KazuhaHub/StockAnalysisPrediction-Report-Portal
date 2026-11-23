@@ -10,6 +10,7 @@ import { mockNarrowViewport } from '../../test/narrow'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
+vi.mock('../../prefs', () => ({ useOptionalPrefs: () => null }))
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: unknown) => (o === undefined ? k : `${k}:${JSON.stringify(o)}`)
   const hook = { t, i18n: { language: 'en-US' } }

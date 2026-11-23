@@ -97,7 +97,9 @@ export function usePlatformMarket(visible: boolean = true) {
   const load = useCallback(async (url: string) => {
     const account = user
     const epoch = generation.current
-    setCatalogues(v => ({ ...v, [url]: { status: 'loading', apps: [], hints: [], error: '' } }))
+    // A source read again keeps what it listed while the new answer is out: an update offer built from it must not
+    // vanish and come back. An answer replaces it; a failure empties it.
+    setCatalogues(v => ({ ...v, [url]: { status: 'loading', apps: v[url]?.status === 'ready' ? v[url].apps : v[url]?.status === 'loading' ? v[url].apps : [], hints: v[url]?.status === 'ready' || v[url]?.status === 'loading' ? v[url].hints : [], error: '' } }))
     try {
       const response = await api.post<unknown>(`${platformRoot}/market/catalogue`, { catalogue_url: url })
       if (!live(account, epoch)) return

@@ -14,6 +14,7 @@ import { appPath, installedDisplay, installedPublisher, useAppLabels, type Admin
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import { sourceName, useAppsConsoleFlow } from './appsConsoleFlow'
 import { loadInstalledRelease } from './platformMarket'
+import { notifyError } from '../../lib/notify'
 
 type View = 'cards' | 'list'
 const VIEW_KEY = 'rp.apps.view'
@@ -68,6 +69,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
   const matches = (text: string) => !search.trim() || text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
   const shown = apps.filter(a => matches(`${installedDisplay(a, lang, labels.title(a)).name} ${a.key} ${a.appId ?? ''} ${a.name}`))
 
+  const refuse = () => notifyError(t(flow.busyReason === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking'))
   // Everything one app needs to show itself, in either view.
   const describe = (a: AdminApp) => {
     const cat = flow.catalogueOf(a)
@@ -80,8 +82,18 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
       source: !a.builtin && cat && activeSource ? sourceName(activeSource.name, activeSource.url, activeSource.official) : undefined,
       uninstallable: !!a.installationId && uninstallable[a.installationId],
       busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
-      onSwitchVersion: (version: string) => { if (cat && !busy) void flow.switchVersion(a, cat, version) },
-      onLifecycle: (action: Parameters<typeof flow.act>[1], opener?: HTMLElement | null) => { if (!busy) void flow.act(a, action, opener) },
+      blocked: flow.busyReason,
+      // The controls are disabled whenever these would refuse, so this is only a race (state changed between render and
+      // click): it still answers instead of dropping the click.
+      onSwitchVersion: (version: string) => {
+        if (!cat) return
+        if (busy) { refuse(); return }
+        void flow.switchVersion(a, cat, version)
+      },
+      onLifecycle: (action: Parameters<typeof flow.act>[1], opener?: HTMLElement | null) => {
+        if (busy) { refuse(); return }
+        void flow.act(a, action, opener)
+      },
       onViewInCatalogue: () => { if (cat) flow.openDetail(cat) },
     }
   }
@@ -95,7 +107,7 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           <AppIcon app={a} size={28} />
           <div className="rp-app-list-name">
             <Link to={appPath(a.key)}>{d.name}</Link>
-            <div><PublisherLine publisherName={a.publisherName} publisherId={a.publisherId} className="rp-app-card-sub">{[d.publisher ?? a.appId, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
+            <div><PublisherLine publisherName={a.publisherName} publisherId={a.publisherId} className="rp-app-card-sub">{[d.publisher, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
           </div>
         </Space>
       },

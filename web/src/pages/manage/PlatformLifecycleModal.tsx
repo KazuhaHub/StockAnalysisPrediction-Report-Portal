@@ -7,6 +7,7 @@ import { appDisplayText } from '../../lib/appDisplayV2'
 import { joinList } from '../../lib/joinList'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import PlatformReviewDetails, { reviewBlocked } from './PlatformReviewDetails'
+import OperationSteps, { useLastRunning } from './OperationSteps'
 import type { PlatformLifecycle } from './platformLifecycle'
 
 const TITLE = { install: 'appPlatform.confirmTitle', update: 'appPlatform.confirmUpdateTitle', disable: 'appPlatform.confirmDisableTitle', uninstall: 'appPlatform.confirmUninstallTitle', enable: 'appPlatform.confirmEnableTitle', repair: 'appPlatform.confirmRepairTitle' } as const
@@ -23,6 +24,7 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
   const { lang } = usePrefs()
   const { target, step, review, intent, busy, expired, progress, progressError, actionError, groups } = lifecycle
   const action = lifecycle.action ?? 'install'
+  const lastRunning = useLastRunning(progress)
   const install = action === 'install'
   // The review fetched for a flow that was resumed after a reload has no release; the review is then the only record.
   const release = target?.release
@@ -99,13 +101,17 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
       </Space>}
       {step === 'review' && !review && !intent && !actionError && <div style={{ textAlign: 'center' }}><Spin /></div>}
       {step === 'review' && review && !intent && <PlatformReviewDetails review={review} release={release} groups={groups} expired={expired} />}
-      {step === 'progress' && <div role="status" aria-live="polite">
-        {progressError && <Alert type="error" title={progressError} />}
-        {progress && <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-          <StatusTag tone={progressTone}>{progress.control_paused ? t('err.app_platform_control_paused') : t(`appPlatform.stage.${progress.stage}`, { defaultValue: progress.stage })}</StatusTag>
-          {progress.error_code && !progress.control_paused && <Alert type="error" title={t(`err.${progress.error_code}`, { defaultValue: t('appPlatform.operationNeedsReview') })} />}
-        </Space>}
-        {!progress && !progressError && <Spin />}
+      {step === 'progress' && <div className="rp-lifecycle-progress">
+        <div role="status" aria-live="polite">
+          {progressError && <Alert type="error" title={progressError} />}
+          {progress && <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+            <StatusTag tone={progressTone}>{progress.control_paused ? t('err.app_platform_control_paused') : t(`appPlatform.stage.${progress.stage}`, { defaultValue: progress.stage })}</StatusTag>
+            {progress.error_code && !progress.control_paused && <Alert type="error" title={t(`err.${progress.error_code}`, { defaultValue: t('appPlatform.operationNeedsReview') })} />}
+          </Space>}
+          {!progress && !progressError && <Spin />}
+        </div>
+        {/* The list sits outside the live region: the status line announces the stage, the list is for looking at. */}
+        {progress && <OperationSteps progress={progress} managed={release?.backend} lastRunning={lastRunning} />}
       </div>}
     </div>
   </Modal>

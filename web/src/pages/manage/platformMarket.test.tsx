@@ -96,6 +96,18 @@ describe('downloading and verifying a catalogue version', () => {
     expect(result).toEqual({ error: 'appMarket.verificationChanged' })
   })
 
+  it('keeps the apps it already knew while the same catalogue is read again, so an offer does not vanish and return', async () => {
+    const view = renderHook(() => usePlatformMarket())
+    await waitFor(() => expect(view.result.current.catalogue?.status).toBe('ready'))
+    const again = deferred<unknown>()
+    mock.post.mockImplementation(async () => again.promise)
+    act(() => { view.result.current.reload() })
+    await waitFor(() => expect(view.result.current.catalogue?.status).toBe('loading'))
+    expect(view.result.current.catalogue?.apps.map(a => a.app_id)).toEqual(['notes'])
+    await act(async () => { again.resolve(catalogueFor('charts')) })
+    await waitFor(() => expect(view.result.current.catalogue?.apps.map(a => a.app_id)).toEqual(['charts']))
+  })
+
   it('does one download at a time', async () => {
     const view = renderHook(() => usePlatformMarket())
     await waitFor(() => expect(view.result.current.catalogue?.status).toBe('ready'))

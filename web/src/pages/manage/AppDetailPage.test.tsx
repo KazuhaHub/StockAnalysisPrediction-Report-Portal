@@ -10,6 +10,7 @@ import { installed, layout } from './appsAdminFixtures'
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), del: vi.fn() }))
 const lang = vi.hoisted(() => ({ value: 'en-US' }))
 vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request failed', ApiError: class extends Error {} }))
+vi.mock('../../prefs', () => ({ useOptionalPrefs: () => null }))
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: unknown) => (o === undefined ? k : `${k}:${JSON.stringify(o)}`)
   const hook = { t, i18n: { get language() { return lang.value } } }

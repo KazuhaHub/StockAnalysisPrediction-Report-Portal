@@ -239,13 +239,15 @@ export function usePlatformLifecycle(onChange?: () => void) {
   /** Starts a flow. An install first asks who can use the app; every other action goes straight to its review. */
   // `opener` is the control the person used, captured before any download: it may have lost focus by now (a button
   // is disabled while a package downloads), and it is where focus returns when the flow ends.
-  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null) => {
-    if (writing.current || intent) return
+  // Returns false when another change is still in flight or pending, so a caller can say so instead of doing nothing.
+  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null): boolean => {
+    if (writing.current || intent) return false
     trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     // A managed app's Enable is its repair review; a frontend-only app keeps the enable review.
     const next = { release, action: action === 'enable' && release.backend ? 'repair' as const : action }
     setTarget(next); setSelected([]); setReview(null); setActionError(''); setHidden(false)
     if (next.action !== 'install') void plan(next, [])
+    return true
   }
   /** Install step one done: ask the server for the review of the chosen audience. */
   const next = () => { if (target) void plan(target, selected) }

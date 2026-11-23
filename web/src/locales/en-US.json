@@ -4347,6 +4347,8 @@
   "appStore.current": "Current",
   "appStore.latest": "Latest",
   "appStore.more": "More actions",
+  "appStore.busyPending": "Finish or review the pending change first.",
+  "appStore.busyWorking": "Another action is still running. Try again in a moment.",
   "appStore.disable": "Disable",
   "appStore.enable": "Enable",
   "appStore.uninstall": "Uninstall",

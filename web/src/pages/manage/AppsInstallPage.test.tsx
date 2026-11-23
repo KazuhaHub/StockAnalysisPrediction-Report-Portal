@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => {
 })
 const auth = vi.hoisted(() => ({ user: 'admin' }))
 vi.mock('../../auth', () => ({ useAuth: () => ({ user: auth.user }) }))
-vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
+vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }), useOptionalPrefs: () => ({ lang: 'en-US' }) }))
 // Dragging itself is dnd.test.tsx's concern. This stand-in exposes the wrapper's contract, a reordered
 // id sequence, through a button, so the test can assert what the page persists.
 vi.mock('./dnd', () => ({

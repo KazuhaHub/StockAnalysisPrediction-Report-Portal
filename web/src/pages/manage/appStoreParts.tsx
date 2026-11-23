@@ -34,7 +34,10 @@ export interface InstalledActionProps {
   catalogue?: PlatformMarketApp
   /** The installation's release can still be uninstalled although the app needs recovery. */
   uninstallable?: boolean
+  /** This app's own action is running: its update button spins. */
   busy: boolean
+  /** Another action holds the console (`pending`: an unfinished change that needs the administrator). Every control that would be refused is disabled, never left to ignore a click. */
+  blocked?: '' | 'pending' | 'working'
   onSwitchVersion: (version: string) => void
   /** `opener` is the more-actions button, where focus returns when the flow ends (the menu item itself is gone by then). */
   onLifecycle: (action: LifecycleAction, opener?: HTMLElement | null) => void
@@ -47,7 +50,7 @@ export function updateOffer(app: AdminApp, catalogue?: PlatformMarketApp): strin
 }
 
 /** Small icon buttons for an installed app: update, switch version, and the more menu. Used by the card and the list. */
-export function InstalledControls({ app, catalogue, uninstallable, busy, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
+export function InstalledControls({ app, catalogue, uninstallable, busy, blocked = '', onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
   const { t } = useTranslation()
   const more = useRef<HTMLButtonElement>(null)
   const newest = updateOffer(app, catalogue)
@@ -72,17 +75,20 @@ export function InstalledControls({ app, catalogue, uninstallable, busy, onSwitc
   ]
   if (!newest && !versionItems.length && !lifecycleItems.length) return null
   const updateLabel = newest ? t('appStore.updateTo', { version: newest }) : ''
+  // The one rule for every control here: it can be pressed exactly when pressing it can act.
+  const idle = !busy && !blocked
+  const why = (label: string) => blocked === 'pending' ? t('appStore.busyPending') : label
   return (
     <span className="rp-app-controls">
-      {newest && <Button size="small" type="text" className="rp-app-update" icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={updateLabel} loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); onSwitchVersion(newest) }} />}
+      {newest && <Button size="small" type="text" className="rp-app-update" icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={why(updateLabel)} loading={busy} disabled={!idle} onClick={e => { e.stopPropagation(); onSwitchVersion(newest) }} />}
       {versionItems.length > 0 && (
-        <Dropdown trigger={['click']} menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} disabled={busy}>
-          <Button size="small" type="text" icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={t('appStore.switchVersion')} onClick={e => e.stopPropagation()} />
+        <Dropdown trigger={['click']} menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} disabled={!idle}>
+          <Button size="small" type="text" icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={why(t('appStore.switchVersion'))} disabled={!idle} onClick={e => e.stopPropagation()} />
         </Dropdown>
       )}
       {lifecycleItems.length > 0 && (
-        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction, more.current) } }} disabled={busy}>
-          <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} title={t('appStore.more')} onClick={e => e.stopPropagation()} />
+        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction, more.current) } }} disabled={!idle}>
+          <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} title={why(t('appStore.more'))} disabled={!idle} onClick={e => e.stopPropagation()} />
         </Dropdown>
       )}
     </span>
@@ -120,7 +126,8 @@ export interface InstalledCardProps extends InstalledActionProps {
 export function InstalledCard({ name, description, publisher, source, ...actions }: InstalledCardProps) {
   const { t } = useTranslation()
   const { app } = actions
-  const secondary = [publisher ?? app.appId ?? (app.builtin ? undefined : app.key), app.version].filter(Boolean).join(' · ')
+  // The publisher's name and the version. With no verified name the slot stays empty: an id is never a stand-in for a name.
+  const secondary = [publisher, app.version].filter(Boolean).join(' · ')
   return (
     <Card hoverable className="rp-app-card" size="small">
       {app.builtin && <span className="rp-app-card-corner">{t('appStore.builtinBadge')}</span>}

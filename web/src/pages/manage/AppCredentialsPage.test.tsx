@@ -18,6 +18,7 @@ vi.mock('../../api/client', () => ({
   ApiError: class extends Error {},
 }))
 
+vi.mock('../../prefs', () => ({ useOptionalPrefs: () => null }))
 vi.mock('react-i18next', () => {
   const t = (key: string, options?: Record<string, unknown>) =>
     options === undefined ? key : `${key}:${JSON.stringify(options)}`
