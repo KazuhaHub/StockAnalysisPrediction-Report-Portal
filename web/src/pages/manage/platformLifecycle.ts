@@ -10,14 +10,16 @@ import type { PlatformRelease } from '../../api/appPlatform'
 // the confirmed request identity is saved before it is sent so a lost response is retried with the same key, a
 // plan expires, and nothing from a previous account or an overtaken request is ever published.
 
-export type LifecycleAction = 'install' | 'update' | 'enable' | 'disable' | 'uninstall'
+// `repair` is what a managed (backend) app's Enable runs as: the reviewed repair flow re-observes the runtime, takes a
+// checkpoint and starts. The frontend-only enable plan refuses an installation that has a runtime.
+export type LifecycleAction = 'install' | 'update' | 'enable' | 'repair' | 'disable' | 'uninstall'
 export type Subject = { id: string; name: string; default?: boolean }
 type Page<T> = { items: T[]; next_cursor: string }
 type Commit = { plan_id: string; plan_sha256: string; idempotency_key: string }
 // What is kept in sessionStorage: the request identity, and what it was for, so a flow resumed after a reload
 // still says what it is confirming. Only the three Commit fields are ever sent to the server.
 export type PendingIntent = Commit & { action?: LifecycleAction; app_id?: string }
-const ACTIONS: readonly string[] = ['install', 'update', 'enable', 'disable', 'uninstall']
+const ACTIONS: readonly string[] = ['install', 'update', 'enable', 'repair', 'disable', 'uninstall']
 export type InstallReview = { action: 'install'; app_id: string; publisher_id: string; release_sha256: string; declined_capabilities: string[]; open_to_ous: string[] }
 export type UpdateReview = {
   action: 'update'
@@ -86,7 +88,8 @@ export type EnableReview = {
   grants_sha256: string
   data_effect: string
 }
-export type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview | DisableReview | EnableReview }
+export type RepairReview = Omit<EnableReview, 'action'> & { action: 'repair' }
+export type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview | DisableReview | EnableReview | RepairReview }
 export type Progress = { operation_id: string; installation_id: string; action: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string }
 export interface LifecycleTarget { release: PlatformRelease; action: LifecycleAction }
 
@@ -220,7 +223,7 @@ export function usePlatformLifecycle(onChange?: () => void) {
     const epoch = generation.current
     try {
       // Organizational units only: who can use the app is an OU policy (doc 190, D7). None selected keeps it closed.
-      const body = action === 'uninstall' || action === 'disable' || action === 'enable'
+      const body = action === 'uninstall' || action === 'disable' || action === 'enable' || action === 'repair'
         ? { action, installation_id: release.installation_id }
         : action === 'update'
         ? { action, release_sha256: release.release_sha256, trust_revision: release.trust_revision, installation_id: release.installation_id }
@@ -239,9 +242,10 @@ export function usePlatformLifecycle(onChange?: () => void) {
   const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null) => {
     if (writing.current || intent) return
     trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
-    const next = { release, action }
+    // A managed app's Enable is its repair review; a frontend-only app keeps the enable review.
+    const next = { release, action: action === 'enable' && release.backend ? 'repair' as const : action }
     setTarget(next); setSelected([]); setReview(null); setActionError(''); setHidden(false)
-    if (action !== 'install') void plan(next, [])
+    if (next.action !== 'install') void plan(next, [])
   }
   /** Install step one done: ask the server for the review of the chosen audience. */
   const next = () => { if (target) void plan(target, selected) }

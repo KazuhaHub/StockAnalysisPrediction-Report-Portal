@@ -330,6 +330,35 @@ describe('A platform app card', () => {
     expect(screen.getByRole('menuitem', { name: 'appStore.uninstall' }).className).toContain('danger')
   })
 
+  const enableFromMenu = async (backend: boolean) => {
+    withPlatform('disabled')
+    fx.releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false, ...(backend ? { backend: true } : null) })
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: fx.entries }
+      if (url === `${root}/installations/${installationId}/settings`) return { current_release_sha256: sha('a') }
+      if (url.startsWith(`${root}/releases?release_sha256=`)) return { items: [fx.releaseRows[sha('a')]], next_cursor: '' }
+      if (url === `${root}/market/sources`) return { official: { name: 'Kazuha Hub', url: catalogueUrl, enabled: false } }
+      return { items: [], next_cursor: '' }
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
+    await user.click(await screen.findByRole('menuitem', { name: 'appStore.enable' }))
+  }
+
+  it('opens the repair review when a disabled managed app is enabled from the menu', async () => {
+    await enableFromMenu(true)
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'repair', installation_id: installationId }))
+    expect(apiMock.post).not.toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: installationId })
+    expect(await screen.findByText('appPlatform.confirmRepairTitle')).toBeTruthy()
+  })
+
+  it('opens the enable review when a disabled frontend-only app is enabled from the menu', async () => {
+    await enableFromMenu(false)
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: installationId }))
+    expect(apiMock.post).not.toHaveBeenCalledWith(`${root}/plans`, { action: 'repair', installation_id: installationId })
+  })
+
   it('offers nothing beyond Manage for an app that needs recovery, unless its release can be uninstalled', async () => {
     withPlatform('attention')
     const user0 = userEvent.setup()

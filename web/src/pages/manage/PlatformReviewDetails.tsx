@@ -18,6 +18,7 @@ export default function PlatformReviewDetails({ review, release, groups, expired
   const capabilityLabel = (capability: string) => t(`appPlatform.capability.${capability}`, { defaultValue: capability })
   const updateReview = review.review.action === 'update' ? review.review : null
   const enableReview = review.review.action === 'enable' ? review.review : null
+  const repairReview = review.review.action === 'repair' ? review.review : null
   const uninstallReview = review.review.action === 'uninstall' ? review.review : null
   const disableReview = review.review.action === 'disable' ? review.review : null
   const quotaRaise = updateReview?.data_quota
@@ -48,13 +49,13 @@ export default function PlatformReviewDetails({ review, release, groups, expired
   const backgroundNetwork = grants('background.run') && grants('network.http')
   const backgroundCredentials = grants('background.run') && grants('secrets.use')
   return <div role="document" tabIndex={0} className="rp-platform-review rp-platform-review-scroll"><Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
-    { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'disable' ? 'appPlatform.disable' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : review.review.action === 'enable' ? 'appPlatform.enable' : 'appPlatform.install') },
+    { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'disable' ? 'appPlatform.disable' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : review.review.action === 'enable' ? 'appPlatform.enable' : review.review.action === 'repair' ? 'appPlatform.repair' : 'appPlatform.install') },
     { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, release?.display, lang).name} · ${release?.version ?? ''}` },
     { key: 'publisher', label: t('appPlatform.publisher'), children: publisherWithId(release?.publisher_name, review.review.publisher_id) },
     { key: 'release', label: t('appPlatform.releaseDigest'), children: <Typography.Text code copyable style={{ wordBreak: 'break-all' }}>{review.review.release_sha256}</Typography.Text> },
     { key: 'compatibility', label: t('appPlatform.compatibility'), children: compatibility },
     { key: 'resources', label: t('appPlatform.resources'), children: resources },
-    ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.open_to_ous.length ? joinList(review.review.open_to_ous.map(audienceLabel), lang) : t('appPlatform.noAudience') }] : review.review.action === 'update' || review.review.action === 'enable' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
+    ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.open_to_ous.length ? joinList(review.review.open_to_ous.map(audienceLabel), lang) : t('appPlatform.noAudience') }] : review.review.action === 'update' || review.review.action === 'enable' || review.review.action === 'repair' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
     ...(uninstallReview ? [] : [
       { key: 'requiredPermissions', label: t('appPlatform.requiredPermissions'), children: permissionList(release?.required_capabilities) },
       { key: 'optionalPermissions', label: t('appPlatform.optionalPermissions'), children: permissionList(release?.optional_capabilities) },
@@ -75,6 +76,6 @@ export default function PlatformReviewDetails({ review, release, groups, expired
         })} />}
       </Space>,
     }] : []),
-    { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : disableReview ? t('appPlatform.disableDataRetained') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : enableReview ? t('appPlatform.enableDataRetained') : t('appPlatform.noData') },
-  ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : disableReview ? 'appPlatform.disableConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : enableReview ? 'appPlatform.enableConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>
+    { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : disableReview ? t('appPlatform.disableDataRetained') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : enableReview ? t('appPlatform.enableDataRetained') : repairReview ? t('appPlatform.repairDataRetained') : t('appPlatform.noData') },
+  ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : disableReview ? 'appPlatform.disableConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : repairReview ? 'appPlatform.repairConfirmHint' : enableReview ? 'appPlatform.enableConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>
 }
