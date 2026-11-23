@@ -286,7 +286,11 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 			plan.Format != expectedFormat ||
 			plan.TargetReleaseSHA256 != release ||
 			plan.TargetGeneration != generation ||
-			plan.TargetPolicyRevision != activePolicy {
+			plan.TargetPolicyRevision < 1 ||
+			// The source plan is history. Policy reviews raise the policy in place on the
+			// installation and its active activation, so the plan may carry an older
+			// revision, never a newer one.
+			plan.TargetPolicyRevision > activePolicy {
 			return platformCheckpointSource{}, fmt.Errorf(
 				"enable source update plan: %w",
 				errAppPlatformStageEvidence)

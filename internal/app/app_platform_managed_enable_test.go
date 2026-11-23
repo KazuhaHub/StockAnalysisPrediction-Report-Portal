@@ -489,18 +489,32 @@ func platformCompleteSyntheticDisable(
 	enabled platformOperationLease,
 ) platformOperationLease {
 	t.Helper()
+	return platformCompleteSyntheticDisableWithIDs(
+		t, s, actor, enabled, 1320, 1321)
+}
+
+// platformCompleteSyntheticDisableWithIDs lets a test disable the same installation more than once
+// by giving each disable its own operation ids.
+func platformCompleteSyntheticDisableWithIDs(
+	t *testing.T,
+	s *Server,
+	actor platformActorSession,
+	enabled platformOperationLease,
+	consumeID, claimID int,
+) platformOperationLease {
+	t.Helper()
 	review, err := s.createPlatformRemovalReview(
 		actor, enabled.installationID, appplatform.ActionDisable)
 	if err != nil {
 		t.Fatal("disable review", err)
 	}
 	commit, err := s.consumePlatformRemovalReview(
-		actor, review.ID, review.SHA256, platformFixtureID(1320))
+		actor, review.ID, review.SHA256, platformFixtureID(consumeID))
 	if err != nil {
 		t.Fatal("disable admission", err)
 	}
 	selected, err := s.claimNextPlatformManagedUninstall(
-		context.Background(), platformFixtureID(1321))
+		context.Background(), platformFixtureID(claimID))
 	if err != nil || selected.lease.id != commit.OperationID {
 		t.Fatal("disable claim", selected, err)
 	}
@@ -639,10 +653,10 @@ func TestPlatformManagedEnableSecondCyclePostgres(t *testing.T) {
 }
 
 func testPlatformManagedRepairCurrentTuple(t *testing.T, pg bool) {
-	testPlatformManagedRepairCurrentTupleReview(t, pg, false)
+	testPlatformManagedRepairCurrentTupleReview(t, pg, false, false)
 }
 
-func testPlatformManagedRepairCurrentTupleReview(t *testing.T, pg, policyReview bool) {
+func testPlatformManagedRepairCurrentTupleReview(t *testing.T, pg, policyReview, repairAgain bool) {
 	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
 	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
 	var previous platformManagedUpdatePlan
@@ -799,10 +813,119 @@ func testPlatformManagedRepairCurrentTupleReview(t *testing.T, pg, policyReview 
 		t.Fatal("launch after repair then policy review", err)
 	}
 	again.Close()
+	if !repairAgain {
+		return
+	}
+	// Disable, then review and run a repair from the source plan that predates the policy review.
+	platformCompleteSyntheticDisableWithIDs(t, s, actor, startLease, 1340, 1341)
+	secondReview, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("repair review after policy review and disable", err)
+	}
+	var secondPlan platformManagedUpdatePlan
+	if json.Unmarshal([]byte(secondReview.JSON), &secondPlan) != nil ||
+		secondPlan.SourcePolicyRevision != secondPlan.TargetPolicyRevision ||
+		secondPlan.TargetPolicyRevision <= plan.TargetPolicyRevision {
+		t.Fatal("second repair plan must use the current policy", secondPlan)
+	}
+	secondCommit, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, secondReview.ID, secondReview.SHA256,
+		platformFixtureID(1342), previous.TargetRuntime, runtime)
+	if err != nil || secondCommit.Stage != appplatform.StageQueued {
+		t.Fatal("second repair admission", secondCommit, err)
+	}
+	secondSelected, err := s.claimNextPlatformManagedRepair(
+		context.Background(), platformFixtureID(1343))
+	if err != nil || secondSelected.lease.id != secondCommit.OperationID {
+		t.Fatal("second repair claim", secondSelected, err)
+	}
+	secondCurrent := secondSelected.lease
+	for secondCurrent.snapshot.Stage != appplatform.StageQuiesce {
+		secondCurrent, err = s.advancePlatformManagedEnableStage(
+			context.Background(), secondCurrent)
+		if err != nil {
+			t.Fatal("second repair stage", secondCurrent.snapshot.Stage, err)
+		}
+	}
+	secondCheckpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), secondCurrent)
+	if err != nil {
+		t.Fatal("second repair checkpoint", err)
+	}
+	secondEndpoint := platformCheckpointEndpointFixture()
+	secondStart, err := s.commitPlatformCheckpoint(
+		context.Background(), secondCurrent, secondCheckpoint, secondEndpoint,
+		platformCheckpointObservationFixture(secondCheckpoint, secondEndpoint))
+	if err != nil || secondStart.snapshot.Stage != appplatform.StageStart {
+		t.Fatal("second repair checkpoint commit", secondStart.snapshot, err)
+	}
+	secondResult := platformRunSyntheticManagedEnable(t, s, secondStart)
+	if secondResult.snapshot.Stage != appplatform.StageComplete ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`,
+			firstEnable.installationID) != "enabled:ready" ||
+		scalar[int64](t, s.st, `SELECT generation
+			FROM app_platform_installations WHERE id=?`,
+			firstEnable.installationID) != secondPlan.TargetGeneration {
+		t.Fatal("second repair did not complete")
+	}
 }
 
 func TestPlatformManagedRepairLaunchAfterPolicyReviewSQLite(t *testing.T) {
-	testPlatformManagedRepairCurrentTupleReview(t, false, true)
+	testPlatformManagedRepairCurrentTupleReview(t, false, true, false)
+}
+
+// Production sequence: repair, then a policy review raises the policy in place, then the app is
+// disabled. The source repair plan still carries the older target policy; reviewing a repair from it
+// must succeed and the repair must run to completion.
+func TestPlatformManagedRepairAfterPolicyReviewAndDisableSQLite(t *testing.T) {
+	testPlatformManagedRepairCurrentTupleReview(t, false, true, true)
+}
+
+// A source plan that targets a newer policy than the activation it describes is not history; it is
+// still refused.
+func TestPlatformManagedRepairSourcePlanNewerThanActivationRefusedSQLite(t *testing.T) {
+	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, false)
+	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
+	var previous platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete' ORDER BY o.completed_ms DESC LIMIT 1`,
+		firstEnable.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &previous) != nil ||
+		previous.TargetRuntime == nil {
+		t.Fatal("source plan", err)
+	}
+	previous.TargetPolicyRevision++
+	forged, err := json.Marshal(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=? WHERE id=(
+		SELECT review_plan_id FROM app_platform_operations WHERE installation_id=?
+		AND action='enable' AND stage='complete')`,
+		string(forged), platformDigest(forged), firstEnable.installationID)
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`, firstEnable.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime); err == nil {
+		t.Fatal("repair review accepted a source plan newer than its activation")
+	}
 }
 
 func TestPlatformManagedRepairCurrentTupleSQLite(t *testing.T) {
