@@ -50,7 +50,7 @@ func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b pla
 			Action: appplatform.ActionRestore, Managed: true, Generation: uint64(b.generation), Stage: appplatform.StageActivate,
 		},
 	}
-	ev, err := loadPlatformResumeEvidence(e, expected)
+	ev, err := loadPlatformResumeEvidenceAt(e, expected, true)
 	if err != nil {
 		return fail("evidence", err)
 	}
@@ -61,7 +61,7 @@ func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b pla
 	var generation, policy int64
 	if err := e.queryRow(`SELECT desired_state,phase,generation,policy_revision,controller_epoch,runtime_id
 		FROM app_platform_installations WHERE id=?`, b.installation).Scan(&desired, &phase, &generation, &policy, &epoch, &runtimeID); err != nil ||
-		desired != "enabled" || phase != "ready" || generation != b.generation || policy != ev.plan.PolicyRevision ||
+		desired != "enabled" || phase != "ready" || generation != b.generation || policy < ev.plan.PolicyRevision ||
 		epoch != b.epoch || runtimeID != runtime.id {
 		return fail("installation", err)
 	}
@@ -73,7 +73,7 @@ func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b pla
 		namespaceState != "active" || namespaceFormat != ev.plan.DataFormat || writerFence != ev.plan.NamespaceWriterFence+1 {
 		return fail("namespace", err)
 	}
-	recoverySetID, _, checkpoint, _, err := loadPlatformResumeCheckpoint(e, expected)
+	recoverySetID, _, checkpoint, _, err := loadPlatformResumeCheckpointAt(e, expected, true)
 	if err != nil {
 		return fail("checkpoint", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -638,6 +639,10 @@ func TestPlatformManagedEnableSecondCyclePostgres(t *testing.T) {
 }
 
 func testPlatformManagedRepairCurrentTuple(t *testing.T, pg bool) {
+	testPlatformManagedRepairCurrentTupleReview(t, pg, false)
+}
+
+func testPlatformManagedRepairCurrentTupleReview(t *testing.T, pg, policyReview bool) {
 	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
 	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
 	var previous platformManagedUpdatePlan
@@ -749,6 +754,55 @@ func testPlatformManagedRepairCurrentTuple(t *testing.T, pg bool) {
 		access.intent.generation != plan.TargetGeneration {
 		t.Fatal("repair backend history lost current generation")
 	}
+	if !policyReview {
+		return
+	}
+	var runtimeID string
+	if err := s.st.queryRow(`SELECT runtime_id FROM app_platform_installations WHERE id=?`,
+		firstEnable.installationID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	// The synthetic enable fixture does not use the writable sandbox profile that production plans
+	// carry, and eligibility requires it. Give the stored repair plan that profile, with its digest.
+	var rawPlan string
+	if err := s.st.queryRow(`SELECT p.plan_json FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=?`, commit.OperationID).Scan(&rawPlan); err != nil {
+		t.Fatal(err)
+	}
+	var stored platformManagedUpdatePlan
+	if err := json.Unmarshal([]byte(rawPlan), &stored); err != nil || stored.TargetRuntime == nil {
+		t.Fatal("stored repair plan", err)
+	}
+	stored.TargetRuntime.Profile.WritableSandboxProfile = control.WritableCandidateSandboxProfile
+	updatedPlan, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=? WHERE id=(
+		SELECT review_plan_id FROM app_platform_operations WHERE id=?)`,
+		string(updatedPlan), platformDigest(updatedPlan), commit.OperationID)
+	openable := func(when string) {
+		t.Helper()
+		ok, err := platformWritableLaunchEligible(
+			s.st.poolExec(), firstEnable.installationID, runtimeID, epoch)
+		if err != nil || !ok {
+			t.Fatal("directory eligibility "+when+" the repair", ok, err)
+		}
+	}
+	openable("after")
+	platformPolicyReviewInPlace(t, s, firstEnable.installationID)
+	openable("after a policy review of")
+	again, err := s.preparePlatformWritableBackendAccess(
+		context.Background(), actor, firstEnable.installationID)
+	if err != nil {
+		t.Fatal("launch after repair then policy review", err)
+	}
+	again.Close()
+}
+
+func TestPlatformManagedRepairLaunchAfterPolicyReviewSQLite(t *testing.T) {
+	testPlatformManagedRepairCurrentTupleReview(t, false, true)
 }
 
 func TestPlatformManagedRepairCurrentTupleSQLite(t *testing.T) {

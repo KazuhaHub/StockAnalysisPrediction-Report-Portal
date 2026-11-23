@@ -81,6 +81,15 @@ func testResumedManagedAppLaunchesAndServesBackend(t *testing.T, pg bool) {
 	if err != nil {
 		t.Fatal("a resumed managed app was refused by the backend gateway:", err)
 	}
+	access.Close()
+	// A policy review raises the revision in place; the resumed history must still be admitted.
+	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=policy_revision+1 WHERE id=?`, f.installation)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=policy_revision+1 WHERE installation_id=? AND state='active'`, f.installation)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision+1 WHERE installation_id=?`, f.installation)
+	access, err = s.preparePlatformWritableBackendAccess(context.Background(), actor, f.installation)
+	if err != nil {
+		t.Fatal("a resumed managed app was refused after a policy review:", err)
+	}
 	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
 	policy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_installations WHERE id=?`, f.installation)
 	release := platformDigest(access.intent.start.writer.descriptor)

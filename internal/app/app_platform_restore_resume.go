@@ -501,6 +501,14 @@ type platformResumeEvidence struct {
 }
 
 func loadPlatformResumeEvidence(e migExec, lease platformOperationLease) (platformResumeEvidence, error) {
+	return loadPlatformResumeEvidenceAt(e, lease, false)
+}
+
+// loadPlatformResumeEvidenceAt reads the resume evidence. Settlement callers need the installation to
+// still sit at the plan's policy revision. History readers pass policyMayHaveRisen: a policy review
+// raises the revision in place after the resume completed, so the installation may be newer than the
+// plan, never older.
+func loadPlatformResumeEvidenceAt(e migExec, lease platformOperationLease, policyMayHaveRisen bool) (platformResumeEvidence, error) {
 	var ev platformResumeEvidence
 	fail := func(reason string) (platformResumeEvidence, error) {
 		return ev, fmt.Errorf("%w: resume %s", errAppPlatformStageEvidence, reason)
@@ -540,7 +548,8 @@ func loadPlatformResumeEvidence(e migExec, lease platformOperationLease) (platfo
 	var runtimeID sql.NullString
 	var release string
 	if err := e.queryRow(`SELECT i.runtime_id,i.policy_revision,i.app_id,i.publisher_id FROM app_platform_installations i WHERE i.id=?`, lease.installationID).
-		Scan(&runtimeID, &ev.policy, &ev.appID, &ev.publisher); err != nil || !runtimeID.Valid || runtimeID.String != plan.RuntimeID || ev.policy != plan.PolicyRevision {
+		Scan(&runtimeID, &ev.policy, &ev.appID, &ev.publisher); err != nil || !runtimeID.Valid || runtimeID.String != plan.RuntimeID ||
+		(ev.policy != plan.PolicyRevision && !(policyMayHaveRisen && ev.policy > plan.PolicyRevision)) {
 		return fail("installation")
 	}
 	release = plan.ReleaseSHA256
@@ -559,7 +568,11 @@ func loadPlatformResumeEvidence(e migExec, lease platformOperationLease) (platfo
 // is not a snapshot receipt: the operation and effect it names are the import's, so the start command
 // carries the import as its checkpoint source, and the data identity is the receiving host's.
 func loadPlatformResumeCheckpoint(e migExec, lease platformOperationLease) (string, string, journal.CheckpointReceipt, int64, error) {
-	ev, err := loadPlatformResumeEvidence(e, lease)
+	return loadPlatformResumeCheckpointAt(e, lease, false)
+}
+
+func loadPlatformResumeCheckpointAt(e migExec, lease platformOperationLease, policyMayHaveRisen bool) (string, string, journal.CheckpointReceipt, int64, error) {
+	ev, err := loadPlatformResumeEvidenceAt(e, lease, policyMayHaveRisen)
 	if err != nil {
 		return "", "", journal.CheckpointReceipt{}, 0, err
 	}

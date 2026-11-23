@@ -80,25 +80,26 @@ func platformWritableLaunchEligible(e migExec, installation, runtime, epoch stri
 }
 
 func platformWritableUpdateLaunchEligible(e migExec, installation, runtime, epoch string, generation int64) (bool, error) {
-	var raw, digest string
+	var raw, digest, actionText string
 	var targetGeneration int64
 	var descriptor []byte
 	err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,
-		o.target_generation,r.descriptor
+		o.target_generation,r.descriptor,o.action
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
 		JOIN app_platform_installations i ON i.id=o.installation_id
-		WHERE o.installation_id=? AND o.action='update' AND o.managed=1
+		WHERE o.installation_id=?
+		AND o.action IN ('update','enable','repair','import_data') AND o.managed=1
 		AND o.target_generation=? AND o.stage='complete'
 		AND o.completed_ms IS NOT NULL AND o.error_code IS NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.fence=i.control_fence AND o.controller_epoch=?
 		AND i.generation=? AND i.controller_epoch=?
 		AND i.runtime_id=? AND p.controller_epoch=?
-		AND p.action='update' AND p.consumed_ms IS NOT NULL`,
+		AND p.action=o.action AND p.consumed_ms IS NOT NULL`,
 		installation, generation, epoch, generation, epoch,
-		runtime, epoch).Scan(&raw, &digest, &targetGeneration, &descriptor)
+		runtime, epoch).Scan(&raw, &digest, &targetGeneration, &descriptor, &actionText)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -106,9 +107,19 @@ func platformWritableUpdateLaunchEligible(e migExec, installation, runtime, epoc
 		return false, err
 	}
 	var plan platformManagedUpdatePlan
+	// The same operation actions and plan formats the update history loader accepts as a source.
+	action := appplatform.Action(actionText)
+	validFormat := false
+	var planProbe platformManagedUpdatePlan
+	if len(raw) <= 65536 && json.Unmarshal([]byte(raw), &planProbe) == nil {
+		validFormat = action == appplatform.ActionUpdate &&
+			planProbe.Format == platformManagedUpdateFormat ||
+			platformSameReleaseLifecycle(action) &&
+				planProbe.Format == platformSameReleaseLifecycleFormat(action)
+	}
 	if len(raw) > 65536 || json.Unmarshal([]byte(raw), &plan) != nil ||
 		targetGeneration != generation ||
-		plan.Format != platformManagedUpdateFormat ||
+		!validFormat ||
 		plan.InstallationID != installation ||
 		plan.ControllerEpoch != epoch ||
 		plan.TargetGeneration != generation ||
@@ -141,7 +152,7 @@ func platformWritableUpdateLaunchEligible(e migExec, installation, runtime, epoc
 		FROM app_platform_activations
 		WHERE installation_id=? AND state='active'
 		AND generation=? AND release_sha256=?
-		AND policy_revision=?`,
+		AND policy_revision>=?`,
 		installation, generation, plan.TargetReleaseSHA256,
 		plan.TargetPolicyRevision).Scan(&active); err != nil {
 		return false, err

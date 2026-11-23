@@ -1243,6 +1243,50 @@ func testPlatformUpdateStartBootBindsRegistration(t *testing.T, pg bool) {
 	}
 }
 
+func TestPlatformUpdateLaunchAfterPolicyReviewSQLite(t *testing.T) {
+	testPlatformUpdateStartActivationModeReview(t, false, true, true)
+}
+
+// A history recorded at a newer policy than the current one is not admitted. The installation, its
+// active activation and its grants are lowered together, so the managed-access policy checks (which only
+// compare the three with each other) agree and only the history's own floor can refuse.
+func TestPlatformUpdateLaunchRefusesNewerRecordedPolicySQLite(t *testing.T) {
+	s, lease, intent, endpoint, obs := platformWritableUpdateStartRegistrationCommitFixture(t, false)
+	next, err := s.commitPlatformUpdateStartRegistration(context.Background(), lease, intent, endpoint, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
+	defer applied.registration.Close()
+	if _, err := s.commitPlatformUpdateStartActivation(context.Background(), next, applied, boot); err != nil {
+		t.Fatal(err)
+	}
+	actor := platformManagedFixtureSession(t, s)
+	if backend, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, lease.installationID); err != nil {
+		t.Fatal("baseline launch", err)
+	} else {
+		backend.Close()
+	}
+	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=policy_revision-1 WHERE id=?`, lease.installationID)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=policy_revision-1 WHERE installation_id=? AND state='active'`, lease.installationID)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision-1 WHERE installation_id=?`, lease.installationID)
+	backend, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, lease.installationID)
+	if err == nil {
+		backend.Close()
+		t.Fatal("history newer than the current policy was admitted")
+	}
+	if !strings.Contains(err.Error(), "update history") {
+		t.Fatal("refused by something other than the history floor:", err)
+	}
+	var runtimeID string
+	if err := s.st.queryRow(`SELECT runtime_id FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := platformWritableLaunchEligible(s.st.poolExec(), lease.installationID, runtimeID, lease.controllerEpoch); err != nil || ok {
+		t.Fatal("directory reported an app openable whose history is newer than the current policy", ok, err)
+	}
+}
+
 func TestPlatformUpdateStartActivationSQLite(t *testing.T) {
 	testPlatformUpdateStartActivationMode(t, false, false)
 	testPlatformUpdateStartActivationMode(t, false, true)
@@ -1630,6 +1674,19 @@ func TestPlatformUpdateStartActivationPostgres(t *testing.T) {
 }
 
 func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
+	testPlatformUpdateStartActivationModeReview(t, pg, writable, false)
+}
+
+// platformPolicyReviewInPlace raises the policy revision the way a proxy or capability policy review
+// does: in place, on the installation, its active activation and its grants, with no lifecycle operation.
+func platformPolicyReviewInPlace(t *testing.T, s *Server, installationID string) {
+	t.Helper()
+	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=policy_revision+1 WHERE id=?`, installationID)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=policy_revision+1 WHERE installation_id=? AND state='active'`, installationID)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision+1 WHERE installation_id=?`, installationID)
+}
+
+func testPlatformUpdateStartActivationModeReview(t *testing.T, pg, writable, review bool) {
 	var s *Server
 	var lease platformOperationLease
 	var intent platformUpdateStartRegistrationIntent
@@ -1718,11 +1775,22 @@ func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
 	if !writable {
 		return
 	}
+	if review {
+		platformPolicyReviewInPlace(t, s, lease.installationID)
+	}
 	actor := platformManagedFixtureSession(t, s)
 	backend, err := s.preparePlatformWritableBackendAccess(
 		context.Background(), actor, lease.installationID)
 	if err != nil {
 		t.Fatal("updated managed backend history", err)
+	}
+	if review {
+		backend.Close()
+		launch, err := s.inspectPlatformLaunchAccess(actor, lease.installationID)
+		if err != nil || launch.generation != "2" {
+			t.Fatal("launch after policy review", launch, err)
+		}
+		return
 	}
 	if backend.intent.generation != 2 ||
 		backend.activationID != applied.start.resourceID {

@@ -167,9 +167,13 @@ func (s *Server) loadPlatformWritableRestoreBackendHistoryPhased(e migExec, b pl
 	if err != nil {
 		return fail("source", err)
 	}
-	var policy int64
-	if err := e.queryRow(`SELECT policy_revision FROM app_platform_activations WHERE installation_id=? AND generation=?`, b.installation, b.generation).Scan(&policy); err != nil || policy < 1 {
-		return fail("policy", err)
+	// The policy the restore ran at is recorded in the start claim of the running receipt. The receipt
+	// is trusted because the rebuilt command digest must equal the stored payload digest. The
+	// activation's current policy may be newer after a policy review, and that digest was computed over
+	// the recorded one.
+	policy, perr := strconv.ParseInt(running.Claim.PolicyRevision, 10, 64)
+	if perr != nil || policy < 1 {
+		return fail("policy", perr)
 	}
 	plan := platformRestoreStartPlan(expected, checkpoint, recoverySetID, policy, source)
 	start, err := loadPlatformCompletedUpdateStartActivation(e, expected, runtime, source, checkpoint, plan)
