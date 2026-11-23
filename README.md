@@ -39,6 +39,8 @@ To update an installation:
 docker compose pull && docker compose up -d
 ~~~
 
+The compose file also starts `app-task-worker`, a second process from the same image that runs background tasks and the egress coordinator behind `network.proxy`. Keep exactly one instance; without it granted network access is refused. See [the handbook](docs/app-platform/07-handbook.md) section 4.4a.
+
 The image tags are `:latest` for the recommended full release, `:beta` for the newest published release including pre-releases, and `:vYYYY.W[.R]` for a pinned release. The first startup creates `./config/config.yaml`; normally only `secret_key` needs to be set manually. Generate one with `openssl rand -hex 32`.
 
 Before upgrading a deployment that predates the CalVer line, read [docs/releases/README.md](docs/releases/README.md). The first CalVer release reads only the **v0.4.72** database schema and converts nothing: a database older than that has to be started once by v0.4.72 first, and one that is older is refused rather than half-upgraded.
@@ -74,7 +76,9 @@ For Docker:
 
 ~~~bash
 docker compose exec report-portal /app/report-portal backup - | gzip > dump-$(date +%F).gz
+docker compose stop app-task-worker     # its cached data key and task claims must not span a restore
 zcat dump-2026-09-04.gz | docker compose exec -T report-portal /app/report-portal restore - --force
+docker compose start app-task-worker
 ~~~
 
 Backups contain password hashes and token hashes, so the files are secrets and are written with mode `0600`. The SSO keyring is encrypted in the database, but its wrapping key is derived from `secret_key` in `config.yaml`; keep the config directory with the backup.
@@ -107,6 +111,7 @@ report-portal recovery-bundle restore /backup/bundle --force  # load it into an 
 - **Docker.** Run the restore in a one-off container that does not start the server, against a fresh volume. `docker compose exec` needs a running Portal, and one that has started has already created the bootstrap admin, so the empty-database guard would refuse it. With the compose file's PostgreSQL service, start only the database first. The original `config.yaml` (same `secret_key`) must be in the config volume. The entrypoint is overridden because the image's default entrypoint starts the server; the container runs as root and the normal entrypoint repairs ownership of `/app/data` on the next start.
 
   ~~~bash
+  docker compose stop app-task-worker   # and keep it stopped until the restore is done: `up -d` below starts it
   docker compose up -d db        # only when config.yaml uses PostgreSQL
   docker compose run --rm --no-deps -v /backup/bundle:/bundle:ro --entrypoint /app/report-portal \
     report-portal recovery-bundle restore /bundle --force

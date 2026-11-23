@@ -79,10 +79,14 @@ ARG TARGETARCH
 ENV TZ=UTC RP_CONFIG=/app/config/config.yaml
 WORKDIR /app
 COPY bin/linux-${TARGETARCH}/report-portal /app/report-portal
+# The application task worker: same image, same uid, started by the entrypoint when it is named as the
+# command. Without a running worker no service egress session is opened (network.proxy is refused) and
+# background tasks never run. See the app-task-worker service in docker-compose.yml.
+COPY bin/linux-${TARGETARCH}/app-task-worker /app/app-task-worker
 COPY config.example.yaml /app/config.example.yaml
 COPY internal/apprunner/driver/seccomp/LICENSE internal/apprunner/driver/seccomp/README.md /app/third-party/moby-profiles/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /app/report-portal /usr/local/bin/docker-entrypoint.sh \
+RUN chmod +x /app/report-portal /app/app-task-worker /usr/local/bin/docker-entrypoint.sh \
  && mkdir -p /app/config /app/data
 EXPOSE 8790
 # /healthz checks the database, not just the process — an orchestrator can already see a dead

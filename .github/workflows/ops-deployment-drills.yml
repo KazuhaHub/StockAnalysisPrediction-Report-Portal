@@ -62,7 +62,9 @@ jobs:
           ldflags="-s -w -X ${mod}/internal/version.Version=drill-${short} -X ${mod}/internal/version.Commit=${short} -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${ldflags}" -o bin/linux-amd64/report-portal ./cmd/report-portal
           sh scripts/check-release-build.sh bin/linux-amd64/report-portal linux amd64 "$sha"
-          chmod +x bin/linux-amd64/report-portal
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${ldflags}" -o bin/linux-amd64/app-task-worker ./cmd/app-task-worker
+          sh scripts/check-release-build.sh bin/linux-amd64/app-task-worker linux amd64 "$sha" app-task-worker
+          chmod +x bin/linux-amd64/report-portal bin/linux-amd64/app-task-worker
       - name: Start the loopback registry
         run: |
           set -euo pipefail

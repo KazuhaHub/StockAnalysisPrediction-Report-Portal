@@ -3436,6 +3436,9 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-market-detail-note { margin-top: 8px; font-size: 12px; }
 .rp-lifecycle-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
 .rp-lifecycle-body > .ant-steps { flex: none; }
+/* A failed step's title in antd's error red (#ff4d4f) is 3.2:1 on white, under WCAG AA. Use the palette's red-7, which
+   the dark algorithm maps to a light red, as the forecast colours already do (lib/forecastPresentation.ts). */
+.rp-lifecycle-progress .ant-steps-item-error .ant-steps-item-title { color: var(--ant-red-7, #cf1322); }
 /* The operation's stage list scrolls inside the dialog, so a long list never pushes the footer off a short phone screen. */
 .rp-lifecycle-progress { display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
 .rp-operation-steps { flex: none; }

@@ -101,7 +101,7 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
       </Space>}
       {step === 'review' && !review && !intent && !actionError && <div style={{ textAlign: 'center' }}><Spin /></div>}
       {step === 'review' && review && !intent && <PlatformReviewDetails review={review} release={release} groups={groups} expired={expired} />}
-      {step === 'progress' && <div className="rp-lifecycle-progress">
+      {step === 'progress' && <div className="rp-lifecycle-progress" role="region" aria-label={t('appPlatform.step.progress')} tabIndex={0}>
         <div role="status" aria-live="polite">
           {progressError && <Alert type="error" title={progressError} />}
           {progress && <Space orientation="vertical" size="small" style={{ width: '100%' }}>

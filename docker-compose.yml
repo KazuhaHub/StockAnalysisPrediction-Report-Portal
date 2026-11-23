@@ -10,10 +10,15 @@
 # Update: docker compose pull && docker compose up -d
 #   First `mkdir -p app-runner-control` beside this file if it is not there yet (this release binds it into the
 #   portal, and Docker never creates a bind source: the portal would not start).
+#   The app-task-worker service (below) ships in the same image and starts with the project; it is what makes
+#   network.proxy and background tasks work.
 #   Always the whole project, with no service names. One variable, PORTAL_VERSION, selects the Portal image and
 #   the app-runner image together, and the two must come from the same release: never `docker compose pull
 #   report-portal` or `up -d report-portal` alone across a version change. Production pins PORTAL_VERSION to a
 #   fixed tag in .env; the default follows :latest.
+#
+# Restore and the worker: stop app-task-worker before `restore --force` and start it after. Its cached data key and
+#   its task claims must not span a restore (docker compose stop app-task-worker ... docker compose start app-task-worker).
 #
 # Backend apps (the app-runner service, off by default): prepare the host once, then enable the profile.
 #   docker compose run --rm app-runner host-setup                   # plan only
@@ -100,7 +105,7 @@ services:
         bind:
           create_host_path: false
 
-    environment:
+    environment: &portal-env
       TZ: Asia/Shanghai
       # Point the portal at the bundled Postgres. These override config.yaml.
       RP_DB_DRIVER: postgres
@@ -124,6 +129,49 @@ services:
       RP_APP_RUNNER_CONTROLLER_GID: ${RP_APP_RUNNER_CONTROLLER_GID:-}
 
     # Resource cap so it doesn't contend with Dify/Ragflow on the same host
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # The application task worker: the ONLY process that runs background tasks and the service egress coordinator
+  # (docs/app-platform/174-background-broker-egress.md). Without it a granted network.proxy is always refused
+  # (403 X-Portal-Proxy-Refusal: unavailable, because no egress session is ever opened), and scheduled digests,
+  # event delivery and backend tasks never run. The Portal process does not start one.
+  # Run exactly ONE instance: it holds the single egress coordinator, and a second worker would replace its
+  # sessions at every tick (task execution alone is lease-fenced and safe to duplicate). Do not scale it.
+  # Same image, config, database and runner endpoint as report-portal, and the same uid: the runner accepts the
+  # control socket only from the controller uid. It publishes no ports and has no HTTP listener.
+  app-task-worker:
+    image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal:${PORTAL_VERSION:-latest}
+    container_name: report-portal-task-worker
+    restart: unless-stopped
+    pull_policy: always
+    depends_on:
+      report-portal:
+        condition: service_healthy   # the portal creates config.yaml and applies schema steps first
+    # The entrypoint drops to PUID/PGID and execs the worker named here.
+    command: ["/app/app-task-worker", "--config", "/app/config/config.yaml"]
+    # The image's HEALTHCHECK probes the portal's HTTP port, which this process does not have.
+    healthcheck:
+      disable: true
+    stop_grace_period: 20s
+    volumes:
+      - ./config:/app/config
+      - rp-data:/app/data
+      - type: bind
+        source: ${RP_APP_RUNNER_CONTROL_DIR:-./app-runner-control}
+        target: /var/lib/portal-app-runner/control
+        read_only: true
+        bind:
+          create_host_path: false
+    # THE WORKER'S ENVIRONMENT IS THE PORTAL'S, BY REFERENCE (the anchor on report-portal's environment). It needs
+    # every RP_* variable the Portal has: RP_DB_* to reach the same database and RP_SECRET_KEY /
+    # RP_SECRET_KEY_PREVIOUS (if you set them instead of secret_key in config.yaml), because it unwraps the keyring
+    # with that key and, on a database that has none, would create one: a worker with a different or missing key
+    # would fail on, or fork, the Portal's keyring. One shared block cannot drift. Variables you add to the Portal
+    # (for example in an override file or env_file) must be added to the worker the same way.
+    environment: *portal-env
     deploy:
       resources:
         limits:

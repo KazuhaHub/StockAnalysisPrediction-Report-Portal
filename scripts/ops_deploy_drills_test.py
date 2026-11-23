@@ -49,14 +49,14 @@ class ComposeTests(unittest.TestCase):
     def setUp(self):
         self.template = (REPO / "docker-compose.yml").read_text(encoding="utf-8")
 
-    def test_the_repository_compose_has_exactly_one_portal_image_line(self):
+    def test_the_repository_compose_has_the_portal_image_lines(self):
         self.assertTrue(drills.compose_image_ref(self.template).startswith(drills.IMAGE + ":"))
 
     def test_rendering_changes_one_line_and_only_the_reference(self):
         ref = f"{drills.IMAGE}:v2026.46.1"
         out = drills.render_pinned_compose(self.template, ref)
         self.assertEqual(drills.compose_image_ref(out), ref)
-        self.assertEqual(len(drills.changed_line_numbers(self.template, out)), 1)
+        self.assertEqual(len(drills.changed_line_numbers(self.template, out)), 2)
         self.assertIn("image: postgres:16-alpine", out)
         self.assertEqual(out.replace(ref, drills.compose_image_ref(self.template)), self.template)
 
@@ -74,25 +74,25 @@ class ComposeTests(unittest.TestCase):
         self.assertIsNone(drills.IMAGE_LINE_RE.match(runner[0]))
         out = drills.render_pinned_compose(self.template, f"{drills.IMAGE}:v2026.46.1")
         self.assertIn(runner[0], out.splitlines())
-        self.assertEqual(len(drills.changed_line_numbers(self.template, out)), 1)
+        self.assertEqual(len(drills.changed_line_numbers(self.template, out)), 2)
         self.assertTrue(drills.IMAGE_LINE_RE.match("    image: ghcr.io/kazuhahub/stockanalysisprediction-report-portal:latest"))
         self.assertIsNone(drills.IMAGE_LINE_RE.match("    image: ghcr.io/o/r-app-runner@sha256:" + "a" * 64))
 
     def test_zero_or_two_portal_images_are_refused(self):
         with self.assertRaises(ValueError):
             drills.render_pinned_compose("services:\n  db:\n    image: postgres:16\n", "x")
-        two = "    image: ghcr.io/a/b:1\n    image: ghcr.io/a/b:2\n"
-        with self.assertRaises(ValueError):
-            drills.render_pinned_compose(two, "x")
+        for bad in ("    image: ghcr.io/a/b:1\n", "    image: ghcr.io/a/b:1\n    image: ghcr.io/a/b:2\n"):
+            with self.assertRaises(ValueError):
+                drills.render_pinned_compose(bad, "x")
 
     def test_changed_line_numbers(self):
         self.assertEqual(drills.changed_line_numbers("a\nb\n", "a\nb\n"), [])
         self.assertEqual(drills.changed_line_numbers("a\nb\n", "a\nc\n"), [2])
         self.assertTrue(drills.changed_line_numbers("a\nb\n", "a\nb\nc\n"))
 
-    def test_the_image_line_number_is_the_only_changed_line_after_rendering(self):
+    def test_the_image_lines_are_the_only_changed_lines_after_rendering(self):
         out = drills.render_pinned_compose(self.template, f"{drills.IMAGE}:v1")
-        self.assertEqual(drills.changed_line_numbers(self.template, out), [drills.image_line_number(self.template)])
+        self.assertEqual(drills.changed_line_numbers(self.template, out), drills.image_line_numbers(self.template))
 
     def test_config_diff_paths_names_every_difference(self):
         a = {"services": {"report-portal": {"image": "x", "ports": [1, 2]}, "db": {"image": "p"}}}
@@ -471,7 +471,7 @@ def ops05_facts():
     return {"mode": "candidate", "image_ref": ref, "run_commit": sha, "expected_commit": sha,
             "build": {"ref": ref, "image_id": "sha256:" + "1" * 64, "digest": DIGEST_A, "binary_sha256": "e" * 64,
                       "version": "drill-" + sha[:7], "commit": sha},
-            "config_diff_paths": ["services.report-portal.image"], "changed_lines": [88], "image_line_number": 88,
+            "config_diff_paths": ["services.app-task-worker.image", "services.report-portal.image"], "changed_lines": [88, 150], "image_line_numbers": [88, 150],
             "registry_digest": DIGEST_A, "repo_digests": [DIGEST_A], "container_image_id": "sha256:" + "1" * 64,
             "container_config_image": ref, "loaded_binary_sha256": "e" * 64, "api_version": "drill-" + sha[:7],
             "api_commit": sha[:7], "cli_version": f"drill-{sha[:7]} ({sha[:7]}, 2026-11-15T00:00:00Z)", "healthy": True}
@@ -486,7 +486,7 @@ class Ops05Tests(unittest.TestCase):
     def test_each_wrong_fact_fails_exactly_its_check(self):
         cases = {
             "deployed_compose_differs_from_reference_only_in_the_image_line": {"config_diff_paths": ["services.report-portal.image", "services.db.image"]},
-            "deployed_compose_text_changes_only_the_image_line": {"changed_lines": [88, 90]},
+            "deployed_compose_text_changes_only_the_image_line": {"changed_lines": [88, 90, 150]},
             "container_reference_is_the_built_reference": {"container_config_image": "localhost:5000/other:tag"},
             "registry_digest_of_tag_equals_built_digest": {"registry_digest": DIGEST_B, "repo_digests": [DIGEST_B]},
             "container_image_digest_equals_registry_digest_of_tag": {"repo_digests": [DIGEST_B]},

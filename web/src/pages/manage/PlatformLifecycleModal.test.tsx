@@ -315,6 +315,13 @@ describe('application installation flow', () => {
     expect(mock.post).not.toHaveBeenCalled()
   })
 
+  // The step list can scroll inside the dialog; a scrollable region must take keyboard focus (axe scrollable-region-focusable).
+  it('makes the scrollable progress region reachable by keyboard', async () => {
+    mount(base, 'install', `/manage/apps?operation=${operation}`)
+    const region = await screen.findByRole('region', { name: 'appPlatform.step.progress' })
+    expect(region.getAttribute('tabindex')).toBe('0')
+  })
+
   it('opens the app settings after completion and tells the page once that the operation is terminal', async () => {
     mount(base, 'install', `/manage/apps?operation=${operation}`)
     const settings = await screen.findByRole('button', { name: 'appPlatform.openSettings' })

@@ -101,11 +101,17 @@ def manifest_digest(imagetools_json):
 
 # ------------------------------------------------------------------ compose
 
+# The Portal image is named by the report-portal service and by the app-task-worker service, which runs the same
+# image and must move with it.
+PORTAL_IMAGE_SERVICES = ("app-task-worker", "report-portal")
+
+
 def compose_image_ref(text):
-    """The report-portal image reference in a compose file; exactly one ghcr.io image line must exist."""
+    """The report-portal image reference in a compose file. One ghcr.io image line per Portal-image service
+    (report-portal and app-task-worker) must exist, and they must name the same reference."""
     refs = [m.group(2) for m in (IMAGE_LINE_RE.match(line) for line in text.splitlines()) if m]
-    if len(refs) != 1:
-        raise ValueError(f"expected one ghcr.io image line in the compose file, found {len(refs)}")
+    if len(refs) != len(PORTAL_IMAGE_SERVICES) or len(set(refs)) != 1:
+        raise ValueError(f"expected {len(PORTAL_IMAGE_SERVICES)} identical ghcr.io image lines in the compose file, found {refs}")
     return refs[0]
 
 
@@ -131,13 +137,10 @@ def changed_line_numbers(a, b):
     return [i + 1 for i in range(n) if (la[i] if i < len(la) else None) != (lb[i] if i < len(lb) else None)]
 
 
-def image_line_number(text):
-    """1-based number of the report-portal image line (the one line the procedure rewrites)."""
+def image_line_numbers(text):
+    """1-based numbers of the report-portal image lines (the only lines the procedure rewrites)."""
     compose_image_ref(text)
-    for number, line in enumerate(text.splitlines(), 1):
-        if IMAGE_LINE_RE.match(line):
-            return number
-    raise ValueError("no image line")
+    return [number for number, line in enumerate(text.splitlines(), 1) if IMAGE_LINE_RE.match(line)]
 
 
 def config_diff_paths(a, b, prefix=""):
@@ -545,9 +548,9 @@ def ops05_checks(f):
     build = f["build"]
     c = []
     c.append(check_result("deployed_compose_differs_from_reference_only_in_the_image_line",
-                          f["config_diff_paths"] == ["services.report-portal.image"], ", ".join(f["config_diff_paths"])))
+                          f["config_diff_paths"] == [f"services.{name}.image" for name in PORTAL_IMAGE_SERVICES], ", ".join(f["config_diff_paths"])))
     c.append(check_result("deployed_compose_text_changes_only_the_image_line",
-                          f["changed_lines"] == [f["image_line_number"]], f"lines {f['changed_lines']}"))
+                          f["changed_lines"] == f["image_line_numbers"], f"lines {f['changed_lines']}"))
     c.append(check_result("container_reference_is_the_built_reference", f["container_config_image"] == build["ref"],
                           f["container_config_image"]))
     c.append(check_result("registry_digest_of_tag_equals_built_digest", f["registry_digest"] == build["digest"],
@@ -756,7 +759,7 @@ class DockerHost:
         os.makedirs(os.path.join(os.path.dirname(self.compose_file), "app-runner-control"), exist_ok=True)
         with open(self.reference_file, "w", encoding="utf-8") as f:  # verbatim, beside the deployed file so paths resolve alike
             f.write(template)
-        return text, changed_line_numbers(template, text), image_line_number(template)
+        return text, changed_line_numbers(template, text), image_line_numbers(template)
 
     def compose_config(self, path):
         out = self.sh(["docker", "compose", "-p", PROJECT, "--project-directory", self.beta, "-f", path, "config",
@@ -780,7 +783,16 @@ class DockerHost:
         """`docker compose up -d`; with wait, until the service reports healthy (or 180 s). A service that
         is expected to refuse to start is brought up without waiting."""
         extra = ["--wait", "--wait-timeout", "180"] if wait else []
-        self.compose("up", "-d", *extra, timeout=420, check=False)
+        # --remove-orphans: a restored prior compose file may predate the app-task-worker service, and the
+        # worker container from the newer file must not outlive it.
+        self.compose("up", "-d", "--remove-orphans", *extra, timeout=420, check=False)
+
+    def stop_portal(self):
+        """Stop the Portal and its task worker. The worker holds pooled connections to the live database, so
+        a rename or a TEMPLATE copy of it fails while the worker runs; `up` starts both again."""
+        # The current compose file may be a prior release's, which has no worker service: name only what it defines.
+        defined = (self.compose("config", "--services", check=False).stdout or "").split()
+        self.compose("stop", *[n for n in ("report-portal", "app-task-worker") if n in defined or n == "report-portal"], check=False)
 
     def wait_healthy(self, base=None, seconds=150):
         deadline = time.time() + seconds
@@ -1006,7 +1018,7 @@ class DockerHost:
     def replace_live_database(self):
         """The migrated database is kept under another name for forensics; the prior build restores
         into a fresh one, because it refuses to open a database whose ledger it does not know."""
-        self.compose("stop", "report-portal")
+        self.stop_portal()
         self.psql_admin(f"DROP DATABASE IF EXISTS {FAILED_DB} WITH (FORCE)")
         self.psql_admin(f"ALTER DATABASE {LIVE_DB} RENAME TO {FAILED_DB}")
         self.psql_admin(f"CREATE DATABASE {LIVE_DB} OWNER portal")
@@ -1023,7 +1035,7 @@ class DockerHost:
         """The obvious rollback, the prior build started against the migrated database, run against a
         database copied from it so the live database is not touched before the restore's checks. The prior
         build must exit non-zero with the unknown steps named."""
-        self.compose("stop", "report-portal")
+        self.stop_portal()
         self.psql_admin(f"DROP DATABASE IF EXISTS {ROLLBACK_COPY_DB} WITH (FORCE)")
         self.psql_admin(f"CREATE DATABASE {ROLLBACK_COPY_DB} TEMPLATE {LIVE_DB} OWNER portal")
         name = "ops-rollback-probe"
@@ -1120,7 +1132,7 @@ def drill_ops05(host, rec, build):
     ident = host.loaded_identity()
     facts = {"mode": "candidate", "image_ref": ref, "build": build, "run_commit": host.env.get("GITHUB_SHA", ""),
              "expected_commit": host.env.get("OPS_DRILL_EXPECTED_COMMIT", ""),
-             "config_diff_paths": host.config_diff(), "changed_lines": changed, "image_line_number": image_line,
+             "config_diff_paths": host.config_diff(), "changed_lines": changed, "image_line_numbers": image_line,
              "registry_digest": host.tag_digest(ref), "healthy": healthy, **ident}
     return ops05_checks(facts), facts
 
@@ -1169,7 +1181,7 @@ def drill_ops06(host, rec, build):
     # config directory that holds secret_key is not carried across (a mis-mounted or recreated volume).
     cand_ref = build["ref"]
     host.sh(["docker", "pull", cand_ref], timeout=600)
-    host.compose("stop", "report-portal")
+    host.stop_portal()
     host.write_compose(cand_ref)
     host.sh(["mv", host.config_dir, host.config_dir + ".not-carried"], sudo=True)
     os.makedirs(host.config_dir, exist_ok=True)
@@ -1198,7 +1210,7 @@ def drill_ops06(host, rec, build):
 
     # The obvious rollback, by tag alone, is demonstrated on a copy of the migrated database. The live
     # database is not touched until the restore's own checks have passed.
-    host.compose("stop", "report-portal")
+    host.stop_portal()
     rb_refused, rb_state = host.rollback_probe(delta)
     live_unchanged = host.state()["ledger"] == after_state["ledger"]
     rec.event("rollback_by_tag_refused_on_a_copy", rb_refused and live_unchanged, state=rb_state, live_ledger_unchanged=live_unchanged)

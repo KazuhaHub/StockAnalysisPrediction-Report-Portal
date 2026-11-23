@@ -832,6 +832,8 @@ jobs:
           ldflags+=" -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
           go build -trimpath -ldflags "${ldflags}" -o bin/linux-amd64/report-portal ./cmd/report-portal
           sh scripts/check-release-build.sh bin/linux-amd64/report-portal linux amd64 "$sha"
+          go build -trimpath -ldflags "${ldflags}" -o bin/linux-amd64/app-task-worker ./cmd/app-task-worker
+          sh scripts/check-release-build.sh bin/linux-amd64/app-task-worker linux amd64 "$sha" app-task-worker
       - uses: docker/setup-buildx-action@v4
       - name: Build the release image
         uses: docker/build-push-action@v7
@@ -884,6 +886,36 @@ jobs:
             "ci (${sha:0:7}, "*) ;;
             *) echo "::error::version output is missing the injected build id or commit"; exit 1 ;;
           esac
+          # The task worker ships in the same image (a granted network.proxy needs its egress coordinator).
+          # Run without a config path it prints its usage and exits 2: proof it is present, executable and
+          # runs as the unprivileged uid.
+          rc=0
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+            --user 10001:10001 --entrypoint /app/app-task-worker -e RP_CONFIG= report-portal:ci >/dev/null || rc=$?
+          test "$rc" = 2 || { echo "::error::app-task-worker exited ${rc} without a config, want 2"; exit 1; }
+          # The same through the image's own entrypoint, as the compose service starts it: no --entrypoint, no
+          # --user. The entrypoint starts as root, drops to PUID/PGID with gosu and execs the worker named as the
+          # command, which prints its usage and exits 2.
+          rc=0
+          docker run --rm --network none -e RP_CONFIG= report-portal:ci /app/app-task-worker >/dev/null || rc=$?
+          test "$rc" = 2 || { echo "::error::app-task-worker through the entrypoint exited ${rc}, want 2"; exit 1; }
+          # And running: PID 1 is the worker, as uid 10001, with no HTTP listener of its own.
+          docker run -d --name rp-worker-smoke --network none report-portal:ci \
+            /app/app-task-worker --config /app/config/config.yaml >/dev/null
+          started=0
+          for _ in $(seq 1 30); do
+            if docker logs rp-worker-smoke 2>&1 | grep -q 'application task worker .* started'; then started=1; break; fi
+            sleep 1
+          done
+          worker_uid=$(docker exec rp-worker-smoke awk '/^Uid:/{print $2}' /proc/1/status || true)
+          # The redirect must run inside the container: a host-side </proc/... would read the runner's own file,
+          # and docker exec without -i passes no stdin anyway.
+          worker_cmd=$(docker exec rp-worker-smoke sh -c "tr '\0' ' ' </proc/1/cmdline" || true)
+          docker logs rp-worker-smoke 2>&1 | tail -n 5
+          docker rm -f rp-worker-smoke >/dev/null
+          test "$started" = 1 || { echo "::error::app-task-worker did not start through the entrypoint"; exit 1; }
+          test "$worker_uid" = 10001 || { echo "::error::app-task-worker runs as uid ${worker_uid}, want 10001"; exit 1; }
+          case "$worker_cmd" in /app/app-task-worker\ *) ;; *) echo "::error::PID 1 is '${worker_cmd}', want the worker"; exit 1 ;; esac
       - name: End-to-end checks against the release image
         run: |
           set -euo pipefail
@@ -961,6 +993,11 @@ jobs:
             out="bin/${goos}-${goarch}/report-portal${ext}"
             GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/report-portal
             sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha"
+            if [ "$goos" = linux ]; then
+              out="bin/${goos}-${goarch}/app-task-worker"
+              GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/app-task-worker
+              sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha" app-task-worker
+            fi
           done
       # release.yml's build-runner job ships app-runner for linux/amd64 and linux/arm64 only (doc 182 D8); the same
       # compile and provenance check run here so a break is found before a tag.
