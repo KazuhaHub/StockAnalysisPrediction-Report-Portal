@@ -163,10 +163,13 @@ func injectBootstrap(index []byte, bootstrap func() map[string]any) []byte {
 	if i < 0 {
 		return index
 	}
-	block := append(append([]byte(`<script type="application/json" id="rp-bootstrap">`), payload...), []byte(`</script>`)...)
-	out := make([]byte, 0, len(index)+len(block))
-	out = append(append(append(out, index[:i]...), block...), index[i:]...)
-	return out
+	var out bytes.Buffer
+	out.Write(index[:i])
+	out.WriteString(`<script type="application/json" id="rp-bootstrap">`)
+	out.Write(payload)
+	out.WriteString(`</script>`)
+	out.Write(index[i:])
+	return out.Bytes()
 }
 
 // precompressAssets gzip-compresses (best level) every file under sub whose
