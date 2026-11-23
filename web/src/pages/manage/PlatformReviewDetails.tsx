@@ -29,6 +29,9 @@ export default function PlatformReviewDetails({ review, release, groups, expired
     return {
       added: target.filter(capability => !previous.includes(capability)),
       removed: previous.filter(capability => !target.includes(capability)),
+      // An optional permission the installation holds today and the new release still declares stays granted
+      // with its current policy; the review says so instead of leaving it out of both lists.
+      kept: target.filter(capability => previous.includes(capability) && release?.optional_capabilities?.includes(capability)),
     }
   })() : null
   const permissionList = (values?: string[]) => values?.length ? joinList(values.map(capabilityLabel), lang) : t('appPlatform.none')
@@ -62,6 +65,7 @@ export default function PlatformReviewDetails({ review, release, groups, expired
       ...(declined.length ? [{ key: 'declinedPermissions', label: t('appPlatform.declinedPermissions'), children: permissionList(declined) }] : []),
       ...(backgroundNetwork ? [{ key: 'backgroundNetwork', label: t('appPlatform.backgroundNetwork'), children: t('appPlatform.backgroundNetworkNote') }] : []),
       ...(backgroundCredentials ? [{ key: 'backgroundCredentials', label: t('appPlatform.backgroundCredentials'), children: t('appPlatform.backgroundCredentialsNote') }] : []),
+      ...(updateDiff?.kept.length ? [{ key: 'retainedPermissions', label: t('appPlatform.retainedPermissions'), children: permissionList(updateDiff.kept) }] : []),
       ...(updateDiff ? [{ key: 'permissionChanges', label: t('appPlatform.permissionDiffLabel'), children: t('appPlatform.permissionDiff', { added: permissionList(updateDiff.added), removed: permissionList(updateDiff.removed) }) }] : []),
     ]),
     ...(quotaRaise ? [{

@@ -297,7 +297,7 @@ func (s *Store) activatePlatformStaticUpdate(ctx context.Context, expected platf
 	if err != nil {
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
-	selection, err := platformInstallCapabilitySelection(manifest.Manifest, nil)
+	selection, err := platformUpdateCapabilitySelection(e, expected.installationID, manifest.Manifest, nil)
 	if err != nil {
 		return platformOperationLease{}, err
 	}

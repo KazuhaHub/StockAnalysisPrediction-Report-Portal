@@ -3728,6 +3728,7 @@
   "appPlatform.requiredPermissions": "必需权限",
   "appPlatform.optionalPermissions": "可选权限",
   "appPlatform.declinedPermissions": "未授予的可选权限",
+  "appPlatform.retainedPermissions": "沿用当前授权的可选权限",
   "appPlatform.backgroundNetwork": "后台网络访问",
   "appPlatform.backgroundNetworkNote": "此应用可以在无人登录时访问已审核的目标地址。",
   "appPlatform.backgroundCredentials": "后台凭据使用",

@@ -89,7 +89,7 @@ func platformBuildUpdateProjection(e migExec, installation string, sourceRelease
 		// evidence that the target bytes can migrate the current data.
 		return platformUpdateProjection{}, errAppPlatformInstallUnavailable
 	}
-	selection, err := platformInstallCapabilitySelection(parsed.Manifest, nil)
+	selection, err := platformUpdateCapabilitySelection(e, installation, parsed.Manifest, nil)
 	if err != nil {
 		return platformUpdateProjection{}, err
 	}

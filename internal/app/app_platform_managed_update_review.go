@@ -582,8 +582,8 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 		parsed.Manifest, source.format, target); err != nil {
 		return platformUpdateProjection{}, err
 	}
-	selection, err := platformInstallCapabilitySelection(
-		parsed.Manifest, target)
+	selection, err := platformUpdateCapabilitySelection(
+		e, installation, parsed.Manifest, target)
 	if err != nil {
 		return platformUpdateProjection{}, err
 	}

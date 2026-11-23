@@ -136,8 +136,8 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	}
 	var capabilities []platformSelectedCapability
 	if lease.snapshot.Action == appplatform.ActionUpdate {
-		capabilities, err = platformInstallCapabilitySelection(
-			manifest.Manifest, source.runtimeTarget)
+		capabilities, err = platformUpdateCapabilitySelection(
+			e, lease.installationID, manifest.Manifest, source.runtimeTarget)
 		if err != nil {
 			return zero, err
 		}
@@ -288,6 +288,12 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 			e, lease.installationID, capabilities, true,
 			plan.TargetPolicyRevision, planID, nil,
 			errAppPlatformStageEvidence); err != nil {
+			return zero, err
+		}
+		// A carried network.proxy grant needs the consumed plan that backs it under the new release.
+		if err := platformCarryProxyPlan(
+			e, lease.installationID, planID, plan.TargetReleaseSHA256,
+			plan.TargetGeneration, plan.TargetPolicyRevision, capabilities, now); err != nil {
 			return zero, err
 		}
 	} else {
