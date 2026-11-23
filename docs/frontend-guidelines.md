@@ -54,6 +54,10 @@ When in doubt, look at how they solve it before inventing a pattern.
   own `gap` and is left to it. An `Alert` sets no margin of its own (`alertSpacing.test.ts`).
 - **Forms keep a readable width** (`.rp-settings-panel > .ant-form-item`, 720 px); tables and cards
   use the full width.
+- **A detail page ends its breadcrumb with the item's name.** The shell knows the route, not the name:
+  the page hands the name it renders its header from to the shell (`useCrumbTail`), and until it has
+  it the shell shows no trail, never the shorter one grown later. Console detail pages use
+  `AppsBreadcrumb` with the name from the same first-paint data.
 - **Back leads the title.** A page reached from a list (a stock, a run, an editor, an app) puts its
   Back button at the top left, before the page or card title, never in the top-right corner.
 - **Columns align.** Side-by-side panels start on the same line. A sticky rail's offset is measured
