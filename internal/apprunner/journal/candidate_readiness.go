@@ -57,6 +57,7 @@ func (s *Store) ObserveCandidateReadiness(ctx context.Context, raw, signature []
 	rootInode, _ := strconv.ParseUint(p.RootInode, 10, 64)
 	request := driver.CandidateLaunchRequest{Identity: driver.CandidateIdentity{DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, InstallationID: c.InstallationID, OperationID: c.OperationID, ResourceID: c.Payload.ResourceID, NamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, Generation: c.TargetGeneration, ControlFence: c.InstallationFence, WriterFence: c.Payload.WriterFence}, Descriptor: descriptor, Platform: c.Payload.Platform, Data: driver.CandidateDataEvidence{ProjectID: uint32(project), Device: device, NamespaceInode: inode, QuotaBytes: quota, QuotaInodes: inodes}}
 	request.Data.Root.FilesystemUUID, request.Data.Root.Inode = p.RootFilesystemUUID, rootInode
+	request.RecordedPolicySHA256 = p.PolicySHA256
 	launch, err := native.PrepareCandidate(ctx, request)
 	if err != nil {
 		return zero, err

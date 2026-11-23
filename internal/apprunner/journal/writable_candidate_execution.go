@@ -55,19 +55,28 @@ func writableNativeRequest(f writableCandidateFacts, m writableCandidateClaimMar
 	if err != nil {
 		return zero, err
 	}
+	// A claim that has bound a preflight names the plan of its container by that preflight's policy digest.
+	if m.Preflight != nil {
+		base.RecordedPolicySHA256 = m.Preflight.Native.PolicySHA256
+	}
 	return driver.WritableCandidateLaunchRequest{CandidateLaunchRequest: base, Binding: writableCandidateBinding(m)}, nil
 }
-func writableSnapshotMatches(snapshot driver.WritableCandidateLaunchSnapshot, f writableCandidateFacts, m writableCandidateClaimMarker) bool {
+
+// writableSnapshotMatches and writablePreflightMatches take the seccomp mode of what the caller does with the
+// evidence: driver.SeccompCurrent to bind, check or settle a new start, driver.SeccompLive to observe a container
+// that already exists, driver.SeccompHistory to read a recorded claim. In every mode the snapshot's digest must
+// equal the writer receipt's, so a v1 claim never pairs with a current writer receipt or the reverse.
+func writableSnapshotMatches(snapshot driver.WritableCandidateLaunchSnapshot, f writableCandidateFacts, m writableCandidateClaimMarker, mode driver.SeccompMode) bool {
 	request, err := writableNativeRequest(f, m, nil)
-	return err == nil && snapshot.Binding == request.Binding && snapshot.Launch.Identity == request.Identity && snapshot.Launch.Data == request.Data && snapshot.Launch.Platform == request.Platform && snapshot.Launch.ImageID == f.source.writer.Native.ImageID && snapshot.SandboxProfile == driver.WritableCandidateSandboxProfile && snapshot.SeccompSHA256 == f.source.writer.Native.SeccompSHA256 && snapshot.SeccompSHA256 == driver.DataWriterPolicySHA256()
+	return err == nil && snapshot.Binding == request.Binding && snapshot.Launch.Identity == request.Identity && snapshot.Launch.Data == request.Data && snapshot.Launch.Platform == request.Platform && snapshot.Launch.ImageID == f.source.writer.Native.ImageID && snapshot.SandboxProfile == driver.WritableCandidateSandboxProfile && snapshot.SeccompSHA256 == f.source.writer.Native.SeccompSHA256 && driver.SeccompAccepted(snapshot.SeccompSHA256, mode)
 }
-func writablePreflightMatches(p writableCandidatePreflightEvidence, f writableCandidateFacts, m writableCandidateClaimMarker) bool {
+func writablePreflightMatches(p writableCandidatePreflightEvidence, f writableCandidateFacts, m writableCandidateClaimMarker, mode driver.SeccompMode) bool {
 	request, err := writableNativeRequest(f, m, nil)
 	if err != nil || !validWritablePreflight(p) {
 		return false
 	}
 	expected := candidatePreflight(driver.CandidateLaunchSnapshot{Identity: request.Identity, Data: request.Data, Platform: request.Platform, ImageID: f.source.writer.Native.ImageID, PolicySHA256: p.Native.PolicySHA256, MountsSHA256: p.Native.MountsSHA256})
-	return expected == p.Native && p.SeccompSHA256 == f.source.writer.Native.SeccompSHA256 && p.SeccompSHA256 == driver.DataWriterPolicySHA256()
+	return expected == p.Native && p.SeccompSHA256 == f.source.writer.Native.SeccompSHA256 && driver.SeccompAccepted(p.SeccompSHA256, mode)
 }
 
 // Only a live opaque native launch can bind actual preflight. A public parsed
@@ -86,11 +95,11 @@ func (s *Store) bindWritableCandidatePreflight(ctx context.Context, live *writab
 	}
 	defer tx.Rollback()
 	var m writableCandidateClaimMarker
-	if !canonicalDataJSON(live.marker, &m) || m.Preflight != nil || !writableSnapshotMatches(actual, f, m) {
+	if !canonicalDataJSON(live.marker, &m) || m.Preflight != nil || !writableSnapshotMatches(actual, f, m, driver.SeccompCurrent) {
 		return ErrFenceReconciliation
 	}
 	p := writablePreflight(actual)
-	if !writablePreflightMatches(p, f, m) {
+	if !writablePreflightMatches(p, f, m, driver.SeccompCurrent) {
 		return ErrFenceReconciliation
 	}
 	m.Preflight = &p
@@ -133,7 +142,7 @@ func (s *Store) checkBoundWritableCandidate(ctx context.Context, live *writableC
 	}
 	defer tx.Rollback()
 	var m writableCandidateClaimMarker
-	if !canonicalDataJSON(live.marker, &m) || m.Preflight == nil || *m.Preflight != *live.bound || *m.Preflight != writablePreflight(actual) || !writableSnapshotMatches(actual, f, m) {
+	if !canonicalDataJSON(live.marker, &m) || m.Preflight == nil || *m.Preflight != *live.bound || *m.Preflight != writablePreflight(actual) || !writableSnapshotMatches(actual, f, m, driver.SeccompCurrent) {
 		return ErrFenceReconciliation
 	}
 	if err := finalWritableCandidateCheck(ctx, f); err != nil {

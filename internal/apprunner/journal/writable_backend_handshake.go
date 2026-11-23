@@ -117,7 +117,7 @@ func (s *Store) finishWritableBackendHandshake(ctx context.Context, before writa
 		return zero, ErrFenceReconciliation
 	}
 	actual, err := observed.Snapshot()
-	if err != nil || actual.Registration != before.binding || !writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim) || actual.ChallengeSHA256 != candidateHash([]byte(challenge)) || actual.ObservedMS < before.facts.source.now || actual.ObservedMS > f.source.now {
+	if err != nil || actual.Registration != before.binding || !writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim, driver.SeccompLive) || actual.ChallengeSHA256 != candidateHash([]byte(challenge)) || actual.ObservedMS < before.facts.source.now || actual.ObservedMS > f.source.now {
 		return zero, ErrFenceReconciliation
 	}
 	if err := checkWritableRegistrationCurrent(ctx, f); err != nil {

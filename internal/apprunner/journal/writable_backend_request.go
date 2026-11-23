@@ -103,7 +103,7 @@ func (s *Store) finishWritableBackendRequest(ctx context.Context, before writabl
 		return zero, ErrFenceReconciliation
 	}
 	actual, err := observed.Snapshot()
-	if err != nil || actual.Registration != before.binding || !writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim) || actual.Method != c.Method || actual.Path != c.Path || actual.BodySHA256 != candidateHash(body) || actual.AssertionSHA256 != candidateHash([]byte(assertion)) || actual.ObservedMS < before.facts.source.now || actual.ObservedMS > f.source.now {
+	if err != nil || actual.Registration != before.binding || !writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim, driver.SeccompLive) || actual.Method != c.Method || actual.Path != c.Path || actual.BodySHA256 != candidateHash(body) || actual.AssertionSHA256 != candidateHash([]byte(assertion)) || actual.ObservedMS < before.facts.source.now || actual.ObservedMS > f.source.now {
 		return zero, ErrFenceReconciliation
 	}
 	if err := checkWritableRegistrationCurrent(ctx, f); err != nil {

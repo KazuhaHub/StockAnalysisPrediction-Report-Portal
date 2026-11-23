@@ -154,7 +154,7 @@ func validUpdateStartClaimMarker(m UpdateStartClaimMarker) bool {
 	if !validUpdateStartPreflight(*m.Preflight) || !dataNumber(m.PreflightBoundMS, false) {
 		return false
 	}
-	if m.Preflight.SeccompSHA256 != driver.UpdateStartSeccompSHA256(m.SandboxProfile) {
+	if !driver.SeccompAccepted(m.Preflight.SeccompSHA256, driver.SeccompHistory) {
 		return false
 	}
 	bound, _ := strconv.ParseInt(m.PreflightBoundMS, 10, 64)
@@ -493,6 +493,11 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		},
 		SandboxProfile: c.Payload.SandboxProfile,
 	}
+	// A claim that has bound a preflight names the plan its container was created from by that preflight's
+	// policy digest; a start that has bound nothing yet always plans under the current policy.
+	if marker.Preflight != nil {
+		request.RecordedPolicySHA256 = marker.Preflight.PolicySHA256
+	}
 	// A source the journal already records as absent (removed by an earlier removal or a settlement) has nothing
 	// left to replace: removing it again would find no container and leave the start unknown for good.
 	if c.Kind == "enable-start" && !enableStartSourceRecordedAbsent(f.source.source) {
@@ -510,7 +515,10 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 	return request, nil
 }
 
-func updateStartSnapshotMatches(snapshot driver.UpdateStartLaunchSnapshot, f updateStartFacts, marker UpdateStartClaimMarker) bool {
+// updateStartSnapshotMatches and updateStartPreflightMatches take the seccomp mode of what the caller does with
+// the evidence: driver.SeccompCurrent to bind, check or settle a new start, driver.SeccompLive to observe a
+// container that already exists.
+func updateStartSnapshotMatches(snapshot driver.UpdateStartLaunchSnapshot, f updateStartFacts, marker UpdateStartClaimMarker, mode driver.SeccompMode) bool {
 	request, err := updateStartNativeRequest(f, marker, nil)
 	if err != nil {
 		return false
@@ -518,10 +526,10 @@ func updateStartSnapshotMatches(snapshot driver.UpdateStartLaunchSnapshot, f upd
 	return snapshot.Binding == request.Binding && snapshot.Launch.Identity == request.Identity &&
 		snapshot.Launch.Data == request.Data && snapshot.Launch.Platform == request.Platform &&
 		snapshot.SandboxProfile == request.SandboxProfile &&
-		snapshot.SeccompSHA256 == driver.UpdateStartSeccompSHA256(request.SandboxProfile)
+		driver.SeccompAccepted(snapshot.SeccompSHA256, mode)
 }
 
-func updateStartPreflightMatches(preflight UpdateStartPreflightEvidence, f updateStartFacts, marker UpdateStartClaimMarker) bool {
+func updateStartPreflightMatches(preflight UpdateStartPreflightEvidence, f updateStartFacts, marker UpdateStartClaimMarker, mode driver.SeccompMode) bool {
 	request, err := updateStartNativeRequest(f, marker, nil)
 	if err != nil || !validUpdateStartPreflight(preflight) {
 		return false
@@ -533,7 +541,7 @@ func updateStartPreflightMatches(preflight UpdateStartPreflightEvidence, f updat
 		MountsSHA256: preflight.MountsSHA256,
 	})
 	return expected == preflight.native() &&
-		preflight.SeccompSHA256 == driver.UpdateStartSeccompSHA256(request.SandboxProfile)
+		driver.SeccompAccepted(preflight.SeccompSHA256, mode)
 }
 
 func (s *Store) bindUpdateStartPreflight(ctx context.Context, live *updateStartClaimState, launch driver.UpdateStartLaunch) error {
@@ -551,11 +559,11 @@ func (s *Store) bindUpdateStartPreflight(ctx context.Context, live *updateStartC
 	defer tx.Rollback()
 	var marker UpdateStartClaimMarker
 	if !canonicalDataJSON(live.marker, &marker) || marker.Preflight != nil ||
-		!updateStartSnapshotMatches(actual, f, marker) {
+		!updateStartSnapshotMatches(actual, f, marker, driver.SeccompCurrent) {
 		return ErrFenceReconciliation
 	}
 	preflight := updateStartPreflight(actual)
-	if !updateStartPreflightMatches(preflight, f, marker) {
+	if !updateStartPreflightMatches(preflight, f, marker, driver.SeccompCurrent) {
 		return ErrFenceReconciliation
 	}
 	marker.Preflight = &preflight
@@ -603,7 +611,7 @@ func (s *Store) checkBoundUpdateStart(ctx context.Context, live *updateStartClai
 	var marker UpdateStartClaimMarker
 	if !canonicalDataJSON(live.marker, &marker) || marker.Preflight == nil ||
 		*marker.Preflight != *live.bound || *marker.Preflight != updateStartPreflight(actual) ||
-		!updateStartSnapshotMatches(actual, f, marker) {
+		!updateStartSnapshotMatches(actual, f, marker, driver.SeccompCurrent) {
 		return ErrFenceReconciliation
 	}
 	if err := finalUpdateStartCheck(ctx, f); err != nil {
@@ -803,7 +811,7 @@ func (s *Store) settleUpdateStartRunning(ctx context.Context, claim UpdateStartC
 	var marker UpdateStartClaimMarker
 	if !canonicalDataJSON(live.marker, &marker) || marker.Preflight == nil ||
 		*marker.Preflight != *live.bound || *marker.Preflight != updateStartPreflight(actual.Launch) ||
-		!updateStartSnapshotMatches(actual.Launch, f, marker) || actual.ObservedMS > f.now {
+		!updateStartSnapshotMatches(actual.Launch, f, marker, driver.SeccompCurrent) || actual.ObservedMS > f.now {
 		return zero, ErrFenceReconciliation
 	}
 	receipt := UpdateStartRunningReceipt{
@@ -1081,6 +1089,7 @@ func enableStartNativeSource(source checkpointSource) (*driver.UpdateStartSource
 				PolicyRevision:          update.Claim.PolicyRevision,
 			},
 			SandboxProfile: update.Claim.SandboxProfile,
+			PolicySHA256:   update.Claim.Preflight.PolicySHA256,
 		}, nil
 	}
 	install := &driver.UpdateStartSource{
@@ -1097,6 +1106,7 @@ func enableStartNativeSource(source checkpointSource) (*driver.UpdateStartSource
 		install.ResourceID, install.NativeID = receipt.Claim.ResourceID, receipt.NativeID
 		install.ReleaseSHA256 = source.command.Payload.ReleaseSHA256
 		install.SandboxProfile = driver.UpdateStartWritableSandboxProfile
+		install.PolicySHA256 = receipt.Claim.Preflight.Native.PolicySHA256
 		install.Writable = &driver.WritableCandidateBinding{
 			EffectID: receipt.Claim.EffectID, ClaimID: receipt.Claim.ClaimID,
 			PayloadSHA256: receipt.Claim.PayloadSHA256, OwnershipSHA256: receipt.Claim.OwnershipSHA256,
@@ -1109,8 +1119,18 @@ func enableStartNativeSource(source checkpointSource) (*driver.UpdateStartSource
 		install.ResourceID, install.NativeID = source.source.Claim.ResourceID, source.source.NativeID
 		install.ReleaseSHA256 = source.source.ReleaseSHA256
 		install.SandboxProfile = driver.UpdateStartReadOnlySandboxProfile
+		install.PolicySHA256 = source.source.Claim.Preflight.PolicySHA256
 	default:
 		return nil, fmt.Errorf("%w: update-start disabled source", ErrFenceReconciliation)
 	}
 	return install, nil
+}
+
+// recordedSeccompSHA256 is the seccomp digest the receipt's own preflight recorded when it is one the driver
+// accepts, otherwise the current digest, which then fails the comparison against the recorded preflight.
+func (r *UpdateStartRunningReceipt) recordedSeccompSHA256() string {
+	if r != nil && r.Claim.Preflight != nil && driver.SeccompAccepted(r.Claim.Preflight.SeccompSHA256, driver.SeccompHistory) {
+		return r.Claim.Preflight.SeccompSHA256
+	}
+	return driver.CurrentSeccompSHA256()
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
 type writableCandidateSource struct {
@@ -66,7 +67,7 @@ func loadWritableCandidateSourceCore(ctx context.Context, tx *sql.Tx, v control.
 	if created < sourceObserved {
 		return zero, ErrFenceReconciliation
 	}
-	if !dataWriterReceiptMatches(receipt, dataWriterFacts{verified: w, source: source, now: now, fence: fence}) {
+	if !dataWriterReceiptMatches(receipt, dataWriterFacts{verified: w, source: source, now: now, fence: fence}, driver.SeccompHistory) {
 		return zero, ErrFenceReconciliation
 	}
 	return writableCandidateSource{data: source, writer: receipt}, nil

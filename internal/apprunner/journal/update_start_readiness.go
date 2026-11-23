@@ -61,8 +61,8 @@ func updateStartExpectedSnapshot(f updateStartFacts, marker UpdateStartClaimMark
 		Binding: request.Binding, SandboxProfile: request.SandboxProfile,
 		SeccompSHA256: preflight.SeccompSHA256,
 	}
-	if !updateStartSnapshotMatches(expected, f, marker) ||
-		!updateStartPreflightMatches(*preflight, f, marker) {
+	if !updateStartSnapshotMatches(expected, f, marker, driver.SeccompLive) ||
+		!updateStartPreflightMatches(*preflight, f, marker, driver.SeccompLive) {
 		return driver.UpdateStartLaunchRequest{}, driver.UpdateStartLaunchSnapshot{}, ErrFenceReconciliation
 	}
 	return request, expected, nil

@@ -223,7 +223,7 @@ func (s *Store) bindPreparedServiceEgressWritable(
 	}
 	defer tx.Rollback()
 	if s.closing.Load() || !sameWritableRegistrationSource(before.facts, f) ||
-		!writableSnapshotMatches(before.binding.Launch, f.source, f.running.Claim) ||
+		!writableSnapshotMatches(before.binding.Launch, f.source, f.running.Claim, driver.SeccompLive) ||
 		checkWritableRegistrationCurrent(ctx, f) != nil ||
 		verifyServiceEgress(raw, signature, f.source.authority) != nil || tx.Commit() != nil {
 		closeServiceBroker(broker)

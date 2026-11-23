@@ -133,7 +133,7 @@ func (s *Store) settleRecoveredWritableCandidate(ctx context.Context, before wri
 		return zero, err
 	}
 	actual, err := observation.Snapshot()
-	if err != nil || actual.Launch != before.expected || actual.Launch.Binding != request.Binding || !writableSnapshotMatches(actual.Launch, f, before.marker) || actual.ObservedMS < before.facts.now || actual.ObservedMS > f.now {
+	if err != nil || actual.Launch != before.expected || actual.Launch.Binding != request.Binding || !writableSnapshotMatches(actual.Launch, f, before.marker, driver.SeccompLive) || actual.ObservedMS < before.facts.now || actual.ObservedMS > f.now {
 		return zero, ErrFenceReconciliation
 	}
 	c := f.verified.Index()
@@ -153,7 +153,7 @@ func writableCandidateExpectedSnapshot(f writableCandidateFacts, m writableCandi
 	}
 	p := m.Preflight
 	expected := driver.WritableCandidateLaunchSnapshot{Launch: driver.CandidateLaunchSnapshot{Identity: request.Identity, Data: request.Data, Platform: request.Platform, ImageID: p.Native.ImageID, PolicySHA256: p.Native.PolicySHA256, MountsSHA256: p.Native.MountsSHA256}, Binding: request.Binding, SandboxProfile: m.SandboxProfile, SeccompSHA256: p.SeccompSHA256}
-	if !writableSnapshotMatches(expected, f, m) || writablePreflight(expected) != *p {
+	if !writableSnapshotMatches(expected, f, m, driver.SeccompLive) || writablePreflight(expected) != *p {
 		return driver.WritableCandidateLaunchRequest{}, driver.WritableCandidateLaunchSnapshot{}, ErrFenceReconciliation
 	}
 	return request, expected, nil
