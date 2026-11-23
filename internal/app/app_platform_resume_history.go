@@ -50,7 +50,7 @@ func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b pla
 			Action: appplatform.ActionRestore, Managed: true, Generation: uint64(b.generation), Stage: appplatform.StageActivate,
 		},
 	}
-	ev, err := loadPlatformResumeEvidence(e, expected)
+	ev, err := loadPlatformResumeEvidenceAt(e, expected, true)
 	if err != nil {
 		return fail("evidence", err)
 	}
@@ -73,7 +73,7 @@ func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b pla
 		namespaceState != "active" || namespaceFormat != ev.plan.DataFormat || writerFence != ev.plan.NamespaceWriterFence+1 {
 		return fail("namespace", err)
 	}
-	recoverySetID, _, checkpoint, _, err := loadPlatformResumeCheckpoint(e, expected)
+	recoverySetID, _, checkpoint, _, err := loadPlatformResumeCheckpointAt(e, expected, true)
 	if err != nil {
 		return fail("checkpoint", err)
 	}

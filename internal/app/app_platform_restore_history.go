@@ -167,8 +167,10 @@ func (s *Server) loadPlatformWritableRestoreBackendHistoryPhased(e migExec, b pl
 	if err != nil {
 		return fail("source", err)
 	}
-	// The policy the restore ran at is signed into the start claim. The activation's current policy may
-	// be newer after a policy review, and the start digest was computed over the recorded one.
+	// The policy the restore ran at is recorded in the start claim of the running receipt. The receipt
+	// is trusted because the rebuilt command digest must equal the stored payload digest. The
+	// activation's current policy may be newer after a policy review, and that digest was computed over
+	// the recorded one.
 	policy, perr := strconv.ParseInt(running.Claim.PolicyRevision, 10, 64)
 	if perr != nil || policy < 1 {
 		return fail("policy", perr)

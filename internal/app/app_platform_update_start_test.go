@@ -1247,7 +1247,9 @@ func TestPlatformUpdateLaunchAfterPolicyReviewSQLite(t *testing.T) {
 	testPlatformUpdateStartActivationModeReview(t, false, true, true)
 }
 
-// A history recorded at a newer policy than the installation holds is not admitted.
+// A history recorded at a newer policy than the current one is not admitted. The installation, its
+// active activation and its grants are lowered together, so the managed-access policy checks (which only
+// compare the three with each other) agree and only the history's own floor can refuse.
 func TestPlatformUpdateLaunchRefusesNewerRecordedPolicySQLite(t *testing.T) {
 	s, lease, intent, endpoint, obs := platformWritableUpdateStartRegistrationCommitFixture(t, false)
 	next, err := s.commitPlatformUpdateStartRegistration(context.Background(), lease, intent, endpoint, obs)
@@ -1259,19 +1261,29 @@ func TestPlatformUpdateLaunchRefusesNewerRecordedPolicySQLite(t *testing.T) {
 	if _, err := s.commitPlatformUpdateStartActivation(context.Background(), next, applied, boot); err != nil {
 		t.Fatal(err)
 	}
-	for name, stmt := range map[string]string{
-		"installation": `UPDATE app_platform_installations SET policy_revision=policy_revision-1 WHERE id=?`,
-		"activation":   `UPDATE app_platform_activations SET policy_revision=policy_revision-1 WHERE installation_id=? AND state='active'`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			mustExec(t, s.st, stmt, lease.installationID)
-			defer mustExec(t, s.st, strings.Replace(strings.Replace(stmt, "-1", "+1", 1), "policy_revision-", "policy_revision+", 1), lease.installationID)
-			actor := platformManagedFixtureSession(t, s)
-			if backend, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, lease.installationID); err == nil {
-				backend.Close()
-				t.Fatal("history newer than the current policy was admitted")
-			}
-		})
+	actor := platformManagedFixtureSession(t, s)
+	if backend, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, lease.installationID); err != nil {
+		t.Fatal("baseline launch", err)
+	} else {
+		backend.Close()
+	}
+	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=policy_revision-1 WHERE id=?`, lease.installationID)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=policy_revision-1 WHERE installation_id=? AND state='active'`, lease.installationID)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision-1 WHERE installation_id=?`, lease.installationID)
+	backend, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, lease.installationID)
+	if err == nil {
+		backend.Close()
+		t.Fatal("history newer than the current policy was admitted")
+	}
+	if !strings.Contains(err.Error(), "update history") {
+		t.Fatal("refused by something other than the history floor:", err)
+	}
+	var runtimeID string
+	if err := s.st.queryRow(`SELECT runtime_id FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := platformWritableLaunchEligible(s.st.poolExec(), lease.installationID, runtimeID, lease.controllerEpoch); err != nil || ok {
+		t.Fatal("directory reported an app openable whose history is newer than the current policy", ok, err)
 	}
 }
 
