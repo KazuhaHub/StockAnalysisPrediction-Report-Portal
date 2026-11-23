@@ -3729,6 +3729,8 @@
   "appPlatform.optionalPermissions": "可選許可權",
   "appPlatform.declinedPermissions": "未授予的可選許可權",
   "appPlatform.retainedPermissions": "沿用目前授權的可選許可權",
+  "appPlatform.retainedProxy": "原樣沿用的已稽核代理策略。主機：{{hosts}}。固定目的地：{{pins}}。每日額度：{{budget}}。",
+  "appPlatform.policyReset": "網路策略重設為發布版本預設值",
   "appPlatform.backgroundNetwork": "背景網路存取",
   "appPlatform.backgroundNetworkNote": "此應用可在無人登入時存取已審核的目的地。",
   "appPlatform.backgroundCredentials": "背景憑證使用",

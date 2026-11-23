@@ -42,10 +42,21 @@ func (s *Server) activatePlatformUpdateStart(ctx context.Context, lease platform
 	if err != nil {
 		return platformActivationResult{}, err
 	}
-	return s.commitPlatformUpdateStartActivation(ctx, lease, intent, boot)
+	// A carried proxy grant is checked against the runner again, as a real proxy approval would be.
+	var check *platformProxyRunnerCheck
+	if lease.snapshot.Action == appplatform.ActionUpdate {
+		check = s.observePlatformProxyCheck(ctx, s.st.poolExec(), lease.installationID, endpoint)
+	}
+	return s.commitPlatformUpdateStartActivationChecked(ctx, lease, intent, boot, check)
 }
 
+// commitPlatformUpdateStartActivation activates with no runner check; the scheduler's path is
+// activatePlatformUpdateStart, which passes the runner's answer.
 func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, boot platformUpdateStartBootObservation) (platformActivationResult, error) {
+	return s.commitPlatformUpdateStartActivationChecked(ctx, lease, intent, boot, nil)
+}
+
+func (s *Server) commitPlatformUpdateStartActivationChecked(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, boot platformUpdateStartBootObservation, proxyCheck *platformProxyRunnerCheck) (platformActivationResult, error) {
 	var zero platformActivationResult
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
@@ -136,11 +147,12 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	}
 	var capabilities []platformSelectedCapability
 	if lease.snapshot.Action == appplatform.ActionUpdate {
-		capabilities, err = platformUpdateCapabilitySelection(
-			e, lease.installationID, manifest.Manifest, source.runtimeTarget)
+		chosen, err := platformUpdateCapabilities(
+			e, lease.installationID, manifest.Manifest, source.runtimeTarget, proxyCheck)
 		if err != nil {
 			return zero, err
 		}
+		capabilities = chosen.capabilities
 	}
 	var sourceActivation, sourceRelease, sourceState string
 	var sourceGeneration, sourcePolicy, sourceFormat int64
@@ -291,9 +303,14 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 			return zero, err
 		}
 		// A carried network.proxy grant needs the consumed plan that backs it under the new release.
-		if err := platformCarryProxyPlan(
+		carried, err := platformCarryProxyPlan(
 			e, lease.installationID, planID, plan.TargetReleaseSHA256,
-			plan.TargetGeneration, plan.TargetPolicyRevision, capabilities, now); err != nil {
+			plan.TargetGeneration, plan.SourcePolicyRevision, capabilities, now)
+		if err != nil {
+			return zero, err
+		}
+		if err := platformAuditUpdateKept(
+			e, lease.installationID, planID, carried, capabilities, now); err != nil {
 			return zero, err
 		}
 	} else {

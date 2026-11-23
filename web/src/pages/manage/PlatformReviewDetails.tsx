@@ -29,9 +29,10 @@ export default function PlatformReviewDetails({ review, release, groups, expired
     return {
       added: target.filter(capability => !previous.includes(capability)),
       removed: previous.filter(capability => !target.includes(capability)),
-      // An optional permission the installation holds today and the new release still declares stays granted
-      // with its current policy; the review says so instead of leaving it out of both lists.
-      kept: target.filter(capability => previous.includes(capability) && release?.optional_capabilities?.includes(capability)),
+      // What the server says the update keeps with its current policy, not what both lists happen to share:
+      // a network capability whose policy is reset is granted before and after but is not kept.
+      kept: updateReview.kept_capabilities ?? [],
+      reset: updateReview.policy_reset ?? [],
     }
   })() : null
   const permissionList = (values?: string[]) => values?.length ? joinList(values.map(capabilityLabel), lang) : t('appPlatform.none')
@@ -65,7 +66,15 @@ export default function PlatformReviewDetails({ review, release, groups, expired
       ...(declined.length ? [{ key: 'declinedPermissions', label: t('appPlatform.declinedPermissions'), children: permissionList(declined) }] : []),
       ...(backgroundNetwork ? [{ key: 'backgroundNetwork', label: t('appPlatform.backgroundNetwork'), children: t('appPlatform.backgroundNetworkNote') }] : []),
       ...(backgroundCredentials ? [{ key: 'backgroundCredentials', label: t('appPlatform.backgroundCredentials'), children: t('appPlatform.backgroundCredentialsNote') }] : []),
-      ...(updateDiff?.kept.length ? [{ key: 'retainedPermissions', label: t('appPlatform.retainedPermissions'), children: permissionList(updateDiff.kept) }] : []),
+      ...(updateDiff?.kept.length ? [{ key: 'retainedPermissions', label: t('appPlatform.retainedPermissions'), children: <Space orientation="vertical" size={4}>
+        <span>{permissionList(updateDiff.kept)}</span>
+        {updateReview?.kept_proxy && <Typography.Text type="secondary" data-testid="kept-proxy">{t('appPlatform.retainedProxy', {
+          hosts: updateReview.kept_proxy.hosts.length ? updateReview.kept_proxy.hosts.join(', ') : t('appPlatform.none'),
+          pins: updateReview.kept_proxy.pins.length ? updateReview.kept_proxy.pins.map(pin => `${pin.host} → ${pin.address}:${pin.port}`).join(', ') : t('appPlatform.none'),
+          budget: formatBytes(updateReview.kept_proxy.daily_bytes),
+        })}</Typography.Text>}
+      </Space> }] : []),
+      ...(updateDiff?.reset.length ? [{ key: 'policyReset', label: t('appPlatform.policyReset'), children: permissionList(updateDiff.reset) }] : []),
       ...(updateDiff ? [{ key: 'permissionChanges', label: t('appPlatform.permissionDiffLabel'), children: t('appPlatform.permissionDiff', { added: permissionList(updateDiff.added), removed: permissionList(updateDiff.removed) }) }] : []),
     ]),
     ...(quotaRaise ? [{

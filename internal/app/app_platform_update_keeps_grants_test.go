@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -95,6 +97,55 @@ func TestPlatformUpdateReviewKeepsGrantedOptionalProxySQLite(t *testing.T) {
 	if err != nil || digest != p.GrantsSHA256 {
 		t.Fatal("grants digest does not bind the live rows, including the proxy policy", err)
 	}
+	// The review shows exactly what carries: the kept list and the proxy's hosts, pin and budget.
+	if !slices.Equal(p.KeptCapabilities, []string{appplatform.ProxyCapability}) || p.KeptProxy == nil ||
+		len(p.KeptProxy.Hosts) != 10 || len(p.KeptProxy.Pins) != 1 || p.KeptProxy.Pins[0] != pinQuotes || p.KeptProxy.DailyBytes != 1<<30 {
+		t.Fatalf("the review does not show the carried proxy policy: %v %+v", p.KeptCapabilities, p.KeptProxy)
+	}
+	if len(p.PolicyReset) != 0 {
+		t.Fatal("nothing was reset", p.PolicyReset)
+	}
+}
+
+// A network.http policy that differs from the release default is not kept: the review lists it as reset.
+func TestPlatformUpdateReviewListsResetNetworkPolicySQLite(t *testing.T) {
+	var kept keptProxyGrant
+	useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
+	f := platformManagedUpdateProjectionFixtureWith(t, false, declareProxyOptional)
+	if p := updateProjectionFor(t, f); len(p.PolicyReset) != 0 {
+		t.Fatal("an unchanged policy is listed as reset", p.PolicyReset)
+	}
+	mustExec(t, f.server.st, `UPDATE app_platform_capability_grants SET policy_json=? WHERE installation_id=? AND capability='network.http'`, `{"reviewed":"later"}`, f.installation)
+	p := updateProjectionFor(t, f)
+	if !slices.Equal(p.PolicyReset, []string{"network.http"}) || slices.Contains(p.KeptCapabilities, "network.http") {
+		t.Fatalf("a reset policy is not listed as reset or is labelled kept: reset %v kept %v", p.PolicyReset, p.KeptCapabilities)
+	}
+}
+
+// A carried proxy grant must pass the checks a real approval runs: a pin the runner no longer lists, or a
+// runner that fails, refuses the review instead of carrying the grant.
+func TestPlatformUpdateReviewRefusesProxyThatTheRunnerNoLongerVouchesForSQLite(t *testing.T) {
+	var kept keptProxyGrant
+	useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
+	f := platformManagedUpdateProjectionFixtureWith(t, false, declareProxyOptional)
+	build := func(check *platformProxyRunnerCheck) error {
+		_, err := platformBuildManagedUpdateProjection(
+			f.server.st.poolExec(), f.installation, f.source, f.revision, f.policy, f.format,
+			platformActorFacts{authorityFingerprint: f.sourcePlan.ActorAuthority},
+			platformActorControl{epoch: f.activeEpoch, nowMS: 1}, f.target, f.release, check)
+		return err
+	}
+	listed := transport.ProxyRunnerState{Profile: transport.NewProxyProfile(), PinsSupported: true, Pins: []appplatform.ProxyPin{pinQuotes}}
+	if err := build(&platformProxyRunnerCheck{state: listed}); err != nil {
+		t.Fatal("a listed pin refused the review", err)
+	}
+	unlisted := transport.ProxyRunnerState{Profile: transport.NewProxyProfile(), PinsSupported: true, Pins: []appplatform.ProxyPin{pinOther}}
+	if err := build(&platformProxyRunnerCheck{state: unlisted}); !errors.Is(err, transport.ErrProxyUnsupported) {
+		t.Fatal("an unlisted pin was carried:", err)
+	}
+	if err := build(&platformProxyRunnerCheck{err: transport.ErrProxyUnsupported}); !errors.Is(err, transport.ErrProxyUnsupported) {
+		t.Fatal("a failing runner did not refuse:", err)
+	}
 }
 
 func TestPlatformUpdateReviewRemovesOptionalProxyTheReleaseDropsSQLite(t *testing.T) {
@@ -129,7 +180,15 @@ func TestPlatformUpdateKeepsOptionalProxyGrantAcrossActivationSQLite(t *testing.
 	}
 	applied, boot := platformUpdateStartBootFixture(t, s, registered, endpoint)
 	defer applied.registration.Close()
-	if _, err := s.commitPlatformUpdateStartActivation(context.Background(), registered, applied, boot); err != nil {
+	listed := &platformProxyRunnerCheck{state: transport.ProxyRunnerState{Profile: transport.NewProxyProfile(), PinsSupported: true, Pins: []appplatform.ProxyPin{pinQuotes}}}
+	unlisted := &platformProxyRunnerCheck{state: transport.ProxyRunnerState{Profile: transport.NewProxyProfile(), PinsSupported: true}}
+	if _, err := s.commitPlatformUpdateStartActivationChecked(context.Background(), registered, applied, boot, unlisted); !errors.Is(err, transport.ErrProxyUnsupported) {
+		t.Fatal("activation carried a pin the runner no longer lists:", err)
+	}
+	if scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, lease.installationID) != 1 {
+		t.Fatal("a refused activation moved the generation")
+	}
+	if _, err := s.commitPlatformUpdateStartActivationChecked(context.Background(), registered, applied, boot, listed); err != nil {
 		t.Fatal("update activation", err)
 	}
 	granted, policy, _ := platformProxyGrantRow(t, s, lease.installationID)
@@ -148,6 +207,19 @@ func TestPlatformUpdateKeepsOptionalProxyGrantAcrossActivationSQLite(t *testing.
 	if len(grant.Policy.Hosts) != 10 || len(grant.Policy.Pins) != 1 || grant.Policy.Pins[0] != pinQuotes || grant.Policy.DailyBytes != 1<<30 {
 		t.Fatalf("hosts, pin or budget changed: %+v", grant.Policy)
 	}
+	// The synthesized plan is marked, follows the convention of a real plan, and is audited.
+	carried, carriedID := loadPlatformLatestProxyPlanFor(t, s, lease.installationID)
+	if carried.CarriedFromPlan == "" || carried.PolicyRevision != 2 || carried.Generation != 2 || carried.Policy != kept.policy || carried.ReleaseSHA256 != applied.start.plan.TargetReleaseSHA256 {
+		t.Fatalf("carried plan %+v", carried)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_kept_capabilities' AND target_id=? AND detail LIKE ?`, lease.installationID, "%"+carriedID+"%") != 1 {
+		t.Fatal("the carry was not audited with the plan id")
+	}
+	// Clock skew cannot make an older plan win: the order is by policy revision, not by consumption time.
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET consumed_ms=0 WHERE id=?`, carriedID)
+	if _, err := loadPlatformProxyGrant(s.st.poolExec(), lease.installationID, revision, applied.start.plan.TargetReleaseSHA256, lease.controllerEpoch); err != nil {
+		t.Fatal("plan order depends on consumed_ms:", err)
+	}
 	actor := platformManagedFixtureSession(t, s)
 	backend, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, lease.installationID)
 	if err != nil {
@@ -157,4 +229,63 @@ func TestPlatformUpdateKeepsOptionalProxyGrantAcrossActivationSQLite(t *testing.
 	if launch, err := s.inspectPlatformLaunchAccess(actor, lease.installationID); err != nil || launch.generation != "2" {
 		t.Fatal("launch inspection", launch, err)
 	}
+}
+
+// A static app that declares principals.read, with the grant on: every update keeps it, the updated app
+// launches, and the next update (which verifies the previous generation's activation proof) succeeds too.
+func TestPlatformStaticUpdateKeepsPrincipalsReadAcrossTwoUpdatesSQLite(t *testing.T) {
+	s, admin, reader, id := platformPrincipalsFixtureAdmin(t, false)
+	platformGrantLaunchUser(t, s, reader, id)
+	for n, version := range []string{"1.0.0-beta.2", "1.0.0-beta.3"} {
+		raw, _, archive := platformSignedReleaseFixture(t, version)
+		var manifest appplatform.Manifest
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+		manifest.Capabilities.Required = nil
+		manifest.Capabilities.Optional = []string{"principals.read"}
+		raw, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target, err := s.stagePlatformRelease(admin, raw, platformSignTestDescriptor(t, raw), archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), admin, id, target.sha256, 1)
+		if err != nil {
+			t.Fatalf("update %d review: %v", n+1, err)
+		}
+		var projection platformUpdateProjection
+		if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil || slices.Contains(projection.Target.DeclinedCapabilities, "principals.read") {
+			t.Fatal("the kept grant is declined in the review", err)
+		}
+		commit, err := s.consumePlatformUpdateReview(admin, review.ID, review.SHA256, platformFixtureID(6100+2*n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := s.st.claimPlatformOperation(commit.OperationID, platformFixtureID(6101+2*n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.runPlatformStaticUpdate(context.Background(), lease); err != nil {
+			t.Fatalf("update %d: %v", n+1, err)
+		}
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='principals.read' AND granted=1`, id) != 1 {
+			t.Fatalf("update %d dropped the grant", n+1)
+		}
+		if binding, err := s.inspectPlatformLaunchAccess(reader, id); err != nil || binding.releaseSHA != target.sha256 {
+			t.Fatalf("launch after update %d: %v", n+1, err)
+		}
+	}
+}
+
+func loadPlatformLatestProxyPlanFor(t *testing.T, s *Server, installation string) (platformProxyPlan, string) {
+	t.Helper()
+	row, err := loadPlatformLatestProxyPlan(s.st.poolExec(), installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row.plan, row.id
 }

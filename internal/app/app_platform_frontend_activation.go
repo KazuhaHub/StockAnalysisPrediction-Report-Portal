@@ -126,6 +126,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	}
 	var encoded []byte
 	var actualDeclined []byte
+	var declinedList []string
 	switch action {
 	case "install":
 		if generation != 1 || policy != 1 {
@@ -150,6 +151,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 		}
 		encoded, _ = json.Marshal(p)
 		actualDeclined, _ = json.Marshal(p.Target.DeclinedCapabilities)
+		declinedList = p.Target.DeclinedCapabilities
 		if p.InstallationID != installation || p.InstallationRevision < 1 || p.PolicyRevision < 1 || p.TargetPolicyRevision != policy || p.SourceReleaseSHA256 != source || p.SourceGeneration != generation-1 || p.TargetGeneration != generation || p.CurrentDataFormat != int64(manifest.Data.Schema) || p.Target.Format != platformFrontendInstallFormat || p.Target.ReleaseSHA256 != release || p.Target.DataQuotaBytes != quota || p.Target.ControllerEpoch != epoch || p.Target.PlatformAPI != platformDevelopmentAPI || p.AppID != manifest.ID || p.PublisherID != manifest.Publisher || p.Target.AppID != manifest.ID || p.Target.PublisherID != manifest.Publisher || !platformValidSHA(p.GrantsSHA256) {
 			return fail
 		}
@@ -200,8 +202,9 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 		return fail
 	}
 	if string(encoded) != plan ||
-		(action != "enable" &&
-			string(actualDeclined) != string(expectedDeclined)) {
+		(action == "install" && string(actualDeclined) != string(expectedDeclined)) ||
+		// An update's decline list leaves out the optional grants it kept.
+		(action == "update" && !platformDeclinedMatches(e, installation, declinedList, declined)) {
 		return fail
 	}
 	// proof.AudienceSHA and the enable plan's audience and grants digests are deliberately not compared

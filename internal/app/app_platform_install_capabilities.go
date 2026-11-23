@@ -184,7 +184,7 @@ func verifyPlatformInstallCapabilityRows(e migExec, installation string, m apppl
 	if err != nil || policy < 1 || !platformValidUUID(planID) {
 		return fail
 	}
-	if !slices.Equal(p.DeclinedCapabilities, platformDeclinedCapabilities(expected)) {
+	if !platformDeclinedMatches(e, installation, p.DeclinedCapabilities, platformDeclinedCapabilities(expected)) {
 		return fail
 	}
 	return verifyPlatformSelectedCapabilityRows(e, installation, expected, active, policy, planID, overlay, fail)

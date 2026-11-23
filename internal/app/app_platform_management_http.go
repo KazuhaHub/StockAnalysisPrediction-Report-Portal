@@ -466,6 +466,13 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		if projection.RecoversOperationID != "" {
 			reviewBody["recovers_operation_id"] = projection.RecoversOperationID
 		}
+		// What the update keeps from the current grants, the proxy policy it carries, and the network policy it
+		// resets to the release default.
+		reviewBody["kept_capabilities"] = platformNonNilStrings(projection.KeptCapabilities)
+		reviewBody["policy_reset"] = platformNonNilStrings(projection.PolicyReset)
+		if projection.KeptProxy != nil {
+			reviewBody["kept_proxy"] = projection.KeptProxy
+		}
 		if projection.Migration != nil {
 			reviewBody["data_migration"] = map[string]any{
 				"from": strconv.FormatInt(projection.Migration.From, 10), "to": strconv.FormatInt(projection.Migration.To, 10),

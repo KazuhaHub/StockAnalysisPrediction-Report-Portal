@@ -30,6 +30,11 @@ type platformUpdateProjection struct {
 	TargetCapabilities   []string                  `json:"target_capabilities"`
 	GrantsSHA256         string                    `json:"grants_sha256"`
 	Target               platformInstallProjection `json:"target"`
+	// KeptCapabilities are the optional grants the update keeps with their current policy, KeptProxy the proxy
+	// policy among them, and PolicyReset the network capabilities whose policy becomes the release default.
+	KeptCapabilities []string           `json:"kept_capabilities,omitempty"`
+	KeptProxy        *platformKeptProxy `json:"kept_proxy,omitempty"`
+	PolicyReset      []string           `json:"policy_reset,omitempty"`
 	// Migration is the declared data migration the update runs, absent when the data needs none.
 	Migration *platformMigrationStep `json:"migration,omitempty"`
 	// RecoversOperationID names the failed update this one retries, empty for an ordinary update.
@@ -89,10 +94,11 @@ func platformBuildUpdateProjection(e migExec, installation string, sourceRelease
 		// evidence that the target bytes can migrate the current data.
 		return platformUpdateProjection{}, errAppPlatformInstallUnavailable
 	}
-	selection, err := platformUpdateCapabilitySelection(e, installation, parsed.Manifest, nil)
+	chosen, err := platformUpdateCapabilities(e, installation, parsed.Manifest, nil, nil)
 	if err != nil {
 		return platformUpdateProjection{}, err
 	}
+	selection := chosen.capabilities
 	previous, err := platformCurrentCapabilities(e, installation)
 	if err != nil {
 		return platformUpdateProjection{}, err
@@ -129,6 +135,7 @@ func platformBuildUpdateProjection(e migExec, installation string, sourceRelease
 		InstallationRevision: installationRevision, PolicyRevision: policyRevision, TargetPolicyRevision: policyRevision + 1, TrustRevision: targetRelease.trustRevision,
 		ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, CurrentDataFormat: currentFormat, TargetCapabilities: targetCapabilities,
 		PreviousCapabilities: previous, GrantsSHA256: grants, Target: target,
+		KeptCapabilities: chosen.kept, KeptProxy: chosen.keptProxy, PolicyReset: chosen.reset,
 	}, nil
 }
 
