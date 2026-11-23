@@ -594,13 +594,12 @@ async function main() {
     currentPage = page;
     currentErrors = desktop.errors;
     await page.getByRole("button", { name: "Notes", exact: true }).waitFor();
-    await page.getByText("Setup required", { exact: true }).waitFor();
-    await page
-      .getByText(
-        "An administrator must finish the application setup before it can be opened.",
-        { exact: true },
-      )
-      .waitFor();
+    // A reader's launcher lists only apps they can open: the setup-required app is left off entirely.
+    for (const label of ["Setup required", "Scheduled Digest"]) {
+      if ((await page.getByText(label, { exact: true }).count()) !== 0) {
+        throw new Error(`reader launcher listed a setup-required application (${label})`);
+      }
+    }
     if (
       (await page
         .getByRole("button", { name: "Scheduled Digest", exact: true })
@@ -608,7 +607,7 @@ async function main() {
     ) {
       throw new Error("setup-required application exposed an open action");
     }
-    assertions.ordinaryUserSeesTruthfulSetupRequired = true;
+    assertions.ordinaryUserDoesNotSeeSetupRequired = true;
     assertions.setupRequiredApplicationNotOpenable = true;
     const setupShot = path.join(
       evidenceDir,

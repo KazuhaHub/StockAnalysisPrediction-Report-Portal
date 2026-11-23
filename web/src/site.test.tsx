@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import { SiteProvider, useSite } from './site'
+import { SiteProvider, useSite, safeLogoUrl } from './site'
 
 const apiMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -39,6 +39,55 @@ describe('SiteProvider', () => {
     apiMock.get.mockReset()
     document.title = ''
     document.querySelector('link[rel="icon"]')?.remove()
+  })
+
+  it('paints its first frame from the settings the server embedded, without waiting for /api/site', async () => {
+    const block = document.createElement('script')
+    block.type = 'application/json'
+    block.id = 'rp-bootstrap'
+    block.textContent = JSON.stringify({ siteTitle: '智研平台', pwaEnabled: true })
+    document.head.appendChild(block)
+    try {
+      let answer!: (value: unknown) => void
+      apiMock.get.mockImplementation(() => new Promise((resolve) => { answer = resolve }))
+      render(<MemoryRouter><SiteProvider><SiteProbe /></SiteProvider></MemoryRouter>)
+      // The very first render, with /api/site still out: the configured title, and the tab title with it.
+      expect(screen.getByTestId('title').textContent).toBe('智研平台')
+      expect(document.title).toContain('智研平台')
+      await waitFor(() => expect(apiMock.get).toHaveBeenCalled())
+      // The same answer changes nothing; a changed one (an administrator just edited it) is applied.
+      const before = screen.getByTestId('settings').textContent
+      answer({ siteTitle: '智研平台', pwaEnabled: true })
+      await waitFor(() => expect(screen.getByTestId('settings').textContent).toBe(before))
+      expect(screen.getByTestId('title').textContent).toBe('智研平台')
+    } finally { block.remove() }
+  })
+
+  it('applies a changed site title when the refresh answers differently', async () => {
+    const block = document.createElement('script')
+    block.type = 'application/json'
+    block.id = 'rp-bootstrap'
+    block.textContent = JSON.stringify({ siteTitle: 'Old' })
+    document.head.appendChild(block)
+    try {
+      apiMock.get.mockResolvedValue({ siteTitle: 'New' })
+      render(<MemoryRouter><SiteProvider><SiteProbe /></SiteProvider></MemoryRouter>)
+      expect(screen.getByTestId('title').textContent).toBe('Old')
+      await waitFor(() => expect(screen.getByTestId('title').textContent).toBe('New'))
+    } finally { block.remove() }
+  })
+
+  it('ignores a bootstrap that is not valid and starts from the defaults', async () => {
+    const block = document.createElement('script')
+    block.type = 'application/json'
+    block.id = 'rp-bootstrap'
+    block.textContent = '{not json'
+    document.head.appendChild(block)
+    try {
+      apiMock.get.mockRejectedValue(new Error('down'))
+      render(<MemoryRouter><SiteProvider><SiteProbe /></SiteProvider></MemoryRouter>)
+      expect(screen.getByTestId('title').textContent).toBe('brand')
+    } finally { block.remove() }
   })
 
   it('normalizes public site settings from the backend', async () => {
@@ -121,5 +170,23 @@ describe('SiteProvider', () => {
     await user.click(screen.getByRole('button', { name: 'refresh' }))
     await waitFor(() => expect(screen.getByTestId('title').textContent).toBe('二次刷新'))
     expect(settings().pwaIconUrl).toBe('/b.png')
+  })
+})
+
+describe('safeLogoUrl', () => {
+  it('keeps same-site paths, web URLs and image data URLs', () => {
+    expect(safeLogoUrl('/static/logo.png')).toBe('/static/logo.png')
+    expect(safeLogoUrl('https://cdn.example.com/a.svg')).toBe('https://cdn.example.com/a.svg')
+    expect(safeLogoUrl('http://example.com/a.png')).toBe('http://example.com/a.png')
+    expect(safeLogoUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA')
+    expect(safeLogoUrl('//cdn.example.com/a.png')).toBe('//cdn.example.com/a.png')
+    expect(safeLogoUrl('logo.png')).toBe('logo.png')
+  })
+
+  it('drops script and non-image data URLs', () => {
+    expect(safeLogoUrl('javascript:alert(1)')).toBe('')
+    expect(safeLogoUrl(' JavaScript:alert(1)')).toBe('')
+    expect(safeLogoUrl('data:text/html,<b>x</b>')).toBe('')
+    expect(safeLogoUrl('')).toBe('')
   })
 })

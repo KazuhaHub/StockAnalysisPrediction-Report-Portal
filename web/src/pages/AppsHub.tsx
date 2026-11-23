@@ -15,6 +15,7 @@ import { useAppDirectory, type AppDirectoryItem } from '../lib/appDirectoryV2'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 import { LoadingPlaceholder } from '../components/LoadGate'
+import { useSettled } from '../lib/useSettled'
 import AppInstallationStatus from '../components/apps/AppInstallationStatus'
 
 // The apps hub: a grid of user-facing apps. Built-in apps are compiled-in cards (each gated by a
@@ -75,10 +76,8 @@ export default function AppsHub() {
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   // The built-in cards and the platform installs arrive separately; show neither until both have answered once.
-  const [settled, setSettled] = useState(false)
   const bothDone = !loading && !directory.loading
-  useEffect(() => { if (bothDone) setSettled(true) }, [bothDone])
-  const waiting = !settled && !bothDone
+  const waiting = !useSettled(bothDone)
 
   const load = () => {
     setLoading(true)

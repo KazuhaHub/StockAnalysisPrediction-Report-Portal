@@ -657,6 +657,23 @@ describe('an entry button pinned to a platform app', () => {
     expect(screen.getByTestId('where').textContent).toBe(`/apps/v2/${id}`)
   })
 
+  it('adds the pinned button when the directory answers, already named, and never swaps a label', async () => {
+    state.resp = { ...base, links: [pin, { id: 10, label: 'Other', url: 'https://example.com', ord: 1 }] }
+    let answer!: (value: unknown) => void
+    state.directory = new Promise((resolve) => { answer = resolve }) as never
+    mount()
+    // The strip does not wait for the directory: the other button is there, the pinned one is not, and no generic label
+    // stands in for the app's name.
+    expect(await screen.findByText('Other')).toBeTruthy()
+    await waitFor(() => expect(platformRequests().length).toBeGreaterThan(0))
+    expect(screen.queryByText('nav.apps')).toBeNull()
+    expect(screen.queryByText('Notes')).toBeNull()
+    await act(async () => { answer({ items: [item()], nextCursor: '' }) })
+    expect(await screen.findByText('Notes')).toBeTruthy()
+    expect(screen.getByText('Other')).toBeTruthy()
+    expect(screen.queryByText('nav.apps')).toBeNull()
+  })
+
   it('keeps written text as written', async () => {
     state.resp = { ...base, links: [{ ...pin, label: 'My notes' }] }
     state.directory = { items: [item()], nextCursor: '' }

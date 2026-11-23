@@ -308,9 +308,12 @@ async function main() {
       });
       await admin.page.goto(`${base}/apps`, { waitUntil: "networkidle" });
       await admin.page.getByText("Not ready", { exact: true }).waitFor();
-      await admin.page.getByText("Disabled", { exact: true }).waitFor();
       await admin.page.getByText("Unavailable", { exact: true }).waitFor();
-      if ((await admin.page.getByRole("link", { name: /Review in management/ }).count()) !== 3) {
+      // A disabled app is managed under Manage -> Apps and is left off the launcher, for administrators too.
+      if ((await admin.page.getByText("Disabled", { exact: true }).count()) !== 0) {
+        throw new Error("admin directory listed a disabled app");
+      }
+      if ((await admin.page.getByRole("link", { name: /Review in management/ }).count()) !== 2) {
         throw new Error("admin directory recovery links missing");
       }
       const text = await admin.page.locator("body").innerText();
@@ -324,6 +327,53 @@ async function main() {
         fullPage: true,
       });
       report.scenarios.push({ name: "directory-states-admin", violations });
+      // The status dialog of an app that is not ready yet: an administrator still sees the app on the launcher.
+      {
+        await admin.page
+          .getByRole("button", { name: "View status for pending-fixture" })
+          .click();
+        const statusDialog = admin.page.getByRole("dialog");
+        await statusDialog
+          .getByText("Checking data policy", { exact: true })
+          .last()
+          .waitFor();
+        await statusDialog
+          .getByText("Not ready", { exact: true })
+          .waitFor();
+        await statusDialog
+          .getByText("Stage changed", { exact: true })
+          .waitFor();
+        await statusDialog
+          .getByRole("button", { name: "Refresh status" })
+          .click();
+        for (let attempt = 0; attempt < 20 && admin.launches.statusReads() < 2; attempt++) {
+          await admin.page.waitForTimeout(50);
+        }
+        if (admin.launches.statusReads() !== 2) {
+          throw new Error("status refresh did not repeat the bounded read");
+        }
+        const text = await admin.page.locator("body").innerText();
+        if (installationIDs.some((id) => text.includes(id)) ||
+            text.includes("count") ||
+            text.includes("private-audit") ||
+            text.includes("/run/private.sock")) {
+          throw new Error("admin status dialog leaked installation identity or count");
+        }
+        const violations = await audit(admin.page);
+        if (violations.length) throw new Error(`admin status dialog axe: ${JSON.stringify(violations)}`);
+        report.assertions.nonopenableStatusActionsEnabled = true;
+        report.assertions.readerStatusBoundedProjection = true;
+        report.assertions.readerStatusRefresh = true;
+        report.assertions.readerInternalIdentityHidden = true;
+        report.assertions.readerStatusTimelineVisible = true;
+        report.assertions.readerStatusTimelineSanitized = true;
+        await admin.page.waitForTimeout(400);
+        report.scenarios.push({ name: "directory-admin-status", violations });
+        await admin.page.screenshot({
+          path: path.join(evidenceDir, "directory-admin-status.png"),
+          fullPage: true,
+        });
+      }
       await closeScenario(admin.context, admin.errors, "directory admin");
     }
     {
@@ -333,7 +383,12 @@ async function main() {
         mode: "directory",
       });
       await reader.page.goto(`${base}/apps`, { waitUntil: "networkidle" });
-      await reader.page.getByText("Not ready", { exact: true }).waitFor();
+      // A reader's launcher lists only apps they can open: none of the not-ready, disabled or attention fixtures.
+      for (const label of ["Not ready", "Disabled", "Unavailable", "pending-fixture", "disabled-fixture", "attention-fixture"]) {
+        if ((await reader.page.getByText(label, { exact: true }).count()) !== 0) {
+          throw new Error(`reader directory listed an app they cannot open (${label})`);
+        }
+      }
       if ((await reader.page.getByRole("link", { name: /Review in management/ }).count()) !== 0) {
         throw new Error("reader directory exposed management recovery");
       }
@@ -344,50 +399,6 @@ async function main() {
         fullPage: true,
       });
       report.scenarios.push({ name: "directory-states-reader", violations: directoryViolations });
-      await reader.page
-        .getByRole("button", { name: "View status for pending-fixture" })
-        .click();
-      const statusDialog = reader.page.getByRole("dialog");
-      await statusDialog
-        .getByText("Checking data policy", { exact: true })
-        .last()
-        .waitFor();
-      await statusDialog
-        .getByText("Not ready", { exact: true })
-        .waitFor();
-      await statusDialog
-        .getByText("Stage changed", { exact: true })
-        .waitFor();
-      await statusDialog
-        .getByRole("button", { name: "Refresh status" })
-        .click();
-      for (let attempt = 0; attempt < 20 && reader.launches.statusReads() < 2; attempt++) {
-        await reader.page.waitForTimeout(50);
-      }
-      if (reader.launches.statusReads() !== 2) {
-        throw new Error("reader status refresh did not repeat the bounded read");
-      }
-      const text = await reader.page.locator("body").innerText();
-      if (installationIDs.some((id) => text.includes(id)) ||
-          text.includes("count") ||
-          text.includes("private-audit") ||
-          text.includes("/run/private.sock")) {
-        throw new Error("reader directory leaked installation identity or count");
-      }
-      const violations = await audit(reader.page);
-      if (violations.length) throw new Error(`reader directory axe: ${JSON.stringify(violations)}`);
-      report.assertions.nonopenableStatusActionsEnabled = true;
-      report.assertions.readerStatusBoundedProjection = true;
-      report.assertions.readerStatusRefresh = true;
-      report.assertions.readerInternalIdentityHidden = true;
-      report.assertions.readerStatusTimelineVisible = true;
-      report.assertions.readerStatusTimelineSanitized = true;
-      await reader.page.waitForTimeout(400);
-      report.scenarios.push({ name: "directory-reader-status", violations });
-      await reader.page.screenshot({
-        path: path.join(evidenceDir, "directory-reader-status.png"),
-        fullPage: true,
-      });
       await closeScenario(reader.context, reader.errors, "directory reader");
     }
     for (const mode of ["denied", "backend-stopped"]) {

@@ -130,6 +130,75 @@ describe('Installed apps', () => {
   })
 })
 
+describe('The first view needs the layout only', () => {
+  // The layout carries each app's verified name, publisher, version and display. The market catalogue is a remote read:
+  // it loads in the background and adds elements (an update offer), never text that is already on screen.
+  const entry = () => ({ ...platformEntry('installed'), publisher_name: 'Kazuha Hub', display: display('Notes', 'Personal notes') })
+  const withVerifiedEntry = () => { fx.entries = [...layout(), entry() as never] }
+
+  it('shows every card complete from the layout alone, without waiting for the catalogue', async () => {
+    withVerifiedEntry()
+    let answer: (value: unknown) => void = () => undefined
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
+    renderPage()
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    // The catalogue is still out and the cards are already there, final.
+    const card = cardOf('Notes')
+    expect(screen.queryByText('common.loading')).toBeNull()
+    expect(within(card).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
+    expect(within(card).getByText('Personal notes')).toBeTruthy()
+    expect(within(card).queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+    const before = card.textContent
+    await act(async () => { answer(catalogue()) })
+    // The catalogue adds the update offer to the card; the text that was there is untouched.
+    expect(await within(cardOf('Notes')).findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    expect(cardOf('Notes').textContent).toContain(before!)
+    expect(within(cardOf('Notes')).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
+  })
+
+  it('never names the publisher or the app from the catalogue: no text swaps when it arrives', async () => {
+    // The layout has no verified publisher name; the catalogue knows one. The card keeps what it showed.
+    fx.entries = [...layout(), platformEntry('installed')]
+    let answer: (value: unknown) => void = () => undefined
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
+    renderPage()
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    const before = within(cardOf('Notes')).getByText(/notes.*1\.0\.0/).textContent
+    await act(async () => { answer(catalogue([{ ...notesApp, publisher_name: 'Late Publisher' }])) })
+    await within(cardOf('Notes')).findByRole('button', { name: /appStore\.updateTo/ })
+    expect(within(cardOf('Notes')).getByText(/notes.*1\.0\.0/).textContent).toBe(before)
+    expect(screen.queryByText(/Late Publisher/)).toBeNull()
+  })
+
+  it('tells a failed catalogue below the cards with a retry, and the cards are untouched', async () => {
+    withVerifiedEntry()
+    const user = userEvent.setup()
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation(async (url: string, body: unknown) => {
+      if (url === `${root}/market/catalogue`) throw new Error('catalogue down')
+      return original(url, body)
+    })
+    renderPage()
+    await screen.findAllByText('Notes')
+    expect(within(cardOf('Notes')).getByText('Personal notes')).toBeTruthy()
+    expect(await screen.findByText('appStore.catalogueFailed')).toBeTruthy()
+    expect(within(cardOf('Notes')).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
+    apiMock.post.mockImplementation(original)
+    await user.click(screen.getByRole('button', { name: 'common.retry' }))
+    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
+    expect(screen.queryByText('appStore.catalogueFailed')).toBeNull()
+  })
+
+  it('does not wait for a catalogue that has no source', async () => {
+    apiMock.get.mockImplementation(async (url: string) => url === `${root}/market/sources` ? {} : url === '/api/admin/apps/layout' ? { apps: fx.entries } : { items: [], next_cursor: '' })
+    renderPage()
+    expect(await screen.findByText('nav.batch')).toBeTruthy()
+    expect(screen.queryByText('common.loading')).toBeNull()
+  })
+})
+
 describe('The cards and list view', () => {
   it('shows a dense list, with the same actions, when the list view is chosen, and remembers the choice', async () => {
     withPlatform('installed')

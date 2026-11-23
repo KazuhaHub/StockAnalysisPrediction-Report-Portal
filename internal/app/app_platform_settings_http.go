@@ -86,6 +86,9 @@ type platformInstallationSettings struct {
 	Recovery             platformSettingsRecovery     `json:"recovery"`
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
 	RepairEligible       bool                         `json:"repair_eligible"`
+	// ResolveKeepDataEligible is true when the installation's one unresolved operation is a failed import, enable or
+	// repair whose data can be accepted as it is. The review asks the runner before it is offered for confirmation.
+	ResolveKeepDataEligible bool `json:"resolve_keep_data_eligible"`
 	// QuotaRaiseEligible and ImportEligible offer the reviewed set_data_quota and import_data actions (doc 185).
 	// A raise is online, so a running installation qualifies; an import needs the installation stopped.
 	QuotaRaiseEligible bool `json:"quota_raise_eligible"`
@@ -504,7 +507,9 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			}
 			rows.Close()
 		}
-		if generation >= 2 &&
+		// A failed import, enable or repair of an installation whose latest lifecycle operation is its install leaves it
+		// at the install's own generation, below the disable's: a repair is reviewed from there as well.
+		if (generation >= 2 || (generation >= 1 && platformRepairFromRecovery(result.DesiredState, result.Phase))) &&
 			!result.ControlPaused &&
 			pending == 0 &&
 			result.Backend.Required &&
@@ -522,6 +527,11 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 						result.Phase == "recovery_required" ||
 						result.Phase == "review_required"))) {
 			result.RepairEligible = true
+		}
+		if !result.ControlPaused {
+			if _, resolveErr := loadPlatformResolveKeepDataPlan(e, installation, control, false); resolveErr == nil {
+				result.ResolveKeepDataEligible = true
+			}
 		}
 		if !result.ControlPaused && pending == 0 && result.Backend.Required && result.Backend.Registered &&
 			platformValidSHA(result.CurrentReleaseSHA256) && result.Data != nil && result.Data.State == "active" {
