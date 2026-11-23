@@ -147,3 +147,11 @@ export function usePrefs(): PrefsCtx {
   if (!c) throw new Error('usePrefs must be used within PrefsProvider')
   return c
 }
+
+/**
+ * The preferences when a provider is above, else null. For shared code that also renders where there is none (a test,
+ * an embed) and can fall back to i18next's language; `usePrefs` is for everything that is always inside the provider.
+ */
+export function useOptionalPrefs(): PrefsCtx | null {
+  return useContext(Ctx)
+}

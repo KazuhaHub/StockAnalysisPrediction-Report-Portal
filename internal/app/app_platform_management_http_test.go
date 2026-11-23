@@ -709,8 +709,18 @@ func TestPlatformManagementProgressPrivacyAndPause(t *testing.T) {
 	s.wireRoutes(mux)
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
 	path := "/api/admin/app-platform/operations/" + id
-	mustExec(t, s.st, `UPDATE meta SET v='1' WHERE k='app_platform_restore_paused'`)
 	got := sessionTestRequest(mux, "GET", path, cookie, "")
+	if got.Code != 200 || !strings.Contains(got.Body.String(), `"managed":false`) || !strings.Contains(got.Body.String(), `"revision":"1"`) {
+		t.Fatal("progress does not carry the operation's managed flag and revision", got.Code, got.Body.String())
+	}
+	mustExec(t, s.st, `UPDATE app_platform_operations SET managed=1`)
+	got = sessionTestRequest(mux, "GET", path, cookie, "")
+	if got.Code != 200 || !strings.Contains(got.Body.String(), `"managed":true`) {
+		t.Fatal("managed operation not reported as managed", got.Body.String())
+	}
+	mustExec(t, s.st, `UPDATE app_platform_operations SET managed=0`)
+	mustExec(t, s.st, `UPDATE meta SET v='1' WHERE k='app_platform_restore_paused'`)
+	got = sessionTestRequest(mux, "GET", path, cookie, "")
 	if got.Code != 200 || !strings.Contains(got.Body.String(), `"control_paused":true`) {
 		t.Fatal("paused progress not inspectable", got.Code, got.Body.String())
 	}

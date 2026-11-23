@@ -76,7 +76,7 @@ describe('application installation settings', () => {
     expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
     expect(screen.getByText('appPlatform.settings.title')).toBeTruthy()
     expect(screen.getByText('2.0.0')).toBeTruthy()
-    expect(screen.getByText(release)).toBeTruthy()
+    expect(screen.getByText(release.slice(0, 12))).toBeTruthy()
     expect(screen.getByText(/appPlatform\.settings\.principal\.user:.*Reader/)).toBeTruthy()
     expect(screen.getByText(/appPlatform\.capability\.storage\.files/)).toBeTruthy()
     expect(screen.getByText(/appPlatform\.settings\.configurationNeeded/)).toBeTruthy()
@@ -326,7 +326,7 @@ describe('application installation settings', () => {
     })
     const dialog = await screen.findByRole('dialog')
     expect(dialog.textContent).toContain('appPlatform.settings.repairWarning')
-    expect(dialog.textContent).toContain(release)
+    expect(dialog.textContent).toContain(release.slice(0, 12))
     expect(dialog.textContent).toContain('2 → 3')
     expect(dialog.textContent).toContain('appPlatform.settings.repairGrantsUnchanged')
     await user.click(screen.getByRole('button', { name: 'appPlatform.settings.repairAction' }))
@@ -413,6 +413,65 @@ describe('application installation settings', () => {
     expect(await screen.findByRole('button', { name: 'appPlatform.settings.repair' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolve' })).toBeNull()
   })
+
+  it('refreshes the page in place after the data is accepted, without blanking it, and closes the dialog when the answer was lost but the data was accepted', async () => {
+    const user = userEvent.setup()
+    const plan = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    const operation = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    let resolved = false
+    let settingsReads = 0
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        settingsReads++
+        return { ...settings, desired_state: 'disabled', phase: 'recovery_required', repair_eligible: resolved, resolve_keep_data_eligible: !resolved }
+      }
+      return { bindings: [] }
+    })
+    let operations = 0
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) {
+        return { plan_id: plan, plan_sha256: 'c'.repeat(64), expires_ms: String(Date.now() + 900000), review: { action: 'resolve_keep_data', installation_id: installation, operation_id: operation, operation_action: 'import_data', release_sha256: release, observed_bytes: '1', checkpoint_recovery_set_id: operation, abandoned_effects: [], keeps_data: true, keeps_checkpoint: true, runs_rollback: false } }
+      }
+      operations++
+      resolved = true
+      // The first confirmation commits on the server, but its answer is lost.
+      if (operations === 1) throw new Error('network lost')
+      return { resolved: true, operation_id: operation, installation_id: installation, abandoned_effects: '0' }
+    })
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.resolve' }))
+    await screen.findByRole('dialog')
+    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))
+    const before = settingsReads
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }))
+    // The page reads what the server holds now; the data is accepted, so the spent plan's dialog closes.
+    await waitFor(() => expect(settingsReads).toBe(before + 1))
+    expect(await screen.findByRole('button', { name: 'appPlatform.settings.repair' })).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('network lost')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolveAction' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolve' })).toBeNull()
+  })
+
+  it('keeps the dialog and its message when a failed confirmation did not accept the data', async () => {
+    const user = userEvent.setup()
+    const plan = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    const operation = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings')
+      ? { ...settings, desired_state: 'disabled', phase: 'recovery_required', repair_eligible: false, resolve_keep_data_eligible: true }
+      : { bindings: [] })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) return { plan_id: plan, plan_sha256: 'c'.repeat(64), expires_ms: String(Date.now() + 900000), review: { action: 'resolve_keep_data', installation_id: installation, operation_id: operation, operation_action: 'import_data', release_sha256: release, observed_bytes: '1', checkpoint_recovery_set_id: operation, abandoned_effects: [], keeps_data: true, keeps_checkpoint: true, runs_rollback: false } }
+      throw new Error('refused')
+    })
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.resolve' }))
+    await screen.findByRole('dialog')
+    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }))
+    expect(await screen.findByText('refused')).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('button', { name: /appPlatform\.settings\.resolveAction/ })).toBeTruthy())
+  })
+
 
   it('reviews and admits restore from the exact verified recovery point', async () => {
     const user = userEvent.setup()

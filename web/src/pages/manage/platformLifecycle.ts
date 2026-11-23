@@ -95,7 +95,7 @@ export type EnableReview = {
 }
 export type RepairReview = Omit<EnableReview, 'action'> & { action: 'repair' }
 export type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview | DisableReview | EnableReview | RepairReview }
-export type Progress = { operation_id: string; installation_id: string; action: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string }
+export type Progress = { operation_id: string; installation_id: string; action: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string; revision?: string; managed?: boolean }
 export interface LifecycleTarget { release: PlatformRelease; action: LifecycleAction }
 
 export const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -244,13 +244,17 @@ export function usePlatformLifecycle(onChange?: () => void) {
   /** Starts a flow. An install first asks who can use the app; every other action goes straight to its review. */
   // `opener` is the control the person used, captured before any download: it may have lost focus by now (a button
   // is disabled while a package downloads), and it is where focus returns when the flow ends.
-  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null) => {
-    if (writing.current || intent) return
+  // Says why a flow did not start, so a caller can answer instead of doing nothing: an unfinished confirmed change
+  // needs the administrator ('pending'); a request still in flight only needs a moment ('writing').
+  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null): 'started' | 'pending' | 'writing' => {
+    if (intent) return 'pending'
+    if (writing.current) return 'writing'
     trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     // A managed app's Enable is its repair review; a frontend-only app keeps the enable review.
     const next = { release, action: action === 'enable' && release.backend ? 'repair' as const : action }
     setTarget(next); setSelected([]); setReview(null); setActionError(''); setHidden(false)
     if (next.action !== 'install') void plan(next, [])
+    return 'started'
   }
   /** Install step one done: ask the server for the review of the chosen audience. */
   const next = () => { if (target) void plan(target, selected) }

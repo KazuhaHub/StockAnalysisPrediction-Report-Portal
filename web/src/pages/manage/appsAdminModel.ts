@@ -6,6 +6,7 @@ import type { LoadOpts } from '../../lib/loadFailure'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
 import { appDisplayText, parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
+import { useOptionalPrefs } from '../../prefs'
 
 /**
  * The publisher name of an installed platform app, from the layout alone: it carries the verified name with the app, so
@@ -65,7 +66,9 @@ export const appPath = (key: string) => `/manage/apps/${encodeURIComponent(key)}
 /** Display strings for an app: a built-in one is translated, an installed one speaks for itself. */
 export function useAppLabels() {
   const { t, i18n } = useTranslation()
-  const lang = i18n?.language || 'en-US'
+  // The language the page's other text reads (usePrefs): i18next's own value trails it by a render after a switch, which
+  // named an app in the old language or fell back to English. Without a provider, i18next is all there is.
+  const lang = useOptionalPrefs()?.lang || i18n?.language || 'en-US'
   return {
     // A platform app speaks in the reader's language from its verified display (the layout's own `name` is the English
     // one); an installed v1 app uses its declared name. Every console place that names an app goes through here.

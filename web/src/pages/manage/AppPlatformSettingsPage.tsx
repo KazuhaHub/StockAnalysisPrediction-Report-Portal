@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, App, Button, Card, Checkbox, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
 import { AppstoreOutlined, ArrowLeftOutlined, CheckCircleOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -8,6 +8,7 @@ import type { AppDisplayView } from '../../lib/appDisplayV2'
 import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
+import ReleaseDigest from '../../components/ReleaseDigest'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { confirmAction } from '../../components/Confirm'
 import { AppsBreadcrumb } from './appsAdminParts'
@@ -211,6 +212,10 @@ export default function AppPlatformSettingsPage() {
   const [error, setError] = useState('')
   const [missing, setMissing] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  // A read that replaces the settings in place, without the page's loading state (see `reloadQuietly`).
+  const quiet = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -264,6 +269,7 @@ export default function AppPlatformSettingsPage() {
       return
     }
     const abort = new AbortController()
+    quiet.current?.abort()
     setLoading(true)
     Promise.all([
       api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal }),
@@ -284,8 +290,25 @@ export default function AppPlatformSettingsPage() {
     }).finally(() => {
       if (!abort.signal.aborted) setLoading(false)
     })
-    return () => abort.abort()
+    return () => { abort.abort(); quiet.current?.abort() }
   }, [installation, refresh, t])
+
+  /**
+   * Reads the settings again after an action whose effect on the installation is known or uncertain, and swaps them in
+   * where they stand: the page, its dialogs and the reader's place stay. A read that fails leaves what is shown.
+   */
+  const reloadQuietly = async (): Promise<Settings | null> => {
+    quiet.current?.abort()
+    const abort = new AbortController()
+    quiet.current = abort
+    try {
+      const next = await api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal })
+      if (abort.signal.aborted) return null
+      setSettings(next)
+      return next
+    } catch { /* the page keeps the settings it has; Retry is one click away */ }
+    return null
+  }
 
   if (loading) return <LoadingPlaceholder minHeight={320} />
   if (!settings) {
@@ -458,11 +481,18 @@ export default function AppPlatformSettingsPage() {
       })
       if (result.resolved !== true || !uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       setResolvePlan(null)
-      setRefresh((n) => n + 1)
+      setResolveAck(false)
+      // The data the failed import left is accepted: read the installation again so the Accept button, the preparing
+      // recovery set and the repair offer all show the state it is in now.
+      await reloadQuietly()
     } catch (failure) {
       setResolveError(errText(failure, t))
+      // The server may have acted before the answer was lost or refused: read what it holds now. If the data is
+      // already accepted, the plan is spent: close the dialog and show the page as it is, not a confirm that cannot apply.
+      const now = await reloadQuietly()
+      if (now && !now.resolve_keep_data_eligible && mounted.current) { setResolvePlan(null); setResolveError(''); setResolveAck(false) }
     } finally {
-      setResolving(false)
+      if (mounted.current) setResolving(false)
     }
   }
   const openRaise = () => {
@@ -677,7 +707,7 @@ export default function AppPlatformSettingsPage() {
         { key: 'state', label: t('appPlatform.settings.state'), children: t(`appPlatform.settings.desired.${settings.desired_state}`, { defaultValue: settings.desired_state }) },
         { key: 'generation', label: t('appPlatform.settings.generation'), children: settings.generation },
         { key: 'policy', label: t('appPlatform.settings.policyRevision'), children: settings.policy_revision },
-        { key: 'release', label: t('appPlatform.settings.currentRelease'), children: settings.current_release_sha256 ? <Space orientation="vertical" size={0}><span>{settings.version || '—'}</span><Typography.Text code copyable>{settings.current_release_sha256}</Typography.Text></Space> : t('appPlatform.settings.noRelease') },
+        { key: 'release', label: t('appPlatform.settings.currentRelease'), children: settings.current_release_sha256 ? <Space orientation="vertical" size={0}><span>{settings.version || '—'}</span><ReleaseDigest value={settings.current_release_sha256} /></Space> : t('appPlatform.settings.noRelease') },
       ]} />
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 }}>
         {(settings.desired_state === 'enabled' && settings.phase === 'ready') && <Link to={`/apps/v2/${installation}`}>{t('appPlatform.settings.openApplication')}</Link>}
@@ -797,7 +827,7 @@ export default function AppPlatformSettingsPage() {
             <Descriptions column={1} size="small" items={[
               { key: 'id', label: t('appPlatform.settings.recoveryPoint'), children: <Typography.Text code>{point.id}</Typography.Text> },
               { key: 'state', label: t('appPlatform.settings.recoveryState'), children: point.state },
-              { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{point.release_sha256}</Typography.Text> },
+              { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <ReleaseDigest value={point.release_sha256} /> },
               { key: 'checkpoint', label: t('appPlatform.settings.recoveryCheckpoint'), children: <Typography.Text code>{point.checkpoint_id}</Typography.Text> },
               { key: 'format', label: t('appPlatform.settings.dataFormat'), children: point.format },
               { key: 'bytes', label: t('appPlatform.settings.recoveryBytes'), children: bytes(point.bytes) },
@@ -888,7 +918,7 @@ export default function AppPlatformSettingsPage() {
           <Alert type="info" showIcon title={t('appPlatform.settings.repairWarning')} />
           {repairError && <Alert type="error" showIcon title={repairError} />}
           <Descriptions column={1} size="small" items={[
-            { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code copyable>{repairPlan.review.release_sha256}</Typography.Text> },
+            { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <ReleaseDigest value={repairPlan.review.release_sha256} /> },
             { key: 'generation', label: t('appPlatform.settings.generation'), children: `${repairPlan.review.source_generation} → ${repairPlan.review.target_generation}` },
             { key: 'policy', label: t('appPlatform.settings.policyRevision'), children: repairPlan.review.policy_revision },
             { key: 'data', label: t('appPlatform.storage'), children: t('appPlatform.settings.repairDataRetained') },
@@ -1033,12 +1063,12 @@ export default function AppPlatformSettingsPage() {
           <Alert type="warning" showIcon title={restorePlan.review.action === 'update' ? t('appPlatform.settings.migrationRecovery.retryWarning') : t('appPlatform.settings.restoreWarning')} />
           {restoreError && <Alert type="error" showIcon title={restoreError} />}
           {restorePlan.review.action === 'update' ? <Descriptions column={1} size="small" items={[
-            ...(restorePlan.review.release_sha256 ? [{ key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{restorePlan.review.release_sha256}</Typography.Text> }] : []),
+            ...(restorePlan.review.release_sha256 ? [{ key: 'release', label: t('appPlatform.settings.currentRelease'), children: <ReleaseDigest value={restorePlan.review.release_sha256} /> }] : []),
             ...(restorePlan.review.source_generation && restorePlan.review.target_generation ? [{ key: 'generation', label: t('appPlatform.settings.generation'), children: `${restorePlan.review.source_generation} → ${restorePlan.review.target_generation}` }] : []),
           ]} /> : <Descriptions column={1} size="small" items={[
             { key: 'recovery', label: t('appPlatform.settings.recoveryPoint'), children: <Typography.Text code>{restorePlan.review.recovery_set_id}</Typography.Text> },
             { key: 'checkpoint', label: t('appPlatform.settings.recoveryCheckpoint'), children: <Typography.Text code>{restorePlan.review.checkpoint_id}</Typography.Text> },
-            { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{restorePlan.review.release_sha256}</Typography.Text> },
+            { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <ReleaseDigest value={restorePlan.review.release_sha256} /> },
             { key: 'manifest', label: t('appPlatform.settings.recoveryManifest'), children: <Typography.Text code>{restorePlan.review.manifest_sha256}</Typography.Text> },
             { key: 'generation', label: t('appPlatform.settings.generation'), children: `${restorePlan.review.source_generation} → ${restorePlan.review.target_generation}` },
             { key: 'bytes', label: t('appPlatform.settings.recoveryBytes'), children: bytes(restorePlan.review.archive_bytes) },

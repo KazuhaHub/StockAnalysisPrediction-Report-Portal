@@ -907,6 +907,9 @@ type platformManagementProgress struct {
 	ErrorCode      string             `json:"error_code,omitempty"`
 	Terminal       bool               `json:"terminal"`
 	ControlPaused  bool               `json:"control_paused"`
+	// Managed says the operation runs a backend (it has start, probe and stop stages), so a page that holds no release
+	// can still list the operation's stages exactly.
+	Managed bool `json:"managed"`
 }
 
 func (s *Server) readPlatformManagementProgress(ctx context.Context, actor platformActorSession, id string) (platformManagementProgress, error) {
@@ -946,6 +949,7 @@ func (s *Server) readPlatformManagementProgress(ctx context.Context, actor platf
 		return result, errAppPlatformOperationConflict
 	}
 	result.Generation, result.Revision = strconv.FormatInt(generation, 10), strconv.FormatInt(revision, 10)
+	result.Managed = managed == 1
 	result.ControlPaused = paused != "0" || !platformValidUUID(epoch) || epoch != currentEpoch
 	result.Terminal = result.Stage == appplatform.StageComplete || result.Stage == appplatform.StageFailed || result.Stage == appplatform.StageRecoveryRequired
 	if code.Valid && code.String != "" {

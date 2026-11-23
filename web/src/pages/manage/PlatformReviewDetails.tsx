@@ -1,6 +1,7 @@
 import { Alert, Descriptions, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../prefs'
+import ReleaseDigest from '../../components/ReleaseDigest'
 import { appDisplayText, publisherWithId } from '../../lib/appDisplayV2'
 import { joinList } from '../../lib/joinList'
 import type { PlatformRelease } from '../../api/appPlatform'
@@ -56,7 +57,7 @@ export default function PlatformReviewDetails({ review, release, groups, expired
     { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'disable' ? 'appPlatform.disable' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : review.review.action === 'enable' ? 'appPlatform.enable' : review.review.action === 'repair' ? 'appPlatform.repair' : 'appPlatform.install') },
     { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, release?.display, lang).name} · ${release?.version ?? ''}` },
     { key: 'publisher', label: t('appPlatform.publisher'), children: publisherWithId(release?.publisher_name, review.review.publisher_id) },
-    { key: 'release', label: t('appPlatform.releaseDigest'), children: <Typography.Text code copyable style={{ wordBreak: 'break-all' }}>{review.review.release_sha256}</Typography.Text> },
+    { key: 'release', label: t('appPlatform.releaseDigest'), children: <ReleaseDigest value={review.review.release_sha256} /> },
     { key: 'compatibility', label: t('appPlatform.compatibility'), children: compatibility },
     { key: 'resources', label: t('appPlatform.resources'), children: resources },
     ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.open_to_ous.length ? joinList(review.review.open_to_ous.map(audienceLabel), lang) : t('appPlatform.noAudience') }] : review.review.action === 'update' || review.review.action === 'enable' || review.review.action === 'repair' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),

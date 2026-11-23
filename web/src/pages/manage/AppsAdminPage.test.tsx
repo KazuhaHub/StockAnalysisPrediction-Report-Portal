@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router'
 import AppsAdminPage from './AppsAdminPage'
 import { layout } from './appsAdminFixtures'
-import { cardOf, catalogue, chartsApp, display, fx, installationId, notesApp, operation, platformEntry, resetFixtures, root, sha, verifiedRow, withPlatform, catalogueUrl } from './appsConsoleFixtures'
+import { cardOf, catalogue, plan, planSha, chartsApp, display, fx, installationId, notesApp, operation, platformEntry, resetFixtures, root, sha, verifiedRow, withPlatform, catalogueUrl } from './appsConsoleFixtures'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), postBytes: vi.fn() }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: apiMock, errText: (e: unknown) => e instanceof Error && e.message !== 'boom' ? e.message : 'Request failed' }))
@@ -19,7 +19,7 @@ vi.mock('react-i18next', () => {
 })
 const auth = vi.hoisted(() => ({ user: 'admin' }))
 vi.mock('../../auth', () => ({ useAuth: () => ({ user: auth.user }) }))
-vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
+vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }), useOptionalPrefs: () => ({ lang: 'en-US' }) }))
 // Dragging itself is dnd.test.tsx's concern. This stand-in exposes the wrapper's contract, a reordered
 // id sequence, through a button, so the test can assert what the page persists.
 vi.mock('./dnd', () => ({
@@ -51,7 +51,7 @@ const renderPage = (path = '/manage/apps') => render(pageTree(path))
 
 
 
-beforeEach(() => { auth.user = 'admin'; localStorage.clear(); resetFixtures(apiMock) })
+beforeEach(() => { auth.user = 'admin'; localStorage.clear(); sessionStorage.clear(); resetFixtures(apiMock) })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Installed apps', () => {
@@ -165,11 +165,21 @@ describe('The first view needs the layout only', () => {
     apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
     renderPage()
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    const before = within(cardOf('Notes')).getByText(/notes.*1\.0\.0/).textContent
+    // With no verified publisher name the slot shows nothing: the app id ("notes") is never a stand-in for a name.
+    const before = within(cardOf('Notes')).getByText('1.0.0').textContent
+    expect(cardOf('Notes').textContent).not.toMatch(/notes/)
     await act(async () => { answer(catalogue([{ ...notesApp, publisher_name: 'Late Publisher' }])) })
     await within(cardOf('Notes')).findByRole('button', { name: /appStore\.updateTo/ })
-    expect(within(cardOf('Notes')).getByText(/notes.*1\.0\.0/).textContent).toBe(before)
+    expect(within(cardOf('Notes')).getByText('1.0.0').textContent).toBe(before)
     expect(screen.queryByText(/Late Publisher/)).toBeNull()
+  })
+
+  it('shows no app id in the publisher slot of the list view either', async () => {
+    fx.entries = [...layout(), platformEntry('installed')]
+    localStorage.setItem('rp.apps.view', 'list')
+    renderPage()
+    const row = (await screen.findByRole('link', { name: 'Notes' })).closest('.rp-app-list-app') as HTMLElement
+    expect(row.textContent).toBe('Notes1.0.0')
   })
 
   it('tells a failed catalogue below the cards with a retry, and the cards are untouched', async () => {
@@ -263,6 +273,75 @@ describe('A platform app card', () => {
     expect(apiMock.get).toHaveBeenCalledWith(`${root}/releases?release_sha256=${sha('b')}`)
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'update', release_sha256: sha('b'), trust_revision: '1', installation_id: installationId }))
     expect(await screen.findByText('appPlatform.confirmUpdate')).toBeTruthy()
+  })
+
+  it('never leaves the update button enabled while a click cannot act: a pending change blocks it, says why, and stays reachable by keyboard', async () => {
+    // A change whose answer was lost stays pending after its dialog is closed. Every other action waits for it, so
+    // the controls say so (and answer a press) instead of accepting clicks that do nothing.
+    withPlatform('installed')
+    sessionStorage.setItem('portal.app-install.pending:admin', JSON.stringify({ plan_id: plan, plan_sha256: planSha, idempotency_key: plan, action: 'update', app_id: 'notes' }))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.cancel' }))
+    const button = await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }) as HTMLButtonElement
+    // Not `disabled`: that would drop it from the tab order and hide the reason.
+    expect(button.disabled).toBe(false)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    expect(button.title).toBe('appStore.busyPending')
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toBe('appStore.busyPending')
+    button.focus()
+    expect(document.activeElement).toBe(button)
+    await user.click(button)
+    expect(apiMock.post.mock.calls.some(([url]) => url === `${root}/market/stage`)).toBe(false)
+    expect(await screen.findByText('appStore.busyPending')).toBeTruthy()
+    const swap = screen.getByRole('button', { name: 'appStore.switchVersion' }) as HTMLButtonElement
+    expect(swap.getAttribute('aria-disabled')).toBe('true')
+    // Reachable by keyboard like the update button: not `disabled`, focusable, and a press answers with the reason.
+    expect(swap.hasAttribute('disabled')).toBe(false)
+    swap.focus()
+    expect(document.activeElement).toBe(swap)
+    expect(swap.getAttribute('aria-describedby')).toBe(button.getAttribute('aria-describedby'))
+    await user.click(swap)
+    expect(screen.queryByRole('menuitem')).toBeNull()
+    expect((await screen.findAllByText('appStore.busyPending')).length).toBeGreaterThan(0)
+  })
+
+  it('keeps View in catalogue usable while an action is blocked, and gates only the lifecycle items', async () => {
+    withPlatform('installed')
+    sessionStorage.setItem('portal.app-install.pending:admin', JSON.stringify({ plan_id: plan, plan_sha256: planSha, idempotency_key: plan, action: 'update', app_id: 'notes' }))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.cancel' }))
+    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
+    expect((await screen.findByRole('menuitem', { name: 'appStore.disable' })).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('menuitem', { name: 'appStore.uninstall' }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('menuitem', { name: 'appStore.viewInCatalogue' }).getAttribute('aria-disabled')).not.toBe('true')
+  })
+
+  it('gives a reason while the console is only busy, too', async () => {
+    withPlatform('installed')
+    const base = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/stage` ? new Promise(() => undefined) : base(url, body))
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
+    const swap = screen.getByRole('button', { name: 'appStore.switchVersion' })
+    expect(swap.getAttribute('aria-disabled')).toBe('true')
+    expect(swap.title).toBe('appStore.busyWorking')
+  })
+
+  it('shows the button busy the moment it is pressed, not when the download answers', async () => {
+    withPlatform('installed')
+    const base = apiMock.post.getMockImplementation()!
+    let answer: (value: unknown) => void = () => undefined
+    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/stage` ? new Promise(resolve => { answer = resolve }) : base(url, body))
+    const user = userEvent.setup()
+    renderPage()
+    const button = await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
+    await user.click(button)
+    expect(button.className).toContain('ant-btn-loading')
+    expect((button as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => { answer({ release_sha256: sha('b') }) })
   })
 
   it('shows no update when the installed version is the newest', async () => {
@@ -395,7 +474,7 @@ describe('Deep links', () => {
   it('lands on the marketplace and resumes an operation in the modal', async () => {
     renderPage(`/manage/apps?operation=${operation}`)
     expect(screen.getByRole('tab', { name: 'nav.apps' }).getAttribute('aria-selected')).toBe('true')
-    expect(await screen.findByText(/appPlatform\.stage\.queued/)).toBeTruthy()
+    expect((await screen.findAllByText(/appPlatform\.stage\.queued/)).length).toBeGreaterThan(0)
     expect(screen.getByText('appPlatform.step.progress')).toBeTruthy()
   })
 
