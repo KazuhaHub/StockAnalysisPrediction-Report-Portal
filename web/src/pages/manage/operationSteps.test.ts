@@ -79,6 +79,9 @@ describe('stepModel', () => {
     expect(stepModel({ action: 'repair', stage: 'failed', terminal: true, revision: '9' }, true, undefined).every(s => s.status === 'wait')).toBe(true)
     // Seen live, a direct failure marks the right step.
     expect(stepModel({ action: 'install', stage: 'failed', terminal: true, revision: '7' }, true, 'start').find(s => s.status === 'error')?.stage).toBe('start')
+    // Seen at download, then stage and prepare_data passed between two polls and it failed at prepare_data (revision 6):
+    // the stage seen last is not where it failed, so nothing is marked rather than the wrong step.
+    expect(stepModel({ action: 'install', stage: 'failed', terminal: true, revision: '6' }, false, 'download').every(s => s.status !== 'error')).toBe(true)
   })
   it('still reads recovery_required from the revision, for any action', () => {
     expect(stepModel({ action: 'enable', stage: 'recovery_required', terminal: true, revision: '5' }, true, undefined).find(s => s.status === 'error')?.stage).toBe('start')

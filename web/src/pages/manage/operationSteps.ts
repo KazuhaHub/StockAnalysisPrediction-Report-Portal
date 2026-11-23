@@ -38,11 +38,15 @@ const SETTLEABLE = ['install', 'enable', 'repair', 'import_data', 'restore', 're
  * stage it happened in, so the failed stage is the one at revision - 2 (Go: SettleStartNeverRan reads it the same
  * way). That holds for recovery_required, and for `failed` on an action with no settle path. A `failed` operation of an
  * action that can be settled may have been settled afterwards, which leaves it one revision further, and the reply cannot
- * tell the two apart: there no step is marked unless this page saw that stage running itself. Never a guess.
+ * tell the two apart: there a step is marked only when this page saw it running and the revision puts a direct failure there. Never a guess.
  */
 export function failedStage(progress: StepReading, stages: OperationStage[], lastRunning: OperationStage | undefined): OperationStage | undefined {
   const revision = Number(progress.revision)
-  if (progress.stage === 'failed' && SETTLEABLE.includes(progress.action)) return lastRunning
+  if (progress.stage === 'failed' && SETTLEABLE.includes(progress.action)) {
+    // Only the stage seen running that is also where the revision says a direct failure happened is certain: a
+    // settled failure sits one revision further, after a stage this page could not have seen running.
+    return Number.isInteger(revision) && lastRunning !== undefined && stages[revision - 2] === lastRunning ? lastRunning : undefined
+  }
   if (Number.isInteger(revision) && revision >= 2 && revision - 2 < stages.length - 1) return stages[revision - 2]
   return lastRunning
 }
