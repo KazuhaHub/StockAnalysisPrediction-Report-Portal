@@ -9,8 +9,8 @@ import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import PlatformReviewDetails, { reviewBlocked } from './PlatformReviewDetails'
 import type { PlatformLifecycle } from './platformLifecycle'
 
-const TITLE = { install: 'appPlatform.confirmTitle', update: 'appPlatform.confirmUpdateTitle', disable: 'appPlatform.confirmDisableTitle', uninstall: 'appPlatform.confirmUninstallTitle', enable: 'appPlatform.confirmEnableTitle' } as const
-const OK = { install: 'appPlatform.confirm', update: 'appPlatform.confirmUpdate', disable: 'appPlatform.confirmDisable', uninstall: 'appPlatform.confirmUninstall', enable: 'appPlatform.confirmEnable' } as const
+const TITLE = { install: 'appPlatform.confirmTitle', update: 'appPlatform.confirmUpdateTitle', disable: 'appPlatform.confirmDisableTitle', uninstall: 'appPlatform.confirmUninstallTitle', enable: 'appPlatform.confirmEnableTitle', repair: 'appPlatform.confirmRepairTitle' } as const
+const OK = { install: 'appPlatform.confirm', update: 'appPlatform.confirmUpdate', disable: 'appPlatform.confirmDisable', uninstall: 'appPlatform.confirmUninstall', enable: 'appPlatform.confirmEnable', repair: 'appPlatform.confirmRepair' } as const
 
 /**
  * The one modal every lifecycle action runs in: Steps for who can use a new app, the review, and the progress of

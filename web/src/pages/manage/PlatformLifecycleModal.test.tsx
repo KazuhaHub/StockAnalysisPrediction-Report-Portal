@@ -82,6 +82,10 @@ const disableReview = () => ({
     data_effect: 'preserve',
   },
 })
+const repairReview = () => {
+  const enabled = enableReview()
+  return { ...enabled, review: { ...enabled.review, action: 'repair', data_effect: 'checkpoint_and_retain' } }
+}
 const enableReview = () => ({
   plan_id: plan,
   plan_sha256: digest,
@@ -443,6 +447,19 @@ describe('application installation flow', () => {
     expect(await screen.findByText('appPlatform.enableConfirmHint')).toBeTruthy()
     expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: operation })
     await user.click(screen.getByRole('button', { name: 'appPlatform.confirmEnable' }))
+    await screen.findByRole('button', { name: 'appPlatform.done' })
+    expect(operations()).toHaveLength(1)
+  })
+
+  it('reviews the repair of a disabled managed app instead of a frontend-only enable', async () => {
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? repairReview() : { operation_id: operation }))
+    mount(installed({ current_release_sha256: release, enableable: true, backend: true }), 'enable')
+    const user = await start(false)
+    expect(await screen.findByText('appPlatform.confirmRepairTitle')).toBeTruthy()
+    expect(screen.getByText('appPlatform.repairConfirmHint')).toBeTruthy()
+    expect(screen.getByText('appPlatform.repairDataRetained')).toBeTruthy()
+    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'repair', installation_id: operation })
+    await user.click(screen.getByRole('button', { name: 'appPlatform.confirmRepair' }))
     await screen.findByRole('button', { name: 'appPlatform.done' })
     expect(operations()).toHaveLength(1)
   })
