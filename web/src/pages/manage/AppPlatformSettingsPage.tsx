@@ -225,7 +225,15 @@ export default function AppPlatformSettingsPage() {
   const shared = useOutletContext<InstallationSettingsContext | undefined>()
   const given = shared?.settings ?? null
   const sharedReload = shared?.reload
-  const reload = useCallback(() => { if (sharedReload && given) sharedReload(); else setRefresh(value => value + 1) }, [sharedReload, given])
+  const sharedReplace = shared?.replace
+  // A reload always asks the tabs as well: when their first read failed, a retry must bring their tab bar back too.
+  // Without shared settings the page also reads for itself, since the tabs' answer may fail again.
+  const reload = useCallback(() => {
+    sharedReload?.()
+    if (!(sharedReload && given)) setRefresh(value => value + 1)
+  }, [sharedReload, given])
+  // The settings a quiet re-read handed up to the tabs: they come back as `given`, and are already shown.
+  const handedUp = useRef<Settings | null>(null)
   const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -257,6 +265,8 @@ export default function AppPlatformSettingsPage() {
   const [principalsError, setPrincipalsError] = useState('')
 
   useEffect(() => {
+    // The page's own quiet re-read coming back from the tabs: it is already shown, with the page's state around it.
+    if (given && given === handedUp.current) return
     setSettings(null)
     setBindings([])
     setBindingError('')
@@ -315,6 +325,8 @@ export default function AppPlatformSettingsPage() {
       const next = await api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal })
       if (abort.signal.aborted) return null
       setSettings(next)
+      // Keep the tabs' copy current, so the page mounted again on a tab switch does not show the old state.
+      if (sharedReplace && given) { handedUp.current = next; sharedReplace(next) }
       return next
     } catch { /* the page keeps the settings it has; Retry is one click away */ }
     return null

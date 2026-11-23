@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useCallback, useState } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
@@ -245,7 +246,7 @@ describe('application installation settings', () => {
     render(
       <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
         <Routes>
-          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: { ...settings, admin_page: true }, reload: () => {}, headed: true }} />}>
+          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: { ...settings, admin_page: true }, reload: () => {}, replace: () => {}, headed: true }} />}>
             <Route index element={<AppPlatformSettingsPage />} />
           </Route>
         </Routes>
@@ -254,6 +255,64 @@ describe('application installation settings', () => {
     await waitFor(() => expect(document.querySelector('.rp-platform-settings')).not.toBeNull())
     expect(screen.queryByRole('navigation', { name: 'apps.breadcrumb' })).toBeNull()
     expect(screen.queryByRole('link', { name: /appPlatform.settings.back/ })).toBeNull()
+  })
+
+  it('hands a quiet re-read up to the tabs, so switching tabs and back does not show the spent action again', async () => {
+    const user = userEvent.setup()
+    const plan = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    const operation = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    let resolved = false
+    const current = () => ({ ...settings, admin_page: true, desired_state: 'disabled', phase: 'recovery_required', repair_eligible: resolved, resolve_keep_data_eligible: !resolved })
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? current() : { bindings: [] })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) return { plan_id: plan, plan_sha256: 'c'.repeat(64), expires_ms: String(Date.now() + 900000), review: { action: 'resolve_keep_data', installation_id: installation, operation_id: operation, operation_action: 'import_data', release_sha256: release, observed_bytes: '1', checkpoint_recovery_set_id: operation, abandoned_effects: [], keeps_data: true, keeps_checkpoint: true, runs_rollback: false } }
+      resolved = true
+      return { resolved: true, operation_id: operation, installation_id: installation, abandoned_effects: '0' }
+    })
+    const replaced: { resolve_keep_data_eligible?: boolean }[] = []
+    function Host() {
+      const [shared, setShared] = useState<Record<string, unknown>>(current())
+      const replace = useCallback((next: Record<string, unknown>) => { replaced.push(next); setShared(next) }, [])
+      return <Outlet context={{ settings: shared, reload: () => {}, replace, headed: true }} />
+    }
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Host />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.resolve' }))
+    await screen.findByRole('dialog')
+    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }))
+    expect(await screen.findByRole('button', { name: 'appPlatform.settings.repair' })).toBeTruthy()
+    await waitFor(() => expect(replaced.map(value => value.resolve_keep_data_eligible)).toEqual([false]))
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolve' })).toBeNull()
+  })
+
+  it('asks the tabs to read again too when their first read failed and the page retries', async () => {
+    const user = userEvent.setup()
+    let reads = 0
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings') && ++reads === 1) throw new Error('down')
+      return url.endsWith('/settings') ? settings : { bindings: [] }
+    })
+    const reload = vi.fn()
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: null, reload, replace: () => {}, headed: false }} />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await user.click((await screen.findAllByRole('button', { name: /common\.retry/ }))[0])
+    expect(reload).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(document.querySelector('.rp-platform-settings')).not.toBeNull())
   })
 
   it('does not call the server for an invalid installation identifier', async () => {

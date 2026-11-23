@@ -16,7 +16,13 @@ type Answer = { installation: string; settings: Settings | null }
  * What the tabs hand to the page below them through the outlet: the settings they already loaded, a reload, and
  * whether the tabs already show the breadcrumb and Back link (then the page leaves them out).
  */
-export type InstallationSettingsContext = { settings: Settings | null; reload: () => void; headed: boolean }
+export type InstallationSettingsContext = {
+  settings: Settings | null
+  reload: () => void
+  /** Swaps in settings the page already read, without a request or a loading state. */
+  replace: (next: Settings) => void
+  headed: boolean
+}
 
 /**
  * The tabs of one installation in the console: Platform settings, and, when the app declares an administration page,
@@ -47,10 +53,11 @@ export default function AppInstallationTabs() {
       .catch(() => { if (!abort.signal.aborted) setAnswer({ installation, settings: null }) })
     return () => abort.abort()
   }, [installation, attempt])
+  const replace = useCallback((next: Settings) => setAnswer({ installation, settings: next }), [installation])
   const settings = answer?.settings ?? null
   // With a tab bar, the breadcrumb and Back lead the page above it, for both tabs.
   const headed = settings?.admin_page === true
-  const shared = useMemo<InstallationSettingsContext>(() => ({ settings, reload, headed }), [settings, reload, headed])
+  const shared = useMemo<InstallationSettingsContext>(() => ({ settings, reload, replace, headed }), [settings, reload, replace, headed])
   const onAdmin = location.pathname === adminBase || location.pathname.startsWith(adminBase + '/')
   if (answer?.installation !== installation) return <LoadingPlaceholder minHeight={320} />
   // A direct visit to the admin URL of an app that has no admin page lands on its settings.
