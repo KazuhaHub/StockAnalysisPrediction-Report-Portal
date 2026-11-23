@@ -9,13 +9,14 @@ import SettingsPage from './AppPlatformSettingsPage'
 const apiMock = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: apiMock }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
 const mounts = vi.hoisted(() => ({ settings: 0 }))
 vi.mock('./AppPlatformSettingsPage', async () => {
   const { useEffect } = await import('react')
   return { default: () => {
     const shared = useOutletContext<{ settings: { admin_page?: boolean; revision?: string } | null; reload: () => void } | undefined>()
     useEffect(() => { mounts.settings++ }, [])
-    return <div>settings page<span data-testid="shared">{shared?.settings ? `${String(shared.settings.admin_page)}|${shared.settings.revision ?? ''}` : 'none'}</span><button onClick={() => shared?.reload()}>reload</button></div>
+    return <div>settings page<span data-testid="shared">{shared?.settings ? `${String(shared.settings.admin_page)}|${shared.settings.revision ?? ''}` : 'none'}</span><button onClick={() => shared?.reload()}>reload</button><span data-testid="headed">{String((shared as { headed?: boolean } | undefined)?.headed)}</span></div>
   } }
 })
 vi.mock('../../components/apps/AppSurfaceView', () => ({
@@ -35,7 +36,7 @@ function mount(path = base) {
   render(<RouterProvider router={router} />)
   return router
 }
-const serve = (admin_page: boolean | undefined) => apiMock.get.mockImplementation(async () => ({ installation_id: id, ...(admin_page === undefined ? {} : { admin_page }) }))
+const serve = (admin_page: boolean | undefined) => apiMock.get.mockImplementation(async () => ({ installation_id: id, app_id: 'demo-app', display: { icon: 'dashboard', texts: [{ locale: 'en-US', name: 'Demo App', description: 'd' }] }, ...(admin_page === undefined ? {} : { admin_page }) }))
 
 beforeEach(() => { apiMock.get.mockReset(); mounts.settings = 0 })
 afterEach(cleanup)
@@ -125,5 +126,28 @@ describe('installation page tabs', () => {
     mount()
     expect(await screen.findByText('settings page')).toBeTruthy()
     expect(screen.getByTestId('shared').textContent).toBe('none')
+  })
+
+  it('leads both tabs with one breadcrumb ending in the app name and a Back link, above the tab bar', async () => {
+    serve(true)
+    for (const path of [base, `${base}/admin`]) {
+      const { unmount } = render(<div />)
+      unmount()
+      cleanup()
+      mount(path)
+      const crumb = await screen.findByRole('navigation', { name: 'apps.breadcrumb' })
+      expect(crumb.textContent).toContain('Demo App')
+      const back = screen.getByRole('link', { name: /appPlatform.settings.back/ })
+      const tabs = screen.getByRole('tablist')
+      expect(crumb.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(back.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+  })
+
+  it('tells the page below that the tabs carry the header', async () => {
+    serve(true)
+    mount()
+    await screen.findByText('settings page')
+    expect(screen.getByTestId('headed').textContent).toBe('true')
   })
 })

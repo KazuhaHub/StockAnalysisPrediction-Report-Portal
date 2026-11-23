@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
 import AppInstallationTabs from './AppInstallationTabs'
 
@@ -239,6 +239,21 @@ describe('application installation settings', () => {
       await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.principals\./ })).toBeNull()
     })
+  })
+
+  it('leaves the breadcrumb and Back link to the tabs when they carry the header', async () => {
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: { ...settings, admin_page: true }, reload: () => {}, headed: true }} />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await waitFor(() => expect(document.querySelector('.rp-platform-settings')).not.toBeNull())
+    expect(screen.queryByRole('navigation', { name: 'apps.breadcrumb' })).toBeNull()
+    expect(screen.queryByRole('link', { name: /appPlatform.settings.back/ })).toBeNull()
   })
 
   it('does not call the server for an invalid installation identifier', async () => {

@@ -699,8 +699,8 @@ export default function AppPlatformSettingsPage() {
     }
   }
   return <Space className="rp-platform-settings" orientation="vertical" size={16} style={{ width: '100%' }}>
-    <AppsBreadcrumb name={copy.name} />
-    <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>
+    {!shared?.headed && <AppsBreadcrumb name={copy.name} />}
+    {!shared?.headed && <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>}
     <Typography.Title level={4} style={{ margin: 0 }}>{t('appPlatform.settings.title')}</Typography.Title>
     {error && <Alert type="error" showIcon title={error} action={<Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={() => reload()}>{t('common.retry')}</Button>} />}
     <Card>
