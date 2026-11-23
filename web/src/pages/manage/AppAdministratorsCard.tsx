@@ -62,7 +62,7 @@ export default function AppAdministratorsCard({ installation, adminPage = true }
     <Typography.Paragraph type="secondary">{t('appAdmin.admins.portalAdminsNote')}</Typography.Paragraph>
     <LoadGate loading={admins === null && !error} error={error} onRetry={() => { setAdmins(null); setAttempt(value => value + 1) }} minHeight={120}>
       <CardTable<AppAdmin> rowKey="username" size="small" pagination={false} dataSource={admins ?? []}
-        locale={{ emptyText: t('appAdmin.admins.empty') }}
+        locale={{ emptyText: <Typography.Text type="secondary">{t('appAdmin.admins.empty')}</Typography.Text> }}
         columns={([
           { title: t('appAdmin.admins.user'), key: 'user', render: (_: unknown, admin) => <div>
             <div>{label(admin)}</div>

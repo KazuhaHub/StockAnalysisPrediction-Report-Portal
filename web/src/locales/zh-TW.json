@@ -4107,6 +4107,7 @@
   "apps.deleteConfirm": "解除安裝該應用？",
   "captcha.providerUnsupported": "本門戶配置了第三方驗證碼服務，但當前版本沒有內建它的指令碼。請管理員改用內建圖形驗證碼。",
   "err.app_platform_unavailable": "應用管理暫時無法使用。",
+  "err.app_platform_not_found": "應用不存在。",
   "err.app_platform_invalid_request": "應用管理請求無效。",
   "err.app_platform_origin_denied": "該應用管理請求來自不受信任的來源。",
   "err.app_platform_zip_required": "離線包上傳必須使用 ZIP 封存檔。",

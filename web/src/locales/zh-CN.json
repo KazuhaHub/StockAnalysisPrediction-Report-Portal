@@ -4107,6 +4107,7 @@
   "apps.deleteConfirm": "卸载该应用？",
   "captcha.providerUnsupported": "本门户配置了第三方验证码服务，但当前版本没有内置它的脚本。请管理员改用内置图形验证码。",
   "err.app_platform_unavailable": "应用管理暂时不可用。",
+  "err.app_platform_not_found": "应用不存在。",
   "err.app_platform_invalid_request": "应用管理请求无效。",
   "err.app_platform_origin_denied": "该应用管理请求来自不受信任的来源。",
   "err.app_platform_zip_required": "离线包上传必须使用 ZIP 归档。",
