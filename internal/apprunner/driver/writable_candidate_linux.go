@@ -105,7 +105,7 @@ func (c WritableCandidateLaunch) Snapshot() (WritableCandidateLaunchSnapshot, er
 	if state.closed || state.plan.writable == nil {
 		return zero, ErrContainerUncertain
 	}
-	snapshot := WritableCandidateLaunchSnapshot{Launch: state.snapshot, Binding: *state.plan.writable, SandboxProfile: WritableCandidateSandboxProfile, SeccompSHA256: DataWriterPolicySHA256()}
+	snapshot := WritableCandidateLaunchSnapshot{Launch: state.snapshot, Binding: *state.plan.writable, SandboxProfile: WritableCandidateSandboxProfile, SeccompSHA256: seccompSHAOf(state.plan)}
 	if !validWritableCandidateSnapshot(snapshot) {
 		return zero, ErrContainerUncertain
 	}

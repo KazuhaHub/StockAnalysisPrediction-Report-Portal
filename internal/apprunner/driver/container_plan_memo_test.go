@@ -83,7 +83,7 @@ func TestPlanMemoKeyCoversEveryLeafField(t *testing.T) {
 		"writable?", "writable.EffectID", "writable.ClaimID", "writable.PayloadSHA256", "writable.OwnershipSHA256", "writable.DataReceiptSHA256", "writable.WriterReceiptSHA256",
 		"updateStart?", "updateStart.EffectID", "updateStart.ClaimID", "updateStart.PayloadSHA256", "updateStart.OwnershipSHA256", "updateStart.CheckpointReceiptSHA256", "updateStart.PolicyRevision",
 		"migration?", "migration.EffectID", "migration.ClaimID", "migration.PayloadSHA256", "migration.OwnershipSHA256", "migration.CheckpointReceiptSHA256",
-		"profile", "cpuset"}
+		"profile", "seccomp", "cpuset"}
 	var found []string
 	planLeaves(t, reflect.TypeOf(containerPlan{}), "", true, &found)
 	slices.Sort(covered)

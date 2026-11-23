@@ -61,6 +61,10 @@ type containerPlan struct {
 	updateStart *UpdateStartBinding
 	migration   *MigrationBinding
 	profile     string
+	// seccomp names the policy of the closed accepted set (see seccompPolicies) whose option the body carries.
+	// Builders always produce the current one; an older one comes only from selectRecordedPlan, so it can
+	// observe, stop and remove a container that already exists but never create or start one.
+	seccomp string
 	// cpuset is the app CPU list the plan was built for. The body must pin exactly this set (or none, when it is
 	// empty), so a body edited after planning, digest recomputed, is not the plan.
 	cpuset string
@@ -306,6 +310,10 @@ func validContainerPlanUncached(plan containerPlan) bool {
 		!validAppContainerLogConfig(request.HostConfig.LogConfig.Config, request.HostConfig.LogConfig.Type) {
 		return false
 	}
+	policy, known := seccompPolicyNamed(plan.seccomp)
+	if !known || !policy.live || len(request.HostConfig.SecurityOpt) != 2 || request.HostConfig.SecurityOpt[0] != "no-new-privileges:true" || request.HostConfig.SecurityOpt[1] != policy.option {
+		return false
+	}
 	labels := ownerContainerLabels(plan.owner)
 	if plan.migration == nil && (len(request.Entrypoint) > 0 || len(request.Cmd) > 0) {
 		return false
@@ -335,6 +343,7 @@ func validContainerPlanUncached(plan containerPlan) bool {
 		}
 		labels = updateStartLabels(plan.owner, *plan.updateStart, profile)
 	}
+	labels[containerLabelPrefix+"seccomp-profile"] = policy.name
 	for name, value := range labels {
 		if request.Labels[name] != value {
 			return false
@@ -346,8 +355,60 @@ func validContainerPlanUncached(plan containerPlan) bool {
 	}
 	policySHA := request.Labels[containerLabelPrefix+"policy-sha256"]
 	delete(request.Labels, containerLabelPrefix+"policy-sha256")
-	policy, err := json.Marshal(request)
-	return err == nil && policySHA == containerHash(policy)
+	digested, err := json.Marshal(request)
+	return err == nil && policySHA == containerHash(digested)
+}
+
+// withSeccomp is the plan the same builder would have produced under another policy of the accepted set: the
+// option and the profile label are swapped and the policy digest and body digest recomputed the way every
+// builder computes them. It returns the plan unchanged if the policy cannot be applied.
+func withSeccomp(plan containerPlan, policy seccompPolicy) containerPlan {
+	var request containerCreate
+	if json.Unmarshal(plan.body, &request) != nil || len(request.HostConfig.SecurityOpt) != 2 || request.Labels == nil {
+		return plan
+	}
+	request.HostConfig.SecurityOpt = []string{request.HostConfig.SecurityOpt[0], policy.option}
+	request.Labels[containerLabelPrefix+"seccomp-profile"] = policy.name
+	delete(request.Labels, containerLabelPrefix+"policy-sha256")
+	digested, err := json.Marshal(request)
+	if err != nil {
+		return plan
+	}
+	request.Labels[containerLabelPrefix+"policy-sha256"] = containerHash(digested)
+	body, err := json.Marshal(request)
+	if err != nil {
+		return plan
+	}
+	plan.body, plan.bodySHA, plan.seccomp = body, containerHash(body), policy.name
+	return plan
+}
+
+// selectRecordedPlan picks, from the digest the journal recorded for a container, the plan that container was
+// created from. It never tries plans against a container: a digest that matches no live-accepted policy leaves
+// the current plan, which the usual checks then refuse. An empty digest means a start that records nothing yet.
+func selectRecordedPlan(base containerPlan, recordedPolicySHA256 string) containerPlan {
+	if recordedPolicySHA256 == "" || recordedPolicySHA256 == base.bodySHA || !containerSHA.MatchString(recordedPolicySHA256) {
+		return base
+	}
+	for _, policy := range seccompPolicies {
+		if !policy.live || policy.name == base.seccomp {
+			continue
+		}
+		if variant := withSeccomp(base, policy); variant.bodySHA == recordedPolicySHA256 && validContainerPlan(variant) {
+			return variant
+		}
+	}
+	return base
+}
+
+// validUpdateStartSourcePolicy says the recorded digest is one of the plans selectRecordedPlan can produce.
+func validUpdateStartSourcePolicy(recorded string, base containerPlan) bool {
+	return recorded != "" && selectRecordedPlan(base, recorded).bodySHA == recorded
+}
+
+// currentSeccompPlan refuses a plan built under a historical policy before any effectful request.
+func currentSeccompPlan(plan containerPlan) bool {
+	return len(seccompPolicies) > 0 && plan.seccomp == seccompPolicies[0].name
 }
 
 // The proxy environment of a container whose release declares network.proxy.
@@ -440,7 +501,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	if err != nil || len(body) > 32768 {
 		return empty, ErrInvalidResponse
 	}
-	return containerPlan{name: "portal-app-" + owner.ResourceID, body: body, bodySHA: containerHash(body), owner: owner, cpuset: roots.AppCPUs}, nil
+	return containerPlan{name: "portal-app-" + owner.ResourceID, body: body, bodySHA: containerHash(body), owner: owner, seccomp: candidateSeccompProfile, cpuset: roots.AppCPUs}, nil
 }
 
 // createCandidateContainerHTTP is deliberately package-private and unwired from
@@ -448,7 +509,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 // authority and pinned native mount/quota identities. A lost response never
 // retries or adopts a same-named container. No start/remove action is implicit.
 func createCandidateContainerHTTP(ctx context.Context, client *http.Client, plan containerPlan) (string, error) {
-	if !validContainerPlan(plan) {
+	if !validContainerPlan(plan) || !currentSeccompPlan(plan) {
 		return "", ErrInvalidResponse
 	}
 	if err := ctx.Err(); err != nil {
