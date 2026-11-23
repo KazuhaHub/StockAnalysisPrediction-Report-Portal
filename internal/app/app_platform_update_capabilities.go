@@ -152,11 +152,11 @@ func (s *Server) observePlatformProxyCheck(ctx context.Context, e migExec, insta
 // release and returns its id ("" when no proxy grant is carried). loadPlatformProxyGrant proves a granted row
 // against the installation's latest consumed proxy plan for the active release, so an update to another release
 // needs a plan of its own for the grant to stay usable. The plan changes nothing: it names the policy the row
-// already holds (no host or pin added or removed), it follows the convention of a real plan (the policy revision
-// and installation revision it was made at, which are the source's), and it says in carried_from_plan which plan
-// it carries. It is written in the transaction that activates the update the administrator confirmed with the
+// already holds (no host or pin added or removed) and has the shape of a real plan, so an older binary decodes it
+// (the policy revision and installation revision are the ones it was made at, which are the source's). The audit
+// row of the update names it and the plan it carries. It is written in the transaction that activates the update the administrator confirmed with the
 // retained grant in its review, with the actor and trust facts of that update plan.
-func platformCarryProxyPlan(e migExec, installation, updatePlanID, release string, generation, sourcePolicy int64, selection []platformSelectedCapability, now int64) (string, error) {
+func platformCarryProxyPlan(e migExec, installation, updatePlanID, release string, generation, sourcePolicy int64, selection []platformSelectedCapability, now int64) (string, string, error) {
 	var stored string
 	for _, c := range selection {
 		if c.capability == appplatform.ProxyCapability && c.granted {
@@ -164,21 +164,21 @@ func platformCarryProxyPlan(e migExec, installation, updatePlanID, release strin
 		}
 	}
 	if stored == "" {
-		return "", nil
+		return "", "", nil
 	}
 	parsed, err := appplatform.ParseProxyPolicy([]byte(stored))
 	if err != nil {
-		return "", errAppPlatformStageEvidence
+		return "", "", errAppPlatformStageEvidence
 	}
 	previous, err := loadPlatformLatestProxyPlan(e, installation)
 	if err != nil || previous.plan.Policy != stored {
-		return "", errAppPlatformStageEvidence
+		return "", "", errAppPlatformStageEvidence
 	}
 	var appID, publisher, epoch, scope, username, created, authority string
 	var installationRevision, trustRevision, accountGeneration int64
 	if err := e.queryRow(`SELECT app_id,publisher_id,controller_epoch,actor_scope,COALESCE(username,''),account_created,account_generation,authority_fingerprint,installation_revision,trust_revision FROM app_platform_review_plans WHERE id=?`, updatePlanID).
 		Scan(&appID, &publisher, &epoch, &scope, &username, &created, &accountGeneration, &authority, &installationRevision, &trustRevision); err != nil {
-		return "", err
+		return "", "", err
 	}
 	plan := platformProxyPlan{
 		Format: platformProxyReviewFormatPins, InstallationID: installation, AppID: appID, PublisherID: publisher,
@@ -188,30 +188,29 @@ func platformCarryProxyPlan(e migExec, installation, updatePlanID, release strin
 		HostsAdded: []string{}, HostsRemoved: []string{}, DailyBytesOld: parsed.Policy.DailyBytes, DailyBytesNew: parsed.Policy.DailyBytes,
 		Runner: transport.NewProxyProfile(), ActorAuthority: authority,
 		PinsAdded: []appplatform.ProxyPin{}, PinsRemoved: []appplatform.ProxyPin{}, PinsChanged: []platformProxyPinChange{},
-		RunnerPins:      append([]appplatform.ProxyPin{}, parsed.Policy.Pins...),
-		CarriedFromPlan: previous.id,
+		RunnerPins: append([]appplatform.ProxyPin{}, parsed.Policy.Pins...),
 	}
 	raw, err := json.Marshal(plan)
 	if err != nil || len(raw) > 65536 {
-		return "", errAppPlatformStageEvidence
+		return "", "", errAppPlatformStageEvidence
 	}
 	if _, err := parsePlatformProxyPlan(string(raw)); err != nil {
-		return "", errAppPlatformStageEvidence
+		return "", "", errAppPlatformStageEvidence
 	}
 	id, err := platformNewUUID()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	_, err = e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
 		VALUES(?,?,?,?,'update',?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, installation, appID, publisher, release, installationRevision, sourcePolicy, trustRevision, epoch, scope, username, created, accountGeneration, authority,
 		platformDigest(raw), string(raw), now, now, now, now)
-	return id, err
+	return id, previous.id, err
 }
 
 // platformAuditUpdateKept records which optional grants an update kept, so that a carried grant (and the plan that
 // backs it under the new release) can be told from one an administrator reviewed.
-func platformAuditUpdateKept(e migExec, installation, updatePlanID, carriedPlan string, selection []platformSelectedCapability, now int64) error {
+func platformAuditUpdateKept(e migExec, installation, updatePlanID, carriedPlan, carriedFrom string, selection []platformSelectedCapability, now int64) error {
 	kept := []string{}
 	for _, c := range selection {
 		if c.granted && platformUpdateRetainable(c.capability) {
@@ -221,7 +220,7 @@ func platformAuditUpdateKept(e migExec, installation, updatePlanID, carriedPlan 
 	if len(kept) == 0 {
 		return nil
 	}
-	detail, err := json.Marshal(map[string]any{"update_plan_id": updatePlanID, "kept_capabilities": kept, "carried_proxy_plan_id": carriedPlan})
+	detail, err := json.Marshal(map[string]any{"update_plan_id": updatePlanID, "kept_capabilities": kept, "carried_proxy_plan_id": carriedPlan, "carried_from_proxy_plan_id": carriedFrom})
 	if err != nil {
 		return err
 	}
@@ -230,18 +229,21 @@ func platformAuditUpdateKept(e migExec, installation, updatePlanID, carriedPlan 
 	return err
 }
 
-// platformDeclinedMatches says whether a stored decline list is the install-time one or that list with only
-// retainable capabilities left out, the ones an update kept. Each omitted capability must have a grant row: an
+// platformDeclinedMatches says whether a stored decline list is the install-time one or, for an update, that list
+// with exactly the capabilities the update's plan lists as kept left out. Each must have a grant row: an
 // administrator may switch principals.read off again afterwards, so the row's state is not part of the proof,
 // but a decline list cannot omit a capability the installation never held.
-func platformDeclinedMatches(e migExec, installation string, actual, install []string) bool {
-	if slices.Equal(actual, install) {
-		return true
+func platformDeclinedMatches(e migExec, installation string, actual, install, kept []string, update bool) bool {
+	// An install keeps nothing, so its list is exactly the install one; an update's list differs from it by
+	// exactly what its own plan kept.
+	if !update {
+		return slices.Equal(actual, install)
 	}
 	rows, err := readPlatformCapabilityRows(e, installation)
 	if err != nil {
 		return false
 	}
+	omitted := []string{}
 	next := 0
 	for _, c := range install {
 		if next < len(actual) && actual[next] == c {
@@ -251,6 +253,9 @@ func platformDeclinedMatches(e migExec, installation string, actual, install []s
 		if !platformUpdateRetainable(c) || !slices.ContainsFunc(rows, func(r platformCapabilityRow) bool { return r.name == c }) {
 			return false
 		}
+		omitted = append(omitted, c)
 	}
-	return next == len(actual)
+	sortedKept := slices.Clone(kept)
+	slices.Sort(sortedKept)
+	return next == len(actual) && slices.Equal(omitted, sortedKept)
 }

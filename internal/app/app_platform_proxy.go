@@ -65,9 +65,6 @@ type platformProxyPlan struct {
 	PinsRemoved []appplatform.ProxyPin
 	PinsChanged []platformProxyPinChange
 	RunnerPins  []appplatform.ProxyPin
-	// CarriedFromPlan is set only on a plan an update wrote to carry a grant under a new release (never on an
-	// administrator's review): the id of the proxy plan whose policy it carries. 1-dev.2 only.
-	CarriedFromPlan string
 }
 
 // platformProxyPinChange is a pin whose address or port changed, under the same host name.
@@ -127,7 +124,6 @@ type platformProxyPlanWire2 struct {
 	Runner               transport.ProxyProfile   `json:"runner"`
 	RunnerPins           []appplatform.ProxyPin   `json:"runner_pins"`
 	ActorAuthority       string                   `json:"actor_authority"`
-	CarriedFromPlan      string                   `json:"carried_from_plan,omitempty"`
 }
 
 func (p platformProxyPlan) wire1() platformProxyPlanWire1 {
@@ -142,7 +138,7 @@ func (p platformProxyPlan) wire2() platformProxyPlanWire2 {
 		InstallationRevision: p.InstallationRevision, PolicyRevision: p.PolicyRevision, TrustRevision: p.TrustRevision, ControllerEpoch: p.ControllerEpoch,
 		ReleaseSHA256: p.ReleaseSHA256, Capability: p.Capability, PreviousPolicySHA256: p.PreviousPolicySHA256, Policy: p.Policy, PolicySHA256: p.PolicySHA256,
 		HostsAdded: p.HostsAdded, HostsRemoved: p.HostsRemoved, PinsAdded: p.PinsAdded, PinsRemoved: p.PinsRemoved, PinsChanged: p.PinsChanged,
-		DailyBytesOld: p.DailyBytesOld, DailyBytesNew: p.DailyBytesNew, Runner: p.Runner, RunnerPins: p.RunnerPins, ActorAuthority: p.ActorAuthority, CarriedFromPlan: p.CarriedFromPlan}
+		DailyBytesOld: p.DailyBytesOld, DailyBytesNew: p.DailyBytesNew, Runner: p.Runner, RunnerPins: p.RunnerPins, ActorAuthority: p.ActorAuthority}
 }
 
 func (w platformProxyPlanWire1) plan() platformProxyPlan {
@@ -157,7 +153,7 @@ func (w platformProxyPlanWire2) plan() platformProxyPlan {
 		InstallationRevision: w.InstallationRevision, PolicyRevision: w.PolicyRevision, TrustRevision: w.TrustRevision, ControllerEpoch: w.ControllerEpoch,
 		ReleaseSHA256: w.ReleaseSHA256, Capability: w.Capability, PreviousPolicySHA256: w.PreviousPolicySHA256, Policy: w.Policy, PolicySHA256: w.PolicySHA256,
 		HostsAdded: w.HostsAdded, HostsRemoved: w.HostsRemoved, PinsAdded: w.PinsAdded, PinsRemoved: w.PinsRemoved, PinsChanged: w.PinsChanged,
-		DailyBytesOld: w.DailyBytesOld, DailyBytesNew: w.DailyBytesNew, Runner: w.Runner, RunnerPins: w.RunnerPins, ActorAuthority: w.ActorAuthority, CarriedFromPlan: w.CarriedFromPlan}
+		DailyBytesOld: w.DailyBytesOld, DailyBytesNew: w.DailyBytesNew, Runner: w.Runner, RunnerPins: w.RunnerPins, ActorAuthority: w.ActorAuthority}
 }
 
 // MarshalJSON is the canonical encoding of the plan's own format.
@@ -227,9 +223,6 @@ func parsePlatformProxyPlan(raw string) (platformProxyPlan, error) {
 			return platformProxyPlan{}, fail
 		}
 		policyPins = parsed.Policy.Pins
-	}
-	if plan.CarriedFromPlan != "" && !platformValidUUID(plan.CarriedFromPlan) {
-		return platformProxyPlan{}, fail
 	}
 	if plan.Format == platformProxyReviewFormat {
 		// A 1-dev.1 plan predates pins: nothing in it binds a pin to the runner's entries.

@@ -180,11 +180,17 @@ func platformDeclinedCapabilities(selection []platformSelectedCapability) []stri
 }
 
 func verifyPlatformInstallCapabilityRows(e migExec, installation string, m appplatform.Manifest, p platformInstallProjection, active bool, policy int64, planID string, overlay platformNetworkRowOverlay, fail error) error {
+	return verifyPlatformCapabilityRowsOf(e, installation, m, p, nil, false, active, policy, planID, overlay, fail)
+}
+
+// verifyPlatformCapabilityRowsOf verifies the rows of an install plan (update false: the decline list is exactly the
+// install one) or of an update's target projection (update true: it may omit exactly the plan's kept capabilities).
+func verifyPlatformCapabilityRowsOf(e migExec, installation string, m appplatform.Manifest, p platformInstallProjection, kept []string, update, active bool, policy int64, planID string, overlay platformNetworkRowOverlay, fail error) error {
 	expected, err := platformInstallCapabilitySelection(m, p.Runtime)
 	if err != nil || policy < 1 || !platformValidUUID(planID) {
 		return fail
 	}
-	if !platformDeclinedMatches(e, installation, p.DeclinedCapabilities, platformDeclinedCapabilities(expected)) {
+	if !platformDeclinedMatches(e, installation, p.DeclinedCapabilities, platformDeclinedCapabilities(expected), kept, update) {
 		return fail
 	}
 	return verifyPlatformSelectedCapabilityRows(e, installation, expected, active, policy, planID, overlay, fail)

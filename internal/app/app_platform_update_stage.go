@@ -396,7 +396,7 @@ func (s *Store) activatePlatformStaticUpdate(ctx context.Context, expected platf
 			return platformOperationLease{}, err
 		}
 	}
-	if err := platformAuditUpdateKept(e, expected.installationID, admitted.planID, "", selection, now); err != nil {
+	if err := platformAuditUpdateKept(e, expected.installationID, admitted.planID, "", "", selection, now); err != nil {
 		return platformOperationLease{}, err
 	}
 	if _, err := e.exec(`UPDATE app_platform_operations SET stage='complete',state_revision=?,row_revision=row_revision+1,completed_ms=?,lease_owner=NULL,lease_until_ms=NULL,updated_ms=? WHERE id=? AND stage='activate' AND state_revision=? AND row_revision=?`,

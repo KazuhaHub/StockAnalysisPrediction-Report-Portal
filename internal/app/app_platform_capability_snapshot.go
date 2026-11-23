@@ -30,6 +30,8 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		return fail
 	}
 	var projection platformInstallProjection
+	var keptCapabilities []string
+	isUpdate := false
 	switch action {
 	case "install":
 		if json.Unmarshal([]byte(raw), &projection) != nil {
@@ -80,6 +82,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 				return fail
 			}
 			projection = update.Target
+			keptCapabilities, isUpdate = update.KeptCapabilities, true
 		default:
 			return fail
 		}
@@ -198,5 +201,5 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	if installRequirementsForTarget(m, projection.Format, projection.Runtime) != nil {
 		return fail
 	}
-	return verifyPlatformInstallCapabilityRows(e, installation, m, projection, true, policy, planID, overlay, fail)
+	return verifyPlatformCapabilityRowsOf(e, installation, m, projection, keptCapabilities, isUpdate, true, policy, planID, overlay, fail)
 }

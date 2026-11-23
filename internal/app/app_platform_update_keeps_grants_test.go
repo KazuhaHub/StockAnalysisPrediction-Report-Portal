@@ -209,7 +209,11 @@ func TestPlatformUpdateKeepsOptionalProxyGrantAcrossActivationSQLite(t *testing.
 	}
 	// The synthesized plan is marked, follows the convention of a real plan, and is audited.
 	carried, carriedID := loadPlatformLatestProxyPlanFor(t, s, lease.installationID)
-	if carried.CarriedFromPlan == "" || carried.PolicyRevision != 2 || carried.Generation != 2 || carried.Policy != kept.policy || carried.ReleaseSHA256 != applied.start.plan.TargetReleaseSHA256 {
+	// It is identical in shape to a real plan, so an older binary can still decode it; the audit row names it.
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE id=? AND plan_json LIKE '%carried%'`, carriedID) != 0 {
+		t.Fatal("the carried plan has a field a real plan lacks")
+	}
+	if carried.PolicyRevision != 2 || carried.Generation != 2 || carried.Policy != kept.policy || carried.ReleaseSHA256 != applied.start.plan.TargetReleaseSHA256 {
 		t.Fatalf("carried plan %+v", carried)
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_kept_capabilities' AND target_id=? AND detail LIKE ?`, lease.installationID, "%"+carriedID+"%") != 1 {
@@ -277,6 +281,68 @@ func TestPlatformStaticUpdateKeepsPrincipalsReadAcrossTwoUpdatesSQLite(t *testin
 		}
 		if binding, err := s.inspectPlatformLaunchAccess(reader, id); err != nil || binding.releaseSHA != target.sha256 {
 			t.Fatalf("launch after update %d: %v", n+1, err)
+		}
+	}
+}
+
+// A decline list may omit only what the update's own plan says it kept; an install plan keeps nothing.
+func TestPlatformDeclinedMatchesRequiresTheKeptListSQLite(t *testing.T) {
+	s, _, _, id := platformPrincipalsFixtureAdmin(t, false)
+	e := s.st.poolExec()
+	install := []string{"principals.read"}
+	if !platformDeclinedMatches(e, id, nil, install, []string{"principals.read"}, true) {
+		t.Fatal("an omission the plan lists as kept was refused")
+	}
+	if platformDeclinedMatches(e, id, nil, install, nil, true) {
+		t.Fatal("an omission not listed in kept_capabilities was accepted")
+	}
+	if platformDeclinedMatches(e, id, install, install, []string{"principals.read"}, true) {
+		t.Fatal("a kept capability that is still declined was accepted")
+	}
+	if platformDeclinedMatches(e, id, nil, install, []string{"principals.read"}, false) {
+		t.Fatal("an install plan with an omission was accepted")
+	}
+	if !platformDeclinedMatches(e, id, install, install, nil, false) {
+		t.Fatal("the plain install decline list was refused")
+	}
+}
+
+// The runner check is wired into the scheduler's activation path, and asked before the boot probe so its
+// time cannot use up the freshness window of the boot evidence.
+func TestPlatformActivateUpdateStartChecksTheRunnerBeforeTheBootProbeSQLite(t *testing.T) {
+	for _, listed := range []bool{false, true} {
+		var kept keptProxyGrant
+		useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
+		s, lease, intent, endpoint, observation := platformWritableUpdateStartRegistrationCommitFixture(t, false)
+		registered, err := s.commitPlatformUpdateStartRegistration(context.Background(), lease, intent, endpoint, observation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runner := &platformProxyRunner{profile: transport.NewProxyProfile()}
+		if listed {
+			runner.servePins(pinQuotes)
+		} else {
+			runner.servePins(pinOther)
+		}
+		observed := false
+		s.platformObserveProxy = func(ctx context.Context, e platformRuntimeEndpoint) (transport.ProxyRunnerState, error) {
+			observed = true
+			return runner.observe(ctx, e)
+		}
+		probe := func(context.Context, platformOperationLease, platformRuntimeEndpoint) (platformUpdateStartBootObservation, error) {
+			if !observed {
+				t.Fatal("the boot probe ran before the runner was asked")
+			}
+			applied, boot := platformUpdateStartBootFixture(t, s, registered, endpoint)
+			applied.registration.Close()
+			return boot, nil
+		}
+		_, err = s.activatePlatformUpdateStartWith(context.Background(), registered, endpoint, probe)
+		if listed && err != nil {
+			t.Fatal("a listed pin refused the activation:", err)
+		}
+		if !listed && !errors.Is(err, transport.ErrProxyUnsupported) {
+			t.Fatal("activatePlatformUpdateStart did not check the runner:", err)
 		}
 	}
 }
