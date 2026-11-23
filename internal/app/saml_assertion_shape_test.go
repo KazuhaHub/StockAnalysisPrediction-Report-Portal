@@ -19,8 +19,8 @@ import (
 	dsig "github.com/russellhaering/goxmldsig"
 )
 
-// These tests pin GO-2026-6909, which crewjam/saml v0.5.1 ships unfixed and the patched copy under
-// third_party/crewjam-saml closes. They drive crewjam's ServiceProvider directly with a Response the
+// These tests pin GO-2026-6909, which crewjam/saml v0.5.1 shipped unfixed and v0.5.2 fixes, together
+// with the namespace binding of attribute and authentication statements. They drive crewjam's ServiceProvider directly with a Response the
 // test IdP really signed, because both defects only appear after signature verification has passed:
 // a signed assertion without a Subject panicked in validateAssertion, and a signed assertion whose
 // Subject carried a NameID in a foreign namespace had that foreign value accepted as the subject.

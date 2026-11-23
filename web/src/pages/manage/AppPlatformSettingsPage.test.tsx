@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useCallback, useState } from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
+import AppInstallationTabs from './AppInstallationTabs'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 const translate = vi.hoisted(() => (key: string, options?: Record<string, unknown>) => options ? `${key}:${JSON.stringify(options)}` : key)
@@ -89,6 +91,63 @@ describe('application installation settings', () => {
     expect(screen.getByRole('link', { name: 'appPlatform.settings.openApplication' }).getAttribute('href')).toBe(`/apps/v2/${installation}`)
     expect(screen.getByRole('link', { name: /appPlatform\.settings\.lifecycleActions/ }).getAttribute('href')).toBe(`/manage/apps?installation=${installation}`)
     expect(apiMock.get).toHaveBeenCalledWith(`/api/admin/app-platform/installations/${installation}/settings`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
+
+  describe('app administrators (delegated admin page)', () => {
+    const admins = `${root}/installations/${installation}/app-admins`
+    const serve = (value: typeof settings & { admin_page?: boolean }) => apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) return value
+      if (url.endsWith('/app-admins')) return { admins: [{ username: 'ada', displayName: 'Ada Lovelace', grantedBy: 'root', grantedAt: 1767268800000 }] }
+      return { bindings: [] }
+    })
+
+    it('lists the delegated administrators in the settings tab of an app that has an admin page', async () => {
+      serve({ ...settings, admin_page: true })
+      mount()
+      expect(await screen.findByText('Ada Lovelace')).toBeTruthy()
+      expect(screen.getByText('appAdmin.admins.title')).toBeTruthy()
+      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
+    })
+
+    it('keeps the administrators card when the app has no admin page, so stale delegations can be seen and revoked', async () => {
+      serve({ ...settings, admin_page: false })
+      mount()
+      expect(await screen.findByText('Ada Lovelace')).toBeTruthy()
+      expect(screen.getByText('appAdmin.admins.title')).toBeTruthy()
+      expect(screen.getByText('appAdmin.admins.noAdminPage')).toBeTruthy()
+      expect(screen.queryByRole('button', { name: /appAdmin.admins.add/ })).toBeNull()
+      expect(screen.getByRole('button', { name: /appAdmin.admins.remove/ })).toBeTruthy()
+      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
+    })
+  })
+
+  describe('under the installation tabs', () => {
+    const admins = `${root}/installations/${installation}/app-admins`
+    const settingsUrl = `${root}/installations/${installation}/settings`
+    const mountTabs = () => render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<AppInstallationTabs />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    const serve = () => apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) return { ...settings, admin_page: true }
+      if (url.endsWith('/app-admins')) return { admins: [] }
+      return { bindings: [] }
+    })
+
+    it('makes one settings request for the tab bar and the page together', async () => {
+      serve()
+      mountTabs()
+      expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
+      await screen.findByText('appAdmin.admins.empty')
+      expect(screen.getAllByRole('tab')).toHaveLength(2)
+      expect(apiMock.get.mock.calls.filter(([url]) => url === settingsUrl)).toHaveLength(1)
+      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
+    })
   })
 
   describe('principals.read grant (doc 181 section 4)', () => {
@@ -181,6 +240,79 @@ describe('application installation settings', () => {
       await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.principals\./ })).toBeNull()
     })
+  })
+
+  it('leaves the breadcrumb and Back link to the tabs when they carry the header', async () => {
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: { ...settings, admin_page: true }, reload: () => {}, replace: () => {}, headed: true }} />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await waitFor(() => expect(document.querySelector('.rp-platform-settings')).not.toBeNull())
+    expect(screen.queryByRole('navigation', { name: 'apps.breadcrumb' })).toBeNull()
+    expect(screen.queryByRole('link', { name: /appPlatform.settings.back/ })).toBeNull()
+  })
+
+  it('hands a quiet re-read up to the tabs, so switching tabs and back does not show the spent action again', async () => {
+    const user = userEvent.setup()
+    const plan = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    const operation = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    let resolved = false
+    const current = () => ({ ...settings, admin_page: true, desired_state: 'disabled', phase: 'recovery_required', repair_eligible: resolved, resolve_keep_data_eligible: !resolved })
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? current() : { bindings: [] })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) return { plan_id: plan, plan_sha256: 'c'.repeat(64), expires_ms: String(Date.now() + 900000), review: { action: 'resolve_keep_data', installation_id: installation, operation_id: operation, operation_action: 'import_data', release_sha256: release, observed_bytes: '1', checkpoint_recovery_set_id: operation, abandoned_effects: [], keeps_data: true, keeps_checkpoint: true, runs_rollback: false } }
+      resolved = true
+      return { resolved: true, operation_id: operation, installation_id: installation, abandoned_effects: '0' }
+    })
+    const replaced: { resolve_keep_data_eligible?: boolean }[] = []
+    function Host() {
+      const [shared, setShared] = useState<Record<string, unknown>>(current())
+      const replace = useCallback((next: Record<string, unknown>) => { replaced.push(next); setShared(next) }, [])
+      return <Outlet context={{ settings: shared, reload: () => {}, replace, headed: true }} />
+    }
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Host />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.resolve' }))
+    await screen.findByRole('dialog')
+    await user.click(screen.getByRole('checkbox', { name: 'appPlatform.settings.resolveConfirm' }))
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.resolveAction' }))
+    expect(await screen.findByRole('button', { name: 'appPlatform.settings.repair' })).toBeTruthy()
+    await waitFor(() => expect(replaced.map(value => value.resolve_keep_data_eligible)).toEqual([false]))
+    expect(screen.queryByRole('button', { name: 'appPlatform.settings.resolve' })).toBeNull()
+  })
+
+  it('asks the tabs to read again too when their first read failed and the page retries', async () => {
+    const user = userEvent.setup()
+    let reads = 0
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings') && ++reads === 1) throw new Error('down')
+      return url.endsWith('/settings') ? settings : { bindings: [] }
+    })
+    const reload = vi.fn()
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: null, reload, replace: () => {}, headed: false }} />}>
+            <Route index element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await user.click((await screen.findAllByRole('button', { name: /common\.retry/ }))[0])
+    expect(reload).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(document.querySelector('.rp-platform-settings')).not.toBeNull())
   })
 
   it('does not call the server for an invalid installation identifier', async () => {

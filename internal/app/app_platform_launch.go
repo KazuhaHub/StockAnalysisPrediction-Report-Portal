@@ -189,7 +189,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	if desired != "enabled" || phase != "ready" || installationEpoch != epoch || runtime.Valid || generation < 1 || policy < 1 {
 		return fail("installation-state")
 	}
-	if err := platformLaunchAudience(e, account, installationID); err != nil {
+	if err := platformSurfaceAccess(e, session, account, installationID); err != nil {
 		return fail("audience")
 	}
 	var releaseSHA, evidence string
@@ -257,6 +257,9 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	parsed, err := appplatform.ParseDescriptor(raw)
 	if err != nil || parsed.Manifest.Backend != nil || platformInstallRequirements(parsed.Manifest) != nil {
 		return fail("requirements")
+	}
+	if session.adminSurface && len(parsed.Manifest.Presentation.AdminRoutes) == 0 {
+		return fail("admin-page")
 	}
 
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, releaseSHA, epoch, policy, parsed.Manifest); err != nil {

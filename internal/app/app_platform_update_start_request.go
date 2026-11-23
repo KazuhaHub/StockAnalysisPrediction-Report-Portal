@@ -121,8 +121,8 @@ func signPlatformUpdateStartBackendRequest(a platformWritableBackendAccess, seed
 	if assert != nil {
 		assertion, err = assert(signer, a, time.Now())
 	} else {
-		assertion, err = signer.Sign(
-			method, path, body, a.viewer, time.Now())
+		assertion, err = platformSignViewerAssertion(
+			signer, a.admin, method, path, body, a.viewer, time.Now())
 	}
 	if err != nil {
 		return nil, nil, "", zero, err

@@ -17,6 +17,12 @@ vi.mock('./AppDetailPage', () => stub('detail'))
 vi.mock('./AppAccessPage', () => stub('access'))
 vi.mock('./AppCredentialsPage', () => stub('credentials'))
 vi.mock('./AppPlatformSettingsPage', () => stub('settings'))
+vi.mock('./AppAdminTab', () => stub('admin'))
+// The installation tabs wrapper only frames its two child routes here.
+vi.mock('./AppInstallationTabs', async () => {
+  const { Outlet } = await import('react-router')
+  return { default: function Tabs() { return <Outlet /> } }
+})
 
 function Where() {
   const loc = useLocation()
@@ -35,6 +41,7 @@ const subRoutes: [string, string][] = [
   ['/manage/apps/builtin%3Aquotes/access', 'access:builtin:quotes'],
   ['/manage/apps/notes/credentials', 'credentials:notes'],
   ['/manage/apps/installations/33333333-3333-4333-8333-333333333333', 'settings:33333333-3333-4333-8333-333333333333'],
+  ['/manage/apps/installations/33333333-3333-4333-8333-333333333333/admin', 'admin:33333333-3333-4333-8333-333333333333'],
 ]
 
 describe('the apps console routes', () => {

@@ -15,6 +15,8 @@ type platformDisplayRecord struct {
 	raw, signature                                  []byte
 	managed                                         int
 	coherent                                        bool
+	// adminPage is set from the verified descriptor (doc 191): the release declares admin_routes.
+	adminPage bool
 }
 
 func platformReadDisplayRecord(e migExec, installation string) (*platformDisplayRecord, error) {
@@ -61,6 +63,7 @@ func (r *platformDisplayRecord) verified(trust appplatform.PublisherTrust, now i
 	if !r.coherent || verified.Descriptor.SHA256 != r.release || verified.KeyID != r.key || m.ID != app || m.ID != r.app || m.Publisher != publisher || m.Publisher != r.publisher || m.Version != r.version || m.Frontend.SHA256 != r.frontend || boolInt(m.Backend != nil) != r.managed {
 		return nil, "", false
 	}
+	r.adminPage = len(m.Presentation.AdminRoutes) > 0
 	return m.Presentation.Display, platformManifestPublisherName(m), true
 }
 

@@ -36,6 +36,9 @@ type platformBackendAccess[T platformBackendAccessIntent] struct {
 	// machinePolicy names the machine.read policy and the token of an authenticated machine read
 	// (doc 183); empty for every access that has a session.
 	machinePolicy string
+	// admin marks an access admitted for the app's admin page (doc 191): its assertion is signed with
+	// the admin surface claim.
+	admin bool
 }
 type platformManagedBackendAccess = platformBackendAccess[platformBackendDeliveryIntent]
 type platformWritableBackendAccess = platformBackendAccess[platformWritableRegistrationIntent]
@@ -238,7 +241,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 			errAppPlatformLaunchUnavailable)
 	}
 	if !anonymous {
-		if err := platformLaunchAudience(e, account, installationID); err != nil {
+		if err := platformSurfaceAccess(e, session, account, installationID); err != nil {
 			return zero, fmt.Errorf(
 				"backend access audience: %w", errAppPlatformLaunchUnavailable)
 		}
@@ -328,6 +331,9 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 			"backend access descriptor tuple: %w",
 			errAppPlatformLaunchUnavailable)
 	}
+	if session.adminSurface && len(parsed.Manifest.Presentation.AdminRoutes) == 0 {
+		return zero, fmt.Errorf("backend access admin page: %w", errAppPlatformLaunchUnavailable)
+	}
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, release, epoch, policy, parsed.Manifest); err != nil {
 		return zero, fmt.Errorf("backend access capabilities: %w", err)
 	}
@@ -374,7 +380,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 		if err := buildIntent(); err != nil {
 			return zero, err
 		}
-		if err := inTx(e, platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation, publicPolicy: publicPolicy, machinePolicy: machinePolicy}, seed); err != nil {
+		if err := inTx(e, platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation, publicPolicy: publicPolicy, machinePolicy: machinePolicy, admin: session.adminSurface}, seed); err != nil {
 			return zero, fmt.Errorf("backend access read: %w", err)
 		}
 	}
@@ -439,7 +445,7 @@ func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context
 		return zero, fmt.Errorf(
 			"backend access identity: %w", err)
 	}
-	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation, publicPolicy: publicPolicy, machinePolicy: machinePolicy}
+	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation, publicPolicy: publicPolicy, machinePolicy: machinePolicy, admin: session.adminSurface}
 	if pure != nil {
 		platformPureStep("access-read")
 		if err := pure(result, seed); err != nil {

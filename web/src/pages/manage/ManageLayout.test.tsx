@@ -61,6 +61,20 @@ describe('ManageLayout — grouped rail', () => {
     expect(screen.getAllByText('nav.appsAdmin').length).toBeGreaterThan(0)
   })
 
+  it('keeps one page body while an app administration page moves between its own routes, and replaces it elsewhere', () => {
+    const base = '/manage/apps/installations/11111111-1111-4111-8111-111111111111'
+    locState.pathname = `${base}/admin`
+    const view = render(<ManageLayout />)
+    const body = view.container.querySelector('.rp-admin-page-body')
+    expect(body).not.toBeNull()
+    locState.pathname = `${base}/admin/runs`
+    view.rerender(<ManageLayout />)
+    expect(view.container.querySelector('.rp-admin-page-body')).toBe(body)
+    locState.pathname = base
+    view.rerender(<ManageLayout />)
+    expect(view.container.querySelector('.rp-admin-page-body')).not.toBe(body)
+  })
+
   it('highlights Apps and shows no list description on the install page', () => {
     locState.pathname = '/manage/apps/install'
     const { container } = render(<ManageLayout />)

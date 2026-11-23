@@ -11,7 +11,7 @@ import { useAuth } from '../auth'
 import { BUILTIN_APPS, BUILTIN_PIN_PREFIX, type BuiltinApp } from '../lib/builtinApps'
 import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
-import { useAppDirectory, type AppDirectoryItem } from '../lib/appDirectoryV2'
+import { manageHref, useAppDirectory, type AppDirectoryItem } from '../lib/appDirectoryV2'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 import { LoadingPlaceholder } from '../components/LoadGate'
@@ -103,7 +103,8 @@ export default function AppsHub() {
   // installation opened after the list was read) follows the ordered ones.
   // The launcher lists what this reader can use. A disabled app is never listed (it is managed in the
   // console); an administrator still sees one that needs setup or attention, with its recovery link.
-  const listed = directory.items.filter((a) => a.openable || (admin && a.state !== 'disabled'))
+  // Someone an app was delegated to, who is not in its audience, still sees it: it is theirs to manage.
+  const listed = directory.items.filter((a) => a.openable || ((admin || a.manageable) && a.state !== 'disabled'))
   const entries: HubEntry[] = []
   const placed = new Set<string>()
   for (const key of keys) {
@@ -174,17 +175,22 @@ export default function AppsHub() {
             }
             const a = e.item
             const copy = appDisplayText(a.applicationId, a.display, lang)
+            // An app the viewer can only manage opens its administration page instead of being inert; it needs a
+            // running app to launch, so an app in any other state keeps its card quiet.
+            const adminOnly = !a.openable && a.manageable && a.state === 'installed'
+            const manage = manageHref(a.installationId, admin)
             return (
               <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
-                tag={a.state === 'installed' ? undefined : t(`apps.v2State.${a.state}`)} disabled={!a.openable}
+                tag={a.state === 'installed' ? undefined : t(`apps.v2State.${a.state}`)} disabled={!a.openable && !adminOnly}
                 status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
-                footer={!a.openable
+                footer={!a.openable || a.manageable
                   ? <Space wrap>
-                      <AppInstallationStatus installationId={a.installationId} name={copy.name} />
-                      {admin && <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>}
+                      {!a.openable && <AppInstallationStatus installationId={a.installationId} name={copy.name} />}
+                      {!a.openable && admin && <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>}
+                      {a.manageable && <Button size="small" icon={<SettingOutlined aria-hidden="true" />} onClick={(event) => { event.stopPropagation(); navigate(manage) }}>{t('appAdmin.manage')}</Button>}
                     </Space>
                   : undefined}
-                onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
+                onClick={() => navigate(a.openable ? `/apps/v2/${a.installationId}` : manage)} />
             )
           })}
         </Row>

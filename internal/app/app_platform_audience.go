@@ -144,13 +144,15 @@ func platformOpenInstallations(e migExec, chain []int64) ([]string, error) {
 	return open, nil
 }
 
-// deletePlatformAppRows removes the installation's position and OU access rows. It runs in the same
+// deletePlatformAppRows removes the installation's position, OU access and app administrator rows. It runs in the same
 // transaction that removes the installation, so no row outlives it.
 func deletePlatformAppRows(e migExec, installation string) error {
 	key := platformAppKey(installation)
 	if _, err := e.exec(`DELETE FROM app_order WHERE app_key=?`, key); err != nil {
 		return err
 	}
-	_, err := e.exec(`DELETE FROM app_ou_access WHERE app_key=?`, key)
-	return err
+	if _, err := e.exec(`DELETE FROM app_ou_access WHERE app_key=?`, key); err != nil {
+		return err
+	}
+	return deletePlatformAppAdmins(e, installation)
 }

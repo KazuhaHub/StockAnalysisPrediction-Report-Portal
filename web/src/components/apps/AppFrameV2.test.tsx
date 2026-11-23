@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { BridgeHostOptions } from '../../lib/bridge-v2'
 import AppFrameV2 from './AppFrameV2'
@@ -6,7 +6,7 @@ import AppFrameV2 from './AppFrameV2'
 const sessions=vi.hoisted(()=>[] as {options:BridgeHostOptions;close:ReturnType<typeof vi.fn>;updatePresentation:ReturnType<typeof vi.fn>}[])
 vi.mock('../../lib/bridge-v2',async original=>({...await original<typeof import('../../lib/bridge-v2')>(),createBridgeHost:(options:BridgeHostOptions)=>{const session={options,close:vi.fn(),updatePresentation:vi.fn(()=>true)};sessions.push(session);return session}}))
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}))
-afterEach(()=>{sessions.splice(0);vi.restoreAllMocks()})
+afterEach(()=>{sessions.splice(0);vi.restoreAllMocks();vi.unstubAllGlobals()})
 const binding={installationId:'00000000-0000-0000-0000-000000000001',generation:'9007199254740993',policyRevision:'1',releaseSha256:'a'.repeat(64)}
 const presentation={locale:'zh-CN',timeZone:'Asia/Shanghai',layout:'document',theme:{dark:true,colorPrimary:'#1677ff',colorBg:'#141414',colorText:'#ffffff',colorBorder:'#424242',colorBgLayout:'#000000',borderRadius:8}} as const
 const props={source:'/app-assets/fixture/index.html',binding,presentation,capabilities:[],title:'Fixture',height:640}
@@ -175,3 +175,47 @@ test('page metadata cannot return through a retired document observer',()=>{
  view.unmount();expect(changed).toHaveBeenLastCalledWith(null);
  act(()=>sessions[1].options.onPageChange?.(state));expect(changed).toHaveBeenLastCalledWith(null);
 });
+
+test('an admin frame tells the bridge its surface and relays backend requests to the admin endpoint only',async()=>{
+ const fetch=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:200,body:'{}'})));vi.stubGlobal('fetch',fetch)
+ render(<AppFrameV2 {...props} backendAvailable surface="admin"/>);fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[0].options.surface).toBe('admin')
+ await sessions[0].options.onBackendRequest!({method:'GET',path:'/v1/x',body:''},new AbortController().signal)
+ expect(fetch.mock.calls.map(call=>call[0])).toEqual([`/api/app-platform/installations/${binding.installationId}/admin/backend`])
+})
+test('a reader frame keeps the reader endpoint and a surface change retires the frame',async()=>{
+ const fetch=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({status:200,body:'{}'})));vi.stubGlobal('fetch',fetch)
+ const view=render(<AppFrameV2 {...props} backendAvailable/>);const old=screen.getByTitle('Fixture');fireEvent.load(old)
+ expect(sessions[0].options.surface).not.toBe('admin')
+ await sessions[0].options.onBackendRequest!({method:'GET',path:'/v1/x',body:''},new AbortController().signal)
+ expect(fetch.mock.calls[0][0]).toBe(`/api/app-platform/installations/${binding.installationId}/backend`)
+ view.rerender(<AppFrameV2 {...props} backendAvailable surface="admin"/>);expect(screen.getByTitle('Fixture')).not.toBe(old)
+})
+
+const documentSource=(admin:boolean)=>`/app-documents/${binding.installationId}/${admin?'admin/':''}${binding.generation}/${binding.policyRevision}/${binding.releaseSha256}/${'b'.repeat(64)}/index.html`
+test('an admin frame loads only the admin document URL and a reader frame never loads it',()=>{
+ const admin=render(<AppFrameV2 {...props} surface="admin" source={documentSource(true)}/>)
+ expect(screen.getByTitle('Fixture').getAttribute('src')).toBe(documentSource(true))
+ admin.unmount()
+ render(<AppFrameV2 {...props} surface="admin" source={documentSource(false)}/>);expect(screen.queryByTitle('Fixture')).toBeNull()
+ cleanup()
+ render(<AppFrameV2 {...props} source={documentSource(true)}/>);expect(screen.queryByTitle('Fixture')).toBeNull()
+ cleanup()
+ render(<AppFrameV2 {...props} source={documentSource(false)}/>);expect(screen.getByTitle('Fixture')).toBeTruthy()
+})
+
+const allCapabilities=['network.http','network.stream','reports.read','storage.files','notifications.publish','principals.read'] as const
+test('an admin frame never routes a reader-audience transport: only the backend is wired, whatever the launch says',()=>{
+ render(<AppFrameV2 {...props} surface="admin" backendAvailable capabilities={allCapabilities} canReviewNetwork/>);fireEvent.load(screen.getByTitle('Fixture'))
+ const options=sessions[0].options
+ expect(options.onBackendRequest).toBeTypeOf('function')
+ for(const key of ['onNetworkRequest','onNetworkTargetsRequest','onNetworkStreamRequest','onReportRequest','onObjectRequest','onNotificationRequest','onPrincipalRequest'] as const) expect(options[key],key).toBeUndefined()
+ // The bridge is told no capability either, so the app cannot even ask.
+ expect(options.capabilities).toEqual([])
+})
+test('a reader frame keeps every transport its launch granted',()=>{
+ render(<AppFrameV2 {...props} backendAvailable capabilities={allCapabilities} canReviewNetwork/>);fireEvent.load(screen.getByTitle('Fixture'))
+ const options=sessions[0].options
+ for(const key of ['onBackendRequest','onNetworkRequest','onNetworkTargetsRequest','onNetworkStreamRequest','onReportRequest','onObjectRequest','onNotificationRequest','onPrincipalRequest'] as const) expect(options[key],key).toBeTypeOf('function')
+ expect(options.capabilities).toEqual(allCapabilities)
+})

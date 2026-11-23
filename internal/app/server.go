@@ -73,7 +73,10 @@ type Server struct {
 	// (app_platform_task_refusal.go).
 	platformTaskRefusals    platformTaskRefusalCache
 	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
-	platformTaskBackend     func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
+	// platformBackendSend replaces the runner round trip of the backend endpoints. Nil means the real one;
+	// tests set it to observe the session the handler hands to the signer.
+	platformBackendSend func(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint) (driver.BackendResponse, error)
+	platformTaskBackend func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
 	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
 	// transport.
 	platformImportCheckpoint platformImportCheckpointExecutor

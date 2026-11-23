@@ -144,6 +144,7 @@ def render(raw):
         "maxRouteQueryInteger": p("RouteQuery", "max")["maximum"],
         "maxRouteQueryValues": p("RouteQuery", "values")["maxItems"],
         "maxDescriptorRoutes": p("Presentation", "routes")["maxItems"],
+        "maxDescriptorAdminRoutes": without_null(p("Presentation", "admin_routes"))["maxItems"],
         "maxDescriptorReadableSchemas": p("DataCompatibility", "readable_schemas")["maxItems"],
         "maxDescriptorMigrations": p("DataCompatibility", "migrations")["maxItems"],
         "maxMigrationEntrypointArgs": p("DataMigration", "entrypoint")["maxItems"],

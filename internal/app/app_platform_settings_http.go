@@ -86,6 +86,7 @@ type platformInstallationSettings struct {
 	Recovery             platformSettingsRecovery     `json:"recovery"`
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
 	RepairEligible       bool                         `json:"repair_eligible"`
+	AdminPage            bool                         `json:"admin_page"` // the release declares admin_routes (doc 191)
 	// ResolveKeepDataEligible is true when the installation's one unresolved operation is a failed import, enable or
 	// repair whose data can be accepted as it is. The review asks the runner before it is offered for confirmation.
 	ResolveKeepDataEligible bool `json:"resolve_keep_data_eligible"`
@@ -282,6 +283,7 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			// publisher name are left out; the built-in icon key and texts remain.
 			result.Display = platformDisplayViewUnverified(manifest.Presentation.Display)
 			result.Backend.Required = manifest.Backend != nil
+			result.AdminPage = len(manifest.Presentation.AdminRoutes) > 0
 			for _, capability := range manifest.Capabilities.Required {
 				required[capability] = true
 			}

@@ -521,6 +521,10 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/storage-status", s.apiPlatformImageStorageStatus)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/settings", s.apiPlatformInstallationSettings)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/principals-read", s.apiPlatformPrincipalsGrant)
+	// Delegated administrators of an app's own admin page (doc 191). Only Portal administrators reach these.
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/app-admins", s.apiPlatformAppAdminList)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/app-admins", s.apiPlatformAppAdminGrant)
+	s.platformAdminRoute(mux, "DELETE /api/admin/app-platform/installations/{installation}/app-admins/{username}", s.apiPlatformAppAdminRevoke)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicPreview)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/installations/{installation}/public-projection", s.apiPlatformPublicGrant)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/machine-read", s.apiPlatformMachinePreview)
@@ -578,6 +582,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /api/app-platform/installations/{installation}/status", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformInstallationStatus))))
 	s.route(mux, "GET /api/app-platform/installations/{installation}/launch", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformLaunch))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/backend", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformBackendRequests, platformJSONBusy, s.requireUserJSON(s.apiPlatformBackend))))
+	// The app's own admin page (doc 191): the same chains, admitted by the app-admin check instead of the audience.
+	s.route(mux, "GET /api/app-platform/installations/{installation}/admin/launch", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformAdminLaunch))))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/admin/backend", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformBackendRequests, platformJSONBusy, s.requireUserJSON(s.apiPlatformAdminBackend))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/network", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformNetworkRequests, platformJSONBusy, s.requireUserJSON(s.apiPlatformNetwork))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/network/stream", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformNetworkStreams, platformJSONBusy, s.requireUserJSON(s.apiPlatformNetworkStream))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/principals/search", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformJSONBusy, s.requireUserJSON(s.apiPlatformPrincipalSearch))))
@@ -588,6 +595,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.route(mux, "POST /api/app-platform/installations/{installation}/reports", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformReports))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/objects", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformObjects))))
 	s.route(mux, "GET /app-documents/{installation}/{generation}/{policy}/{release}/{frontend}/{entry...}", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.platformAppDocument))))
+	s.route(mux, "GET /app-documents/{installation}/admin/{generation}/{policy}/{release}/{frontend}/{entry...}", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.platformAppAdminDocument))))
 	s.public(mux, "GET /site-assets/{name}", s.siteAsset)
 	// The anonymous reviewed public projection (doc 179). GET only; no cookie, session or POST.
 	s.public(mux, "GET /public/apps/{installation}/data/{route}", s.publicAppData)

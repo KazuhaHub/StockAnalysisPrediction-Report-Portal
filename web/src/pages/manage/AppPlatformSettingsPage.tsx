@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, App, Button, Card, Checkbox, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
 import { AppstoreOutlined, ArrowLeftOutlined, CheckCircleOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
 import type { AppDisplayView } from '../../lib/appDisplayV2'
@@ -12,6 +12,8 @@ import ReleaseDigest from '../../components/ReleaseDigest'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { confirmAction } from '../../components/Confirm'
 import { AppsBreadcrumb } from './appsAdminParts'
+import AppAdministratorsCard from './AppAdministratorsCard'
+import type { InstallationSettingsContext } from './AppInstallationTabs'
 import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
 import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
@@ -32,7 +34,7 @@ type RecoveryPoint = {
   verified_ms?: string
   restore_eligible: boolean
 }
-type Settings = {
+export type Settings = {
   installation_id: string
   app_id: string
   publisher_id: string
@@ -45,6 +47,8 @@ type Settings = {
   version?: string
   display?: AppDisplayView
   audience: Audience[]
+  // The app declares an administration page of its own (admin routes in its descriptor).
+  admin_page?: boolean
   audience_total?: number
   capabilities: Capability[]
   // The reviewed network.http destinations, present while that grant is on.
@@ -216,6 +220,20 @@ export default function AppPlatformSettingsPage() {
   const quiet = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  // Under the installation tabs the settings are already loaded; the page takes them from there and asks the tabs
+  // for a reload, so one request serves both. Mounted alone, or when the tabs' read failed, it loads for itself.
+  const shared = useOutletContext<InstallationSettingsContext | undefined>()
+  const given = shared?.settings ?? null
+  const sharedReload = shared?.reload
+  const sharedReplace = shared?.replace
+  // A reload always asks the tabs as well: when their first read failed, a retry must bring their tab bar back too.
+  // Without shared settings the page also reads for itself, since the tabs' answer may fail again.
+  const reload = useCallback(() => {
+    sharedReload?.()
+    if (!(sharedReload && given)) setRefresh(value => value + 1)
+  }, [sharedReload, given])
+  // The settings a quiet re-read handed up to the tabs: they come back as `given`, and are already shown.
+  const handedUp = useRef<Settings | null>(null)
   const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -247,6 +265,8 @@ export default function AppPlatformSettingsPage() {
   const [principalsError, setPrincipalsError] = useState('')
 
   useEffect(() => {
+    // The page's own quiet re-read coming back from the tabs: it is already shown, with the page's state around it.
+    if (given && given === handedUp.current) return
     setSettings(null)
     setBindings([])
     setBindingError('')
@@ -272,7 +292,7 @@ export default function AppPlatformSettingsPage() {
     quiet.current?.abort()
     setLoading(true)
     Promise.all([
-      api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal }),
+      given && given.installation_id === installation ? Promise.resolve(given) : api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal }),
       api.get<{ bindings: Binding[] }>(`${root}/installations/${installation}/secret-bindings`, { signal: abort.signal })
         .catch((failure) => {
           if (!abort.signal.aborted) setBindingError(errText(failure, t))
@@ -291,7 +311,7 @@ export default function AppPlatformSettingsPage() {
       if (!abort.signal.aborted) setLoading(false)
     })
     return () => { abort.abort(); quiet.current?.abort() }
-  }, [installation, refresh, t])
+  }, [installation, refresh, given, t])
 
   /**
    * Reads the settings again after an action whose effect on the installation is known or uncertain, and swaps them in
@@ -305,6 +325,8 @@ export default function AppPlatformSettingsPage() {
       const next = await api.get<Settings>(`${root}/installations/${installation}/settings`, { signal: abort.signal })
       if (abort.signal.aborted) return null
       setSettings(next)
+      // Keep the tabs' copy current, so the page mounted again on a tab switch does not show the old state.
+      if (sharedReplace && given) { handedUp.current = next; sharedReplace(next) }
       return next
     } catch { /* the page keeps the settings it has; Retry is one click away */ }
     return null
@@ -317,7 +339,7 @@ export default function AppPlatformSettingsPage() {
       title={t(missing ? 'appPlatform.settings.notFound' : 'common.loadFailed')}
       subTitle={error || undefined}
       extra={<Space>
-        {!missing && <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => setRefresh((value) => value + 1)}>{t('common.retry')}</Button>}
+        {!missing && <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={() => reload()}>{t('common.retry')}</Button>}
         <Link to="/manage/apps">{t('appPlatform.settings.back')}</Link>
       </Space>}
     />
@@ -361,7 +383,7 @@ export default function AppPlatformSettingsPage() {
     try {
       await api.post(`${root}/installations/${installation}/principals-read`, { enabled, policyRevision: settings.policy_revision })
       setPrincipalsOpen(false)
-      setRefresh((value) => value + 1)
+      reload()
     } catch (failure) {
       setPrincipalsError(errText(failure, t))
     } finally {
@@ -689,10 +711,10 @@ export default function AppPlatformSettingsPage() {
     }
   }
   return <Space className="rp-platform-settings" orientation="vertical" size={16} style={{ width: '100%' }}>
-    <AppsBreadcrumb name={copy.name} />
-    <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>
+    {!shared?.headed && <AppsBreadcrumb name={copy.name} />}
+    {!shared?.headed && <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>}
     <Typography.Title level={4} style={{ margin: 0 }}>{t('appPlatform.settings.title')}</Typography.Title>
-    {error && <Alert type="error" showIcon title={error} action={<Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={() => setRefresh((value) => value + 1)}>{t('common.retry')}</Button>} />}
+    {error && <Alert type="error" showIcon title={error} action={<Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={() => reload()}>{t('common.retry')}</Button>} />}
     <Card>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
         {settings.display ? <AppDisplayIcon display={settings.display} /> : <AppstoreOutlined aria-hidden="true" style={{ fontSize: 32, color: token.colorPrimary }} />}
@@ -737,6 +759,9 @@ export default function AppPlatformSettingsPage() {
       <div style={{ marginTop: 12 }}><Link to={`/manage/apps/${encodeURIComponent(`platform:${settings.installation_id}`)}/access`}>{t('appPlatform.settings.manageAccess')}</Link></div>
     </Card>
 
+    {/* Always shown: a delegation outlives the admin page of a release, and must stay visible to be revoked. */}
+    <AppAdministratorsCard installation={installation} adminPage={settings.admin_page === true} />
+
     <Card title={t('appPlatform.settings.capabilities')}>
       {settings.capabilities.length
         ? <Space size={[6, 6]} wrap>{settings.capabilities.map((item) => <StatusTag key={item.capability} className={item.granted ? 'rp-platform-success-tag' : undefined} tone={item.granted ? 'success' : item.required ? 'error' : 'neutral'}>
@@ -751,15 +776,15 @@ export default function AppPlatformSettingsPage() {
           : <Button disabled={!principalsReady} onClick={() => { setPrincipalsError(''); setPrincipalsOpen(true) }}>{t('appPlatform.settings.principals.enable')}</Button>}
         {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
       </Space>}
-      {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
-      {networkProxy && <AppNetworkProxyPanel root={root} installation={installation} granted={networkProxy.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
-      {machineRead && <AppMachineReadPanel root={root} installation={installation} granted={machineRead.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
-      {postgresProbe && <AppPostgresPolicyPanel root={root} installation={installation} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
-      {ingress && <AppIngressPanel root={root} installation={installation} granted={ingress.granted} ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />}
+      {publicProjection && <AppPublicProjectionPanel root={root} installation={installation} granted={publicProjection.granted} ready={principalsReady} onChanged={() => reload()} />}
+      {networkProxy && <AppNetworkProxyPanel root={root} installation={installation} granted={networkProxy.granted} ready={principalsReady} onChanged={() => reload()} />}
+      {machineRead && <AppMachineReadPanel root={root} installation={installation} granted={machineRead.granted} ready={principalsReady} onChanged={() => reload()} />}
+      {postgresProbe && <AppPostgresPolicyPanel root={root} installation={installation} ready={principalsReady} onChanged={() => reload()} />}
+      {ingress && <AppIngressPanel root={root} installation={installation} granted={ingress.granted} ready={principalsReady} onChanged={() => reload()} />}
     </Card>
     {settings.networkPolicy && <Card title={t('appPlatform.network.title')}>
       <AppNetworkTargetsPanel key={settings.networkPolicy.policy_sha256} installation={installation} policyRevision={settings.policy_revision} policy={settings.networkPolicy}
-        ready={principalsReady} onChanged={() => setRefresh((value) => value + 1)} />
+        ready={principalsReady} onChanged={() => reload()} />
     </Card>}
     <Modal
       className="rp-platform-review-modal"

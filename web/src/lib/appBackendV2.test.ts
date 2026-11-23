@@ -145,3 +145,17 @@ test("pre-aborted and invalid requests do not fetch", async () => {
   ).rejects.toMatchObject({ code: "invalid_request" });
   expect(fetch).not.toHaveBeenCalled();
 });
+
+test("the admin surface posts only to the admin endpoint and the reader surface never does", async () => {
+  const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ status: 200, body: "{}" })));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+  await createAppBackendTransport(binding, "admin")(request, signal);
+  await createAppBackendTransport(binding, "reader")(request, signal);
+  await createAppBackendTransport(binding)(request, signal);
+  expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+    `/api/app-platform/installations/${binding.installationId}/admin/backend`,
+    `/api/app-platform/installations/${binding.installationId}/backend`,
+    `/api/app-platform/installations/${binding.installationId}/backend`,
+  ]);
+});

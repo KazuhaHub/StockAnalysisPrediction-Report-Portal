@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { parseAppDirectory, useAppDirectory } from './appDirectoryV2'
+import { manageHref, parseAppDirectory, useAppDirectory } from './appDirectoryV2'
 
 const first = '00000000-0000-4000-8000-000000000001'
 const second = '00000000-0000-4000-8000-000000000002'
@@ -83,4 +83,17 @@ test('unmount cancels the current pagination request', async () => {
 
 test('invalid display cannot pass the directory metadata boundary',()=>{
  expect(parseAppDirectory({items:[{...item(),display:{icon:'appstore',texts:[]}}],nextCursor:''})).toBeNull()
+})
+
+test('manageable is an optional boolean, false when absent, and may mark an app the viewer cannot open', () => {
+  expect(parseAppDirectory({ items: [item()], nextCursor: '' })?.items[0].manageable).toBe(false)
+  expect(parseAppDirectory({ items: [{ ...item(), manageable: true }], nextCursor: '' })?.items[0].manageable).toBe(true)
+  const adminOnly = parseAppDirectory({ items: [{ ...item(), openable: false, manageable: true }], nextCursor: '' })?.items[0]
+  expect(adminOnly).toMatchObject({ openable: false, manageable: true })
+  for (const manageable of ['true', 1, null]) expect(parseAppDirectory({ items: [{ ...item(), manageable }], nextCursor: '' })).toBeNull()
+})
+
+test('the manage page of an installation is the console tab for a Portal administrator and the user page for anyone else', () => {
+  expect(manageHref(first, true)).toBe(`/manage/apps/installations/${first}/admin`)
+  expect(manageHref(first, false)).toBe(`/apps/manage/${first}`)
 })
