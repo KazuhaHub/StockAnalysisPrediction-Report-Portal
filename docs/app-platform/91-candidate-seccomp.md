@@ -134,6 +134,26 @@ permitted` while `python -c` and `python - < script.py` worked. The v2-dev profi
 adds exactly FIONCLEX (`0x5450`) and FIOCLEX (`0x5451`); they only clear or set
 close-on-exec on a descriptor the process already holds. The profile name changes
 because the allowed set changed, so the ownership label never names two policies.
-Containers created under v1-dev are reported as an identity conflict by container
-observation (different label and different security option) and must be recreated
-from a plan built by the new runner.
+
+### Containers created under v1-dev keep working
+
+The driver holds one closed, ordered set of accepted profiles (`seccompPolicies`): the current
+v2-dev first, then v1-dev rebuilt from the same frozen base and the five-request list. A
+container that exists is planned from the policy digest the journal recorded for it, never by
+trying profiles against it, so every journal comparison stays an exact equality against one
+plan. Each profile has two switches: accepted for live containers (observe, stop, remove) and
+accepted in history (recorded receipts stay readable); live acceptance of v1-dev can be retired
+once nothing runs under it.
+
+The mode of each use is explicit (`SeccompCurrent`, `SeccompLive`, `SeccompHistory`).
+Creating or starting a container, binding or settling a new start and settling a fresh writer
+receipt accept only the current profile; the create and start requests refuse a plan under
+any other profile before reaching the daemon. A claim and its writer receipt must name the
+same profile. The Portal reads a v1-dev install's writer and running receipts as history.
+
+A v1-dev container is therefore observed, stopped and removed normally, and a repair, disable
+and enable or update replaces it with a v2-dev container. The v1-dev plan reproduces what the
+runner built at 4bcc3d5b only while every other plan input is unchanged; the golden digests in
+`seccomp_accept_test.go` pin this. Before deploying, run the read-only gate against the
+running container: `docker inspect portal-app-<resource id> | go run ./scripts/seccomp_gate`
+exits 0 only when its seccomp option and policy-sha256 are recognised as v1-dev.
