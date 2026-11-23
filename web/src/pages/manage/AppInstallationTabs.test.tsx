@@ -13,7 +13,7 @@ vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
 const mounts = vi.hoisted(() => ({ settings: 0 }))
 vi.mock('./AppPlatformSettingsPage', async () => {
   const { useEffect } = await import('react')
-  return { default: () => {
+  return { default: function SettingsPageStub() {
     const shared = useOutletContext<{ settings: { admin_page?: boolean; revision?: string } | null; reload: () => void } | undefined>()
     useEffect(() => { mounts.settings++ }, [])
     return <div>settings page<span data-testid="shared">{shared?.settings ? `${String(shared.settings.admin_page)}|${shared.settings.revision ?? ''}` : 'none'}</span><button onClick={() => shared?.reload()}>reload</button><span data-testid="headed">{String((shared as { headed?: boolean } | undefined)?.headed)}</span></div>
