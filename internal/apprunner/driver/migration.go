@@ -73,7 +73,7 @@ func validMigrationPlan(plan containerPlan, request containerCreate) bool {
 		h.Mounts[0].BindOptions.Propagation == "rprivate" &&
 		len(request.Env) == 0 && h.NetworkMode == "none" && request.NetworkDisabled && h.ReadonlyRootfs &&
 		!h.Privileged && !h.AutoRemove && h.RestartPolicy.Name == "no" && len(h.Tmpfs) == 1 &&
-		len(request.Entrypoint) == 1 && len(h.SecurityOpt) == 2 && h.SecurityOpt[1] == candidateSeccompOption &&
+		len(request.Entrypoint) == 1 && len(h.SecurityOpt) == 2 && h.SecurityOpt[1] != "" &&
 		request.Labels[containerLabelPrefix+"sandbox-profile"] == WritableCandidateSandboxProfile
 }
 
@@ -358,7 +358,11 @@ func discardMigrationJobHTTP(ctx context.Context, client *http.Client, plan cont
 	if err != nil {
 		return err
 	}
+	base := plan
 	for _, listed := range found {
+		// A job records no policy digest, so cleanup is the one place that tries each live-accepted policy: a
+		// leftover job may have been created before the runner was upgraded. Only an exact match is ever acted on.
+		plan := migrationCleanupPlan(ctx, client, listed.ID, base)
 		state, err := inspectContainerStateHTTP(ctx, client, listed.ID, plan)
 		if err != nil {
 			return err
@@ -387,4 +391,23 @@ func discardMigrationJobHTTP(ctx context.Context, client *http.Client, plan cont
 		}
 	}
 	return proveMigrationAbsentHTTP(ctx, client, plan)
+}
+
+// migrationCleanupPlan returns the plan under which the listed job inspects exactly, trying the given plan first
+// and then the same plan under each other live-accepted policy. If none matches it returns the given plan, whose
+// inspection then refuses the job as it always has.
+func migrationCleanupPlan(ctx context.Context, client *http.Client, nativeID string, base containerPlan) containerPlan {
+	if _, err := inspectContainerStateHTTP(ctx, client, nativeID, base); err == nil {
+		return base
+	}
+	for _, policy := range seccompPolicies {
+		if !policy.live || policy.name == base.seccomp {
+			continue
+		}
+		variant := withSeccomp(base, policy)
+		if _, err := inspectContainerStateHTTP(ctx, client, nativeID, variant); err == nil && validContainerPlan(variant) {
+			return variant
+		}
+	}
+	return base
 }

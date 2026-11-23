@@ -228,6 +228,7 @@ func (s *Store) prepareServiceBindingInitial(
 	if err != nil {
 		return nil, err
 	}
+	request.RecordedPolicySHA256 = facts.running.Claim.Preflight.PolicySHA256
 	launch, err := native.PrepareCandidate(ctx, request)
 	if err != nil {
 		return nil, err
@@ -486,7 +487,7 @@ func (s *Store) finishWritableServiceBackendTask(
 	}
 	identitySHA := candidateHash(command.ServiceIdentity)
 	if actual.Registration != before.binding ||
-		!writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim) ||
+		!writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim, driver.SeccompLive) ||
 		actual.Handler != command.Handler ||
 		actual.BodySHA256 != candidateHash(body) ||
 		actual.ServiceIdentitySHA256 != identitySHA ||

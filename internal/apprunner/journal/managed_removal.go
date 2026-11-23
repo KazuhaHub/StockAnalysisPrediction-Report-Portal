@@ -448,6 +448,8 @@ func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte)
 					QuotaBytes:     mustDataInt(p.QuotaBytes),
 					QuotaInodes:    mustDataInt(p.QuotaInodes),
 				},
+				// The plan of the container being removed is the one its recorded policy digest names.
+				RecordedPolicySHA256: p.PolicySHA256,
 			},
 			Binding: driver.UpdateStartBinding{
 				EffectID:                source.update.Claim.EffectID,
@@ -508,6 +510,11 @@ func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte)
 			DataReceiptSHA256: source.writable.Claim.DataReceiptSHA256, WriterReceiptSHA256: source.writable.Claim.WriterReceiptSHA256,
 		}
 		result.writable = &binding
+		if source.writable.Claim.Preflight != nil {
+			result.request.RecordedPolicySHA256 = source.writable.Claim.Preflight.Native.PolicySHA256
+		}
+	} else if source.source.Claim.Preflight != nil {
+		result.request.RecordedPolicySHA256 = source.source.Claim.Preflight.PolicySHA256
 	}
 	return result, nil
 }
@@ -677,8 +684,7 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 					Launch: snapshot.Launch,
 					SandboxProfile: source.update.Claim.
 						SandboxProfile,
-					SeccompSHA256: driver.UpdateStartSeccompSHA256(
-						source.update.Claim.SandboxProfile),
+					SeccompSHA256: source.update.recordedSeccompSHA256(),
 				})
 		}
 		return zero, fmt.Errorf(
@@ -795,8 +801,7 @@ func (source managedRemovalSource) preflightMatches(snapshot driver.CandidateLau
 					Launch: snapshot,
 					SandboxProfile: source.update.Claim.
 						SandboxProfile,
-					SeccompSHA256: driver.UpdateStartSeccompSHA256(
-						source.update.Claim.SandboxProfile),
+					SeccompSHA256: source.update.recordedSeccompSHA256(),
 				})
 	}
 	if source.writable != nil {

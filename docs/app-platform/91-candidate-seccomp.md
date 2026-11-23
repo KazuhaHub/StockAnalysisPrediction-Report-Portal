@@ -31,15 +31,16 @@ escape in an accepted candidate, whose data remains read-only.
 2. Preserve its default-deny action, architecture map and every existing syscall
    rule except the unrestricted `ioctl` allowance. Replace that allowance with
    exact argument-1 equality rules for TCGETS (`0x5401`), TIOCSPGRP (`0x5410`), TIOCGWINSZ (`0x5413`),
-   FIONREAD (`0x541b`) and FIONBIO (`0x5421`). FIONBIO changes nonblocking mode;
-   TIOCSPGRP assigns a terminal foreground process group. Neither is a
+   FIONREAD (`0x541b`), FIONBIO (`0x5421`), FIONCLEX (`0x5450`) and FIOCLEX (`0x5451`).
+   FIONBIO changes nonblocking mode; FIONCLEX/FIOCLEX only clear/set close-on-exec;
+   TIOCSPGRP assigns a terminal foreground process group. None is a
    filesystem attribute setter. Every other ioctl is denied.
 3. Send the compact complete profile to Docker as an inline `seccomp=` security
    option, beside `no-new-privileges:true`. Docker installs it before the image
    entrypoint. No application cooperation, shell wrapper or extra app container
    is involved. Keep the existing UID/GID, dropped capabilities, no-network,
    read-only root/data, mount pins and resource bounds.
-4. Add `ioctl-terminal-socket/v1-dev` to the closed ownership labels. The full
+4. Add `ioctl-terminal-socket/v2-dev` (v1-dev allowed five requests, without FIONCLEX and FIOCLEX) to the closed ownership labels. The full
    security option participates in the existing policy hash, not just this name.
    Every native container observation checks the exact option. Missing,
    unconfined, broadened or changed policies are identity conflicts.
@@ -56,7 +57,7 @@ closed policy bytes cannot be silently adopted or restarted.
 ## Acceptance and execution
 
 Local contract tests check the upstream source hash, preserve every non-ioctl
-rule and top-level field, require the five exact argument rules and reject an
+rule and top-level field, require the seven exact argument rules and reject an
 unexpected source shape. Container-observation refusal tests cover removed,
 unconfined and broadened security options. Existing lifecycle/transport tests use
 the real derived create policy.
@@ -68,7 +69,7 @@ NoNewPrivs and seccomp filter mode. With FD -1 it then requires:
 - EPERM for native/compat FS_IOC_SETFLAGS, FS_IOC_FSSETXATTR, filesystem getters,
   unlisted requests and an upper-word alias of an allowed request. Seccomp acts
   before descriptor lookup; an unfiltered invalid FD would return EBADF.
-- EBADF for each of the five admitted terminal/socket requests, proving the
+- EBADF for each of the seven admitted terminal/socket requests, proving the
   filter does not just deny every ioctl.
 - EPERM for io_uring_setup, preserving the default-deny alternative submission
   boundary.
@@ -123,3 +124,36 @@ pass before writable mounts are admitted. Managed automatic activation, broker
 capabilities, normal worker scheduling, update/recovery/uninstall, SDK/reference
 apps and full P00–P14 acceptance remain incomplete. There is no production,
 server beta, schema, dependency/toolchain, credential or Status adoption change.
+
+## v2-dev: close-on-exec requests
+
+`ioctl-terminal-socket/v1-dev` denied FIOCLEX. CPython 3.11 calls
+`ioctl(fd, FIOCLEX)` when it opens a script file and falls back to `fcntl` only
+for ENOTTY/EACCES, so `python /app/script.py` failed with `Operation not
+permitted` while `python -c` and `python - < script.py` worked. The v2-dev profile
+adds exactly FIONCLEX (`0x5450`) and FIOCLEX (`0x5451`); they only clear or set
+close-on-exec on a descriptor the process already holds. The profile name changes
+because the allowed set changed, so the ownership label never names two policies.
+
+### Containers created under v1-dev keep working
+
+The driver holds one closed, ordered set of accepted profiles (`seccompPolicies`): the current
+v2-dev first, then v1-dev rebuilt from the same frozen base and the five-request list. A
+container that exists is planned from the policy digest the journal recorded for it, never by
+trying profiles against it, so every journal comparison stays an exact equality against one
+plan. Each profile has two switches: accepted for live containers (observe, stop, remove) and
+accepted in history (recorded receipts stay readable); live acceptance of v1-dev can be retired
+once nothing runs under it.
+
+The mode of each use is explicit (`SeccompCurrent`, `SeccompLive`, `SeccompHistory`).
+Creating or starting a container, binding or settling a new start and settling a fresh writer
+receipt accept only the current profile; the create and start requests refuse a plan under
+any other profile before reaching the daemon. A claim and its writer receipt must name the
+same profile. The Portal reads a v1-dev install's writer and running receipts as history.
+
+A v1-dev container is therefore observed, stopped and removed normally, and a repair, disable
+and enable or update replaces it with a v2-dev container. The v1-dev plan reproduces what the
+runner built at 4bcc3d5b only while every other plan input is unchanged; the golden digests in
+`seccomp_accept_test.go` pin this. Before deploying, run the read-only gate against the
+running container: `docker inspect portal-app-<resource id> | go run ./scripts/seccomp_gate`
+exits 0 only when its seccomp option and policy-sha256 are recognised as v1-dev.

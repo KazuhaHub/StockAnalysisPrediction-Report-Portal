@@ -116,7 +116,7 @@ func (s *Store) finishWritableCandidateReadiness(ctx context.Context, before wri
 	}
 	actual, err := observation.Snapshot()
 	c := f.verified.Index()
-	if err != nil || actual.Launch != before.expected || !writableSnapshotMatches(actual.Launch, f, before.running.Claim) || actual.NativeID != before.running.NativeID || actual.DataFormat != c.Payload.DataFormat || actual.ObservedMS < before.facts.now || actual.ObservedMS > f.now {
+	if err != nil || actual.Launch != before.expected || !writableSnapshotMatches(actual.Launch, f, before.running.Claim, driver.SeccompLive) || actual.NativeID != before.running.NativeID || actual.DataFormat != c.Payload.DataFormat || actual.ObservedMS < before.facts.now || actual.ObservedMS > f.now {
 		return zero, driver.ErrCandidateNotReady
 	}
 	if err := finalWritableCandidateCheck(ctx, f); err != nil {

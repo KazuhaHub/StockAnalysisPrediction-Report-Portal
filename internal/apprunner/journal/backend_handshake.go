@@ -65,6 +65,7 @@ func (s *Store) ExchangeBackendHandshake(ctx context.Context, raw, signature, de
 	if err != nil {
 		return zero, err
 	}
+	request.RecordedPolicySHA256 = f.running.Claim.Preflight.PolicySHA256
 	launch, err := native.PrepareCandidate(ctx, request)
 	if err != nil {
 		return zero, err

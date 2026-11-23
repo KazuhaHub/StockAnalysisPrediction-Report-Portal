@@ -127,12 +127,13 @@ func (r *CandidateRuntime) withVerifiedWritableCandidate(ctx context.Context, re
 	if err != nil {
 		return zero, err
 	}
+	plan = selectRecordedPlan(plan, expected.Launch.PolicySHA256)
 	pins, base, err := r.pinCandidatePreflight(ctx, request.CandidateLaunchRequest, image, plan)
 	if err != nil {
 		return zero, err
 	}
 	defer pins.Close()
-	actual := WritableCandidateLaunchSnapshot{Launch: base, Binding: request.Binding, SandboxProfile: WritableCandidateSandboxProfile, SeccompSHA256: DataWriterPolicySHA256()}
+	actual := WritableCandidateLaunchSnapshot{Launch: base, Binding: request.Binding, SandboxProfile: WritableCandidateSandboxProfile, SeccompSHA256: seccompSHAOf(plan)}
 	if actual != expected {
 		return zero, ErrContainerConflict
 	}

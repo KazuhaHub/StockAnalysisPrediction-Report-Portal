@@ -217,6 +217,7 @@ func (r *CandidateRuntime) prepareCandidateProfileAccess(ctx context.Context, re
 	if err != nil {
 		return zero, err
 	}
+	plan = selectRecordedPlan(plan, request.RecordedPolicySHA256)
 	pins, snapshot, err := r.pinCandidatePreflight(ctx, request, image, plan)
 	if err != nil {
 		return zero, fmt.Errorf("prepare candidate mount pins: %w", err)

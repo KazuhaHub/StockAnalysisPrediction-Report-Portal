@@ -8,11 +8,13 @@ The exact source SHA-256 is
 No upstream NOTICE file was present at that revision.
 
 The application platform changes the profile in `../seccomp.go`: it removes the
-unconditional `ioctl` allowance and adds five argument-constrained requests:
-TCGETS, TIOCSPGRP, TIOCGWINSZ, FIONREAD and FIONBIO. Other upstream rules, architecture
+unconditional `ioctl` allowance and adds seven argument-constrained requests:
+TCGETS, TIOCSPGRP, TIOCGWINSZ, FIONREAD, FIONBIO, FIONCLEX and FIOCLEX. Other upstream rules, architecture
 mapping, capability conditions and default-deny behavior are preserved. This
-derived policy is named `ioctl-terminal-socket/v1-dev`. FIONBIO changes descriptor
-nonblocking mode; TIOCSPGRP assigns a terminal foreground process group, and the other three
+derived policy is named `ioctl-terminal-socket/v2-dev` (v1-dev lacked FIONCLEX and
+FIOCLEX). FIONBIO changes descriptor nonblocking mode; FIONCLEX and FIOCLEX only clear or set
+close-on-exec on a descriptor the process already holds (CPython calls FIOCLEX when it opens a
+script file); TIOCSPGRP assigns a terminal foreground process group, and the other three
 requests query terminal/socket state. Docker init calls TIOCSPGRP on non-TTY
 stdin too; the kernel must return ENOTTY rather than the filter returning EPERM.
 

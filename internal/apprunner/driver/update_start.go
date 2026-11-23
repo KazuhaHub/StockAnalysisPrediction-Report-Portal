@@ -35,6 +35,9 @@ type UpdateStartSource struct {
 	ReleaseSHA256, Generation, ControlFence, WriterFence string
 	Binding                                              UpdateStartBinding
 	SandboxProfile                                       string
+	// PolicySHA256 is the body digest the journal recorded for the stopped source. It selects the plan the
+	// source was created from. Empty means the current plan; a value no accepted plan produces is refused.
+	PolicySHA256 string
 	// Origin and Writable are set only for the install's own backend. Binding then stays empty: the install's
 	// backend has no update-start binding, and a writable one is identified by Writable.
 	Origin   UpdateStartSourceOrigin
@@ -138,7 +141,7 @@ func updateStartSnapshotFailure(s UpdateStartLaunchSnapshot) string {
 		s.SandboxProfile != UpdateStartWritableSandboxProfile:
 		return "sandbox profile"
 	case candidateSeccompError != nil ||
-		s.SeccompSHA256 != updateStartSeccompSHA(s.SandboxProfile):
+		!SeccompAccepted(s.SeccompSHA256, SeccompHistory):
 		return "seccomp"
 	case d.Root.Inode == 0 ||
 		!containerUUID.MatchString(d.Root.FilesystemUUID) ||
@@ -191,7 +194,7 @@ func validUpdateStartSource(s UpdateStartSource, r UpdateStartLaunchRequest) boo
 		return containerUUID.MatchString(id) &&
 			id != "00000000-0000-0000-0000-000000000000"
 	}
-	common := validID(s.OperationID) && validID(s.ResourceID) &&
+	common := (s.PolicySHA256 == "" || containerSHA.MatchString(s.PolicySHA256)) && validID(s.OperationID) && validID(s.ResourceID) &&
 		s.ResourceID != r.Identity.ResourceID &&
 		containerSHA.MatchString(s.NativeID) &&
 		containerSHA.MatchString(s.ReleaseSHA256) &&
@@ -286,6 +289,17 @@ func planUpdateStartContainer(raw []byte, image BackendImageInspection, owner co
 // planUpdateStartSource is the plan of the stopped backend an enable start replaces, built the way the start that
 // created it built it: from the owner its labels carry, by its origin.
 func planUpdateStartSource(request UpdateStartLaunchRequest, image BackendImageInspection, roots containerRoots) (containerPlan, error) {
+	plan, err := planUpdateStartSourceCurrent(request, image, roots)
+	if err != nil || request.Source.PolicySHA256 == "" || request.Source.PolicySHA256 == plan.bodySHA {
+		return plan, err
+	}
+	if !validUpdateStartSourcePolicy(request.Source.PolicySHA256, plan) {
+		return containerPlan{}, ErrContainerConflict
+	}
+	return selectRecordedPlan(plan, request.Source.PolicySHA256), nil
+}
+
+func planUpdateStartSourceCurrent(request UpdateStartLaunchRequest, image BackendImageInspection, roots containerRoots) (containerPlan, error) {
 	if request.Source == nil {
 		return containerPlan{}, ErrInvalidResponse
 	}

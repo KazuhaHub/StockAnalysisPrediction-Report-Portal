@@ -309,7 +309,7 @@ func (s *Store) settleWritableRegistration(ctx context.Context, before writableR
 	}
 	actual, err := observed.Snapshot()
 	m := f.row.marker
-	if err != nil || actual.Launch != expected || !writableSnapshotMatches(actual.Launch, f.source, f.running.Claim) || actual.NativeID != m.NativeID || actual.BindingSHA256 != writableRegistrationBinding(m) || actual.DocumentSHA256 != m.DocumentSHA256 || actual.ObservedMS < before.source.now || actual.ObservedMS > f.source.now {
+	if err != nil || actual.Launch != expected || !writableSnapshotMatches(actual.Launch, f.source, f.running.Claim, driver.SeccompLive) || actual.NativeID != m.NativeID || actual.BindingSHA256 != writableRegistrationBinding(m) || actual.DocumentSHA256 != m.DocumentSHA256 || actual.ObservedMS < before.source.now || actual.ObservedMS > f.source.now {
 		return zero, ErrFenceReconciliation
 	}
 	r := WritableBackendRegistrationReceipt{Format: writableRegistrationReceiptFormat, Claim: m, BindingSHA256: actual.BindingSHA256, Device: strconv.FormatUint(actual.Device, 10), Inode: strconv.FormatUint(actual.Inode, 10), ObservedMS: strconv.FormatInt(actual.ObservedMS, 10), SettledMS: strconv.FormatInt(f.source.now, 10)}

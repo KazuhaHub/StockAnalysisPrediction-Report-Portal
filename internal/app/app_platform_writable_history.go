@@ -10,6 +10,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -213,7 +214,7 @@ func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runti
 	w.command.PayloadSHA256, err = control.DataWriterLogicalDigest(w.command)
 	writerClaimed, _ := strconv.ParseInt(w.receipt.Claim.ClaimedMS, 10, 64)
 	writerSettled, _ := strconv.ParseInt(w.receipt.SettledMS, 10, 64)
-	if err != nil || w.command.PayloadSHA256 != writerEffect.digest || writerClaimed+1000 < writerEffect.created || writerSettled > writerEffect.updated+1000 || !platformWriterReceiptMatchesFence(w.receipt, w, b.fence, completed) {
+	if err != nil || w.command.PayloadSHA256 != writerEffect.digest || writerClaimed+1000 < writerEffect.created || writerSettled > writerEffect.updated+1000 || !platformWriterReceiptMatchesFence(w.receipt, w, b.fence, completed, driver.SeccompHistory) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	w.raw, w.signature, err = control.SignDataWriter(w.command, key, w.authority, issued)
@@ -230,7 +231,7 @@ func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runti
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	start.running, err = journal.ParseWritableCandidateRunningReceipt([]byte(startEffect.receipt))
-	if err != nil || start.command.PayloadSHA256 != startEffect.digest || !platformWritableRunningSourceMatches(start.running, start, source, completed) {
+	if err != nil || start.command.PayloadSHA256 != startEffect.digest || !platformWritableRunningSourceMatches(start.running, start, source, completed, driver.SeccompHistory) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	startSettled, _ := strconv.ParseInt(start.running.SettledMS, 10, 64)

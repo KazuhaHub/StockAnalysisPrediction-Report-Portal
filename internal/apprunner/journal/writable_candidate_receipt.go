@@ -169,7 +169,7 @@ func (s *Store) settleWritableCandidateRunning(ctx context.Context, claim Writab
 	}
 	defer tx.Rollback()
 	var m writableCandidateClaimMarker
-	if !canonicalDataJSON(live.marker, &m) || m.Preflight == nil || *m.Preflight != *live.bound || *m.Preflight != writablePreflight(actual.Launch) || !writableSnapshotMatches(actual.Launch, f, m) || actual.ObservedMS > f.now {
+	if !canonicalDataJSON(live.marker, &m) || m.Preflight == nil || *m.Preflight != *live.bound || *m.Preflight != writablePreflight(actual.Launch) || !writableSnapshotMatches(actual.Launch, f, m, driver.SeccompCurrent) || actual.ObservedMS > f.now {
 		return zero, ErrFenceReconciliation
 	}
 	r := WritableCandidateRunningReceipt{Format: writableRunningFormat, Claim: m, NativeID: actual.NativeID, NativeObservedMS: strconv.FormatInt(actual.ObservedMS, 10), SettledMS: strconv.FormatInt(f.now, 10)}

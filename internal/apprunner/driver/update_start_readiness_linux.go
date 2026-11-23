@@ -125,6 +125,7 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 		return zero, fmt.Errorf(
 			"update-start readiness plan: %w", err)
 	}
+	plan = selectRecordedPlan(plan, expected.Launch.PolicySHA256)
 	pins, base, err := r.pinCandidatePreflight(ctx, request.CandidateLaunchRequest, image, plan)
 	if err != nil {
 		return zero, fmt.Errorf(
@@ -133,7 +134,7 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 	defer pins.Close()
 	actual := UpdateStartLaunchSnapshot{
 		Launch: base, Binding: request.Binding, SandboxProfile: request.SandboxProfile,
-		SeccompSHA256: UpdateStartSeccompSHA256(request.SandboxProfile),
+		SeccompSHA256: seccompSHAOf(plan),
 	}
 	if actual != expected {
 		return zero, fmt.Errorf(

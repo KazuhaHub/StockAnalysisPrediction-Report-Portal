@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
 // Copies share one consumed flag. Neither restart nor JSON can reconstruct it.
@@ -65,7 +66,7 @@ func writableCandidateMarkerIdentityMatches(m writableCandidateClaimMarker, f wr
 	if m.Preflight == nil {
 		return m.PreflightBoundMS == ""
 	}
-	if !dataNumber(m.PreflightBoundMS, false) || !writablePreflightMatches(*m.Preflight, f, m) {
+	if !dataNumber(m.PreflightBoundMS, false) || !writablePreflightMatches(*m.Preflight, f, m, driver.SeccompHistory) {
 		return false
 	}
 	bound, _ := strconv.ParseInt(m.PreflightBoundMS, 10, 64)

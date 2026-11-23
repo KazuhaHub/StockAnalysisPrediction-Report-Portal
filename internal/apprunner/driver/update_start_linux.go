@@ -136,7 +136,7 @@ func (c UpdateStartLaunch) Snapshot() (UpdateStartLaunchSnapshot, error) {
 	snapshot := UpdateStartLaunchSnapshot{
 		Launch: state.snapshot, Binding: *state.plan.updateStart,
 		SandboxProfile: state.plan.profile,
-		SeccompSHA256:  updateStartSeccompSHA(state.plan.profile),
+		SeccompSHA256:  seccompSHAOf(state.plan),
 	}
 	if reason := updateStartSnapshotFailure(snapshot); reason != "" {
 		return zero, fmt.Errorf(

@@ -24,6 +24,10 @@ type CandidateLaunchRequest struct {
 	Descriptor []byte
 	Platform   string
 	Data       CandidateDataEvidence
+	// RecordedPolicySHA256 is the body digest the journal recorded for a container that already exists. It
+	// selects the plan that container was created from (see selectRecordedPlan). It is empty for a start that
+	// has recorded nothing yet, which always plans under the current policy.
+	RecordedPolicySHA256 string
 }
 
 // CandidateLaunchSnapshot excludes host paths, image command/environment and
@@ -117,6 +121,9 @@ func candidateOwner(i CandidateIdentity) containerOwner { return containerOwner(
 
 func candidateRequestFailure(request CandidateLaunchRequest) string {
 	d := request.Data
+	if request.RecordedPolicySHA256 != "" && !containerSHA.MatchString(request.RecordedPolicySHA256) {
+		return "recorded_policy"
+	}
 	parsed, err := appplatform.ParseDescriptor(request.Descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != request.Identity.ReleaseSHA256 {
 		return "descriptor"

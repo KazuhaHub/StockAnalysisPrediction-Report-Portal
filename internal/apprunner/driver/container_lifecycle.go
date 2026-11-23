@@ -25,6 +25,9 @@ func startCandidateContainerHTTP(ctx context.Context, client *http.Client, nativ
 	if state != "created" {
 		return "", ErrContainerConflict
 	}
+	if !currentSeccompPlan(plan) {
+		return "", ErrInvalidResponse
+	}
 	if err := candidateLifecyclePOST(ctx, client, nativeID, "start"); err != nil {
 		return "", err
 	}

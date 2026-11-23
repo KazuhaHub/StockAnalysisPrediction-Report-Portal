@@ -287,7 +287,7 @@ func (s *Store) ReadDataWriterReceipt(ctx context.Context, raw, signature []byte
 	}
 	defer tx.Rollback()
 	r, err := ParseDataWriterReceipt([]byte(f.receipt))
-	if err != nil || !dataWriterReceiptMatches(r, f) {
+	if err != nil || !dataWriterReceiptMatches(r, f, driver.SeccompCurrent) {
 		return zero, ErrFenceReconciliation
 	}
 	if err := finalDataWriterCheck(ctx, f); err != nil {
@@ -305,7 +305,9 @@ func (s *Store) ReadDataWriterReceipt(ctx context.Context, raw, signature []byte
 	return r, nil
 }
 
-func dataWriterReceiptMatches(r DataWriterReceipt, f dataWriterFacts) bool {
+// dataWriterReceiptMatches takes the seccomp mode of the read: driver.SeccompCurrent for a receipt just settled
+// for a start in progress, driver.SeccompHistory for a receipt an earlier install left behind.
+func dataWriterReceiptMatches(r DataWriterReceipt, f dataWriterFacts, mode driver.SeccompMode) bool {
 	c, ref := f.verified.Command(), f.verified.Data()
 	n, source := r.Native, f.source
 	evidenceRevision, _ := strconv.ParseInt(r.ControlRevision, 10, 64)
@@ -316,5 +318,5 @@ func dataWriterReceiptMatches(r DataWriterReceipt, f dataWriterFacts) bool {
 	claimTime, _ := strconv.ParseInt(r.Claim.ClaimedMS, 10, 64)
 	sourceTime, _ := strconv.ParseInt(source.ObservedMS, 10, 64)
 	root := markerRoot(source.Claim)
-	return validDataWriterReceipt(r) && r.Claim.EffectID == c.EffectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == c.DataReceiptSHA256 && r.Claim.ResourceID == c.ResourceID && r.Claim.AdmittedFence == ref.InstallationFence && evidenceRevision >= sourceRevision && evidenceRevision <= currentRevision && n.Platform == c.Platform && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.RootFilesystemUUID == root.FilesystemUUID && n.RootInode == strconv.FormatUint(root.Inode, 10) && n.ProjectID == source.ProjectID && n.Device == source.Device && n.NamespaceInode == source.NamespaceInode && n.QuotaBytes == source.QuotaBytes && n.QuotaInodes == source.QuotaInodes && claimTime >= sourceTime && observed <= f.now && settled <= f.now
+	return validDataWriterReceipt(r) && r.Claim.EffectID == c.EffectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == c.DataReceiptSHA256 && r.Claim.ResourceID == c.ResourceID && r.Claim.AdmittedFence == ref.InstallationFence && evidenceRevision >= sourceRevision && evidenceRevision <= currentRevision && n.Platform == c.Platform && driver.SeccompAccepted(n.SeccompSHA256, mode) && n.RootFilesystemUUID == root.FilesystemUUID && n.RootInode == strconv.FormatUint(root.Inode, 10) && n.ProjectID == source.ProjectID && n.Device == source.Device && n.NamespaceInode == source.NamespaceInode && n.QuotaBytes == source.QuotaBytes && n.QuotaInodes == source.QuotaInodes && claimTime >= sourceTime && observed <= f.now && settled <= f.now
 }
