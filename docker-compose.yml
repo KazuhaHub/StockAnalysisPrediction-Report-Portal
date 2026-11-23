@@ -17,6 +17,9 @@
 #   report-portal` or `up -d report-portal` alone across a version change. Production pins PORTAL_VERSION to a
 #   fixed tag in .env; the default follows :latest.
 #
+# Restore and the worker: stop app-task-worker before `restore --force` and start it after. Its cached data key and
+#   its task claims must not span a restore (docker compose stop app-task-worker ... docker compose start app-task-worker).
+#
 # Backend apps (the app-runner service, off by default): prepare the host once, then enable the profile.
 #   docker compose run --rm app-runner host-setup                   # plan only
 #   docker compose run --rm app-runner host-setup --apply --enrollment <file>
@@ -102,7 +105,7 @@ services:
         bind:
           create_host_path: false
 
-    environment:
+    environment: &portal-env
       TZ: Asia/Shanghai
       # Point the portal at the bundled Postgres. These override config.yaml.
       RP_DB_DRIVER: postgres
@@ -162,15 +165,13 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    environment:
-      TZ: Asia/Shanghai
-      RP_DB_DRIVER: postgres
-      RP_DB_DSN: "postgres://portal:${PG_PASSWORD:-portal}@db:5432/reports?sslmode=disable"
-      PUID: ${PORTAL_UID:-10001}
-      PGID: ${PORTAL_GID:-10001}
-      RP_APP_RUNNER_SOCKET: ${RP_APP_RUNNER_SOCKET:-}
-      RP_APP_RUNNER_CONTROLLER_UID: ${RP_APP_RUNNER_CONTROLLER_UID:-}
-      RP_APP_RUNNER_CONTROLLER_GID: ${RP_APP_RUNNER_CONTROLLER_GID:-}
+    # THE WORKER'S ENVIRONMENT IS THE PORTAL'S, BY REFERENCE (the anchor on report-portal's environment). It needs
+    # every RP_* variable the Portal has: RP_DB_* to reach the same database and RP_SECRET_KEY /
+    # RP_SECRET_KEY_PREVIOUS (if you set them instead of secret_key in config.yaml), because it unwraps the keyring
+    # with that key and, on a database that has none, would create one: a worker with a different or missing key
+    # would fail on, or fork, the Portal's keyring. One shared block cannot drift. Variables you add to the Portal
+    # (for example in an override file or env_file) must be added to the worker the same way.
+    environment: *portal-env
     deploy:
       resources:
         limits:

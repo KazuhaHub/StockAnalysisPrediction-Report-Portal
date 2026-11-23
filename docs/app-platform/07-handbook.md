@@ -439,6 +439,12 @@ The Portal web process opens no service egress session and runs no background ta
 
 `docker-compose.yml` defines it as the `app-task-worker` service, started with the rest of the project (no profile). It uses the Portal image, `command: ["/app/app-task-worker", "--config", "/app/config/config.yaml"]`, `restart: unless-stopped` and publishes no ports. It needs what the Portal needs and nothing more: the same `./config` (the `secret_key` and database settings), the same `RP_DB_*` database variables, the same `PUID`/`PGID` (the runner accepts its control socket only from the controller uid), the `RP_APP_RUNNER_*` variables and the read-only control directory bind. It depends on `report-portal` being healthy so that the portal has created `config.yaml` and applied schema steps first. With a hand-written or systemd deployment run `app-task-worker --config <config.yaml>` as the Portal's user with the same environment and the same runner socket.
 
+The worker needs every `RP_*` variable the Portal has, not only the database ones: `RP_DB_*`, and `RP_SECRET_KEY` / `RP_SECRET_KEY_PREVIOUS` when the key is set in the environment rather than in `config.yaml`. It unwraps the keyring with that key and, on a database that has none yet, creates one; a worker with a different or missing key fails on the Portal's keyring or forks it. The compose file therefore gives the worker the Portal's `environment` block by YAML reference (`&portal-env` on `report-portal`, `*portal-env` on `app-task-worker`) so the two cannot drift. If you move the Portal's variables into an `env_file` or an override, share that source with the worker in the same way.
+
+Stop the worker before a restore and start it after (`docker compose stop app-task-worker`, then `restore --force`, then `docker compose start app-task-worker`; the recovery-bundle restore in the README likewise). It caches the unwrapped data key and holds task claims in the database, and neither may span a restore; it also holds pooled connections that block renaming or copying the live database.
+
+Rolling back to a release that has no worker: that release's compose file does not define `app-task-worker`, so `docker compose up -d` leaves the newer container behind as an orphan, still talking to the database with the newer binary. Stop and remove it (`docker compose stop app-task-worker && docker compose rm -f app-task-worker`, or `up -d --remove-orphans`) before starting the older release. Background tasks and `network.proxy` do not work on a release without the worker.
+
 Run exactly one worker per Portal installation. The Portal does not start a coordinator of its own, so running the worker beside it is the normal arrangement and creates no duplicate. A second worker is another matter: task claiming is lease-fenced and several workers may share it safely, but the egress coordinator has no lease. The runner keeps one current session per installation and a newer session replaces the older, so two workers would replace each other's sessions every few seconds and proxied calls would fail intermittently. Do not scale the service and do not run a worker by hand while the compose service is up (`--once` runs no coordinator and is safe).
 
 To check it: `docker compose logs app-task-worker` shows `application task worker <id> started`, and a managed app with a granted proxy stops answering `unavailable`.
@@ -571,6 +577,8 @@ cannot be cleared inline has a separate `delete_data` confirmation and clearly
 states backup-copy coverage.
 
 ### Restore
+
+Stop `app-task-worker` first and start it again after the restore (section 4.4a).
 
 Select a verified compatible recovery set; show possible loss of writes after its
 checkpoint. Restore in app maintenance with fenced workers. Review credentials,

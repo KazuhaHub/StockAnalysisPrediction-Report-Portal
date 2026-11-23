@@ -517,6 +517,16 @@ jobs:
           want="${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
           echo "$got"
           test "$got" = "$want" || { echo "::error::app-runner version printed '${got}', want '${want}'"; exit 1; }
+      - name: Run the arm64 app-task-worker usage call
+        shell: bash
+        run: |
+          set -euo pipefail
+          worker="$PWD/bin/app-task-worker"
+          chmod +x "$worker"
+          # Without a config path it prints its usage and exits 2: the arm64 build loads and runs natively.
+          rc=0
+          RP_CONFIG= "$worker" >/dev/null || rc=$?
+          test "$rc" = 2 || { echo "::error::app-task-worker exited ${rc} without a config, want 2"; exit 1; }
       - name: Run version and probe /healthz
         shell: bash
         env:

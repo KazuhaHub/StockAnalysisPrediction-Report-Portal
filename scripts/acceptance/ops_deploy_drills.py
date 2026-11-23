@@ -783,7 +783,16 @@ class DockerHost:
         """`docker compose up -d`; with wait, until the service reports healthy (or 180 s). A service that
         is expected to refuse to start is brought up without waiting."""
         extra = ["--wait", "--wait-timeout", "180"] if wait else []
-        self.compose("up", "-d", *extra, timeout=420, check=False)
+        # --remove-orphans: a restored prior compose file may predate the app-task-worker service, and the
+        # worker container from the newer file must not outlive it.
+        self.compose("up", "-d", "--remove-orphans", *extra, timeout=420, check=False)
+
+    def stop_portal(self):
+        """Stop the Portal and its task worker. The worker holds pooled connections to the live database, so
+        a rename or a TEMPLATE copy of it fails while the worker runs; `up` starts both again."""
+        # The current compose file may be a prior release's, which has no worker service: name only what it defines.
+        defined = (self.compose("config", "--services", check=False).stdout or "").split()
+        self.compose("stop", *[n for n in ("report-portal", "app-task-worker") if n in defined or n == "report-portal"], check=False)
 
     def wait_healthy(self, base=None, seconds=150):
         deadline = time.time() + seconds
@@ -1009,7 +1018,7 @@ class DockerHost:
     def replace_live_database(self):
         """The migrated database is kept under another name for forensics; the prior build restores
         into a fresh one, because it refuses to open a database whose ledger it does not know."""
-        self.compose("stop", "report-portal")
+        self.stop_portal()
         self.psql_admin(f"DROP DATABASE IF EXISTS {FAILED_DB} WITH (FORCE)")
         self.psql_admin(f"ALTER DATABASE {LIVE_DB} RENAME TO {FAILED_DB}")
         self.psql_admin(f"CREATE DATABASE {LIVE_DB} OWNER portal")
@@ -1026,7 +1035,7 @@ class DockerHost:
         """The obvious rollback, the prior build started against the migrated database, run against a
         database copied from it so the live database is not touched before the restore's checks. The prior
         build must exit non-zero with the unknown steps named."""
-        self.compose("stop", "report-portal")
+        self.stop_portal()
         self.psql_admin(f"DROP DATABASE IF EXISTS {ROLLBACK_COPY_DB} WITH (FORCE)")
         self.psql_admin(f"CREATE DATABASE {ROLLBACK_COPY_DB} TEMPLATE {LIVE_DB} OWNER portal")
         name = "ops-rollback-probe"
@@ -1172,7 +1181,7 @@ def drill_ops06(host, rec, build):
     # config directory that holds secret_key is not carried across (a mis-mounted or recreated volume).
     cand_ref = build["ref"]
     host.sh(["docker", "pull", cand_ref], timeout=600)
-    host.compose("stop", "report-portal")
+    host.stop_portal()
     host.write_compose(cand_ref)
     host.sh(["mv", host.config_dir, host.config_dir + ".not-carried"], sudo=True)
     os.makedirs(host.config_dir, exist_ok=True)
@@ -1201,7 +1210,7 @@ def drill_ops06(host, rec, build):
 
     # The obvious rollback, by tag alone, is demonstrated on a copy of the migrated database. The live
     # database is not touched until the restore's own checks have passed.
-    host.compose("stop", "report-portal")
+    host.stop_portal()
     rb_refused, rb_state = host.rollback_probe(delta)
     live_unchanged = host.state()["ledger"] == after_state["ledger"]
     rec.event("rollback_by_tag_refused_on_a_copy", rb_refused and live_unchanged, state=rb_state, live_ledger_unchanged=live_unchanged)

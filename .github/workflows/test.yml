@@ -893,6 +893,27 @@ jobs:
           docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
             --user 10001:10001 --entrypoint /app/app-task-worker -e RP_CONFIG= report-portal:ci >/dev/null || rc=$?
           test "$rc" = 2 || { echo "::error::app-task-worker exited ${rc} without a config, want 2"; exit 1; }
+          # The same through the image's own entrypoint, as the compose service starts it: no --entrypoint, no
+          # --user. The entrypoint starts as root, drops to PUID/PGID with gosu and execs the worker named as the
+          # command, which prints its usage and exits 2.
+          rc=0
+          docker run --rm --network none -e RP_CONFIG= report-portal:ci /app/app-task-worker >/dev/null || rc=$?
+          test "$rc" = 2 || { echo "::error::app-task-worker through the entrypoint exited ${rc}, want 2"; exit 1; }
+          # And running: PID 1 is the worker, as uid 10001, with no HTTP listener of its own.
+          docker run -d --name rp-worker-smoke --network none report-portal:ci \
+            /app/app-task-worker --config /app/config/config.yaml >/dev/null
+          started=0
+          for _ in $(seq 1 30); do
+            if docker logs rp-worker-smoke 2>&1 | grep -q 'application task worker .* started'; then started=1; break; fi
+            sleep 1
+          done
+          worker_uid=$(docker exec rp-worker-smoke awk '/^Uid:/{print $2}' /proc/1/status || true)
+          worker_cmd=$(docker exec rp-worker-smoke tr '\0' ' ' </proc/1/cmdline || true)
+          docker logs rp-worker-smoke 2>&1 | tail -n 5
+          docker rm -f rp-worker-smoke >/dev/null
+          test "$started" = 1 || { echo "::error::app-task-worker did not start through the entrypoint"; exit 1; }
+          test "$worker_uid" = 10001 || { echo "::error::app-task-worker runs as uid ${worker_uid}, want 10001"; exit 1; }
+          case "$worker_cmd" in /app/app-task-worker\ *) ;; *) echo "::error::PID 1 is '${worker_cmd}', want the worker"; exit 1 ;; esac
       - name: End-to-end checks against the release image
         run: |
           set -euo pipefail

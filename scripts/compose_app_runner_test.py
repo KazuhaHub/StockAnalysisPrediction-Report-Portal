@@ -140,15 +140,17 @@ class TaskWorkerServiceTests(unittest.TestCase):
 
     def test_shares_config_database_uid_and_runner_endpoint_with_the_portal(self):
         for line in ('- ./config:/app/config', '- rp-data:/app/data', 'source: ${RP_APP_RUNNER_CONTROL_DIR:-./app-runner-control}',
-                     'target: /var/lib/portal-app-runner/control', 'read_only: true', 'create_host_path: false',
-                     'RP_DB_DRIVER: postgres', 'PUID: ${PORTAL_UID:-10001}', 'PGID: ${PORTAL_GID:-10001}',
-                     'RP_APP_RUNNER_SOCKET: ${RP_APP_RUNNER_SOCKET:-}',
-                     'RP_APP_RUNNER_CONTROLLER_UID: ${RP_APP_RUNNER_CONTROLLER_UID:-}',
-                     'RP_APP_RUNNER_CONTROLLER_GID: ${RP_APP_RUNNER_CONTROLLER_GID:-}'):
+                     'target: /var/lib/portal-app-runner/control', 'read_only: true', 'create_host_path: false'):
             self.assertIn(line, self.worker, line)
             self.assertIn(line, self.portal, line)
-        dsn = re.search(r'RP_DB_DSN: .*', self.portal)[0]
-        self.assertIn(dsn, self.worker)
+
+    def test_environment_is_the_portals_by_reference_so_the_two_cannot_drift(self):
+        # RP_DB_*, RP_SECRET_KEY(_PREVIOUS), PUID/PGID and the RP_APP_RUNNER_* variables all come from one block.
+        self.assertRegex(self.portal, r'(?m)^    environment: &portal-env\s*$')
+        self.assertRegex(self.worker, r'(?m)^    environment: \*portal-env\s*$')
+        for name in ('RP_DB_DRIVER', 'RP_DB_DSN', 'PUID', 'PGID', 'RP_APP_RUNNER_SOCKET'):
+            self.assertIn(f'{name}:', self.portal)
+        self.assertNotRegex(self.worker, r'(?m)^      [A-Z_]+:')
 
     def test_starts_after_the_portal_has_made_the_config_and_schema(self):
         self.assertRegex(self.worker, r'depends_on:\n\s+report-portal:\n\s+condition: service_healthy')
