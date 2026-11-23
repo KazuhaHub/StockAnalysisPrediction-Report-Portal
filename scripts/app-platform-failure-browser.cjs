@@ -308,9 +308,12 @@ async function main() {
       });
       await admin.page.goto(`${base}/apps`, { waitUntil: "networkidle" });
       await admin.page.getByText("Not ready", { exact: true }).waitFor();
-      await admin.page.getByText("Disabled", { exact: true }).waitFor();
       await admin.page.getByText("Unavailable", { exact: true }).waitFor();
-      if ((await admin.page.getByRole("link", { name: /Review in management/ }).count()) !== 3) {
+      // A disabled app is managed under Manage -> Apps and is left off the launcher, for administrators too.
+      if ((await admin.page.getByText("Disabled", { exact: true }).count()) !== 0) {
+        throw new Error("admin directory listed a disabled app");
+      }
+      if ((await admin.page.getByRole("link", { name: /Review in management/ }).count()) !== 2) {
         throw new Error("admin directory recovery links missing");
       }
       const text = await admin.page.locator("body").innerText();
