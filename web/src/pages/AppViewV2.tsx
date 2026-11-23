@@ -11,6 +11,7 @@ import { parseBridgePresentation } from '../lib/bridge-v2'
 import { parseAppLaunchV2, validInstallationId, type AppLaunchV2 } from '../lib/appLaunchV2'
 import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
 import AppPageHeader from '../components/apps/AppPageHeader'
+import { useCrumbTail } from '../lib/crumbTail'
 import type { PageActionSnapshot } from '../lib/page-v2'
 import AppFrameV2 from '../components/apps/AppFrameV2'
 import { AppDraftPrompt, useAppDraftBlocker } from '../components/apps/AppDraftGuard'
@@ -89,6 +90,8 @@ function LaunchPage({ installation }: { installation: string }) {
   }) : null, [launch,lang,dark,layout,path,location.search,token])
 
   const copy = launch ? appDisplayText(launch.applicationId, launch.display, lang) : null
+  // The shell's breadcrumb ends with the app's name, rendered with the page from the same launch data.
+  useCrumbTail(copy ? copy.name : failed ? null : undefined)
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>

@@ -73,7 +73,7 @@ afterEach(cleanup)
 describe('application installation settings', () => {
   it('shows the current package, audience, permissions, data, recovery and credential metadata', async () => {
     mount()
-    expect(await screen.findByText('notes')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
     expect(screen.getByText('appPlatform.settings.title')).toBeTruthy()
     expect(screen.getByText('2.0.0')).toBeTruthy()
     expect(screen.getByText(release)).toBeTruthy()
@@ -149,7 +149,7 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'public.projection', granted: false, required: true }] } : { bindings: [] })
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.public\./ })).toBeNull()
     })
 
@@ -160,7 +160,7 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: true }] } : { bindings: [] })
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.machine\./ })).toBeNull()
     })
 
@@ -172,13 +172,13 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/postgres-policy') ? { ...preview, declared: false } : url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'network.postgres', granted: false, required: false }] } : { bindings: [] })
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByText('appPostgres.title')).toBeNull()
     })
 
     it('offers no control for other capabilities or without the capability', async () => {
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.principals\./ })).toBeNull()
     })
   })
@@ -265,6 +265,18 @@ describe('application installation settings', () => {
       idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })))
     expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('ends its breadcrumb with the app name, rendered with the page', async () => {
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings')
+      ? { ...settings, display: { icon: 'file-text', texts: ['en-US', 'zh-CN', 'zh-TW'].map(locale => ({ locale, name: 'Market Monitor', description: 'd' })) } }
+      : { bindings: [] })
+    mount()
+    const crumb = await screen.findByRole('navigation', { name: 'apps.breadcrumb' })
+    // The first render that has the page has the full trail: Apps / Market Monitor, the app's name and never its id.
+    expect(within(crumb).getByRole('link', { name: 'apps.title' })).toBeTruthy()
+    expect(within(crumb).getByText('Market Monitor')).toBeTruthy()
+    expect(within(crumb).queryByText('notes')).toBeNull()
   })
 
   it('reviews and confirms repair of the current managed release without changing grants', async () => {
@@ -536,13 +548,13 @@ describe('application installation settings', () => {
 
     it('shows no re-upload notice when the image is intact', async () => {
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByTestId('image-delivery-reupload')).toBeNull()
     })
 
     it('renders nothing when the field is absent', async () => {
       mount()
-      await screen.findByText('notes')
+      await screen.findByRole('heading', { name: 'notes' })
       expect(screen.queryByText('appPlatform.settings.migrationRecovery.title')).toBeNull()
     })
 

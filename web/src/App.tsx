@@ -10,6 +10,7 @@ import { lazyRetry } from './lib/lazyRetry'
 import { appsRoutes } from './pages/manage/appsRoutes'
 import { portalTheme } from './theme/portal'
 import AppLayout from './components/AppLayout'
+import { CrumbTailProvider } from './lib/crumbTail'
 import ErrorBoundary from './components/ErrorBoundary'
 import ConnectionBoundary, { ConnectionContent, ConnectionNotice } from './components/ConnectionBoundary'
 import LoginPage from './pages/LoginPage'
@@ -132,7 +133,7 @@ function AppRoutes() {
       <Route
         element={
           <Protected>
-            <AppLayout />
+            <CrumbTailProvider><AppLayout /></CrumbTailProvider>
           </Protected>
         }
       >

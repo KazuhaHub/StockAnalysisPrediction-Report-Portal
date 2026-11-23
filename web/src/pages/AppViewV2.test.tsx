@@ -5,6 +5,8 @@ import {beforeEach,afterEach,expect,test,vi} from 'vitest'
 import {ConfigProvider,theme} from 'antd'
 import axe from 'axe-core'
 import AppViewV2 from './AppViewV2'
+import { CrumbTailProvider, useCrumbTailValue } from '../lib/crumbTail'
+function CrumbProbe(){const tail=useCrumbTailValue();return <div data-testid="crumb-tail">{tail===undefined?'pending':tail===null?'none':tail}</div>}
 const prefs=vi.hoisted(()=>({lang:'zh-CN',dark:true}))
 const frames=vi.hoisted(()=>[] as any[])
 const PrefsPulse=createContext('');
@@ -62,6 +64,26 @@ test('waits for the launch and renders the header once, with the name and never 
  expect(await screen.findByRole('heading',{name:'笔记'})).toBeTruthy()
  expect(screen.queryByText(/notes-sample/)).toBeNull()
  expect(screen.queryByText('apps.v2Loading')).toBeNull()
+})
+
+test('the shell breadcrumb ends with the app name, from the same launch data and never before it',async()=>{
+ const display={icon:'file-text',texts:[{locale:'en-US',name:'Notes',description:'n'},{locale:'zh-CN',name:'笔记',description:'n'},{locale:'zh-TW',name:'筆記',description:'n'}]}
+ let answer!:(value:Response)=>void
+ vi.stubGlobal('fetch',vi.fn(()=>new Promise<Response>(resolve=>{answer=resolve})))
+ render(<CrumbTailProvider><CrumbProbe/><Page/></CrumbTailProvider>)
+ await waitFor(()=>expect(fetch).toHaveBeenCalledTimes(1))
+ // While the launch is out the tail is not known: the shell shows no trail, never the shorter one.
+ expect(screen.getByTestId('crumb-tail').textContent).toBe('pending')
+ await act(async()=>answer(new Response(JSON.stringify({...response,display}),{status:200})))
+ await screen.findByRole('heading',{name:'笔记'})
+ expect(screen.getByTestId('crumb-tail').textContent).toBe('笔记')
+})
+
+test('a failed launch settles the breadcrumb without a name',async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response('x',{status:404})))
+ render(<CrumbTailProvider><CrumbProbe/><Page/></CrumbTailProvider>)
+ await screen.findByRole('alert')
+ expect(screen.getByTestId('crumb-tail').textContent).toBe('none')
 })
 
 test('signed host title and frame label change language without another launch request',async()=>{

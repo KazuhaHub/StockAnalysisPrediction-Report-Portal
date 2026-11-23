@@ -10,6 +10,7 @@ import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { confirmAction } from '../../components/Confirm'
+import { AppsBreadcrumb } from './appsAdminParts'
 import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
 import AppPostgresPolicyPanel from './AppPostgresPolicyPanel'
@@ -658,6 +659,7 @@ export default function AppPlatformSettingsPage() {
     }
   }
   return <Space className="rp-platform-settings" orientation="vertical" size={16} style={{ width: '100%' }}>
+    <AppsBreadcrumb name={copy.name} />
     <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>
     <Typography.Title level={4} style={{ margin: 0 }}>{t('appPlatform.settings.title')}</Typography.Title>
     {error && <Alert type="error" showIcon title={error} action={<Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={() => setRefresh((value) => value + 1)}>{t('common.retry')}</Button>} />}
