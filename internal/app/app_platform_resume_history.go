@@ -61,7 +61,7 @@ func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b pla
 	var generation, policy int64
 	if err := e.queryRow(`SELECT desired_state,phase,generation,policy_revision,controller_epoch,runtime_id
 		FROM app_platform_installations WHERE id=?`, b.installation).Scan(&desired, &phase, &generation, &policy, &epoch, &runtimeID); err != nil ||
-		desired != "enabled" || phase != "ready" || generation != b.generation || policy != ev.plan.PolicyRevision ||
+		desired != "enabled" || phase != "ready" || generation != b.generation || policy < ev.plan.PolicyRevision ||
 		epoch != b.epoch || runtimeID != runtime.id {
 		return fail("installation", err)
 	}

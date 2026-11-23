@@ -592,9 +592,15 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 			"update-start activation row: %w",
 			errAppPlatformStageEvidence)
 	}
+	// A completed operation's evidence records the policy revision it ran at. Policy reviews raise the
+	// revision in place afterwards, so an active activation may be newer than the record, never older.
+	policyStale := policy != plan.TargetPolicyRevision
+	if activationState == "active" {
+		policyStale = policy < plan.TargetPolicyRevision
+	}
 	if release != plan.TargetReleaseSHA256 ||
 		generation != int64(expected.snapshot.Generation) ||
-		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
+		policyStale || namespace != plan.DataNamespaceID ||
 		format != plan.targetDataFormat() || state != activationState ||
 		readinessRaw == "{}" || observed <= 0 {
 		return zero, fmt.Errorf(

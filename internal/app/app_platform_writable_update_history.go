@@ -260,7 +260,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		Scan(&desired, &phase, &generation, &policy, &epoch, &runtimeID); err != nil ||
 		desired != "enabled" || phase != "ready" ||
 		generation != plan.TargetGeneration ||
-		policy != plan.TargetPolicyRevision ||
+		policy < plan.TargetPolicyRevision ||
 		epoch != expected.controllerEpoch || runtimeID != runtime.id {
 		return zero, errAppPlatformLaunchUnavailable
 	}
@@ -274,7 +274,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 			&activeNamespace, &activeFormat); err != nil ||
 		activeRelease != plan.TargetReleaseSHA256 ||
 		activeGeneration != plan.TargetGeneration ||
-		activePolicy != plan.TargetPolicyRevision ||
+		activePolicy < plan.TargetPolicyRevision ||
 		activeNamespace != plan.DataNamespaceID ||
 		activeFormat != plan.targetDataFormat() {
 		return zero, fmt.Errorf(
