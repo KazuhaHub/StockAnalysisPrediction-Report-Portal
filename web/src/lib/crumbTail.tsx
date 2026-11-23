@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 
 /**
  * The last item of the shell's breadcrumb, supplied by the page it names. The shell knows the route (Home / Apps) but not
@@ -30,8 +30,8 @@ export function useCrumbTailValue(): string | null | undefined {
 /** A page names the last breadcrumb item once its first-paint data is in; it is forgotten when the page goes away. */
 export function useCrumbTail(label: string | null | undefined): void {
   const setTail = useContext(Ctx)?.setTail
-  useEffect(() => {
+  useLayoutEffect(() => {
     setTail?.(label)
   }, [setTail, label])
-  useEffect(() => () => setTail?.(undefined), [setTail])
+  useLayoutEffect(() => () => setTail?.(undefined), [setTail])
 }
