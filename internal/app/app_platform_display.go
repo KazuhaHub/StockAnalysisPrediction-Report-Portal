@@ -18,20 +18,38 @@ type platformDisplayRecord struct {
 }
 
 func platformReadDisplayRecord(e migExec, installation string) (*platformDisplayRecord, error) {
+	return platformReadDisplayRecordFor(e, installation, false)
+}
+
+// platformReadCurrentReleaseDisplayRecord is the console's view of an installation that has no active
+// activation (disabled): it takes the installation's current release the way the settings API does,
+// preferring an active activation and otherwise the latest one. Its coherence is not meaningful without
+// an active activation, so it is reported as coherent; every signature and identity check still runs.
+// The reader directory never calls it.
+func platformReadCurrentReleaseDisplayRecord(e migExec, installation string) (*platformDisplayRecord, error) {
+	return platformReadDisplayRecordFor(e, installation, true)
+}
+
+func platformReadDisplayRecordFor(e migExec, installation string, current bool) (*platformDisplayRecord, error) {
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE OF a,r"
 	}
 	var record platformDisplayRecord
+	var state string
 	var generation, policy, currentGeneration, currentPolicy int64
-	err := e.queryRow(`SELECT r.sha256,r.app_id,r.publisher_id,r.verification_key_id,r.frontend_sha256,r.version,r.descriptor,r.signature,r.managed,a.generation,a.policy_revision,i.generation,i.policy_revision FROM app_platform_activations a JOIN app_platform_releases r ON r.sha256=a.release_sha256 JOIN app_platform_installations i ON i.id=a.installation_id WHERE a.installation_id=? AND a.state='active'`+lock, installation).Scan(&record.release, &record.app, &record.publisher, &record.key, &record.frontend, &record.version, &record.raw, &record.signature, &record.managed, &generation, &policy, &currentGeneration, &currentPolicy)
+	pick := ` AND a.state='active'`
+	if current {
+		pick = ` AND a.id=(SELECT id FROM app_platform_activations WHERE installation_id=i.id AND state<>'candidate' ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END,generation DESC,updated_ms DESC,id DESC LIMIT 1)`
+	}
+	err := e.queryRow(`SELECT r.sha256,r.app_id,r.publisher_id,r.verification_key_id,r.frontend_sha256,r.version,r.descriptor,r.signature,r.managed,a.state,a.generation,a.policy_revision,i.generation,i.policy_revision FROM app_platform_activations a JOIN app_platform_releases r ON r.sha256=a.release_sha256 JOIN app_platform_installations i ON i.id=a.installation_id WHERE a.installation_id=?`+pick+lock, installation).Scan(&record.release, &record.app, &record.publisher, &record.key, &record.frontend, &record.version, &record.raw, &record.signature, &record.managed, &state, &generation, &policy, &currentGeneration, &currentPolicy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	record.coherent = generation == currentGeneration && policy == currentPolicy
+	record.coherent = (current && state != "active") || (generation == currentGeneration && policy == currentPolicy)
 	return &record, nil
 }
 func (r *platformDisplayRecord) verified(trust appplatform.PublisherTrust, now int64, app, publisher string) (*appplatform.AppDisplay, string, bool) {
