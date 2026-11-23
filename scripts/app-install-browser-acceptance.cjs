@@ -410,7 +410,8 @@ async function installScenario(browser, url) {
     await dialog.locator(".rp-platform-review").waitFor();
     await dialog.getByRole("button", { name: "Confirm installation", exact: true }).click();
     await page.waitForURL(/[?&]operation=[0-9a-f-]{36}(?:&|$)/);
-    await dialog.getByText("Operation complete", { exact: true }).waitFor({
+    // The step list repeats the stage title, so read the status line.
+    await dialog.getByRole("status").getByText("Operation complete", { exact: true }).waitFor({
       timeout: 60_000,
     });
     await dialog.getByRole("button", { name: "Done", exact: true }).click();

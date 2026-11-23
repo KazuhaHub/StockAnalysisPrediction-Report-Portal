@@ -139,7 +139,10 @@ async function main() {
       );
       // Progress is the last step of the apps console's lifecycle dialog, opened from ?operation=.
       await page.getByRole("dialog").locator('div[role="status"]').waitFor();
+      // The step list repeats the stage title, so read the status line.
       await page
+        .getByRole("dialog")
+        .getByRole("status")
         .getByText("Operation complete", { exact: true })
         .waitFor({ timeout: 180_000 });
       await page.screenshot({
