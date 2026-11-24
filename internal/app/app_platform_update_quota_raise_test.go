@@ -68,9 +68,29 @@ func (f *platformFakeRaiseRunner) status(i platformSetDataQuotaIntent, state, co
 		Format: "portal.runner.migration-status/1-dev.1", Kind: h.Kind, DeploymentID: h.DeploymentID, ControllerEpoch: h.ControllerEpoch,
 		InstallationID: h.InstallationID, OperationID: h.OperationID, TargetGeneration: h.TargetGeneration, Stage: h.Stage,
 		EffectNumber: h.EffectNumber, EffectID: h.EffectID, PayloadSHA256: h.PayloadSHA256, State: state, Code: code,
-		ObservedMS: strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
+		ObservedMS: strconv.FormatInt(observation.receivedAt.UnixMilli(), 10),
 	}
 	return observation
+}
+
+// A fake runner's status is observed no later than the Portal receives it. The runner answers at one instant; reading
+// the clock once for the observation and again for the status put the status a millisecond after its own receipt
+// whenever a millisecond boundary fell between the two reads, and the Portal rightly refused such a status.
+func TestPlatformFakeRaiseStatusIsObservedBeforeItIsReceived(t *testing.T) {
+	saved := platformQuotaClock
+	t.Cleanup(func() { platformQuotaClock = saved })
+	platformQuotaClock = func() time.Time {
+		time.Sleep(1200 * time.Microsecond) // every read lands in a later millisecond than the one before
+		return time.Now().UTC()
+	}
+	observation, ok := (&platformFakeRaiseRunner{}).status(platformSetDataQuotaIntent{}, "absent", "").(platformQuotaTestObservation)
+	if !ok || observation.status == nil {
+		t.Fatal("the fake runner did not answer with a status")
+	}
+	observed, err := strconv.ParseInt(observation.status.ObservedMS, 10, 64)
+	if err != nil || observed > observation.receivedAt.UnixMilli() {
+		t.Fatal("a status was observed after it was received", observed, observation.receivedAt.UnixMilli(), err)
+	}
 }
 
 // platformUpdateRaiseFixture brings a reviewed managed update, whose target asks for a larger quota (and for a data
