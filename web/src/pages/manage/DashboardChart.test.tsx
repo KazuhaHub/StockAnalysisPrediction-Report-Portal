@@ -138,3 +138,19 @@ it('gives every series colour a distinct hue', () => {
   const colors = (chart.setOption.mock.lastCall![0] as { color: string[] }).color
   expect(new Set(colors.map((c) => c.toLowerCase())).size).toBe(colors.length)
 })
+// The widget catalog shows each chart in a fixed 160px preview. A narrow donut's layout (a 230px ring band
+// with the legend under it) does not fit there and lost the bottom of its ring, so a compact chart sizes
+// the ring to the host instead and leaves the legend out.
+it('keeps a compact donut ring inside its host', async () => {
+  hostSize = { width: 334, height: 160 }
+  const rows = ['A', 'B', 'C'].map((name, i) => ({ name, value: i + 1 }))
+  const { container } = renderChart(<DashboardChart label="Types" rows={rows} series={{ type: 'pie' as const }} total={6} compact />)
+  await act(async () => { resize([], {} as ResizeObserver); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  const option = chart.setOption.mock.lastCall![0] as { legend: { show?: boolean }; series: { center: [string, string]; radius: [string, string] }[] }
+  expect(option.legend.show).toBe(false)
+  const [, cy] = option.series[0].center
+  const outer = parseFloat(option.series[0].radius[1]) / 100 * Math.min(334, 160) / 2
+  expect(parseFloat(cy) / 100 * 160 + outer).toBeLessThanOrEqual(160)
+  const host = container.querySelector('.rp-dashboard-echart-host') as HTMLElement
+  expect(host.style.minHeight).toBe('')
+})

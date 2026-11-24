@@ -24,6 +24,8 @@ interface ChartProps {
   total?: number
   hint?: string
   legendValues?: boolean
+  /** A preview in a fixed small host: the ring fits the host and there is no legend. */
+  compact?: boolean
 }
 
 // A narrow donut: the ring in a fixed band at the top, every group listed under it in a legend that
@@ -39,7 +41,7 @@ export function narrowDonutHeight(width: number, groups: number): number {
 }
 
 /** Container sizing belongs to the dashboard; plot geometry and interactions belong to ECharts. */
-export default function DashboardChart({ label, rows, series, horizontal, dates, total, hint, legendValues }: ChartProps) {
+export default function DashboardChart({ label, rows, series, horizontal, dates, total, hint, legendValues, compact }: ChartProps) {
   const { token } = theme.useToken()
   const { t } = useTranslation()
   const host = useRef<HTMLDivElement>(null)
@@ -58,8 +60,8 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
   const pie = series.type === 'pie'
   const summary = rows.map(item => `${item.name}: ${item.value}`).join(', ')
   const makeOption = useMemo(() => (width: number): EChartsOption => {
-    const narrow = width < NARROW
-    const center: [string, string | number] = narrow ? ['50%', RING_BAND / 2] : ['26%', '50%']
+    const narrow = !compact && width < NARROW
+    const center: [string, string | number] = compact ? ['50%', '50%'] : narrow ? ['50%', RING_BAND / 2] : ['26%', '50%']
     const countLabel = (value: number) => t('manage.dashboard.tooltipCount', { count: value })
     const tooltip = (raw: unknown) => {
       const item = (Array.isArray(raw) ? raw[0] : raw) as { name?: string; value?: number; marker?: string }
@@ -83,7 +85,7 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
       tooltip: { trigger: pie || horizontal ? 'item' : 'axis', renderMode: 'richText', confine: true, formatter: tooltip,
         backgroundColor: token.colorBgElevated, borderColor: token.colorBorder, textStyle: { color: token.colorText, fontSize: 12 } },
       ...(pie ? {
-        legend: { type: narrow ? 'plain' : 'scroll', orient: narrow ? 'horizontal' : 'vertical',
+        legend: { show: !compact, type: narrow ? 'plain' : 'scroll', orient: narrow ? 'horizontal' : 'vertical',
           ...(narrow ? { top: RING_BAND, left: 16, right: 16, itemGap: 12 } : { left: '54%', right: 8, top: 'middle' }),
           formatter: legendValues ? (name: string) => `${name}  ${rows.find(row => row.name === name)?.value ?? 0}` : undefined,
           textStyle: { color: token.colorTextSecondary, width: narrow ? LEGEND_ITEM - 40 : Math.max(80, width * .4), overflow: 'truncate' }, tooltip: { show: true } },
@@ -95,12 +97,12 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
         grid: { left: 8, right: horizontal ? 45 : 16, top: 24, bottom: 8, containLabel: true },
         xAxis: horizontal ? value : category, yAxis: horizontal ? category : value,
       }),
-      series: [{ ...series, ...(pie ? { center, radius: narrow ? [RING_BAND * .25, RING_BAND * .39] : ['45%', '68%'], stillShowZeroSum: false } : {}),
+      series: [{ ...series, ...(pie ? { center, radius: compact ? ['58%', '88%'] : narrow ? [RING_BAND * .25, RING_BAND * .39] : ['45%', '68%'], stillShowZeroSum: false } : {}),
         data: pie ? rows : rows.map(item => item.value), label: { ...series.label, color: token.colorText, fontSize: 12 },
         emphasis: { focus: 'self' }, ...(pie ? {} : { itemStyle: { borderRadius: RADIUS.xs } }),
       }],
     } as EChartsOption
-  }, [rows, series, horizontal, dates, total, pie, legendValues, token, t])
+  }, [rows, series, horizontal, dates, total, pie, legendValues, compact, token, t])
   const latest = useRef(makeOption)
   latest.current = makeOption
   useEffect(() => {
@@ -132,7 +134,7 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
           hidden, so the chart instance survives until there is data again. */}
       {!rows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('manage.dashboard.noReports')} />}
       <div ref={host} aria-hidden="true" hidden={!rows.length} className="rp-dashboard-echart-host" style={{ minHeight: horizontal ? Math.max(220, rows.length * 30 + 40)
-        : pie && hostWidth && hostWidth < NARROW ? narrowDonutHeight(hostWidth, rows.length) : undefined }} />
+        : pie && !compact && hostWidth && hostWidth < NARROW ? narrowDonutHeight(hostWidth, rows.length) : undefined }} />
     </div>
     {hint && rows.length > 0 && <figcaption><Typography.Text type="secondary">{hint}</Typography.Text></figcaption>}
     {headerTarget && createPortal(dataButton, headerTarget)}
