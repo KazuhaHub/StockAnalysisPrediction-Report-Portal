@@ -63,7 +63,7 @@ func newCheckpointArchiveHash() *checkpointArchiveHash {
 // Checkpoint serializes one stopped namespace into an exclusive archive under
 // the distinct checkpoint root. It does not decide whether the source process is
 // stopped or whether a Portal operation is admitted.
-func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Root, sourceExpected RootIdentity, request CheckpointRequest) (CheckpointObservation, error) {
+func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Root, sourceExpected RootIdentity, request CheckpointRequest) (observation CheckpointObservation, err error) {
 	var zero CheckpointObservation
 	if r == nil || source == nil || r == source || !request.valid() {
 		return zero, ErrUnsafe
@@ -114,8 +114,9 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	defer func() {
 		if !ok {
 			_ = archive.Sync()
-			if limited != nil && limited.exceeded {
-				// Over the cap is final: no partial archive is left behind for a reconciliation to find.
+			if limited != nil && (limited.exceeded || checkpointRefused(err)) {
+				// A definite refusal (over the cap, or a tree the walker will not archive) is final: no partial
+				// archive is left behind for a reconciliation to find.
 				_ = unix.Unlinkat(int(directory.Fd()), name, 0)
 			}
 		}
@@ -189,6 +190,13 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	ok = true
 	verified.ObservedMS = time.Now().UTC().UnixMilli()
 	return CheckpointObservation{snapshot: verified, valid: true}, nil
+}
+
+// checkpointRefused reports whether err is a definite refusal of the namespace's content: unsafe or too large, and
+// not joined with ErrCheckpointIncomplete (an archive that may be half written or unverified is for reconciliation).
+func checkpointRefused(err error) bool {
+	return err != nil && !errors.Is(err, ErrCheckpointIncomplete) &&
+		(errors.Is(err, ErrCheckpointUnsafe) || errors.Is(err, ErrCheckpointTooLarge))
 }
 
 func checkpointIncomplete(err error) error {

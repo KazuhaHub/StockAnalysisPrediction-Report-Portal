@@ -589,6 +589,30 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 			}
 			return zero, true, nil
 		}
+		if storedState == "reverted" {
+			// A refusal settled by an earlier attempt is the answer again, with no native work.
+			failure, ok := parseDataEffectFailure(storedReceipt)
+			if !ok || failure.NamespaceID != command.Payload.NamespaceID {
+				return zero, false, fmt.Errorf("%w: checkpoint replay failure record", ErrFenceReconciliation)
+			}
+			return zero, false, checkpointRefusedError(command, failure.Code, nil)
+		}
+		if storedState == "unknown" && storedReceipt == "{}" {
+			// An earlier attempt claimed the snapshot and never settled it. The caller holds the data execution
+			// gate, so no dispatch is still working on it, and a checkpoint writes nothing to the data: it cannot
+			// have applied anything, whatever it left in the checkpoint directory. It settles as refused, but only
+			// while its checkpoint row is still exactly what the claim wrote.
+			if err := validateCheckpointRecord(ctx, tx, command, "", 0, false); err != nil {
+				return zero, false, fmt.Errorf("%w: checkpoint replay record", ErrFenceReconciliation)
+			}
+			if err := refuseCheckpointTx(ctx, tx, command, dataFailureCheckpointUnsettled, now); err != nil {
+				return zero, false, err
+			}
+			if err := tx.Commit(); err != nil {
+				return zero, false, err
+			}
+			return zero, false, checkpointRefusedError(command, dataFailureCheckpointUnsettled, nil)
+		}
 		if storedState != "prepared" || storedReceipt != "{}" {
 			return zero, false, fmt.Errorf("%w: checkpoint replay state %s", ErrFenceReconciliation, storedState)
 		}
@@ -739,9 +763,22 @@ func sameCheckpointSource(a, b checkpointSource) bool {
 		a.sourceFence == b.sourceFence && a.resource == b.resource
 }
 
+// checkpointNative is the native checkpoint call: it archives the namespace and returns what it observed.
+type checkpointNative func(ctx context.Context, request data.CheckpointRequest) (data.CheckpointObservation, error)
+
 func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, dataRoot *data.Root, dataPin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity) (CheckpointReceipt, error) {
 	var zero CheckpointReceipt
 	if dataRoot == nil || checkpointRoot == nil || s.closing.Load() {
+		return zero, ErrCheckpointUnavailable
+	}
+	return s.dispatchCheckpointWith(ctx, raw, signature, func(ctx context.Context, request data.CheckpointRequest) (data.CheckpointObservation, error) {
+		return checkpointRoot.Checkpoint(ctx, checkpointPin, dataRoot, dataPin, request)
+	})
+}
+
+func (s *Store) dispatchCheckpointWith(ctx context.Context, raw, signature []byte, native checkpointNative) (CheckpointReceipt, error) {
+	var zero CheckpointReceipt
+	if native == nil || s.closing.Load() {
 		return zero, ErrCheckpointUnavailable
 	}
 	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
@@ -771,8 +808,16 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 		ExpectedDevice: mustDataUint(source.command.Payload.Device), ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
 		WriterFence: mustDataInt(source.command.Payload.WriterFence),
 	}
-	observation, err := checkpointRoot.Checkpoint(ctx, checkpointPin, dataRoot, dataPin, request)
+	observation, err := native(ctx, request)
 	if err != nil {
+		if code, refused := classifyCheckpointRefusal(err); refused {
+			// The walker refused the content of the namespace. Nothing was written to the data, so the outcome is
+			// known: settle it, and answer with the typed refusal instead of an error the sender must retry.
+			if recordErr := s.refuseCheckpoint(ctx, raw, signature, source.command, code, err); recordErr != nil {
+				return zero, errors.Join(err, recordErr)
+			}
+			return zero, checkpointRefusedError(source.command, code, err)
+		}
 		return zero, err
 	}
 	return s.settleCheckpoint(ctx, source, observation)
@@ -837,6 +882,16 @@ func (s *Store) ReadCheckpointReceipt(ctx context.Context, raw, signature []byte
 		return zero, err
 	}
 	command := verified.Command()
+	var storedState, storedReceipt string
+	if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=? AND operation_id=? AND installation_id=? AND kind='snapshot'`,
+		command.EffectID, command.OperationID, command.InstallationID).Scan(&storedState, &storedReceipt); err == nil && storedState == "reverted" {
+		// A refusal is a definite answer to a read-back too.
+		failure, ok := parseDataEffectFailure(storedReceipt)
+		if !ok || failure.NamespaceID != command.Payload.NamespaceID {
+			return zero, ErrFenceReconciliation
+		}
+		return zero, checkpointRefusedError(command, failure.Code, nil)
+	}
 	var receipt string
 	if err := tx.QueryRowContext(ctx, `SELECT receipt_json FROM runner_commands WHERE effect_id=? AND operation_id=? AND installation_id=? AND state='applied'`,
 		command.EffectID, command.OperationID, command.InstallationID).Scan(&receipt); err != nil {

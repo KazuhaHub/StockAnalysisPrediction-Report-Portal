@@ -91,7 +91,9 @@ func TestCheckpointPersistsOneExactUnknownIntent(t *testing.T) {
 		f.command.Payload.CheckpointID, f.command.OperationID).Scan(&count); err != nil || count != 1 {
 		t.Fatal("checkpoint repository intent not durable")
 	}
-	if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); !errors.Is(err, ErrFenceReconciliation) {
+	// A replay never claims the effect again: the unknown intent settles as a refusal (see checkpoint_refusal_test.go).
+	var refused *DataEffectFailedError
+	if _, replay, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); replay || !errors.As(err, &refused) {
 		t.Fatal("unknown checkpoint reclaimed", err)
 	}
 }

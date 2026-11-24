@@ -454,6 +454,10 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, unsafe); !errors.Is(err, ErrCheckpointUnsafe) {
 		t.Fatal("symlink checkpoint accepted", err)
 	}
+	// The refusal is definite: it leaves no partial archive for a reconciliation to find.
+	if _, err := os.Lstat(dir + unsafe.CheckpointID + ".tar"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a refused checkpoint left its partial archive", err)
+	}
 	if err := os.Remove(namespace + "/link"); err != nil {
 		t.Fatal(err)
 	}
