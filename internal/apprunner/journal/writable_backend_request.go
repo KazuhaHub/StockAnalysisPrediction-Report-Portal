@@ -29,7 +29,7 @@ type WritableBackendRequestResult struct {
 
 func ParseWritableBackendRequestResult(raw []byte) (WritableBackendRequestResult, error) {
 	var r WritableBackendRequestResult
-	if len(raw) == 0 || len(raw) > MaxBackendRequestResultBytes || !canonicalDataJSON(string(raw), &r) || r.Format != writableBackendRequestResultFormat || !enrollmentUUID.MatchString(r.RequestID) || r.RequestID == "00000000-0000-0000-0000-000000000000" || !dataSHA(r.RequestSHA256) || !dataSHA(r.DeliveryReceiptSHA256) || !dataSHA(r.NativeID) || len(r.BootID) == 0 || len(r.BootID) > 128 || !utf8.ValidString(r.BootID) || !appplatform.ValidBackendResponse(r.Response.Status, r.Response.Body) || !dataNumber(r.ObservedMS, false) {
+	if len(raw) == 0 || len(raw) > MaxBackendRequestResultBytes || !canonicalDataJSONWithin(string(raw), MaxBackendRequestResultBytes, &r) || r.Format != writableBackendRequestResultFormat || !enrollmentUUID.MatchString(r.RequestID) || r.RequestID == "00000000-0000-0000-0000-000000000000" || !dataSHA(r.RequestSHA256) || !dataSHA(r.DeliveryReceiptSHA256) || !dataSHA(r.NativeID) || len(r.BootID) == 0 || len(r.BootID) > 128 || !utf8.ValidString(r.BootID) || !appplatform.ValidBackendResponse(r.Response.Status, r.Response.Body) || !dataNumber(r.ObservedMS, false) {
 		return WritableBackendRequestResult{}, ErrFenceReconciliation
 	}
 	return r, nil

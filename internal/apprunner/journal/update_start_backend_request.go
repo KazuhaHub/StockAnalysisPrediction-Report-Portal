@@ -29,7 +29,7 @@ type UpdateStartBackendRequestResult struct {
 func ParseUpdateStartBackendRequestResult(raw []byte) (UpdateStartBackendRequestResult, error) {
 	var result UpdateStartBackendRequestResult
 	if len(raw) == 0 || len(raw) > MaxBackendRequestResultBytes ||
-		!canonicalDataJSON(string(raw), &result) ||
+		!canonicalDataJSONWithin(string(raw), MaxBackendRequestResultBytes, &result) ||
 		result.Format != updateStartBackendRequestResultFormat ||
 		!enrollmentUUID.MatchString(result.RequestID) ||
 		result.RequestID == "00000000-0000-0000-0000-000000000000" ||

@@ -34,7 +34,7 @@ type ServiceBackendTaskResult struct {
 func ParseServiceBackendTaskResult(raw []byte) (ServiceBackendTaskResult, error) {
 	var result ServiceBackendTaskResult
 	if len(raw) == 0 || len(raw) > MaxBackendRequestResultBytes ||
-		!canonicalDataJSON(string(raw), &result) ||
+		!canonicalDataJSONWithin(string(raw), MaxBackendRequestResultBytes, &result) ||
 		result.Format != ServiceBackendTaskResultFormat ||
 		!enrollmentUUID.MatchString(result.RequestID) ||
 		!enrollmentUUID.MatchString(result.TaskID) ||
