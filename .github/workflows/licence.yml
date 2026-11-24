@@ -10,12 +10,28 @@ name: licence
 # outlive its evidence.
 #
 # A dedicated workflow rather than a job of test.yml: the release guard names test.yml's jobs one by
-# one, and the policy is checked on every pull request and every push to main all the same.
+# one, and the policy is checked on every push to main and on the pull requests that touch its inputs.
 
 on:
   push:
     branches: [main, integration/app-platform]
+  # A pull request runs the scan only when what it judges, or what judges it, changes: the dependency
+  # manifests, the policy and the scripts that evaluate it, the ELK exclusion's evidence, and this file.
+  # A push to main and a manual run are unfiltered, so a licence that arrives some other way is still
+  # caught on main.
   pull_request:
+    paths:
+      - go.mod
+      - go.sum
+      - web/package.json
+      - web/package-lock.json
+      - scripts/licence-policy.json
+      - scripts/licence_scan*.py
+      - web/scripts/check-no-elk.mjs
+      - web/scripts/forbid-elkjs.mjs
+      - web/vite.config.ts
+      - web/src/lib/elkDisabled.ts
+      - .github/workflows/licence.yml
   workflow_dispatch:
 
 concurrency:

@@ -1,0 +1,16 @@
+# Known false positives in the history, by fingerprint (commit:file:rule:line); no secret values.
+# Code that only looks like a key assignment, prose that mentions a credential, and a removed
+# vendored fuzz fixture. Test-file fixtures are allowed by rule in .gitleaks.toml.
+0074a3702158b937b63b3ea5909be81c33504d53:internal/app/app_platform_machine_authority.go:generic-api-key:96
+12cd5463a20895cf1f5f24b18e807aa22359217b:.github/workflows/test.yml:generic-api-key:492
+480bd53a29fcf6658fab2203e01a7ed4e7e8c078:internal/app/app_platform_machine_authority.go:generic-api-key:96
+7212a3fbf4ec8da79a23915c00af3a68de97ff5e:.github/workflows/test.yml:generic-api-key:338
+8a806adc34a24e2a1c036579c0cdf3b2ab8f5dea:internal/app/user_admin.go:generic-api-key:279
+8e58b36a1a1f01d8c49cfa93f98e8346a1d80c6f:internal/app/app_platform_ingress_authority.go:generic-api-key:176
+9543e04253038fd8c1fdd21de081cffad01877ef:docs/app-platform/104-writable-backend-handshake.md:generic-api-key:59
+aa518d215de91422c011e3b8fa88a37f7f60ecf1:.github/workflows/test.yml:generic-api-key:611
+b4741355118c28d95dcf3c096115963ce5936f01:docs/notification-operator-runbook.md:generic-api-key:165
+b690482f4df80f747391c4d81c4533235667d7e1:internal/app/app_platform_public_authority.go:generic-api-key:140
+c3840350fb5d729f0f721f95854ace47bdaff5dc:third_party/crewjam-saml/xmlenc/fuzz.go:private-key:13
+cbe8d9a3a1b545bc5cfa71fe7c54cc61c127e8cf:docs/app-platform/104-writable-backend-handshake.md:generic-api-key:59
+d4d88d3491372f6a088d524e215b1aa2a90c1d82:internal/app/app_platform_ingress_authority.go:generic-api-key:175

@@ -205,6 +205,16 @@ go run ./cmd/report-portal freeze-names
 go run ./cmd/report-portal version
 ~~~
 
+### Pre-commit hook and CI
+
+An optional pre-commit hook checks the staged files for `gofmt` and, when `web/node_modules` exists, `oxlint` on staged `web/src` files. Opt in once per clone:
+
+~~~bash
+git config core.hooksPath .githooks
+~~~
+
+The required pull request checks are `go-test`, `web typecheck + build`, `docker image (font gate + smoke)` and `workflow lint` (which also scans the change for secrets with gitleaks; `.gitleaks.toml` allows only throwaway fixture literals in Go and Python test files, and `.gitleaksignore` lists the other known false positives by fingerprint). The Go race detector is not a pull request check: it runs on pushes to main and on manual runs of the `test` workflow (`go race full` jobs, including the app platform's PostgreSQL tests), and a release is tagged only from a commit where they passed. The licence scan runs on a pull request only when the dependency manifests or the licence tooling change, and the arm64 runner probes and the capacity soak run on main or by hand.
+
 ## Release process
 
 Releases are CalVer: `vYYYY.W[.R]`, where `YYYY` is the ISO week-numbering year, `W` the UTC ISO week the series starts in, and `R` an optional revision that rises for every changed set of artifacts — `v2026.38` for the week's first release, `v2026.38.2` if that same week needs another one. Cut the tag from its release note and push it:

@@ -81,7 +81,7 @@ def validate_metadata(meta, tag, image, commit):
 
 
 def ci_ready(jobs):
-    required = {'changes', 'go-test', 'go test (checks + other packages)', 'go race (app platform, PostgreSQL)',
+    required = {'changes', 'go-test', 'go test (checks + other packages)',
                 'web typecheck + build', 'web lint + typecheck + build', 'workflow lint',
                 'docker image (font gate + smoke)', 'go race full (other packages)',
                 'release targets (cross-compile)'}
