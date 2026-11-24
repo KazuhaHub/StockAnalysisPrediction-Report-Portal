@@ -228,3 +228,30 @@ func TestPlatformCheckpointCodeIsRefusedAfterTheSnapshotStage(t *testing.T) {
 		t.Fatal("a checkpoint code was accepted at the quiesce stage", err)
 	}
 }
+
+// A read back that finds the checkpoint refused (the runner settled the refusal while the reply was lost) ends the
+// update with the runner's code, not checkpoint_incomplete.
+func TestPlatformSnapshotRefusalFoundOnReadBackKeepsTheRunnersCode(t *testing.T) {
+	s, snapshot := platformSnapshotStageFixture(t, false)
+	intent, err := s.preparePlatformCheckpoint(context.Background(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := newPlatformWritableInstallScheduler(s, platformManagedRemovalFixtureEndpoint(), platformFixtureID(6120), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.active = snapshot
+	w.runOverride = func(context.Context, platformOperationLease) (platformInstallRun, error) {
+		return platformInstallRun{}, errors.New("checkpoint reply lost")
+	}
+	w.checkpointReadOverride = func(ctx context.Context, lease platformOperationLease) (platformOperationLease, error) {
+		return s.commitPlatformCheckpoint(ctx, lease, intent, platformCheckpointEndpointFixture(), platformRefusedCheckpoint(t, intent, "checkpoint_unsafe"))
+	}
+	for i := 0; i < 2*platformInstallAttemptLimit && w.currentStatus().code != "review_required"; i++ {
+		_ = w.tick(context.Background())
+	}
+	if got := scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, snapshot.id); got != "recovery_required:checkpoint_unsafe" {
+		t.Fatal("a refusal found on read back lost the runner's code:", got)
+	}
+}
