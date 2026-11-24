@@ -78,7 +78,7 @@ def classify(paths):
 
 
 def needs_platform(paths):
-    """Whether the changed paths need the app platform's own race lane."""
+    """Whether the changed paths touch the app platform's ground (no job reads this now)."""
     paths = [p for p in paths if p]
     if not paths:
         return True

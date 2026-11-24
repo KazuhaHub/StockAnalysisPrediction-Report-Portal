@@ -130,8 +130,8 @@ is capped at 10 entries after that live filtering.
 
 **The tag must go on a commit that has a fully green `test` run of its own** — the release workflow
 refuses to publish otherwise: it looks for a completed run against that exact commit, accepting one
-from a push to `main` or from a manual dispatch, and requires the whole suite, race lane included;
-the race lane does not run on a pull request. The normal target is therefore the squash merge commit
+from a push to `main` or from a manual dispatch, and requires the whole suite, the full race jobs included;
+the race jobs run only on main and by hand, never on a pull request. The normal target is therefore the squash merge commit
 from the feature PR after its main-branch run finishes. The note changes the tag object, not that
 commit, so publishing needs no second PR and does not invalidate the completed CI result.
 

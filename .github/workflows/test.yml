@@ -407,29 +407,33 @@ jobs:
       # The app platform's focused tests under the race detector, on PostgreSQL. internal/app is
       # outside the package run above, and go-race-full runs it without a database.
       - name: App platform on PostgreSQL (service egress)
+        shell: bash
         env:
           TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
-        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=8m ./internal/app -run '^TestPlatformServiceEgress'
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=8m ./internal/app -run '^TestPlatformServiceEgress' 2>&1 | tee -a go-race-others-postgres.txt
       - name: App platform on PostgreSQL (credential schema and custody)
+        shell: bash
         env:
           TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
-        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatform(Credential|SecretBindingPolicy|SecretUninstall)'
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatform(Credential|SecretBindingPolicy|SecretUninstall)' 2>&1 | tee -a go-race-others-postgres.txt
       - name: App platform on PostgreSQL (capability review and publication)
+        shell: bash
         env:
           TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
-        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^(TestPlatformInstallCapability|TestManagedInstallRequiresOpaqueRuntimeFacts)'
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^(TestPlatformInstallCapability|TestManagedInstallRequiresOpaqueRuntimeFacts)' 2>&1 | tee -a go-race-others-postgres.txt
       - name: App platform on PostgreSQL (network provider and viewer request authority)
+        shell: bash
         env:
           TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
         run: |
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m -v ./internal/app -run '^TestPlatformNetworkRuntimeNoAuthority'
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetwork(Request|HTTP)'
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m -v ./internal/app -run '^TestPlatformNetworkRuntimeNoAuthority' 2>&1 | tee -a go-race-others-postgres.txt
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetwork(Request|HTTP)' 2>&1 | tee -a go-race-others-postgres.txt
       - name: Upload race output
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: go-race-others-output
-          path: go-race-others.txt
+          path: go-race-others*.txt
           retention-days: 7
       - name: Trim the build cache to what this run used
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -517,17 +521,14 @@ jobs:
           # objects as their build cache (see go-test-checks). Compiling actionlint cold costs it ~10s.
           cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-      # actionlint's shellcheck sees only the run: blocks, not the scripts they call. Those carry
-      # the release (scripts/lib/*.sh is sourced by release.yml, check-release-build.sh passes or
-      # fails every binary) and the image's entrypoint, which starts as root and drops privileges.
-      # They are POSIX sh and run under dash here and in debian-slim, where a bashism that works in
-      # a developer's shell fails, and the tests above exercise only the paths they call. -x with
-      # SCRIPTDIR follows each `. lib/...` the way the script resolves it. About a second.
       # Secret scan of what this change adds, not of the history: a pull request's own commits
       # (HEAD^1 is the base branch in GitHub's merge commit), a push's new commits, or the tip commit
-      # of a manual run. The release binary is pinned and checked against the checksum published with
-      # v8.30.1, the way actionlint is pinned above; .gitleaks.toml keeps the default rules and allows
-      # only test fixtures. A finding names the file and line; the secret itself is redacted.
+      # of a manual run. Merge commits are scanned too, because a conflict resolution can add a line
+      # that no other commit has. The release binary is pinned and checked against the checksum
+      # published with v8.30.1, the way actionlint is pinned above. .gitleaks.toml keeps the default
+      # rules and allows only throwaway fixture literals in Go and Python test files; the other known
+      # false positives are listed by fingerprint in .gitleaksignore, so a new finding anywhere else,
+      # docs included, fails. A finding names the file and line; the secret itself is redacted.
       - name: Secret scan
         env:
           GITLEAKS_VERSION: "8.30.1"
@@ -543,11 +544,17 @@ jobs:
           echo "$GITLEAKS_SHA256  $tool/$archive" | sha256sum -c -
           tar -xzf "$tool/$archive" -C "$tool" gitleaks
           case "$EVENT_NAME" in
-            pull_request) range='--no-merges HEAD^1..HEAD' ;;
-            push) if git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then range="--no-merges $PUSH_BEFORE..HEAD"; else range='-n 1'; fi ;;
+            pull_request) range='HEAD^1..HEAD' ;;
+            push) if git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then range="$PUSH_BEFORE..HEAD"; else range='-n 1'; fi ;;
             *) range='-n 1' ;;
           esac
           "$tool/gitleaks" git --no-banner --redact=100 --config .gitleaks.toml --log-opts "$range" .
+      # actionlint's shellcheck sees only the run: blocks, not the scripts they call. Those carry
+      # the release (scripts/lib/*.sh is sourced by release.yml, check-release-build.sh passes or
+      # fails every binary) and the image's entrypoint, which starts as root and drops privileges.
+      # They are POSIX sh and run under dash here and in debian-slim, where a bashism that works in
+      # a developer's shell fails, and the tests above exercise only the paths they call. -x with
+      # SCRIPTDIR follows each `. lib/...` the way the script resolves it. About a second.
       - name: Shell scripts
         run: git ls-files -z '*.sh' deploy/app-runner/portal-app-runner-entry | xargs -0 shellcheck -x -P SCRIPTDIR
       - name: Release script tests

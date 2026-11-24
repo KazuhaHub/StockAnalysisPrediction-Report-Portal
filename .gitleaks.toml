@@ -1,22 +1,20 @@
 # Settings for the secret scan in .github/workflows/test.yml (the "workflow lint" job).
-# The default rule set stays on; only what is known not to be a credential is allowed through.
+# The default rule set stays on. Only one pattern is allowed by rule: a throwaway fixture
+# assignment in a Go or Python test file. Every other known false positive in the history is
+# listed by fingerprint in .gitleaksignore, so a new finding anywhere else, docs and runbooks
+# included, fails the scan.
 title = "report portal gitleaks"
 
 [extend]
 useDefault = true
 
 [[allowlists]]
-description = "Test fixtures: fixed throwaway keys, passwords and tokens in test files, and the vendored libraries' own test material"
+description = "Throwaway test fixtures: a SecretKey, password or token literal assigned in a test file"
+condition = "AND"
 paths = [
   '''_test\.(go|py)$''',
-  '''^third_party/''',
-  '''^docs/''',
 ]
-
-[[allowlists]]
-description = "Code and comments that only look like key assignments to the generic-api-key rule"
 regexTarget = "line"
 regexes = [
-  '''\.Valid \|\|''',
-  '''key of its own''',
+  '''(?i)(secretkey|password|passwd|secret|apitoken|rotoldkey|rotnewkey)["']?\s*(:=|[:=,])\s*["']''',
 ]

@@ -43,8 +43,9 @@ class ClassifyTests(unittest.TestCase):
 
 
 class PlatformTests(unittest.TestCase):
-    """The app platform's own race lane (and journal's race shards) run only for a change that can
-    reach them. The list errs towards running: anything that is not a plain Go or docs file counts."""
+    """The platform output says whether a change can reach the app platform's ground. Nothing gates on it
+    now (its race lane is gone), but the list stays tested. It errs towards running: anything that is
+    not a plain Go or docs file counts."""
 
     def test_portal_only_go_and_docs_need_no_platform_lane(self):
         self.assertFalse(needs_platform(['internal/app/server.go', 'internal/app/sso_admin.go',
