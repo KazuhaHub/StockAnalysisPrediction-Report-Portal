@@ -87,7 +87,7 @@ func validCheckpointReceipt(r CheckpointReceipt) bool {
 
 func ParseCheckpointReceipt(raw []byte) (CheckpointReceipt, error) {
 	var receipt CheckpointReceipt
-	if len(raw) == 0 || len(raw) > 32768 || !canonicalDataJSON(string(raw), &receipt) || !validCheckpointReceipt(receipt) {
+	if len(raw) == 0 || len(raw) > 32768 || !canonicalDataJSONWithin(string(raw), 32768, &receipt) || !validCheckpointReceipt(receipt) {
 		return CheckpointReceipt{}, ErrFenceReconciliation
 	}
 	return receipt, nil

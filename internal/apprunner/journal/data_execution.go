@@ -59,8 +59,16 @@ func dataSHA(text string) bool {
 func validDataRoot(pin data.RootIdentity) bool {
 	return enrollmentUUID.MatchString(pin.FilesystemUUID) && pin.FilesystemUUID != "00000000-0000-0000-0000-000000000000" && pin.Inode > 0
 }
+
+// canonicalDataJSON bounds the journal's small receipts and markers at 16 KiB.
 func canonicalDataJSON(raw string, target any) bool {
-	if len(raw) > 16384 || json.Unmarshal([]byte(raw), target) != nil {
+	return canonicalDataJSONWithin(raw, 16384, target)
+}
+
+// canonicalDataJSONWithin is canonicalDataJSON for a record type with its own declared bound, such as a backend
+// reply that carries the app's response body.
+func canonicalDataJSONWithin(raw string, limit int, target any) bool {
+	if len(raw) > limit || json.Unmarshal([]byte(raw), target) != nil {
 		return false
 	}
 	encoded, err := json.Marshal(target)
