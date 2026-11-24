@@ -115,6 +115,9 @@ type checkpointSource struct {
 	resource    managedRemovalResource
 	raw         []byte
 	signature   []byte
+	// resumed is a snapshot an earlier attempt claimed and left unknown: it is walked again, after the partial
+	// archive that attempt left is removed.
+	resumed bool
 	// quotaBytes and quotaInodes are the namespace's current limits: the last link of its quota chain. The install's
 	// receipt in data keeps the limits the namespace was created with, because its digest is rebuilt from them.
 	quotaBytes, quotaInodes string
@@ -569,6 +572,7 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 	}
 	command := verified.Command()
 	createdCommand := false
+	resumed := false
 	var storedOperation, storedInstallation, storedStage, storedKind, storedPayload, storedEpoch, storedState, storedReceipt string
 	var storedSlot, storedGeneration, storedFence int64
 	err = tx.QueryRowContext(ctx, `SELECT operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json
@@ -595,25 +599,16 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 			if !ok || failure.NamespaceID != command.Payload.NamespaceID {
 				return zero, false, fmt.Errorf("%w: checkpoint replay failure record", ErrFenceReconciliation)
 			}
-			return zero, false, checkpointRefusedError(command, failure.Code, nil)
+			return checkpointSource{command: command}, false, checkpointRefusedError(command, failure.Code, nil)
 		}
 		if storedState == "unknown" && storedReceipt == "{}" {
-			// An earlier attempt claimed the snapshot and never settled it. The caller holds the data execution
-			// gate, so no dispatch is still working on it, and a checkpoint writes nothing to the data: it cannot
-			// have applied anything, whatever it left in the checkpoint directory. It settles as refused, but only
-			// while its checkpoint row is still exactly what the claim wrote.
-			if err := validateCheckpointRecord(ctx, tx, command, "", 0, false); err != nil {
-				return zero, false, fmt.Errorf("%w: checkpoint replay record", ErrFenceReconciliation)
-			}
-			if err := refuseCheckpointTx(ctx, tx, command, dataFailureCheckpointUnsettled, now); err != nil {
-				return zero, false, err
-			}
-			if err := tx.Commit(); err != nil {
-				return zero, false, err
-			}
-			return zero, false, checkpointRefusedError(command, dataFailureCheckpointUnsettled, nil)
-		}
-		if storedState != "prepared" || storedReceipt != "{}" {
+			// An earlier attempt claimed the snapshot and never settled it: it may have timed out, run out of space
+			// or failed to sync, all of which a walk can recover from, so it is not a refusal. The caller holds the
+			// data execution gate, so no dispatch is still working on it. A checkpoint only reads the data, so the
+			// walk is repeated under the same command once the partial archive is removed, and its outcome settles
+			// normally. That is allowed only while the checkpoint row is exactly what the claim wrote (checked below).
+			resumed = true
+		} else if storedState != "prepared" || storedReceipt != "{}" {
 			return zero, false, fmt.Errorf("%w: checkpoint replay state %s", ErrFenceReconciliation, storedState)
 		}
 	} else if errors.Is(err, sql.ErrNoRows) {
@@ -652,16 +647,19 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 	} else if err := validateCheckpointRecord(ctx, tx, command, "", 0, false); err != nil {
 		return zero, false, err
 	}
-	changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='unknown',updated_ms=? WHERE effect_id=? AND state='prepared' AND receipt_json='{}'`, now, command.EffectID)
-	if err != nil {
-		return zero, false, err
-	}
-	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, false, fmt.Errorf("%w: checkpoint intent transition", ErrFenceReconciliation)
+	if !resumed {
+		changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='unknown',updated_ms=? WHERE effect_id=? AND state='prepared' AND receipt_json='{}'`, now, command.EffectID)
+		if err != nil {
+			return zero, false, err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return zero, false, fmt.Errorf("%w: checkpoint intent transition", ErrFenceReconciliation)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, false, err
 	}
+	source.resumed = resumed
 	return source, false, nil
 }
 
@@ -688,7 +686,8 @@ func (s *Store) settleCheckpoint(ctx context.Context, source checkpointSource, o
 	}
 	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 	now := time.Now().UTC().UnixMilli()
-	if _, err := control.VerifyCheckpoint(source.commandRaw(), source.commandSignature(), authority, now); err != nil {
+	// A walk that outlived its signed window and verified is still settled: the window governs dispatch only.
+	if _, err := control.VerifyCheckpointSettlement(source.commandRaw(), source.commandSignature(), authority, now); err != nil {
 		return zero, ErrFenceReconciliation
 	}
 	current, err := loadCheckpointSource(ctx, tx, source.command, now)
@@ -773,12 +772,17 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 	}
 	return s.dispatchCheckpointWith(ctx, raw, signature, func(ctx context.Context, request data.CheckpointRequest) (data.CheckpointObservation, error) {
 		return checkpointRoot.Checkpoint(ctx, checkpointPin, dataRoot, dataPin, request)
+	}, func(ctx context.Context, checkpointID string) error {
+		return checkpointRoot.DiscardCheckpointArchive(ctx, checkpointPin, checkpointID)
 	})
 }
 
-func (s *Store) dispatchCheckpointWith(ctx context.Context, raw, signature []byte, native checkpointNative) (CheckpointReceipt, error) {
+// checkpointDiscard removes the archive a checkpoint left under its id; an absent archive is not an error.
+type checkpointDiscard func(ctx context.Context, checkpointID string) error
+
+func (s *Store) dispatchCheckpointWith(ctx context.Context, raw, signature []byte, native checkpointNative, discard checkpointDiscard) (CheckpointReceipt, error) {
 	var zero CheckpointReceipt
-	if native == nil || s.closing.Load() {
+	if native == nil || discard == nil || s.closing.Load() {
 		return zero, ErrCheckpointUnavailable
 	}
 	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
@@ -788,11 +792,24 @@ func (s *Store) dispatchCheckpointWith(ctx context.Context, raw, signature []byt
 	defer s.releaseDataExecution()
 	source, replay, err := s.beginCheckpoint(ctx, raw, signature)
 	if err != nil {
+		var settled *DataEffectFailedError
+		if errors.As(err, &settled) && source.command.Payload.CheckpointID != "" {
+			// A refusal settled earlier: nothing may be left of its archive.
+			_ = discard(ctx, source.command.Payload.CheckpointID)
+		}
 		return zero, err
 	}
 	source.raw, source.signature = raw, signature
 	if replay {
 		return s.ReadCheckpointReceipt(ctx, raw, signature)
+	}
+	if source.resumed {
+		// The attempt that claimed this snapshot never settled it and left an archive of unknown completeness. The
+		// archive is removed and the walk is repeated under the same command; if it cannot be removed the snapshot
+		// stays unknown and is replayed again.
+		if err := discard(ctx, source.command.Payload.CheckpointID); err != nil {
+			return zero, fmt.Errorf("remove the partial checkpoint archive: %w", err)
+		}
 	}
 	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
 	if err != nil {
@@ -816,6 +833,8 @@ func (s *Store) dispatchCheckpointWith(ctx context.Context, raw, signature []byt
 			if recordErr := s.refuseCheckpoint(ctx, raw, signature, source.command, code, err); recordErr != nil {
 				return zero, errors.Join(err, recordErr)
 			}
+			// The refusal is settled: no partial archive may outlive it.
+			_ = discard(ctx, source.command.Payload.CheckpointID)
 			return zero, checkpointRefusedError(source.command, code, err)
 		}
 		return zero, err

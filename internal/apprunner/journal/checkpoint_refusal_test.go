@@ -1,13 +1,18 @@
 package journal
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"testing"
+	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 )
 
@@ -16,6 +21,14 @@ func checkpointNativeFailing(err error, calls *int) checkpointNative {
 		*calls++
 		return data.CheckpointObservation{}, err
 	}
+}
+
+// checkpointDiscards records the archives the dispatch asked to have removed.
+type checkpointDiscards struct{ ids []string }
+
+func (d *checkpointDiscards) discard(_ context.Context, id string) error {
+	d.ids = append(d.ids, id)
+	return nil
 }
 
 func checkpointRefusalRows(t *testing.T, s *Store, effect, checkpoint string) (commandState, receipt, checkpointState string, unknown int) {
@@ -33,7 +46,8 @@ func checkpointRefusalRows(t *testing.T, s *Store, effect, checkpoint string) (c
 }
 
 // A walker refusal (a symlink in the data root, an unsupported file type, an archive over its cap) is definite: the
-// checkpoint never writes to the data, so the command ends reverted, the checkpoint row ends, and the answer is typed.
+// checkpoint never writes to the data, so the command ends reverted, the checkpoint row ends, the partial archive is
+// removed, and the answer is typed.
 func TestCheckpointDefiniteRefusalIsSettledAndTyped(t *testing.T) {
 	cases := map[string]struct {
 		err  error
@@ -46,21 +60,26 @@ func TestCheckpointDefiniteRefusalIsSettledAndTyped(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newCheckpointFixture(t)
-			calls := 0
-			_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(tc.err, &calls))
+			calls, discards := 0, &checkpointDiscards{}
+			id := f.command.Payload.CheckpointID
+			_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(tc.err, &calls), discards.discard)
 			var failed *DataEffectFailedError
 			if !errors.As(err, &failed) || failed.Code != tc.code || !errors.Is(err, tc.err) || calls != 1 {
 				t.Fatal("refusal was not a typed data effect failure", err, calls)
 			}
-			state, receipt, checkpoint, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, f.command.Payload.CheckpointID)
+			if len(discards.ids) != 1 || discards.ids[0] != id {
+				t.Fatal("the refused archive was not removed", discards.ids)
+			}
+			state, receipt, checkpoint, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, id)
 			record, ok := parseDataEffectFailure(receipt)
 			if state != "reverted" || !ok || record.Code != tc.code || record.Dirty || checkpoint != "deleted" || unknown != 0 {
 				t.Fatal("refusal was not settled", state, receipt, checkpoint, unknown)
 			}
-			// The settled refusal is replayed as the same typed answer and never reaches the native layer again.
-			_, err = f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(io.EOF, &calls))
-			if !errors.As(err, &failed) || failed.Code != tc.code || calls != 1 {
-				t.Fatal("a settled refusal was not replayed as the same answer", err, calls)
+			// The settled refusal is replayed as the same typed answer, never reaches the native layer again, and
+			// removes whatever archive is still there.
+			_, err = f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(io.EOF, &calls), discards.discard)
+			if !errors.As(err, &failed) || failed.Code != tc.code || calls != 1 || len(discards.ids) != 2 {
+				t.Fatal("a settled refusal was not replayed as the same answer", err, calls, discards.ids)
 			}
 			// A read-back answers the same, and the status it carries is a valid failed status for this command.
 			_, err = f.store.ReadCheckpointReceipt(context.Background(), f.raw, f.sig)
@@ -89,41 +108,53 @@ func TestCheckpointUncertainFailureIsNotSettledByTheCallThatSawIt(t *testing.T) 
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newCheckpointFixture(t)
-			calls := 0
-			_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(native, &calls))
+			calls, discards := 0, &checkpointDiscards{}
+			_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(native, &calls), discards.discard)
 			var failed *DataEffectFailedError
 			if err == nil || errors.As(err, &failed) || !errors.Is(err, native) {
 				t.Fatal("an uncertain failure was typed as a refusal", err)
 			}
 			state, receipt, checkpoint, _ := checkpointRefusalRows(t, f.store, f.command.EffectID, f.command.Payload.CheckpointID)
-			if state != "unknown" || receipt != "{}" || checkpoint != "preparing" {
-				t.Fatal("an uncertain failure was settled", state, receipt, checkpoint)
+			if state != "unknown" || receipt != "{}" || checkpoint != "preparing" || len(discards.ids) != 0 {
+				t.Fatal("an uncertain failure was settled", state, receipt, checkpoint, discards.ids)
 			}
 		})
 	}
 }
 
-// A snapshot left unknown (the wedged production command) settles as refused on its next replay when its checkpoint
-// row is still preparing: a checkpoint never writes to the data, so the effect cannot have applied.
-func TestUnknownCheckpointSettlesAsRefusedOnReplay(t *testing.T) {
+// A snapshot left unknown (the wedged production command) is not settled by its replay: a timeout, a full disk or a
+// failed sync would become a permanent refusal. A checkpoint only reads the data, so the replay removes the partial
+// archive and walks again under the same command. Whatever that walk ends with settles normally.
+func TestUnknownCheckpointIsWalkedAgainOnReplay(t *testing.T) {
 	f := newCheckpointFixture(t)
+	id := f.command.Payload.CheckpointID
 	if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); err != nil {
 		t.Fatal(err)
 	}
-	calls := 0
-	_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(io.EOF, &calls))
+	// The walk is uncertain again: still unknown, the partial archive removed before the walk, nothing settled.
+	calls, discards := 0, &checkpointDiscards{}
+	uncertain := errors.Join(data.ErrCheckpointIncomplete, io.ErrUnexpectedEOF)
+	_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(uncertain, &calls), discards.discard)
 	var failed *DataEffectFailedError
-	if !errors.As(err, &failed) || failed.Code != dataFailureCheckpointUnsettled || calls != 0 {
-		t.Fatal("unknown snapshot did not settle as refused", err, calls)
+	if err == nil || errors.As(err, &failed) || calls != 1 || len(discards.ids) != 1 || discards.ids[0] != id {
+		t.Fatal("the unknown snapshot was not walked again", err, calls, discards.ids)
 	}
-	state, receipt, checkpoint, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, f.command.Payload.CheckpointID)
-	if record, ok := parseDataEffectFailure(receipt); state != "reverted" || !ok || record.Code != dataFailureCheckpointUnsettled || record.Dirty || checkpoint != "deleted" || unknown != 0 {
-		t.Fatal("unknown snapshot was not settled", state, receipt, checkpoint, unknown)
+	if state, _, checkpoint, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, id); state != "unknown" || checkpoint != "preparing" || unknown != 1 {
+		t.Fatal("an uncertain replay settled the snapshot", state, checkpoint, unknown)
+	}
+	// The data now refuses definitively (the symlink is still there): the same command settles as refused.
+	_, err = f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(data.ErrCheckpointUnsafe, &calls), discards.discard)
+	if !errors.As(err, &failed) || failed.Code != dataFailureCheckpointUnsafe || calls != 2 {
+		t.Fatal("the re-walk's refusal did not settle", err, calls)
+	}
+	if state, _, checkpoint, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, id); state != "reverted" || checkpoint != "deleted" || unknown != 0 {
+		t.Fatal("the re-walk's refusal was not settled", state, checkpoint, unknown)
 	}
 }
 
-// The replay only settles a snapshot whose checkpoint row is still preparing; anything else stays for review.
-func TestUnknownCheckpointWithAnotherRecordIsNotSettled(t *testing.T) {
+// A replay only walks again a snapshot whose checkpoint row is still exactly what the claim wrote; anything else stays
+// for review, and nothing is removed or walked.
+func TestUnknownCheckpointWithAnotherRecordIsNotWalked(t *testing.T) {
 	f := newCheckpointFixture(t)
 	if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); err != nil {
 		t.Fatal(err)
@@ -131,15 +162,43 @@ func TestUnknownCheckpointWithAnotherRecordIsNotSettled(t *testing.T) {
 	if _, err := f.store.db.Exec(`UPDATE runner_checkpoints SET state='review_required' WHERE id=?`, f.command.Payload.CheckpointID); err != nil {
 		t.Fatal(err)
 	}
-	calls := 0
-	_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(io.EOF, &calls))
+	calls, discards := 0, &checkpointDiscards{}
+	_, err := f.store.dispatchCheckpointWith(context.Background(), f.raw, f.sig, checkpointNativeFailing(io.EOF, &calls), discards.discard)
 	var failed *DataEffectFailedError
-	if !errors.Is(err, ErrFenceReconciliation) || errors.As(err, &failed) || calls != 0 {
-		t.Fatal("a snapshot whose checkpoint is not preparing was settled", err, calls)
+	if !errors.Is(err, ErrFenceReconciliation) || errors.As(err, &failed) || calls != 0 || len(discards.ids) != 0 {
+		t.Fatal("a snapshot whose checkpoint is not preparing was walked", err, calls, discards.ids)
 	}
 	state, receipt, checkpoint, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, f.command.Payload.CheckpointID)
 	if state != "unknown" || receipt != "{}" || checkpoint != "review_required" || unknown != 1 {
 		t.Fatal("rows changed", state, receipt, checkpoint, unknown)
+	}
+}
+
+// A refusal that the walk reaches after its signed window ran out is still recorded against the exact command: the
+// window governs dispatch, not settlement.
+func TestCheckpointRefusalAfterTheSignedWindowIsStillSettled(t *testing.T) {
+	f := newCheckpointFixture(t)
+	c := f.command
+	now := time.Now().UnixMilli()
+	c.IssuedMS, c.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+300, 10)
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}
+	raw, sig, err := control.SignCheckpoint(c, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slow := func(context.Context, data.CheckpointRequest) (data.CheckpointObservation, error) {
+		time.Sleep(400 * time.Millisecond)
+		return data.CheckpointObservation{}, data.ErrCheckpointUnsafe
+	}
+	discards := &checkpointDiscards{}
+	_, err = f.store.dispatchCheckpointWith(context.Background(), raw, sig, slow, discards.discard)
+	var failed *DataEffectFailedError
+	if !errors.As(err, &failed) || failed.Code != dataFailureCheckpointUnsafe {
+		t.Fatal("a refusal after the window was not settled", err)
+	}
+	if state, _, checkpoint, _ := checkpointRefusalRows(t, f.store, c.EffectID, c.Payload.CheckpointID); state != "reverted" || checkpoint != "deleted" {
+		t.Fatal("a refusal after the window was not recorded", state, checkpoint)
 	}
 }
 

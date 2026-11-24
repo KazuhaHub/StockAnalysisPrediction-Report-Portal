@@ -91,10 +91,13 @@ func TestCheckpointPersistsOneExactUnknownIntent(t *testing.T) {
 		f.command.Payload.CheckpointID, f.command.OperationID).Scan(&count); err != nil || count != 1 {
 		t.Fatal("checkpoint repository intent not durable")
 	}
-	// A replay never claims the effect again: the unknown intent settles as a refusal (see checkpoint_refusal_test.go).
-	var refused *DataEffectFailedError
-	if _, replay, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); replay || !errors.As(err, &refused) {
-		t.Fatal("unknown checkpoint reclaimed", err)
+	// A replay never claims the effect again: it resumes the unknown intent, which stays unknown until its walk
+	// settles (see checkpoint_refusal_test.go).
+	if resumed, replay, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); replay || err != nil || !resumed.resumed {
+		t.Fatal("unknown checkpoint was not resumed", err)
+	}
+	if err := f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands WHERE effect_id=? AND state='unknown' AND receipt_json='{}'`, f.command.EffectID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("a resumed checkpoint is no longer unknown")
 	}
 }
 

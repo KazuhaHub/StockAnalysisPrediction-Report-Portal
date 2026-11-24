@@ -34,16 +34,15 @@ const (
 	dataFailureRaiseUnsafe      = "quota_raise_unsafe"
 	dataFailureRaiseLower       = "quota_raise_lower"
 	// A checkpoint never writes to the data, so each of these leaves the namespace as it was (Dirty is false).
-	dataFailureCheckpointUnsafe    = "checkpoint_unsafe"
-	dataFailureCheckpointTooLarge  = "checkpoint_too_large"
-	dataFailureCheckpointUnsettled = "checkpoint_unsettled"
+	dataFailureCheckpointUnsafe   = "checkpoint_unsafe"
+	dataFailureCheckpointTooLarge = "checkpoint_too_large"
 )
 
 var dataFailureCodes = map[string]bool{
 	dataFailureArchiveMissing: true, dataFailureArchiveAmbiguous: true, dataFailureArchiveInvalid: true, dataFailureTooLarge: true,
 	dataFailureFormatMismatch: true, dataFailureUnsafe: true, dataFailureIncomplete: true, dataFailureImport: true,
 	dataFailureRaiseUnsafe: true, dataFailureRaiseLower: true,
-	dataFailureCheckpointUnsafe: true, dataFailureCheckpointTooLarge: true, dataFailureCheckpointUnsettled: true,
+	dataFailureCheckpointUnsafe: true, dataFailureCheckpointTooLarge: true,
 }
 
 // dataEffectFailure is the receipt_json of a reverted data effect. Dirty is true when the failed native call may have
