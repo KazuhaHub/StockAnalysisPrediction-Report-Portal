@@ -144,13 +144,15 @@ it('gives every series colour a distinct hue', () => {
 it('keeps a compact donut ring inside its host', async () => {
   hostSize = { width: 334, height: 160 }
   const rows = ['A', 'B', 'C'].map((name, i) => ({ name, value: i + 1 }))
-  const { container } = renderChart(<DashboardChart label="Types" rows={rows} series={{ type: 'pie' as const }} total={6} compact />)
+  renderChart(<DashboardChart label="Types" rows={rows} series={{ type: 'pie' as const }} total={6} compact />)
   await act(async () => { resize([], {} as ResizeObserver); await new Promise(resolve => requestAnimationFrame(resolve)) })
-  const option = chart.setOption.mock.lastCall![0] as { legend: { show?: boolean }; series: { center: [string, string]; radius: [string, string] }[] }
+  const option = chart.setOption.mock.lastCall![0] as { legend: { show?: boolean }; title: { left: string; top: string }; series: { center: [string, string]; radius: [string, string] }[] }
   expect(option.legend.show).toBe(false)
-  const [, cy] = option.series[0].center
-  const outer = parseFloat(option.series[0].radius[1]) / 100 * Math.min(334, 160) / 2
+  const [cx, cy] = option.series[0].center
+  // ECharts sizes a percent radius against half the shorter side, and a hovered slice grows by 10px.
+  const outer = parseFloat(option.series[0].radius[1]) / 100 * Math.min(334, 160) / 2 + 10
   expect(parseFloat(cy) / 100 * 160 + outer).toBeLessThanOrEqual(160)
-  const host = container.querySelector('.rp-dashboard-echart-host') as HTMLElement
-  expect(host.style.minHeight).toBe('')
+  expect(parseFloat(cy) / 100 * 160 - outer).toBeGreaterThanOrEqual(0)
+  // The total stays in the ring's middle.
+  expect([option.title.left, option.title.top]).toEqual([cx, cy])
 })
