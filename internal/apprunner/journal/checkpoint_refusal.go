@@ -111,11 +111,17 @@ func (s *Store) refuseCheckpoint(parent context.Context, raw, signature []byte, 
 // execution gate every walk holds, so it cannot race one that is still running. A checkpoint only reads the data, so
 // abandoning an unfinished one loses nothing. Only a snapshot whose checkpoint row is still exactly what its claim wrote
 // is settled; any other stays for review. It returns the checkpoint ids whose archives are to be removed.
+//
+// The journal keeps no payload of a command, so the checkpoint id a snapshot was signed with is not stored beside it.
+// A snapshot command is bound to its row by the claim, which writes exactly one checkpoint row for the operation: an
+// operation holding any other checkpoint row is ambiguous, and none of its rows is touched.
 func supersedeUnknownSnapshots(ctx context.Context, tx *sql.Tx, next control.CheckpointCommand, now int64) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT c.effect_id,c.operation_id,c.payload_sha256,k.id,k.data_namespace_id
 		FROM runner_commands c JOIN runner_checkpoints k ON k.operation_id=c.operation_id AND k.installation_id=c.installation_id
 		WHERE c.installation_id=? AND c.kind='snapshot' AND c.state='unknown' AND c.receipt_json='{}' AND c.effect_id<>?
-		AND k.state='preparing' AND k.revision=1 AND k.manifest_sha256 IS NULL AND k.bytes=0 AND k.verified_ms IS NULL`,
+		AND k.state='preparing' AND k.revision=1 AND k.manifest_sha256 IS NULL AND k.bytes=0 AND k.verified_ms IS NULL
+		AND (SELECT COUNT(*) FROM runner_checkpoints o WHERE o.operation_id=c.operation_id)=1
+		AND (SELECT COUNT(*) FROM runner_commands s WHERE s.operation_id=c.operation_id AND s.kind='snapshot')=1`,
 		next.InstallationID, next.EffectID)
 	if err != nil {
 		return nil, err
@@ -149,7 +155,9 @@ func supersedeUnknownSnapshots(ctx context.Context, tx *sql.Tx, next control.Che
 		if n, err := changed.RowsAffected(); err != nil || n != 1 {
 			return nil, fmt.Errorf("%w: superseded checkpoint command", ErrFenceReconciliation)
 		}
-		changed, err = tx.ExecContext(ctx, `UPDATE runner_checkpoints SET state='deleted',revision=revision+1,updated_ms=? WHERE id=? AND state='preparing' AND revision=1`, now, e.checkpoint)
+		changed, err = tx.ExecContext(ctx, `UPDATE runner_checkpoints SET state='deleted',revision=revision+1,updated_ms=?
+			WHERE id=? AND operation_id=? AND state='preparing' AND revision=1 AND manifest_sha256 IS NULL AND bytes=0 AND verified_ms IS NULL`,
+			now, e.checkpoint, e.operation)
 		if err != nil {
 			return nil, err
 		}
@@ -160,3 +168,9 @@ func supersedeUnknownSnapshots(ctx context.Context, tx *sql.Tx, next control.Che
 	}
 	return ids, nil
 }
+
+// unsettledSnapshotExclusion leaves out of a pending-command check the snapshots an earlier operation claimed and never
+// settled. It is for an action that holds the data execution gate and whose first command is not a checkpoint (a stop,
+// a deletion): a checkpoint only reads the data and every walk holds that gate, so no such snapshot is still running,
+// and none can block the action for ever. The next checkpoint of the installation settles them.
+const unsettledSnapshotExclusion = ` AND NOT (kind='snapshot' AND state='unknown' AND receipt_json='{}')`

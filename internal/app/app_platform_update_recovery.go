@@ -108,6 +108,11 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		// Whatever the reason, an update ended at the snapshot stage is ended the same way, below.
 		code = platformCheckpointIncompleteCode
 	}
+	if !atSnapshot && platformCheckpointRefusalCode(code) {
+		// A checkpoint code names an ending at the snapshot stage, which changed no data, and nothing else: the repair
+		// that resolves such endings (resolvePlatformSnapshotEndingsByRepair) relies on it.
+		return errAppPlatformStageEvidence
+	}
 	if expected.snapshot.Action != appplatform.ActionUpdate ||
 		!expected.snapshot.Managed || expected.id == "" ||
 		expected.snapshot.Stage == appplatform.StageComplete ||
@@ -346,4 +351,86 @@ func loadPlatformManagedUpdateFinishPlan(e migExec, expected platformOperationLe
 		ControllerEpoch: review.ControllerEpoch, TargetRuntime: review.Target.Runtime,
 		Migration: review.Migration, RecoversOperationID: review.RecoversOperationID,
 	}, nil
+}
+
+// resolvePlatformSnapshotEndingsByRepair resolves, in the transaction that activates a repair, the managed updates of
+// the installation that ended at the snapshot stage on the generation the repair brought back. Such an update changed
+// no data: the snapshot comes before the migration, and its ending disabled the installation for recovery so that a
+// repair could bring the source back. Nothing else resolves it (there is no checkpoint to restore and no migration to
+// retry), so without this the installation would stay gated for ever after the repair. A retry that ended there
+// resolves the failed updates it retried as well, the way a completed retry does: they were settled before the retry
+// was admitted, and the source they all left is what the repair started again. Each operation gets the recovered
+// marker launch reads, and an audit row naming the repair.
+func resolvePlatformSnapshotEndingsByRepair(e migExec, lease platformOperationLease, runtimeID string, sourceGeneration, now int64) error {
+	if lease.snapshot.Action != appplatform.ActionRepair {
+		return errAppPlatformStageEvidence
+	}
+	rows, err := e.query(`SELECT o.id,o.error_code FROM app_platform_operations o
+		WHERE o.installation_id=? AND o.action='update' AND o.managed=1 AND o.stage='recovery_required'
+		AND o.completed_ms IS NOT NULL AND o.error_code IN (?,?,?) AND o.source_generation=?
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='recovered')
+		ORDER BY o.completed_ms,o.id`,
+		lease.installationID, "checkpoint_unsafe", "checkpoint_too_large", platformCheckpointIncompleteCode, sourceGeneration)
+	if err != nil {
+		return err
+	}
+	type ended struct{ id, code string }
+	var endings []ended
+	for rows.Next() {
+		var o ended
+		if err := rows.Scan(&o.id, &o.code); err != nil {
+			rows.Close()
+			return err
+		}
+		endings = append(endings, o)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	resolved := map[string]bool{}
+	at := time.UnixMilli(now).UTC().Format(time.RFC3339)
+	for _, o := range endings {
+		chain, err := platformRetryAncestors(e, o.id)
+		if err != nil {
+			return err
+		}
+		for _, id := range chain {
+			if resolved[id] {
+				continue
+			}
+			var marked int
+			var action, stage string
+			if err := e.queryRow(`SELECT o.action,o.stage,(SELECT COUNT(*) FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='recovered')
+				FROM app_platform_operations o WHERE o.id=? AND o.installation_id=?`, id, lease.installationID).Scan(&action, &stage, &marked); err != nil {
+				return errAppPlatformStageEvidence
+			}
+			resolved[id] = true
+			if marked != 0 {
+				continue
+			}
+			if action != "update" || stage != "recovery_required" {
+				return errAppPlatformStageEvidence
+			}
+			if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+				VALUES(?,'recovered',1,?,'recovered',?,?,?,?,?,'applied','{}',?,?)`,
+				id, platformDerivedUUID("recovered", id), platformDigest([]byte("repair/"+id+"/"+lease.id)),
+				runtimeID, lease.controllerEpoch, lease.fence, lease.fence, now, now); err != nil {
+				return err
+			}
+			detail, _ := json.Marshal(struct {
+				Operation       string `json:"operation_id"`
+				Repair          string `json:"repair_operation_id"`
+				EndedAtSnapshot string `json:"ended_at_snapshot_operation_id"`
+				Code            string `json:"code"`
+			}{id, lease.id, o.id, o.code})
+			if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
+				VALUES(?,'system',0,'app_platform.recovery_resolved_by_repair','app_platform_operation',?,?,'')`,
+				at, id, string(detail)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
