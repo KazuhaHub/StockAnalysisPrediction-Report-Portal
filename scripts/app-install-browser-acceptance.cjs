@@ -609,7 +609,8 @@ async function settingsScenario(browser, url, options) {
     }
     if (options.ready) {
       await gotoSettingsTab(page, "overview");
-      await page.getByText(options.ready, { exact: true }).waitFor();
+      // The Overview's Status card shows the configuration item as a tag.
+      await page.locator(".rp-installation-facts").getByText(options.ready, { exact: true }).first().waitFor();
       await gotoSettingsTab(page, "permissions");
     }
     // Restore, repair and the retained data's deletion are on the Data tab.
@@ -905,7 +906,7 @@ async function main() {
           viewport: { width: 1440, height: 900 },
           title: "Application settings",
           capability: "Store application files",
-          ready: "No configuration gap detected",
+          ready: "Complete",
         }),
         await settingsScenario(browser, url, {
           name: "settings-320-zh-cn-dark",
@@ -914,7 +915,7 @@ async function main() {
           viewport: { width: 320, height: 800 },
           title: "应用设置",
           capability: "保存应用文件",
-          ready: "未发现配置缺口",
+          ready: "已完成",
         }),
         await settingsScenario(browser, url, {
           name: "settings-1440-en-light-zoom-200",
@@ -922,7 +923,7 @@ async function main() {
           dark: false,
           title: "Application settings",
           capability: "Store application files",
-          ready: "No configuration gap detected",
+          ready: "Complete",
           ...desktopZoom200,
         }),
       );
