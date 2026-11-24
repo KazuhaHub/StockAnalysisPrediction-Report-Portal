@@ -646,11 +646,13 @@ async function settingsScenario(browser, url, options) {
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       await waitForReviewDialogStyles(page);
-      await assertDialogViewport(page, "repair review");
-      const text = await dialog.innerText();
-      if (!text.includes(options.repairBoundary)) {
-        throw new Error(`repair review boundary missing: ${text}`);
+      // The unified repair review loads its plan after the dialog opens: wait for the boundary text.
+      try {
+        await dialog.getByText(options.repairBoundary, { exact: false }).first().waitFor({ timeout: 30_000 });
+      } catch (error) {
+        throw new Error(`repair review boundary missing: ${await dialog.innerText()}`, { cause: error });
       }
+      await assertDialogViewport(page, "repair review");
       const dialogViolations = (await auditDialog(page)).filter(
         (violation) =>
           violation.impact === "critical" || violation.impact === "serious",
