@@ -87,6 +87,9 @@ type platformInstallScheduler struct {
 	probe  func(context.Context) error
 	// runOverride replaces the action dispatch of a tick. Only tests set it.
 	runOverride func(context.Context, platformOperationLease) (platformInstallRun, error)
+	// checkpointReadOverride replaces the read back of a checkpoint receipt before an update ends at its snapshot.
+	// Only tests set it.
+	checkpointReadOverride func(context.Context, platformOperationLease) (platformOperationLease, error)
 }
 
 func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
@@ -283,6 +286,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.active, w.attempts, w.waits = selected.lease, 0, 0
 	}
 	if w.attempts >= platformInstallAttemptLimit {
+		if w.readBackCheckpoint(ctx) {
+			return nil
+		}
 		return w.finish(ctx)
 	}
 	// Renewal happens only at a serial stage boundary. A heartbeat cannot race
@@ -436,6 +442,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	w.attempts++
 	w.publish("retry_pending", w.active.id, w.active.snapshot.Stage)
 	if w.attempts >= platformInstallAttemptLimit {
+		if w.readBackCheckpoint(ctx) {
+			return nil
+		}
 		return w.finish(ctx)
 	}
 	return err
@@ -450,6 +459,33 @@ func (w *platformInstallScheduler) afterOperationComplete(ctx context.Context, l
 }
 
 func (w *platformInstallScheduler) finish(ctx context.Context) error { return w.finishAs(ctx, "") }
+
+// readBackCheckpoint asks the runner, once, for the receipt of a managed update's checkpoint before the update ends at
+// its snapshot stage with no verdict. The runner may have settled the checkpoint, verified archive and all, while every
+// reply was lost: committing that receipt carries the update on, where ending it would leave the archive behind with
+// no recovery set to account for it. Anything but a committed receipt ends the update as before.
+func (w *platformInstallScheduler) readBackCheckpoint(ctx context.Context) bool {
+	if w.active.id == "" || w.active.snapshot.Action != appplatform.ActionUpdate || !w.active.snapshot.Managed ||
+		w.active.snapshot.Stage != appplatform.StageSnapshot {
+		return false
+	}
+	read := func(ctx context.Context, lease platformOperationLease) (platformOperationLease, error) {
+		return w.server.readPlatformCheckpoint(ctx, lease, w.endpoint)
+	}
+	if w.checkpointReadOverride != nil {
+		read = w.checkpointReadOverride
+	}
+	lease, err := read(ctx, w.active)
+	if err != nil || lease.id != w.active.id || lease.snapshot.Stage == appplatform.StageSnapshot {
+		if err != nil {
+			log.Printf("app-platform checkpoint read back %s: %v", w.active.id, err)
+		}
+		return false
+	}
+	w.active, w.attempts = lease, 0
+	w.publish("running", w.active.id, w.active.snapshot.Stage)
+	return true
+}
 
 // finishAs ends the active operation by its action's review path. A capacity code, when given, becomes the
 // failure code of an installation, whose finish owns one.

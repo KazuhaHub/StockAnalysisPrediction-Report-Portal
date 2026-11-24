@@ -386,7 +386,7 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		return result, ErrManagedRemovalUnavailable
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND kind NOT IN (`+installationNeutralCommandKinds+`) AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil || pending != 0 {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND kind NOT IN (`+installationNeutralCommandKinds+`) AND state IN ('prepared','unknown')`+unsettledSnapshotExclusion, c.InstallationID, c.EffectID).Scan(&pending); err != nil || pending != 0 {
 		return result, fmt.Errorf("%w: managed removal pending command", ErrFenceReconciliation)
 	}
 	if now <= 0 {

@@ -331,8 +331,11 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 		!platformValidSHA(source) || !platformValidSHA(targetRelease) {
 		return result, errAppPlatformStageEvidence
 	}
-	if expires <= now {
+	if expires <= now && (lease.owner == "" || lease.leaseUntilMS <= now) {
 		// Expiry governs only a start that has not begun; one that has is carried on (see platformManagedUpdateStarted).
+		// It is checked when a claim admits the start, not under a lease a claim already holds: a plan that expires
+		// between the claim and the first effect of the quiesce must not end the update for review with its source
+		// never stopped. A worker that lost its lease is claimed again, and the check applies again then.
 		started, err := platformManagedUpdateStarted(e, lease)
 		if err != nil {
 			return result, err

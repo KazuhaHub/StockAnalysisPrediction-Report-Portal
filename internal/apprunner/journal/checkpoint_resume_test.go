@@ -183,3 +183,38 @@ func TestCheckpointArchiveRemovalFailureIsLogged(t *testing.T) {
 		t.Fatal("the removal ran on the cancelled context of the dispatch", err, seen)
 	}
 }
+
+// An earlier snapshot is bound to its checkpoint row by more than the operation: when the operation holds another
+// checkpoint row too, which row the command claimed cannot be told, so neither is touched and the new checkpoint is
+// refused for it.
+func TestANewCheckpointDoesNotSettleAnEarlierSnapshotWithAnAmbiguousRecord(t *testing.T) {
+	f := newCheckpointFixture(t)
+	if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); err != nil {
+		t.Fatal(err)
+	}
+	// A second row of the same operation, as the claim writes one.
+	if _, err := f.store.db.Exec(`INSERT INTO runner_checkpoints(id,data_namespace_id,installation_id,operation_id,release_sha256,data_format,writer_fence,manifest_sha256,bytes,state,revision,verified_ms,created_ms,updated_ms)
+		SELECT ?,data_namespace_id,installation_id,operation_id,release_sha256,data_format,writer_fence,NULL,0,'preparing',1,NULL,created_ms,updated_ms FROM runner_checkpoints WHERE id=?`,
+		fixtureID(896), f.command.Payload.CheckpointID); err != nil {
+		t.Fatal(err)
+	}
+	// The command's own row is not as its claim left it; only the other one is.
+	if _, err := f.store.db.Exec(`UPDATE runner_checkpoints SET state='review_required' WHERE id=?`, f.command.Payload.CheckpointID); err != nil {
+		t.Fatal(err)
+	}
+	raw, sig := resignCheckpoint(t, f, func(c *control.CheckpointCommand) {
+		c.OperationID, c.EffectID, c.Payload.CheckpointID = fixtureID(897), fixtureID(898), fixtureID(899)
+	})
+	calls, discards := 0, &checkpointDiscards{}
+	_, err := f.store.dispatchCheckpointWith(context.Background(), raw, sig, checkpointNativeFailing(io.EOF, &calls), discards.discard)
+	if !errors.Is(err, ErrFenceReconciliation) || calls != 0 || len(discards.ids) != 0 {
+		t.Fatal("an earlier snapshot with an ambiguous record was abandoned", err, calls, discards.ids)
+	}
+	if state, _, _, unknown := checkpointRefusalRows(t, f.store, f.command.EffectID, f.command.Payload.CheckpointID); state != "unknown" || unknown != 1 {
+		t.Fatal("the earlier snapshot changed", state, unknown)
+	}
+	var other string
+	if err := f.store.db.QueryRow(`SELECT state FROM runner_checkpoints WHERE id=?`, fixtureID(896)).Scan(&other); err != nil || other != "preparing" {
+		t.Fatal("a checkpoint row the command may not own was ended", other, err)
+	}
+}

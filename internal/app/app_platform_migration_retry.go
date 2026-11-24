@@ -56,9 +56,7 @@ func requirePlatformRetrySource(e migExec, installation, recovers string) error 
 	// Only the head of a chain, the latest unresolved update, can be recovered: an update another retry already
 	// names has a successor, whatever state that retry is in. The plan's field is checked against the operations
 	// that exist, never taken as given.
-	var recoverers int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.installation_id=? AND o.action='update' AND p.plan_json LIKE ?`, installation, `%"recovers_operation_id":"`+recovers+`"%`).Scan(&recoverers); err != nil || recoverers != 0 {
+	if recoverers, err := platformRetrySuccessorCount(e, installation, recovers); err != nil || recoverers != 0 {
 		return fmt.Errorf("%w: the update already has a retry", errAppPlatformPlanChanged)
 	}
 	// The retry signs the chain of the updates it recovers, and a chain holds at most control.MaxRecoversChain.
@@ -70,6 +68,18 @@ func requirePlatformRetrySource(e migExec, installation, recovers string) error 
 		return fmt.Errorf("%w: the chain of retries is at its limit", errAppPlatformPlanChanged)
 	}
 	return nil
+}
+
+// platformRetrySuccessorCount is the number of retries that name the failed update. A retry that ended plan_expired
+// before it began is not one: it acted on nothing (it ended failed with no effect) and leaves the update as it was.
+func platformRetrySuccessorCount(e migExec, installation, recovers string) (int, error) {
+	var n int
+	err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='update' AND p.plan_json LIKE ?
+		AND NOT (o.stage='failed' AND o.error_code='plan_expired'
+			AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id))`,
+		installation, `%"recovers_operation_id":"`+recovers+`"%`).Scan(&n)
+	return n, err
 }
 
 // platformRetryAncestors lists the failed updates a retry recovers: the one it names, then the one that one

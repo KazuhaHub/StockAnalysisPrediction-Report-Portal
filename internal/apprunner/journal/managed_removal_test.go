@@ -291,6 +291,19 @@ func TestManagedRemovalRejectsChangedSourceAndPendingWork(t *testing.T) {
 	}
 }
 
+// A snapshot an earlier operation claimed and never settled does not block a removal: a checkpoint only reads the data,
+// and the removal holds the data execution gate every walk holds, so no walk of it is still running. Its first
+// command is a stop, not a checkpoint, which is what would otherwise settle it.
+func TestManagedRemovalIsNotBlockedByAnUnsettledSnapshot(t *testing.T) {
+	f := newManagedRemovalFixture(t)
+	if _, err := f.store.db.Exec(`INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms) VALUES(?,?,?,'snapshot',1,'snapshot',?,1,?,1,'unknown','{}',NULL,1,1)`, fixtureID(854), fixtureID(855), f.source.InstallationID, strings.Repeat("f", 64), f.source.ControllerEpoch); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.store.beginManagedRemoval(context.Background(), f.raw, f.sig); err != nil {
+		t.Fatal("an unsettled snapshot blocked the removal", err)
+	}
+}
+
 func TestManagedRemovalReceiptReadMatchesAppliedIntent(t *testing.T) {
 	f := newManagedRemovalFixture(t)
 	source, replay, err := f.store.beginManagedRemoval(context.Background(), f.raw, f.sig)

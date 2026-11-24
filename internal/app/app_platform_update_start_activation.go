@@ -332,6 +332,12 @@ func (s *Server) commitPlatformUpdateStartActivationChecked(ctx context.Context,
 			return zero, err
 		}
 	}
+	if lease.snapshot.Action == appplatform.ActionRepair {
+		// A repair that brought the source back resolves the updates that ended at the snapshot stage on it.
+		if err := resolvePlatformSnapshotEndingsByRepair(e, lease, runtime.id, plan.SourceGeneration, now); err != nil {
+			return zero, err
+		}
+	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
