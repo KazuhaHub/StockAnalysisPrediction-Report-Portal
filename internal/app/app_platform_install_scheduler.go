@@ -398,7 +398,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	if errors.Is(err, errPlatformDataEffectFailed) {
 		// The runner proved the raise or the import failed: a definite end, never a retry. An import restores its
-		// pre-import checkpoint; a raise changed nothing.
+		// pre-import checkpoint; a raise changed nothing. A refused checkpoint tells the finisher why.
+		var failed *platformDataEffectFailedError
+		if errors.As(err, &failed) {
+			ctx = withPlatformSnapshotRefusal(ctx, failed.code)
+		}
 		return w.finish(ctx)
 	}
 	if orphan, ok := platformCandidateOrphanOf(err); ok {

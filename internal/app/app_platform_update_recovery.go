@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -12,7 +14,63 @@ import (
 // have mounted data. The source remains the active generation, the installation
 // enters review-only recovery, and a separate reviewed restore is required.
 func (s *Server) finishPlatformManagedUpdateForReview(ctx context.Context, expected platformOperationLease) error {
+	if code := platformSnapshotRefusal(ctx); code != "" && expected.snapshot.Stage == appplatform.StageSnapshot {
+		// The runner refused the checkpoint for good: the operation reports the runner's own code.
+		return s.finishPlatformManagedUpdateWith(ctx, expected, nil, code)
+	}
 	return s.finishPlatformManagedUpdateWith(ctx, expected, nil, platformUpdateRecoveryCode)
+}
+
+type platformSnapshotRefusalKey struct{}
+
+// withPlatformSnapshotRefusal tells the finisher of an update that the runner refused its checkpoint, and why.
+func withPlatformSnapshotRefusal(ctx context.Context, code string) context.Context {
+	return context.WithValue(ctx, platformSnapshotRefusalKey{}, code)
+}
+
+// platformSnapshotRefusal is the runner's code for the checkpoint refusal the finisher was told of, or empty.
+func platformSnapshotRefusal(ctx context.Context) string {
+	code, _ := ctx.Value(platformSnapshotRefusalKey{}).(string)
+	if !platformCheckpointRefusalCode(code) {
+		return ""
+	}
+	return code
+}
+
+// platformCheckpointRefusalCode is a failure code the runner answers a refused checkpoint with.
+func platformCheckpointRefusalCode(code string) bool {
+	return code == "checkpoint_unsafe" || code == "checkpoint_too_large"
+}
+
+// settlePlatformRefusedSnapshot ends the snapshot effect and the recovery set the runner's refusal leaves behind. The
+// snapshot comes before the migration and a checkpoint only reads the data, so nothing was changed: the effect is
+// reverted with the runner's code, and the recovery set, which never held an archive, is deleted. Neither is left to
+// gate the installation as an unresolved effect for ever.
+func settlePlatformRefusedSnapshot(e migExec, operation, code string, now int64) error {
+	var effectID, digest string
+	err := e.queryRow(`SELECT effect_id,payload_sha256 FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='snapshot' AND effect_number=1 AND kind='snapshot'
+		AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`, operation).Scan(&effectID, &digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	receipt, _ := json.Marshal(struct {
+		State         string `json:"state"`
+		Code          string `json:"code"`
+		EffectID      string `json:"effect_id"`
+		PayloadSHA256 string `json:"payload_sha256"`
+	}{"failed", code, effectID, digest})
+	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+		WHERE effect_id=? AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`, string(receipt), now, effectID)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	_, err = e.exec(`UPDATE app_platform_recovery_sets SET state='deleted',deleted_ms=?,updated_ms=?
+		WHERE operation_id=? AND state='preparing' AND manifest_sha256 IS NULL AND bytes=0 AND verified_ms IS NULL`, now, now, operation)
+	return err
 }
 
 // platformUpdateRecoveryCode is the error code of an update that ended recovery_required for a reason the update
@@ -24,7 +82,8 @@ const platformUpdateRecoveryCode = "update_recovery_required"
 // recovery is the same. A raise of the data quota that the runner refused (data_quota_capacity) or failed for
 // good (data_quota_unavailable) names itself.
 func platformUpdateRecoveryCodes(code string) bool {
-	return code == platformUpdateRecoveryCode || code == "data_quota_capacity" || code == "data_quota_unavailable"
+	return code == platformUpdateRecoveryCode || code == "data_quota_capacity" || code == "data_quota_unavailable" ||
+		platformCheckpointRefusalCode(code)
 }
 
 // finishPlatformManagedUpdateWith ends the operation for review with the given error code. effects, when set,
@@ -97,6 +156,16 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 			return err
 		}
 	}
+	// A checkpoint the runner refused ended the update with the source quiesced and nothing else done. The
+	// installation is left as a disable leaves it, which is where a repair is admitted from, so the source generation
+	// has a way back. An update that retries another failed one keeps the recovery state of that chain.
+	refused := expected.snapshot.Stage == appplatform.StageSnapshot && platformCheckpointRefusalCode(code) &&
+		phase == "ready" && plan.RecoversOperationID == ""
+	if platformCheckpointRefusalCode(code) && expected.snapshot.Stage == appplatform.StageSnapshot {
+		if err := settlePlatformRefusedSnapshot(e, expected.id, code, now); err != nil {
+			return err
+		}
+	}
 	if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=?
 		WHERE operation_id=? AND kind IN ('migrate-data','set-data-quota') AND state='prepared'`, now, expected.id); err != nil {
 		return err
@@ -127,16 +196,22 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
-	changed, err = e.exec(`UPDATE app_platform_installations
-		SET phase='recovery_required',revision=revision+1,updated_ms=?
-		WHERE id=? AND desired_state='enabled' AND phase IN ('ready','recovery_required')
-		AND generation=? AND policy_revision=? AND revision=?
-		AND control_fence=? AND controller_epoch=?`,
-		now, expected.installationID, plan.SourceGeneration,
-		plan.SourcePolicyRevision, facts.installationRevision,
-		expected.fence, expected.controllerEpoch)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return err
+	if refused {
+		if err := disablePlatformInstallationForRecovery(e, expected, source, plan, facts.installationRevision, now); err != nil {
+			return err
+		}
+	} else {
+		changed, err = e.exec(`UPDATE app_platform_installations
+			SET phase='recovery_required',revision=revision+1,updated_ms=?
+			WHERE id=? AND desired_state='enabled' AND phase IN ('ready','recovery_required')
+			AND generation=? AND policy_revision=? AND revision=?
+			AND control_fence=? AND controller_epoch=?`,
+			now, expected.installationID, plan.SourceGeneration,
+			plan.SourcePolicyRevision, facts.installationRevision,
+			expected.fence, expected.controllerEpoch)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
 	}
 	detail, _ := json.Marshal(struct {
 		Stage            appplatform.Stage `json:"stage"`
@@ -161,6 +236,38 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		return err
 	}
 	return tx.Commit()
+}
+
+// disablePlatformInstallationForRecovery leaves an installation whose source was quiesced by an update that went no
+// further the way a disable leaves one: disabled, its activation retired, the data namespace's writer fence raised
+// and its tasks and event subscriptions stopped, with the phase recovery_required. That is the state the repair
+// action is admitted from, and the generation is kept as every recovery from a disabled installation keeps it.
+func disablePlatformInstallationForRecovery(e migExec, expected platformOperationLease, source platformCheckpointSource, plan platformManagedUpdatePlan, revision, now int64) error {
+	changed, err := e.exec(`UPDATE app_platform_installations
+		SET desired_state='disabled',phase='recovery_required',revision=revision+1,control_fence=control_fence+1,updated_ms=?
+		WHERE id=? AND desired_state='enabled' AND phase='ready'
+		AND generation=? AND policy_revision=? AND revision=?
+		AND control_fence=? AND controller_epoch=?`,
+		now, expected.installationID, plan.SourceGeneration,
+		plan.SourcePolicyRevision, revision,
+		expected.fence, expected.controllerEpoch)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	changed, err = e.exec(`UPDATE app_platform_activations SET state='retired',updated_ms=?
+		WHERE installation_id=? AND state='active' AND generation=?`, now, expected.installationID, plan.SourceGeneration)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	changed, err = e.exec(`UPDATE app_platform_data_namespaces SET writer_fence=writer_fence+1,revision=revision+1,updated_ms=?
+		WHERE id=? AND owner_installation_id=? AND state='active'`, now, source.namespaceID, expected.installationID)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	if err := invalidatePlatformTasksForInstallation(e, expected.installationID, "installation_disabled", now); err != nil {
+		return err
+	}
+	return cancelPlatformEventSubscriptionsForInstallation(e, expected.installationID, "paused", now)
 }
 
 // loadPlatformManagedUpdateFinishPlan is the plan an update is ended against. From the migrate stage on it is the

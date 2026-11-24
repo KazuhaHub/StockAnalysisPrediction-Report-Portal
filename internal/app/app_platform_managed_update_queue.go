@@ -29,16 +29,51 @@ var platformAdmitManagedUpdate = func(s *Server, e migExec, lease platformOperat
 }
 
 // platformManagedUpdateSkipLog remembers the last reason logged for each skipped operation, so that an operation that
-// stays unadmittable is logged when its reason changes and not on every tick.
-var platformManagedUpdateSkipLog sync.Map
+// stays unadmittable is logged when its reason changes and not on every tick. It is bounded: past its size it starts
+// over, which costs at most one repeated line per operation still being skipped.
+var platformManagedUpdateSkipLog = struct {
+	sync.Mutex
+	reasons map[string]string
+}{reasons: map[string]string{}}
+
+const platformManagedUpdateSkipLogLimit = 256
+
+func resetPlatformManagedUpdateSkipLog() {
+	platformManagedUpdateSkipLog.Lock()
+	defer platformManagedUpdateSkipLog.Unlock()
+	clear(platformManagedUpdateSkipLog.reasons)
+}
 
 func logPlatformManagedUpdateSkipped(operation string, err error) {
 	reason := err.Error()
-	if previous, ok := platformManagedUpdateSkipLog.Load(operation); ok && previous == reason {
+	platformManagedUpdateSkipLog.Lock()
+	previous, seen := platformManagedUpdateSkipLog.reasons[operation]
+	if seen && previous == reason {
+		platformManagedUpdateSkipLog.Unlock()
 		return
 	}
-	platformManagedUpdateSkipLog.Store(operation, reason)
+	if !seen && len(platformManagedUpdateSkipLog.reasons) >= platformManagedUpdateSkipLogLimit {
+		clear(platformManagedUpdateSkipLog.reasons)
+	}
+	platformManagedUpdateSkipLog.reasons[operation] = reason
+	platformManagedUpdateSkipLog.Unlock()
 	log.Printf("app-platform managed update claim: skipping operation %s: %v", operation, err)
+}
+
+// platformManagedUpdateSkippable reports whether a failure to admit one operation is a statement about that
+// operation (its evidence, its plan, its state) and so no reason to stop looking at the others. Anything else, a
+// database or driver error above all, is returned: on PostgreSQL one failed statement aborts the transaction, and
+// every later operation would fail for a reason that is not theirs.
+func platformManagedUpdateSkippable(err error) bool {
+	for _, evidence := range []error{
+		errAppPlatformStageEvidence, errAppPlatformPlanChanged, errAppPlatformPlanExpired, errAppPlatformOperationConflict,
+		errAppPlatformRuntimeConflict, errAppPlatformReleaseConflict, errAppPlatformTrustConflict, sql.ErrNoRows,
+	} {
+		if errors.Is(err, evidence) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker string) (platformInstallSelection, error) {
@@ -127,7 +162,7 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 			if errors.Is(err, errAppPlatformLeaseConflict) {
 				continue
 			}
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || !platformManagedUpdateSkippable(err) {
 				return zero, err
 			}
 			// One operation whose evidence does not load must not starve the claims of every other one.
@@ -145,7 +180,7 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		admitted, err := platformAdmitManagedUpdate(
 			s, e, facts.lease, trust, facts.now)
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || !platformManagedUpdateSkippable(err) {
 				return zero, err
 			}
 			// An operation that cannot be admitted is skipped and logged, never returned: an error here would
@@ -184,11 +219,12 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 }
 
 // platformManagedUpdateIsNewStart reports whether the update has not begun to act on the installation. The expiry of
-// its review plan governs only that: an operation already admitted (its source quiesced, or about to be) is carried
-// through to its end or to review whatever the clock says, because refusing it would leave the app stopped.
+// its review plan governs only that: an operation whose source is quiesced is carried through to its end or to review
+// whatever the clock says, because refusing it would leave the app stopped. The quiesce stage has stopped nothing
+// yet (its effect is what stops the source), so an expired review still stops the update there.
 func platformManagedUpdateIsNewStart(stage appplatform.Stage) bool {
 	switch stage {
-	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage:
+	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage, appplatform.StageQuiesce:
 		return true
 	}
 	return false

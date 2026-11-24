@@ -103,7 +103,7 @@ func TestPlatformManagedUpdateWithRefusedSnapshotEndsFailedWithSourceKept(t *tes
 	if calls != 1 || w.active.id != "" || w.currentStatus().code != "review_required" {
 		t.Fatalf("calls=%d status=%+v", calls, w.currentStatus())
 	}
-	if scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, snapshot.id) != "recovery_required:update_recovery_required" ||
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, snapshot.id) != "recovery_required:checkpoint_unsafe" ||
 		scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, snapshot.installationID) != generation ||
 		scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, snapshot.installationID) != "recovery_required" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL AND lease_owner IS NULL`, snapshot.id) != 1 {
@@ -173,8 +173,8 @@ func TestPlatformManagedUpdateClaimSkipsAFailingOperation(t *testing.T) {
 		FROM app_platform_operations WHERE id=?`, otherOperation, otherInstallation, otherPlan, platformDigest([]byte(otherOperation)), platformDigest([]byte(otherPlan)), first.id)
 	second := platformOperationLease{id: otherOperation}
 	real := platformAdmitManagedUpdate
-	platformManagedUpdateSkipLog.Clear()
-	t.Cleanup(func() { platformAdmitManagedUpdate = real; platformManagedUpdateSkipLog.Clear() })
+	resetPlatformManagedUpdateSkipLog()
+	t.Cleanup(func() { platformAdmitManagedUpdate = real; resetPlatformManagedUpdateSkipLog() })
 	platformAdmitManagedUpdate = func(s *Server, e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) (platformAdmittedManagedUpdate, error) {
 		if lease.id == first.id {
 			return platformAdmittedManagedUpdate{}, errAppPlatformStageEvidence
@@ -202,5 +202,63 @@ func TestPlatformManagedUpdateClaimSkipsAFailingOperation(t *testing.T) {
 	}
 	if selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6153)); err != nil || selected.lease.id != "" {
 		t.Fatal("every operation failing admission must leave the claim idle, not failed", selected, err)
+	}
+	// A database or driver error is not about one operation: it is returned, never skipped (on PostgreSQL the
+	// transaction is already aborted, and every later operation would fail for a reason that is not theirs).
+	broken := errors.New("driver: bad connection")
+	platformAdmitManagedUpdate = func(*Server, migExec, platformOperationLease, appplatform.PublisherTrust, int64) (platformAdmittedManagedUpdate, error) {
+		return platformAdmittedManagedUpdate{}, broken
+	}
+	if _, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6154)); !errors.Is(err, broken) {
+		t.Fatal("a driver error was skipped", err)
+	}
+}
+
+// The log of skipped operations is bounded: it starts over past its size instead of growing with every operation.
+func TestPlatformManagedUpdateSkipLogIsBounded(t *testing.T) {
+	resetPlatformManagedUpdateSkipLog()
+	t.Cleanup(resetPlatformManagedUpdateSkipLog)
+	var logged bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	for i := range 3 * platformManagedUpdateSkipLogLimit {
+		logPlatformManagedUpdateSkipped(platformFixtureID(20000+i), errAppPlatformStageEvidence)
+	}
+	platformManagedUpdateSkipLog.Lock()
+	size := len(platformManagedUpdateSkipLog.reasons)
+	platformManagedUpdateSkipLog.Unlock()
+	if size > platformManagedUpdateSkipLogLimit {
+		t.Fatal("the skip log grew past its bound", size)
+	}
+	before := strings.Count(logged.String(), "\n")
+	logPlatformManagedUpdateSkipped(platformFixtureID(1), errAppPlatformStageEvidence)
+	logPlatformManagedUpdateSkipped(platformFixtureID(1), errAppPlatformStageEvidence)
+	if strings.Count(logged.String(), "\n") != before+1 {
+		t.Fatal("the same reason was logged twice for one operation")
+	}
+}
+
+// An update still at the quiesce stage has stopped nothing: an expired review plan stops it there, so an app that
+// is still running is not stopped by a review that no longer holds.
+func TestPlatformManagedUpdateAtQuiesceIsRefusedOnceItsReviewPlanExpired(t *testing.T) {
+	s, lease, _, _ := platformManagedUpdateQuiesceFixture(t, false)
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET expires_ms=1 WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, lease.id)
+	mustExec(t, s.st, `UPDATE app_platform_operations SET lease_until_ms=1 WHERE id=?`, lease.id)
+	if selected, _ := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6170)); selected.lease.id != "" {
+		t.Fatal("an update that stopped nothing was carried on after its review plan expired", selected)
+	}
+}
+
+// An intent whose fence is ahead of the lease's was not written under any claim this lease follows: it is refused, where
+// one behind it (an earlier claim of the same operation) is carried forward.
+func TestPlatformCheckpointIntentWithAFenceAheadOfTheLeaseIsRefused(t *testing.T) {
+	s, snapshot := platformSnapshotStageFixture(t, false)
+	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_operation_effects SET admitted_fence=admitted_fence+100 WHERE operation_id=? AND stage='snapshot'`, snapshot.id)
+	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); !errors.Is(err, errAppPlatformStageEvidence) {
+		t.Fatal("an intent from a fence ahead of the lease's was accepted", err)
 	}
 }
