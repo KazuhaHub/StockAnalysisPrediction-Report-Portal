@@ -1,0 +1,22 @@
+# Settings for the secret scan in .github/workflows/test.yml (the "workflow lint" job).
+# The default rule set stays on; only what is known not to be a credential is allowed through.
+title = "report portal gitleaks"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures: fixed throwaway keys, passwords and tokens in test files, and the vendored libraries' own test material"
+paths = [
+  '''_test\.(go|py)$''',
+  '''^third_party/''',
+  '''^docs/''',
+]
+
+[[allowlists]]
+description = "Code and comments that only look like key assignments to the generic-api-key rule"
+regexTarget = "line"
+regexes = [
+  '''\.Valid \|\|''',
+  '''key of its own''',
+]

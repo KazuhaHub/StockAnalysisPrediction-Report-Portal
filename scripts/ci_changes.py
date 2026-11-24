@@ -12,12 +12,9 @@ A file one side reads from the other side's ground is "both" whatever its place:
 name them, and scripts/ci_changes_test.py scans the sources so that a new such read fails there.
 An empty list of files runs everything: it means the diff said nothing, not that nothing changed.
 
-A third output, platform, says whether the app platform's own race lane runs: go race (app platform,
-PostgreSQL) and the race shards of internal/apprunner/journal. internal/app is one Go package that
-holds both the Portal and the platform, so a Portal-only Go change still runs every platform test in
-the ordinary go-test shards and the platform subset of the race shards; what it skips is only the
-platform's PostgreSQL race runs, which a main push still runs in full. The rule errs towards running:
-a file counts unless it is docs, web (outside GO_READS) or a Go file off the platform's ground below.
+A third output, platform, says whether a change touches the app platform's ground. It once gated the
+pull request race lane for the platform; that lane is gone (the race detector runs on main only), so
+nothing reads the output now, and it is kept because test.yml's changes job still publishes it.
 
 Usage: python3 scripts/ci_changes.py [FILE ...]  (or the names on stdin); prints go=..., web=... and
 platform=... lines for $GITHUB_OUTPUT.

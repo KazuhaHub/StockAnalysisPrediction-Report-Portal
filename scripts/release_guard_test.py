@@ -16,7 +16,6 @@ CHANGES_CONDITIONS = (
     "needs.changes.outputs.go == 'true'",
     "needs.changes.outputs.web == 'true'",
     "needs.changes.outputs.go == 'true' || needs.changes.outputs.web == 'true'",
-    "needs.changes.outputs.go == 'true' && needs.changes.outputs.platform == 'true'",
 )
 
 
@@ -122,7 +121,7 @@ class GuardTests(unittest.TestCase):
 
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
-                ['changes','go-test','go test (checks + other packages)','go race (app platform, PostgreSQL)',
+                ['changes','go-test','go test (checks + other packages)',
                  'web typecheck + build','web lint + typecheck + build','workflow lint',
                  'docker image (font gate + smoke)','go race full (other packages)',
                  'release targets (cross-compile)'] + [f'web tests ({i}/3)' for i in range(1,4)]]
@@ -190,11 +189,11 @@ class GuardTests(unittest.TestCase):
         self.assertIn('--shard=${{ matrix.shard }}/${{ strategy.job-total }}', block)
 
     def test_summary_checks_fail_rather_than_skip(self):
-        # "go race" and "web typecheck + build" are required checks that now only summarise their
+        # "go-test" and "web typecheck + build" are required checks that only summarise their
         # shards. A job whose `needs` failed is skipped unless it says always(), and a skipped
         # required check counts as passed, so each must run always() and test every result itself.
         workflow = read_workflow('test.yml')
-        for job_id in ('go-race', 'go-test', 'web-build'):
+        for job_id in ('go-test', 'web-build'):
             with self.subTest(job=job_id):
                 block = job_block(workflow, job_id)
                 self.assertRegex(re.search(r'^    if: (.+?)\s*$', block, re.M)[1], r'^always\(\)')
@@ -223,36 +222,6 @@ class GuardTests(unittest.TestCase):
         self.assertIn('go: ${{ steps.classify.outputs.go }}', block)
         self.assertIn('web: ${{ steps.classify.outputs.web }}', block)
         self.assertIn('platform: ${{ steps.classify.outputs.platform }}', block)
-
-    def test_pr_race_shards_deal_journal_and_the_subset_over_every_shard(self):
-        # Shard 1 races the small concurrency packages; internal/apprunner/journal and the app subset
-        # are each dealt over every shard, so both deals must read the matrix, and each step must fail
-        # on a shard dealt nothing rather than race nothing green.
-        block = job_block(read_workflow('test.yml'), 'go-race-shard')
-        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
-        self.assertEqual(shards, list(range(1, len(shards) + 1)))
-        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
-        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
-        packages = block[block.index('Race the concurrency packages'):block.index('of internal/apprunner/journal')]
-        self.assertIn('if: matrix.shard == 1', packages)
-        self.assertNotIn('journal', packages)
-        # Every step's work is a pipe into tee: without bash's pipefail a failed race passes.
-        self.assertIn('shell: bash', packages)
-        journal = block[block.index('of internal/apprunner/journal'):block.index('of the app subset')]
-        subset = block[block.index('of the app subset'):]
-        for label, step in (('journal', journal), ('subset', subset)):
-            with self.subTest(step=label):
-                self.assertNotIn('if: matrix.shard', step)
-                self.assertIn('shell: bash', step)
-                self.assertIn('scripts/ci_shard.py --shard "${{ matrix.shard }}" --of "${{ strategy.job-total }}"', step)
-                self.assertIn('test -n "$regex"', step)
-        self.assertIn('./internal/apprunner/journal/', journal)
-        # Journal and the platform lane skip together, on the changes job's word alone, and the summary
-        # accepts the platform lane's skip only when that word was "no platform change".
-        self.assertIn("if: needs.changes.outputs.platform == 'true'", journal)
-        summary = job_block(read_workflow('test.yml'), 'go-race')
-        gate = summary.index('if [ "${{ needs.changes.outputs.platform }}" = false ]; then')
-        self.assertLess(gate, summary.index('test "${{ needs.go-race-platform.result }}" = skipped', gate))
 
     def test_ci_compiles_every_release_target(self):
         # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles
