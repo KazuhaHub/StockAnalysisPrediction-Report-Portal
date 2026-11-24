@@ -56,104 +56,37 @@ on:
         description: The full SHA of the reviewed commit the run must measure. When it is given and differs from the commit that ran, the run is never OPS-08 evidence
         type: string
         default: ''
+  # A pull request runs this probe only for the backend platform, the runner and the scripts the
+  # jobs execute; a push to main (below) keeps the wider list. The web files kept are the app frame and
+  # the bridge the browser fixtures drive in Chromium; every other web file reaches these jobs only as
+  # the SPA that `npm run build --prefix web` embeds, and the web jobs of test.yml check that code.
   pull_request:
     paths:
-      - 'internal/appplatform/contract/**'
-      - 'internal/appplatform/descriptor*'
-      - 'internal/appplatform/route_query.go'
-      - 'internal/app/app_platform_capability_snapshot*'
-      - 'internal/app/app_platform_launch.go'
-      - 'internal/app/app_platform_reports*'
-      - 'internal/app/app_platform_object*'
-      - 'internal/app/app_platform_storage*'
-      - 'internal/app/app_platform_managed_access.go'
-      - 'internal/app/app_platform_template_browser_test.go'
-      - 'internal/app/app_platform_http_browser_test.go'
-      - 'web/src/lib/bridge-v2*'
-      - 'web/src/lib/network-v2*'
-      - 'web/src/lib/appNetworkV2*'
-      - 'web/src/lib/appReportsV2*'
-      - 'web/src/lib/appObjectsV2*'
-      - 'web/src/lib/route-query-v2*'
-      - 'web/src/lib/page-v2*'
-      - 'web/src/lib/descriptor-contract.generated.ts'
-      - 'web/src/components/apps/**'
-      - 'web/src/pages/AppViewV2*'
-      - 'web/src/components/AppLayout*'
-      - 'scripts/generate_app_contract*'
-      - 'internal/apprunner/data/**'
-      - 'internal/apprunner/control/**'
-      - 'internal/apprunner/broker/**'
-      - 'internal/apprunner/driver/**'
-      - 'internal/apprunner/journal/**'
-      - 'internal/apprunner/transport/**'
-      - 'internal/apprunner/service/**'
-      - 'internal/apprunner/imagestore/**'
-      - 'internal/app/app_platform_network_request*'
-      - 'internal/app/app_platform_network_http*'
-      - 'internal/app/app_platform_network_install*'
-      - 'internal/app/app_platform_network_authority*'
-      - 'internal/app/app_platform_network_roundtrip*'
-      - 'internal/app/app_platform_service_egress*'
-      - 'internal/app/app_platform_notifications*'
-      - 'internal/app/app_platform_install_capabilities*'
-      - 'internal/app/app_platform_data*'
-      - 'internal/app/app_platform_checkpoint*'
-      - 'internal/app/app_platform_restore*'
-      - 'internal/app/app_platform_recovery*'
-      - 'internal/app/app_platform_update*'
-      - 'internal/app/app_platform_removal*'
-      - 'internal/app/app_platform_writer*'
-      - 'internal/app/app_platform_writable*'
-      - 'internal/app/app_platform_managed_*'
-      - 'internal/app/app_platform_candidate*'
-      - 'internal/app/app_platform_readiness*'
-      - 'internal/appplatform/backend_readiness*'
-      - 'internal/appplatform/backend_registration*'
-      - 'internal/app/app_platform_backend_identity*'
-      - 'internal/app/app_platform_backend_delivery*'
-      - 'internal/app/app_platform_backend_boot*'
-      - 'internal/app/app_platform_backend_request*'
-      - 'internal/appplatform/backend_request*'
-      - 'internal/appplatform/backend_handshake*'
-      - 'internal/app/app_platform_install_stage*'
-      - 'internal/app/app_platform_install_worker*'
-      - 'internal/app/app_platform_install_queue*'
-      - 'internal/app/app_platform_install_scheduler*'
-      - 'internal/app/app_platform_install_service*'
-      - 'internal/app/app_platform_lease*'
-      - 'internal/app/app_platform_install_review*'
-      - 'internal/app/app_platform_release*'
-      - 'internal/app/app_platform_image*'
-      - 'internal/app/app_platform_market*'
-      - 'internal/appplatform/offline*'
-      - 'internal/appplatform/image*'
-      - 'internal/appplatform/catalogue*'
-      - 'internal/app/app_platform_catalogue*'
-      - 'internal/app/app_platform_actor*'
-      - 'internal/app/app_platform_trust*'
-      - 'internal/app/app_platform_install_audience*'
-      - 'internal/app/app_platform_activation*'
-      - 'internal/app/app_platform_frontend*'
-      - 'internal/app/app_platform_install_profile*'
-      - 'internal/app/app_platform_launch*'
-      - 'internal/app/app_platform_viewer*'
-      - 'internal/app/app_platform_audience*'
-      - 'internal/appplatform/viewer_identity*'
-      - 'scripts/acceptance/**'
-      - 'scripts/project_quota_probe_test.py'
-      - 'scripts/capacity_soak_test.py'
-      - 'internal/app/app_platform_capacity*'
+      # the runner, the platform's backend packages and the Portal's app-platform handlers: what the quota, image
+      # delivery and lifecycle tests run against
       - 'internal/apprunner/**'
-      - 'internal/app/app_platform_backend_http*'
-      - 'internal/app/app_platform_managed_access*'
-      - 'internal/app/app_platform_writable_request*'
-      - 'internal/app/store.go'
-      - 'internal/app/store_stmtcache*'
-      - 'internal/app/batch_run.go'
-      - 'internal/queue/**'
-      - 'internal/app/app_platform_installation_capacity*'
-      - 'internal/app/app_platform_image_fixture_test.go'
+      - 'internal/appplatform/**'
+      - 'internal/app/app_platform*'
+      - 'cmd/app-runner/**'
+      - 'cmd/app-task-worker/**'
+      - 'deploy/app-runner/**'
+      # the probe's own scripts, fixtures and harness tests
+      - 'scripts/acceptance/**'
+      - 'scripts/app-*browser*.cjs'
+      - 'scripts/app-*browser-fixture.py'
+      - 'scripts/fixture_http*.py'
+      - 'scripts/project_quota_probe_test.py'
+      - 'scripts/sdk_browser_public_fixture_test.py'
+      # the app frame and the bridge the Chromium fixtures drive
+      - 'web/src/components/apps/AppFrameV2.tsx'
+      - 'web/src/components/apps/AppSurfaceView.tsx'
+      - 'web/src/pages/AppView.tsx'
+      - 'web/src/pages/AppViewV2.tsx'
+      - 'web/src/lib/bridge-v2.ts'
+      - 'web/src/lib/appBridge.ts'
+      # the module graph every job compiles, and this workflow
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/app-project-quota-probe.yml'
   push:
     branches: [main]
@@ -559,11 +492,12 @@ jobs:
 
   # The declared-capacity soak (doc 171, PR 4b; OPS-08; SEC-09 stays partial after OPS-08 passes, because the task worker and event delivery coordinator are not exercised). The dispatch run is the acceptance run
   # (120 minutes by default, 140 at most), started on the branch that carries this job at the reviewed commit; a pull request
-  # touching the capacity code, the code behind its latency fixes or the soak runs the same configuration for five minutes
-  # (and adds the diagnosis) so it cannot rot, and that smoke is never evidence. Both use the reference host class: a
+  # touching the capacity code, the code behind its latency fixes or the soak used to run the same configuration for five
+  # minutes (and add the diagnosis) so it could not rot; it now runs on a manual dispatch only, so a change to the capacity
+  # code is soaked by dispatching this workflow on its branch before merge. Both use the reference host class: a
   # GitHub-hosted ubuntu-24.04 runner (4 vCPU, 16 GiB) and a 16 GiB XFS project-quota loop volume the harness creates and owns.
   capacity-soak:
-    if: github.event_name != 'push'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm') && fromJSON('["self-hosted","sec09-reference-vm"]') || 'ubuntu-24.04' }}
     timeout-minutes: 170
     env:

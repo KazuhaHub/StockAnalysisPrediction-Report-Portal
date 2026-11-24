@@ -475,6 +475,8 @@ jobs:
   # The same steps natively on arm64. A separate job rather than a runner matrix: runs-on stays a literal
   # GitHub-hosted label (capacity_soak_test.WorkflowHostGuardTests).
   inspect-disposable-daemon-arm64:
+    # Not on a pull request: the amd64 leg is the pull request's check; arm64 runs on main and by hand.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps: *inspect_steps
@@ -636,6 +638,8 @@ jobs:
   # The same steps natively on arm64. A separate job rather than a runner matrix: runs-on stays a literal
   # GitHub-hosted label (capacity_soak_test.WorkflowHostGuardTests).
   provision-xfs-images-arm64:
+    # Not on a pull request: the amd64 leg is the pull request's check; arm64 runs on main and by hand.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps: *provision_steps
@@ -646,6 +650,8 @@ jobs:
   # here; the doc 146 service workflow runs on arm64 in the inspect-disposable-daemon-arm64 leg above. Evidence,
   # not a gate on its own: until this job has passed on arm64, Apple Silicon guests stay unsupported.
   native-quota-evidence-arm64:
+    # Not on a pull request: the amd64 leg is the pull request's check; arm64 runs on main and by hand.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     steps:
