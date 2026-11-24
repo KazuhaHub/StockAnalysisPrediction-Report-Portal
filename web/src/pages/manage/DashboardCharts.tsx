@@ -30,11 +30,11 @@ export function ReportKinds({ kinds, config = defaultDashboardChart() }: { kinds
     total={kinds.reduce((sum, item) => sum + item.count, 0)} hint={t('manage.dashboard.reportKindsHint')}
     series={{ type: 'bar', barMaxWidth: 28, label: { show: config.showValues, position: 'right' } }} />
 }
-export function ReportDonut({ kinds, config = defaultDashboardChart() }: { kinds: ReportOverview['kinds']; config?: ChartConfig }) {
+export function ReportDonut({ kinds, config = defaultDashboardChart(), compact }: { kinds: ReportOverview['kinds']; config?: ChartConfig; compact?: boolean }) {
   const { t } = useTranslation()
   const rows: ChartRow[] = kinds.slice(0, config.topN).map(item => ({ name: item.key || t('manage.dashboard.uncategorized'), value: item.count }))
   if (kinds.length > config.topN) rows.push({ name: t('manage.dashboard.otherKinds'), value: kinds.slice(config.topN).reduce((sum,item) => sum + item.count,0) })
-  return <DashboardChart label={t('manage.dashboard.reportDonut')} rows={rows} legendValues={config.showValues}
+  return <DashboardChart label={t('manage.dashboard.reportDonut')} rows={rows} legendValues={config.showValues} compact={compact}
     total={kinds.reduce((sum,item) => sum + item.count,0)} hint={t('manage.dashboard.reportKindsHint')}
     series={{ type: 'pie', radius: ['48%', '70%'], label: { show: false }, labelLine: { show: false } }} />
 }

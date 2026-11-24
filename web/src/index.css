@@ -3149,7 +3149,9 @@ body {
 
 .rp-dashboard-palette-groups { margin-top: 16px; }
 .rp-dashboard-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.rp-dashboard-catalog-card { min-width: 0; border: 1px solid var(--ant-color-border-secondary); border-radius: var(--ant-border-radius); padding: 10px; }
+.rp-dashboard-catalog-card { min-width: 0; border: 1px solid var(--ant-color-border-secondary); border-radius: var(--ant-border-radius); padding: 10px; display: flex; flex-direction: column; }
+/* Previews differ in height (a label that wraps, a chart); the add button stays on the card's bottom edge. */
+.rp-dashboard-catalog-card > .ant-btn { margin-top: auto; }
 .rp-dashboard-example { margin-bottom: 10px; min-height: 120px; }
 .rp-dashboard-example-label { display: block; font-size: 11px; color: var(--ant-color-text-tertiary); margin-bottom: 8px; }
 .rp-dashboard-example .rp-dashboard-chart figcaption { display: none; }

@@ -138,3 +138,21 @@ it('gives every series colour a distinct hue', () => {
   const colors = (chart.setOption.mock.lastCall![0] as { color: string[] }).color
   expect(new Set(colors.map((c) => c.toLowerCase())).size).toBe(colors.length)
 })
+// The widget catalog shows each chart in a fixed 160px preview. A narrow donut's layout (a 230px ring band
+// with the legend under it) does not fit there and lost the bottom of its ring, so a compact chart sizes
+// the ring to the host instead and leaves the legend out.
+it('keeps a compact donut ring inside its host', async () => {
+  hostSize = { width: 334, height: 160 }
+  const rows = ['A', 'B', 'C'].map((name, i) => ({ name, value: i + 1 }))
+  renderChart(<DashboardChart label="Types" rows={rows} series={{ type: 'pie' as const }} total={6} compact />)
+  await act(async () => { resize([], {} as ResizeObserver); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  const option = chart.setOption.mock.lastCall![0] as { legend: { show?: boolean }; title: { left: string; top: string }; series: { center: [string, string]; radius: [string, string] }[] }
+  expect(option.legend.show).toBe(false)
+  const [cx, cy] = option.series[0].center
+  // ECharts sizes a percent radius against half the shorter side, and a hovered slice grows by 10px.
+  const outer = parseFloat(option.series[0].radius[1]) / 100 * Math.min(334, 160) / 2 + 10
+  expect(parseFloat(cy) / 100 * 160 + outer).toBeLessThanOrEqual(160)
+  expect(parseFloat(cy) / 100 * 160 - outer).toBeGreaterThanOrEqual(0)
+  // The total stays in the ring's middle.
+  expect([option.title.left, option.title.top]).toEqual([cx, cy])
+})
