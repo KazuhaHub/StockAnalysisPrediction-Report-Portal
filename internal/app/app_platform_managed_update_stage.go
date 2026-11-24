@@ -208,7 +208,10 @@ func (s *Server) preparePlatformManagedUpdateSourceRemoval(ctx context.Context, 
 			return zero, err
 		}
 		created, updated = facts.now, facts.now
-	} else if kind != commandKind || admittedFence != expected.fence ||
+	} else if kind != commandKind ||
+		// Every claim of the operation raises its fence: an intent prepared under an earlier claim is behind the lease
+		// and is carried to it below; one ahead of the lease belongs to no claim this lease follows.
+		(admittedFence != expected.fence && !(state == "prepared" && admittedFence < expected.fence)) ||
 		(state != "prepared" && state != "applied") ||
 		updated < created || updated > facts.now {
 		return zero, errAppPlatformStageEvidence
@@ -286,6 +289,15 @@ func (s *Server) preparePlatformManagedUpdateSourceRemoval(ctx context.Context, 
 			if observedFence != 0 || receipt != "{}" ||
 				updated != created {
 				return zero, errAppPlatformStageEvidence
+			}
+			if admittedFence < expected.fence {
+				changed, err := e.exec(`UPDATE app_platform_operation_effects SET admitted_fence=?
+					WHERE operation_id=? AND stage=? AND effect_number=1 AND effect_id=? AND payload_sha256=?
+					AND admitted_fence=? AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`,
+					expected.fence, expected.id, string(stage), effectID, digest, admittedFence)
+				if err := platformLeaseCAS(changed, err); err != nil {
+					return zero, err
+				}
 			}
 		case "applied":
 			parsed, err := journal.ParseManagedRemovalReceipt(

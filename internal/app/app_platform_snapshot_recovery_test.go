@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +71,13 @@ func TestPlatformRefusedSnapshotLeavesNoUnresolvedEffectAndKeepsTheRunnersCode(t
 // admitted, checkpointed and started, and the installation is enabled and ready again.
 func TestPlatformRepairBringsTheSourceBackAfterARefusedSnapshot(t *testing.T) {
 	s, snapshot, fixture := platformRefusedSnapshotEnded(t, "checkpoint_unsafe")
+	platformRepairBringsTheSourceBack(t, s, snapshot, fixture)
+}
+
+// platformRepairBringsTheSourceBack reviews, admits, checkpoints and starts a repair of the installation of an update
+// that ended at its snapshot, and expects it enabled and ready at the target generation.
+func platformRepairBringsTheSourceBack(t *testing.T, s *Server, snapshot platformOperationLease, fixture platformManagedUpdateReviewFixture) {
+	t.Helper()
 	installation := snapshot.installationID
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "disabled:recovery_required" {
 		t.Fatal("the installation is not offered to repair")
@@ -119,5 +128,123 @@ func TestPlatformRepairBringsTheSourceBackAfterARefusedSnapshot(t *testing.T) {
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "enabled:ready" ||
 		scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation) != plan.TargetGeneration {
 		t.Fatal("repair did not bring the source back")
+	}
+}
+
+// The attempt that sends a checkpoint is bulk work with the runner's own bound, not the short attempt: cut at 20s it
+// would abandon a walk that is still verifying, over and over.
+func TestPlatformCheckpointAttemptHasTheBulkTimeout(t *testing.T) {
+	for name, lease := range map[string]platformOperationLease{
+		"update snapshot": {snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionUpdate, Managed: true, Stage: appplatform.StageSnapshot}},
+		"enable snapshot": {snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionEnable, Managed: true, Stage: appplatform.StageSnapshot}},
+		"repair quiesce":  {snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionRepair, Managed: true, Stage: appplatform.StageQuiesce}},
+	} {
+		if platformAttemptTimeout(lease) != platformImportAttemptTimeout {
+			t.Fatal(name, "does not get the bulk timeout")
+		}
+	}
+	quiesce := platformOperationLease{snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionUpdate, Managed: true, Stage: appplatform.StageQuiesce}}
+	if platformAttemptTimeout(quiesce) != platformInstallAttemptTimeout {
+		t.Fatal("an update's quiesce is not a checkpoint")
+	}
+}
+
+// platformExhaustedSnapshot ends an update at the snapshot stage the other way: every attempt fails with an error that
+// settled nothing (the walk timed out), until the scheduler gives up.
+func platformExhaustedSnapshot(t *testing.T, s *Server, snapshot platformOperationLease) {
+	t.Helper()
+	w, err := newPlatformWritableInstallScheduler(s, platformManagedRemovalFixtureEndpoint(), platformFixtureID(6120), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.active = snapshot
+	w.runOverride = func(context.Context, platformOperationLease) (platformInstallRun, error) {
+		return platformInstallRun{}, errors.New("checkpoint walk timed out")
+	}
+	for i := 0; i < 2*platformInstallAttemptLimit && w.currentStatus().code != "review_required"; i++ {
+		_ = w.tick(context.Background())
+	}
+	if w.currentStatus().code != "review_required" {
+		t.Fatalf("the scheduler never gave up: %+v", w.currentStatus())
+	}
+}
+
+// An update that ends at the snapshot stage on exhausted attempts, with no verdict from the runner, ends the same way
+// as a refusal: the effect reverted, the empty recovery set deleted, the installation disabled for recovery with the
+// code checkpoint_incomplete, and repair as the way back.
+func TestPlatformSnapshotEndedOnExhaustedAttemptsIsNotADeadEnd(t *testing.T) {
+	s, snapshot := platformSnapshotStageFixture(t, false)
+	fixture := lastPlatformUpdateFixture
+	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	platformExhaustedSnapshot(t, s, snapshot)
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, snapshot.id) != "recovery_required:checkpoint_incomplete" ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot'`, snapshot.id) != "reverted" ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_recovery_sets WHERE operation_id=?`, snapshot.id) != "deleted" ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, snapshot.installationID) != "disabled:recovery_required" {
+		t.Fatal("an update that ran out of attempts at the snapshot is a dead end")
+	}
+	if effects, err := platformUnresolvedOperationEffectCount(s.st.poolExec(), snapshot.installationID); err != nil || effects != 0 {
+		t.Fatal("an unresolved effect still gates the installation", effects, err)
+	}
+	platformRepairBringsTheSourceBack(t, s, snapshot, fixture)
+}
+
+// The runner's checkpoint codes, and the code of an update whose plan expired, reach the management and status views as
+// themselves, not as the generic failure.
+func TestPlatformCheckpointCodesReachThePublicStatus(t *testing.T) {
+	for _, code := range []string{"checkpoint_unsafe", "checkpoint_too_large", "checkpoint_incomplete", "plan_expired"} {
+		if got := platformPublicOperationErrorCode(code); got != code {
+			t.Fatalf("%s is shown as %q", code, got)
+		}
+	}
+}
+
+// The system's disable is audited against the installation, with the code and the fact that it was disabled for
+// recovery.
+func TestPlatformSnapshotEndingAuditsTheDisableForRecovery(t *testing.T) {
+	s, snapshot, _ := platformRefusedSnapshotEnded(t, "checkpoint_unsafe")
+	var detail struct {
+		Operation string `json:"operation_id"`
+		Code      string `json:"code"`
+		Disabled  bool   `json:"disabled_for_recovery"`
+	}
+	raw := scalar[string](t, s.st, `SELECT detail FROM audit_log WHERE action='app_platform.installation_disabled_for_recovery' AND target_id=?`, snapshot.installationID)
+	if err := json.Unmarshal([]byte(raw), &detail); err != nil || detail.Operation != snapshot.id || detail.Code != "checkpoint_unsafe" || !detail.Disabled {
+		t.Fatal("the disable for recovery is not audited", raw, err)
+	}
+	if !strings.Contains(scalar[string](t, s.st, `SELECT detail FROM audit_log WHERE action='app_platform.update_recovery_required' AND target_id=?`, snapshot.id), "checkpoint_unsafe") {
+		t.Fatal("the operation's audit row does not carry the code")
+	}
+}
+
+// An update that retries another failed one (the installation is enabled in recovery_required) and ends at the snapshot
+// is disabled for recovery as well, never stranded enabled and in recovery with its source stopped.
+func TestPlatformRetryEndedAtTheSnapshotIsDisabledForRecovery(t *testing.T) {
+	s, snapshot := platformSnapshotStageFixture(t, false)
+	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := s.st.queryRow(`SELECT plan_json FROM app_platform_review_plans WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, snapshot.id).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var review platformUpdateProjection
+	if err := json.Unmarshal([]byte(raw), &review); err != nil {
+		t.Fatal(err)
+	}
+	review.RecoversOperationID = platformFixtureID(6190)
+	changed, err := json.Marshal(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=? WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, string(changed), platformDigest(changed), snapshot.id)
+	mustExec(t, s.st, `UPDATE app_platform_installations SET phase='recovery_required' WHERE id=?`, snapshot.installationID)
+	platformExhaustedSnapshot(t, s, snapshot)
+	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, snapshot.installationID) != "disabled:recovery_required" ||
+		scalar[string](t, s.st, `SELECT error_code FROM app_platform_operations WHERE id=?`, snapshot.id) != "checkpoint_incomplete" ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot'`, snapshot.id) != "reverted" {
+		t.Fatal("a retry ended at the snapshot stranded the installation")
 	}
 }

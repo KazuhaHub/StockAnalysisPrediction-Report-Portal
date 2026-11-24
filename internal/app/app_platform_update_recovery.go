@@ -14,8 +14,13 @@ import (
 // have mounted data. The source remains the active generation, the installation
 // enters review-only recovery, and a separate reviewed restore is required.
 func (s *Server) finishPlatformManagedUpdateForReview(ctx context.Context, expected platformOperationLease) error {
-	if code := platformSnapshotRefusal(ctx); code != "" && expected.snapshot.Stage == appplatform.StageSnapshot {
-		// The runner refused the checkpoint for good: the operation reports the runner's own code.
+	if expected.snapshot.Stage == appplatform.StageSnapshot {
+		// An update ends at the snapshot stage either on the runner's definite refusal, whose code it reports, or
+		// because its attempts ran out on errors that settled nothing: checkpoint_incomplete.
+		code := platformSnapshotRefusal(ctx)
+		if code == "" {
+			code = platformCheckpointIncompleteCode
+		}
 		return s.finishPlatformManagedUpdateWith(ctx, expected, nil, code)
 	}
 	return s.finishPlatformManagedUpdateWith(ctx, expected, nil, platformUpdateRecoveryCode)
@@ -39,8 +44,12 @@ func platformSnapshotRefusal(ctx context.Context) string {
 
 // platformCheckpointRefusalCode is a failure code the runner answers a refused checkpoint with.
 func platformCheckpointRefusalCode(code string) bool {
-	return code == "checkpoint_unsafe" || code == "checkpoint_too_large"
+	return code == "checkpoint_unsafe" || code == "checkpoint_too_large" || code == platformCheckpointIncompleteCode
 }
+
+// platformCheckpointIncompleteCode is the code of an update that ended at the snapshot stage with no verdict from the
+// runner: the checkpoint could not be completed.
+const platformCheckpointIncompleteCode = "checkpoint_incomplete"
 
 // settlePlatformRefusedSnapshot ends the snapshot effect and the recovery set the runner's refusal leaves behind. The
 // snapshot comes before the migration and a checkpoint only reads the data, so nothing was changed: the effect is
@@ -50,7 +59,7 @@ func settlePlatformRefusedSnapshot(e migExec, operation, code string, now int64)
 	var effectID, digest string
 	err := e.queryRow(`SELECT effect_id,payload_sha256 FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='snapshot' AND effect_number=1 AND kind='snapshot'
-		AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`, operation).Scan(&effectID, &digest)
+		AND state IN ('prepared','unknown') AND observed_fence=0 AND receipt_json='{}'`, operation).Scan(&effectID, &digest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -64,7 +73,7 @@ func settlePlatformRefusedSnapshot(e migExec, operation, code string, now int64)
 		PayloadSHA256 string `json:"payload_sha256"`
 	}{"failed", code, effectID, digest})
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-		WHERE effect_id=? AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`, string(receipt), now, effectID)
+		WHERE effect_id=? AND state IN ('prepared','unknown') AND observed_fence=0 AND receipt_json='{}'`, string(receipt), now, effectID)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
@@ -93,6 +102,11 @@ func platformUpdateRecoveryCodes(code string) bool {
 func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected platformOperationLease, effects func(e migExec, now int64) error, code string) error {
 	if !platformUpdateRecoveryCodes(code) {
 		return errAppPlatformStageEvidence
+	}
+	atSnapshot := expected.snapshot.Stage == appplatform.StageSnapshot
+	if atSnapshot && !platformCheckpointRefusalCode(code) {
+		// Whatever the reason, an update ended at the snapshot stage is ended the same way, below.
+		code = platformCheckpointIncompleteCode
 	}
 	if expected.snapshot.Action != appplatform.ActionUpdate ||
 		!expected.snapshot.Managed || expected.id == "" ||
@@ -156,12 +170,12 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 			return err
 		}
 	}
-	// A checkpoint the runner refused ended the update with the source quiesced and nothing else done. The
+	// An update that ends at the snapshot stage, refused by the runner or out of attempts, has its source quiesced and
+	// nothing else done: the data was never touched. Its snapshot effect and empty recovery set end, and the
 	// installation is left as a disable leaves it, which is where a repair is admitted from, so the source generation
-	// has a way back. An update that retries another failed one keeps the recovery state of that chain.
-	refused := expected.snapshot.Stage == appplatform.StageSnapshot && platformCheckpointRefusalCode(code) &&
-		phase == "ready" && plan.RecoversOperationID == ""
-	if platformCheckpointRefusalCode(code) && expected.snapshot.Stage == appplatform.StageSnapshot {
+	// has a way back. That holds in every phase the update can be in, a retry of another failed update included: no
+	// ending at this stage leaves the installation enabled and in recovery with its source stopped.
+	if atSnapshot {
 		if err := settlePlatformRefusedSnapshot(e, expected.id, code, now); err != nil {
 			return err
 		}
@@ -196,7 +210,7 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
-	if refused {
+	if atSnapshot {
 		if err := disablePlatformInstallationForRecovery(e, expected, source, plan, facts.installationRevision, now); err != nil {
 			return err
 		}
@@ -219,10 +233,11 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		TargetRelease    string            `json:"target_release_sha256"`
 		SourceGeneration int64             `json:"source_generation"`
 		TargetGeneration int64             `json:"target_generation"`
+		Code             string            `json:"code"`
 	}{
 		expected.snapshot.Stage, plan.SourceReleaseSHA256,
 		plan.TargetReleaseSHA256, plan.SourceGeneration,
-		plan.TargetGeneration,
+		plan.TargetGeneration, code,
 	})
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)
@@ -231,6 +246,23 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		time.UnixMilli(now).UTC().Format(time.RFC3339),
 		expected.id, string(detail)); err != nil {
 		return err
+	}
+	if atSnapshot {
+		// The system disabled the installation: that is recorded against the installation, with why.
+		disabled, _ := json.Marshal(struct {
+			OperationID         string `json:"operation_id"`
+			Code                string `json:"code"`
+			DisabledForRecovery bool   `json:"disabled_for_recovery"`
+			Generation          int64  `json:"generation"`
+		}{expected.id, code, true, plan.SourceGeneration})
+		if _, err := e.exec(`INSERT INTO audit_log(
+			at,actor,actor_ou,action,target_type,target_id,detail,ip)
+			VALUES(?,'system',0,'app_platform.installation_disabled_for_recovery',
+			'app_platform_installation',?,?,'')`,
+			time.UnixMilli(now).UTC().Format(time.RFC3339),
+			expected.installationID, string(disabled)); err != nil {
+			return err
+		}
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
 		return err
@@ -245,7 +277,7 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 func disablePlatformInstallationForRecovery(e migExec, expected platformOperationLease, source platformCheckpointSource, plan platformManagedUpdatePlan, revision, now int64) error {
 	changed, err := e.exec(`UPDATE app_platform_installations
 		SET desired_state='disabled',phase='recovery_required',revision=revision+1,control_fence=control_fence+1,updated_ms=?
-		WHERE id=? AND desired_state='enabled' AND phase='ready'
+		WHERE id=? AND desired_state='enabled' AND phase IN ('ready','recovery_required')
 		AND generation=? AND policy_revision=? AND revision=?
 		AND control_fence=? AND controller_epoch=?`,
 		now, expected.installationID, plan.SourceGeneration,

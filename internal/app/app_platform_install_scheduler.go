@@ -52,6 +52,11 @@ func platformAttemptTimeout(lease platformOperationLease) time.Duration {
 	if lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageStart {
 		return platformImportAttemptTimeout
 	}
+	// A checkpoint walks the data and reads the archive back to verify it, under the runner's bulk bound.
+	if lease.snapshot.Managed && (lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Stage == appplatform.StageSnapshot ||
+		platformSameReleaseLifecycle(lease.snapshot.Action) && lease.snapshot.Stage == platformSameReleaseCheckpointStage(lease.snapshot.Action)) {
+		return platformImportAttemptTimeout
+	}
 	return platformInstallAttemptTimeout
 }
 

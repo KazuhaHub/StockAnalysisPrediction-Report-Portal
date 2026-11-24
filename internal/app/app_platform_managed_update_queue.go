@@ -156,6 +156,7 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 	if err != nil {
 		return zero, err
 	}
+	ended := false
 	for _, id := range ids {
 		facts, err := loadPlatformOperationLease(e, id)
 		if err != nil {
@@ -180,6 +181,14 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		admitted, err := platformAdmitManagedUpdate(
 			s, e, facts.lease, trust, facts.now)
 		if err != nil {
+			if errors.Is(err, errAppPlatformPlanExpired) {
+				// A start whose review plan expired before it began ends, failed, in this same transaction.
+				if endErr := endExpiredPlatformManagedUpdate(e, facts); endErr != nil {
+					return zero, endErr
+				}
+				ended = true
+				continue
+			}
 			if ctx.Err() != nil || !platformManagedUpdateSkippable(err) {
 				return zero, err
 			}
@@ -215,19 +224,68 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		}
 		return platformInstallSelection{lease: lease, operationID: id}, nil
 	}
+	if ended {
+		if err := tx.Commit(); err != nil {
+			return zero, err
+		}
+	}
 	return zero, nil
 }
 
-// platformManagedUpdateIsNewStart reports whether the update has not begun to act on the installation. The expiry of
-// its review plan governs only that: an operation whose source is quiesced is carried through to its end or to review
-// whatever the clock says, because refusing it would leave the app stopped. The quiesce stage has stopped nothing
-// yet (its effect is what stops the source), so an expired review still stops the update there.
-func platformManagedUpdateIsNewStart(stage appplatform.Stage) bool {
-	switch stage {
-	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage, appplatform.StageQuiesce:
-		return true
+// platformManagedUpdateStarted reports whether the update has begun to act on the installation. The expiry of its
+// review plan governs only a start that has not begun: an operation whose source may be stopped is carried through to
+// its end or to review whatever the clock says, because refusing it would leave the app stopped. The stages before
+// quiesce act on nothing. The quiesce stage acts as soon as its effect row exists, in any state, because the stop may
+// have been sent; with no row nothing was sent, and the update has still stopped nothing.
+func platformManagedUpdateStarted(e migExec, lease platformOperationLease) (bool, error) {
+	switch lease.snapshot.Stage {
+	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage:
+		return false, nil
+	case appplatform.StageQuiesce:
+		var effects int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce'`, lease.id).Scan(&effects); err != nil {
+			return false, err
+		}
+		return effects > 0, nil
 	}
-	return false
+	return true, nil
+}
+
+// endExpiredPlatformManagedUpdate ends an update whose review plan expired before it began to act: it is failed with
+// plan_expired, with no effect to settle and the installation untouched, so it neither runs on a plan that no longer
+// holds nor waits to be skipped for ever.
+func endExpiredPlatformManagedUpdate(e migExec, facts platformLeaseFacts) error {
+	lease := facts.lease
+	var effects int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil || effects != 0 {
+		return errAppPlatformStageEvidence
+	}
+	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	failed, err := model.Fail(lease.snapshot.Revision, appplatform.EffectsNone)
+	if err != nil || failed.Snapshot().Stage != appplatform.StageFailed {
+		return errAppPlatformStageEvidence
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations
+		SET stage='failed',state_revision=?,row_revision=row_revision+1,error_code='plan_expired',
+		completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
+		WHERE id=? AND installation_id=? AND stage=? AND state_revision=? AND row_revision=? AND completed_ms IS NULL
+		AND (lease_until_ms IS NULL OR lease_until_ms<=?)`,
+		int64(failed.Snapshot().Revision), facts.now, facts.now, lease.id, lease.installationID,
+		string(lease.snapshot.Stage), int64(lease.snapshot.Revision), lease.rowRevision, facts.now)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(struct {
+		Stage appplatform.Stage `json:"stage"`
+		Code  string            `json:"code"`
+	}{lease.snapshot.Stage, "plan_expired"})
+	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
+		VALUES(?,'system',0,'app_platform.update_plan_expired','app_platform_operation',?,?,'')`,
+		time.UnixMilli(facts.now).UTC().Format(time.RFC3339), lease.id, string(detail))
+	return err
 }
 
 func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) (platformAdmittedManagedUpdate, error) {
@@ -268,11 +326,20 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 		uint64(targetGeneration) != lease.snapshot.Generation ||
 		targetGeneration != sourceGeneration+1 ||
 		!consumed.Valid || consumed.Int64 > now ||
-		(expires <= now && platformManagedUpdateIsNewStart(lease.snapshot.Stage)) ||
 		epoch != lease.controllerEpoch ||
 		platformDigest([]byte(raw)) != digest ||
 		!platformValidSHA(source) || !platformValidSHA(targetRelease) {
 		return result, errAppPlatformStageEvidence
+	}
+	if expires <= now {
+		// Expiry governs only a start that has not begun; one that has is carried on (see platformManagedUpdateStarted).
+		started, err := platformManagedUpdateStarted(e, lease)
+		if err != nil {
+			return result, err
+		}
+		if !started {
+			return result, errAppPlatformPlanExpired
+		}
 	}
 	var formatProbe struct {
 		Format string `json:"format"`

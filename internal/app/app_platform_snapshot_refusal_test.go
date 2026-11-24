@@ -147,13 +147,87 @@ func TestPlatformManagedUpdateWedgedAtSnapshotIsClaimedAndFinished(t *testing.T)
 	}
 }
 
-// Expiry of the review plan blocks only a new start: an update that was never admitted is still refused.
-func TestPlatformManagedUpdateNotYetAdmittedIsRefusedOnceItsReviewPlanExpired(t *testing.T) {
+// platformExpireReview makes the review plan of the operation expired, and its lease free to claim.
+func platformExpireReview(t *testing.T, s *Server, operation string) {
+	t.Helper()
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET expires_ms=1 WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, operation)
+	mustExec(t, s.st, `UPDATE app_platform_operations SET lease_until_ms=1 WHERE id=? AND lease_owner IS NOT NULL`, operation)
+}
+
+// platformExpectPlanExpired expects the operation to have ended failed with plan_expired, with nothing to settle, and
+// the installation left as it was.
+func platformExpectPlanExpired(t *testing.T, s *Server, operation, installation string) {
+	t.Helper()
+	if scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE id=?`, operation) != "failed:plan_expired" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL AND lease_owner IS NULL`, operation) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, operation) != 0 ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "enabled:ready" {
+		t.Fatal("the expired update did not end failed with plan_expired and nothing else")
+	}
+}
+
+// Expiry of the review plan blocks only a new start, and a new start whose plan expired ends: it is failed with
+// plan_expired, with no effects to settle, instead of being skipped for ever.
+func TestPlatformManagedUpdateNotYetStartedEndsOnceItsReviewPlanExpired(t *testing.T) {
 	s, operation := platformManagedUpdateOperationFixture(t, false)
-	mustExec(t, s.st, `UPDATE app_platform_review_plans SET expires_ms=1 WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, operation.id)
+	platformExpireReview(t, s, operation.id)
 	selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6140))
-	if selected.lease.id != "" {
+	if err != nil || selected.lease.id != "" {
 		t.Fatal("a new start was admitted after its review plan expired", selected, err)
+	}
+	platformExpectPlanExpired(t, s, operation.id, operation.installationID)
+	// It stays ended: nothing claims it again.
+	if selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6141)); err != nil || selected.lease.id != "" {
+		t.Fatal("an ended update was claimed again", selected, err)
+	}
+}
+
+// platformUpdateAtQuiesceWithoutEffect takes an update to the quiesce stage without preparing the stop: nothing
+// was sent, so nothing is stopped.
+func platformUpdateAtQuiesceWithoutEffect(t *testing.T) (*Server, platformOperationLease) {
+	t.Helper()
+	s, operation := platformManagedUpdateOperationFixture(t, false)
+	selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6120))
+	if err != nil || selected.lease.id != operation.id {
+		t.Fatal("claim", selected, err)
+	}
+	lease := selected.lease
+	for range 4 {
+		if lease, err = s.advancePlatformManagedUpdateStage(context.Background(), lease); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lease.snapshot.Stage != appplatform.StageQuiesce {
+		t.Fatal("not at quiesce", lease.snapshot)
+	}
+	return s, lease
+}
+
+// An update at the quiesce stage with no effect row has stopped nothing: an expired review plan ends it there.
+func TestPlatformManagedUpdateAtQuiesceWithoutAnEffectEndsOnceItsReviewPlanExpired(t *testing.T) {
+	s, lease := platformUpdateAtQuiesceWithoutEffect(t)
+	platformExpireReview(t, s, lease.id)
+	if selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6170)); err != nil || selected.lease.id != "" {
+		t.Fatal("an update that stopped nothing was carried on after its review plan expired", selected, err)
+	}
+	platformExpectPlanExpired(t, s, lease.id, lease.installationID)
+}
+
+// Once a quiesce effect row exists, in any state, the stop may have been sent: the update is admitted whatever the
+// clock says, and carried on.
+func TestPlatformManagedUpdateAtQuiesceWithAnEffectIsClaimedAfterItsReviewPlanExpired(t *testing.T) {
+	s, lease, _, _ := platformManagedUpdateQuiesceFixture(t, false)
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce'`, lease.id) != 1 {
+		t.Fatal("the fixture holds no quiesce effect")
+	}
+	platformExpireReview(t, s, lease.id)
+	selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6171))
+	if err != nil || selected.lease.id != lease.id || selected.lease.snapshot.Stage != appplatform.StageQuiesce {
+		t.Fatal("a quiesce whose stop may have been sent was not carried on", selected, err)
+	}
+	// And it carries on: its stop intent is prepared again under the expired plan.
+	if _, err := s.preparePlatformManagedUpdateQuiesce(context.Background(), selected.lease); err != nil {
+		t.Fatal("an admitted update at quiesce could not carry on", err)
 	}
 }
 
@@ -236,17 +310,6 @@ func TestPlatformManagedUpdateSkipLogIsBounded(t *testing.T) {
 	logPlatformManagedUpdateSkipped(platformFixtureID(1), errAppPlatformStageEvidence)
 	if strings.Count(logged.String(), "\n") != before+1 {
 		t.Fatal("the same reason was logged twice for one operation")
-	}
-}
-
-// An update still at the quiesce stage has stopped nothing: an expired review plan stops it there, so an app that
-// is still running is not stopped by a review that no longer holds.
-func TestPlatformManagedUpdateAtQuiesceIsRefusedOnceItsReviewPlanExpired(t *testing.T) {
-	s, lease, _, _ := platformManagedUpdateQuiesceFixture(t, false)
-	mustExec(t, s.st, `UPDATE app_platform_review_plans SET expires_ms=1 WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, lease.id)
-	mustExec(t, s.st, `UPDATE app_platform_operations SET lease_until_ms=1 WHERE id=?`, lease.id)
-	if selected, _ := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6170)); selected.lease.id != "" {
-		t.Fatal("an update that stopped nothing was carried on after its review plan expired", selected)
 	}
 }
 
