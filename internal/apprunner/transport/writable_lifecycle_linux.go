@@ -35,7 +35,7 @@ const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.
 func bulkDataAction(action WritableLifecycleAction) bool {
-	return action == RestoreExecute || action == ImportDataExecute || action == DataQueryAnswer || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
+	return action == CheckpointCreate || action == RestoreExecute || action == ImportDataExecute || action == DataQueryAnswer || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
 }
 
 // loadImageExecutionTimeout bounds the connection of a load-image execute: the longest a claimed load may run

@@ -104,3 +104,59 @@ func (s *Store) refuseCheckpoint(parent context.Context, raw, signature []byte, 
 	}
 	return nil
 }
+
+// supersedeUnknownSnapshots settles the earlier snapshots of the installation that were claimed and never settled, when
+// a new checkpoint arrives for it: without that, the pending-command check of the new one refuses it for ever, and
+// the checkpoint a repair needs could never run. It runs in the transaction of the new claim and under the data
+// execution gate every walk holds, so it cannot race one that is still running. A checkpoint only reads the data, so
+// abandoning an unfinished one loses nothing. Only a snapshot whose checkpoint row is still exactly what its claim wrote
+// is settled; any other stays for review. It returns the checkpoint ids whose archives are to be removed.
+func supersedeUnknownSnapshots(ctx context.Context, tx *sql.Tx, next control.CheckpointCommand, now int64) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT c.effect_id,c.operation_id,c.payload_sha256,k.id,k.data_namespace_id
+		FROM runner_commands c JOIN runner_checkpoints k ON k.operation_id=c.operation_id AND k.installation_id=c.installation_id
+		WHERE c.installation_id=? AND c.kind='snapshot' AND c.state='unknown' AND c.receipt_json='{}' AND c.effect_id<>?
+		AND k.state='preparing' AND k.revision=1 AND k.manifest_sha256 IS NULL AND k.bytes=0 AND k.verified_ms IS NULL`,
+		next.InstallationID, next.EffectID)
+	if err != nil {
+		return nil, err
+	}
+	type earlier struct{ effect, operation, payload, checkpoint, namespace string }
+	var found []earlier
+	for rows.Next() {
+		var e earlier
+		if err := rows.Scan(&e.effect, &e.operation, &e.payload, &e.checkpoint, &e.namespace); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		found = append(found, e)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, e := range found {
+		encoded, err := json.Marshal(dataEffectFailure{Format: dataEffectFailureFormat, NamespaceID: e.namespace, Code: dataFailureCheckpointIncomplete, Dirty: false, SettledMS: strconv.FormatInt(now, 10)})
+		if err != nil {
+			return nil, err
+		}
+		changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='reverted',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}' AND payload_sha256=?`,
+			string(encoded), now, e.effect, e.payload)
+		if err != nil {
+			return nil, err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return nil, fmt.Errorf("%w: superseded checkpoint command", ErrFenceReconciliation)
+		}
+		changed, err = tx.ExecContext(ctx, `UPDATE runner_checkpoints SET state='deleted',revision=revision+1,updated_ms=? WHERE id=? AND state='preparing' AND revision=1`, now, e.checkpoint)
+		if err != nil {
+			return nil, err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return nil, fmt.Errorf("%w: superseded checkpoint record", ErrFenceReconciliation)
+		}
+		ids = append(ids, e.checkpoint)
+	}
+	return ids, nil
+}

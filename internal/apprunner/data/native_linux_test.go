@@ -458,6 +458,35 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if _, err := os.Lstat(dir + unsafe.CheckpointID + ".tar"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("a refused checkpoint left its partial archive", err)
 	}
+	// A partial archive is removed by its id; an absent one is not an error; only a regular file under a checkpoint id.
+	partial := nativeNamespace(510)
+	if err := os.WriteFile(dir+partial+".tar", []byte("partial"), 0400); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpointRoot.DiscardCheckpointArchive(context.Background(), checkpointIdentity, partial); err != nil {
+		t.Fatal("a partial archive was not discarded", err)
+	}
+	if _, err := os.Lstat(dir + partial + ".tar"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the discarded archive is still there", err)
+	}
+	if err := checkpointRoot.DiscardCheckpointArchive(context.Background(), checkpointIdentity, partial); err != nil {
+		t.Fatal("discarding an absent archive failed", err)
+	}
+	if err := checkpointRoot.DiscardCheckpointArchive(context.Background(), checkpointIdentity, "../escape"); !errors.Is(err, ErrUnsafe) {
+		t.Fatal("a path was accepted as a checkpoint id", err)
+	}
+	if err := checkpointRoot.DiscardCheckpointArchive(context.Background(), RootIdentity{}, partial); !errors.Is(err, ErrUnsafe) {
+		t.Fatal("an archive was discarded through another root identity", err)
+	}
+	if err := os.Mkdir(dir+partial+".tar", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpointRoot.DiscardCheckpointArchive(context.Background(), checkpointIdentity, partial); !errors.Is(err, ErrUnsafe) {
+		t.Fatal("a directory was discarded as an archive", err)
+	}
+	if err := os.Remove(dir + partial + ".tar"); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(namespace + "/link"); err != nil {
 		t.Fatal(err)
 	}

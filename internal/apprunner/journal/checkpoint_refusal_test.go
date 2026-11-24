@@ -17,9 +17,9 @@ import (
 )
 
 func checkpointNativeFailing(err error, calls *int) checkpointNative {
-	return func(context.Context, data.CheckpointRequest) (data.CheckpointObservation, error) {
+	return func(context.Context, data.CheckpointRequest) (data.CheckpointSnapshot, error) {
 		*calls++
-		return data.CheckpointObservation{}, err
+		return data.CheckpointSnapshot{}, err
 	}
 }
 
@@ -187,9 +187,9 @@ func TestCheckpointRefusalAfterTheSignedWindowIsStillSettled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slow := func(context.Context, data.CheckpointRequest) (data.CheckpointObservation, error) {
+	slow := func(context.Context, data.CheckpointRequest) (data.CheckpointSnapshot, error) {
 		time.Sleep(400 * time.Millisecond)
-		return data.CheckpointObservation{}, data.ErrCheckpointUnsafe
+		return data.CheckpointSnapshot{}, data.ErrCheckpointUnsafe
 	}
 	discards := &checkpointDiscards{}
 	_, err = f.store.dispatchCheckpointWith(context.Background(), raw, sig, slow, discards.discard)
