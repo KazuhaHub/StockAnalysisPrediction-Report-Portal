@@ -128,8 +128,12 @@ func platformDataActionFixture(t *testing.T, pg bool) (*Server, platformActorSes
 	return s, actor, firstEnable, previous.TargetRuntime, runtime
 }
 
+// platformQuotaClock is the instant a fake runner answers at; a test replaces it to pin the clock.
+var platformQuotaClock = func() time.Time { return time.Now().UTC() }
+
 func platformQuotaObservation(intent platformSetDataQuotaIntent, endpoint platformRuntimeEndpoint) platformQuotaTestObservation {
-	now := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
+	at := platformQuotaClock()
+	now := strconv.FormatInt(at.UnixMilli(), 10)
 	c, p := intent.command, intent.command.Payload
 	return platformQuotaTestObservation{
 		receipt: journal.SetDataQuotaReceipt{
@@ -142,7 +146,7 @@ func platformQuotaObservation(intent platformSetDataQuotaIntent, endpoint platfo
 		},
 		authority:  intent.authority,
 		endpoint:   transport.CandidateReceiptEndpoint{Path: endpoint.path, RunnerUID: 0, ControllerUID: endpoint.controllerUID, ControllerGID: endpoint.controllerGID, RootController: true},
-		receivedAt: time.Now().UTC(), commandSHA: platformDigest(intent.raw),
+		receivedAt: at, commandSHA: platformDigest(intent.raw),
 	}
 }
 
