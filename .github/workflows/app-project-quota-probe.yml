@@ -56,8 +56,8 @@ on:
         description: The full SHA of the reviewed commit the run must measure. When it is given and differs from the commit that ran, the run is never OPS-08 evidence
         type: string
         default: ''
-  # Not a pull request check: it runs on pushes to main and by hand, and a release is tagged only
-  # from a main commit whose CI passed. A pull request is checked by test.yml's unit and integration jobs.
+  # Not a pull request check: it runs on pushes to main and by hand. A pull request is checked by
+  # test.yml's unit and integration jobs; a red run here shows on main and must be fixed before the next release.
   push:
     branches: [main]
     paths:

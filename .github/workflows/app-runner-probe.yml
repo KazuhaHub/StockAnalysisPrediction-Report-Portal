@@ -1,8 +1,8 @@
 name: app runner daemon probe
 on:
   workflow_dispatch:
-  # Not a pull request check: it runs on pushes to main and by hand, and a release is tagged only
-  # from a main commit whose CI passed. A pull request is checked by test.yml's unit and integration jobs.
+  # Not a pull request check: it runs on pushes to main and by hand. A pull request is checked by
+  # test.yml's unit and integration jobs; a red run here shows on main and must be fixed before the next release.
   push:
     branches: [main]
     paths:
