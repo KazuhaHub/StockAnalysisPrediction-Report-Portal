@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import { readFileSync } from 'node:fs'
@@ -78,12 +78,6 @@ describe('Installed apps', () => {
     expect(screen.queryByRole('button', { name: 'Charts' })).toBeNull()
   })
 
-  it('reads the catalogue quietly, so a card can offer an update', async () => {
-    withPlatform('installed')
-    renderPage()
-    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
-    expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, { catalogue_url: catalogueUrl })
-  })
 
   it('opens the install page from a plain Install app button', async () => {
     const user = userEvent.setup()
@@ -136,43 +130,7 @@ describe('The first view needs the layout only', () => {
   const entry = () => ({ ...platformEntry('installed'), publisher_name: 'Kazuha Hub', display: display('Notes', 'Personal notes') })
   const withVerifiedEntry = () => { fx.entries = [...layout(), entry() as never] }
 
-  it('shows every card complete from the layout alone, without waiting for the catalogue', async () => {
-    withVerifiedEntry()
-    let answer: (value: unknown) => void = () => undefined
-    const original = apiMock.post.getMockImplementation()!
-    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
-    renderPage()
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    // The catalogue is still out and the cards are already there, final.
-    const card = cardOf('Notes')
-    expect(screen.queryByText('common.loading')).toBeNull()
-    expect(within(card).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
-    expect(within(card).getByText('Personal notes')).toBeTruthy()
-    expect(within(card).queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
-    const before = card.textContent
-    await act(async () => { answer(catalogue()) })
-    // The catalogue adds the update offer to the card; the text that was there is untouched.
-    expect(await within(cardOf('Notes')).findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
-    expect(cardOf('Notes').textContent).toContain(before!)
-    expect(within(cardOf('Notes')).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
-  })
 
-  it('never names the publisher or the app from the catalogue: no text swaps when it arrives', async () => {
-    // The layout has no verified publisher name; the catalogue knows one. The card keeps what it showed.
-    fx.entries = [...layout(), platformEntry('installed')]
-    let answer: (value: unknown) => void = () => undefined
-    const original = apiMock.post.getMockImplementation()!
-    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/catalogue` ? new Promise(resolve => { answer = resolve }) : original(url, body))
-    renderPage()
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    // With no verified publisher name the slot shows nothing: the app id ("notes") is never a stand-in for a name.
-    const before = within(cardOf('Notes')).getByText('1.0.0').textContent
-    expect(cardOf('Notes').textContent).not.toMatch(/notes/)
-    await act(async () => { answer(catalogue([{ ...notesApp, publisher_name: 'Late Publisher' }])) })
-    await within(cardOf('Notes')).findByRole('button', { name: /appStore\.updateTo/ })
-    expect(within(cardOf('Notes')).getByText('1.0.0').textContent).toBe(before)
-    expect(screen.queryByText(/Late Publisher/)).toBeNull()
-  })
 
   it('shows no app id in the publisher slot of the list view either', async () => {
     fx.entries = [...layout(), platformEntry('installed')]
@@ -182,24 +140,6 @@ describe('The first view needs the layout only', () => {
     expect(row.textContent).toBe('Notes1.0.0')
   })
 
-  it('tells a failed catalogue below the cards with a retry, and the cards are untouched', async () => {
-    withVerifiedEntry()
-    const user = userEvent.setup()
-    const original = apiMock.post.getMockImplementation()!
-    apiMock.post.mockImplementation(async (url: string, body: unknown) => {
-      if (url === `${root}/market/catalogue`) throw new Error('catalogue down')
-      return original(url, body)
-    })
-    renderPage()
-    await screen.findAllByText('Notes')
-    expect(within(cardOf('Notes')).getByText('Personal notes')).toBeTruthy()
-    expect(await screen.findByText('appStore.catalogueFailed')).toBeTruthy()
-    expect(within(cardOf('Notes')).getByText(/Kazuha Hub.*1\.0\.0/)).toBeTruthy()
-    apiMock.post.mockImplementation(original)
-    await user.click(screen.getByRole('button', { name: 'common.retry' }))
-    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
-    expect(screen.queryByText('appStore.catalogueFailed')).toBeNull()
-  })
 
   it('does not wait for a catalogue that has no source', async () => {
     apiMock.get.mockImplementation(async (url: string) => url === `${root}/market/sources` ? {} : url === '/api/admin/apps/layout' ? { apps: fx.entries } : { items: [], next_cursor: '' })
@@ -210,23 +150,6 @@ describe('The first view needs the layout only', () => {
 })
 
 describe('The cards and list view', () => {
-  it('shows a dense list, with the same actions, when the list view is chosen, and remembers the choice', async () => {
-    withPlatform('installed')
-    const user = userEvent.setup()
-    const view = renderPage()
-    await screen.findByText('nav.batch')
-    expect(document.querySelector('.rp-app-grid')).not.toBeNull()
-    await user.click(screen.getByTitle('appStore.view.list'))
-    expect(document.querySelector('.rp-app-grid')).toBeNull()
-    expect(await screen.findByRole('columnheader', { name: 'appStore.col.status' })).toBeTruthy()
-    expect(screen.getByRole('columnheader', { name: 'appStore.col.access' })).toBeTruthy()
-    expect(screen.getByText('nav.batch')).toBeTruthy()
-    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
-    expect(localStorage.getItem('rp.apps.view')).toBe('list')
-    view.unmount()
-    renderPage()
-    expect(await screen.findByRole('columnheader', { name: 'appStore.col.status' })).toBeTruthy()
-  })
 
   it('starts on cards when storage holds nothing usable or throws', async () => {
     const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage unavailable') })
@@ -264,123 +187,13 @@ describe('A platform app card', () => {
     }
   })
 
-  it('offers an update only when the catalogue lists a newer version, and reviews it through the update plan', async () => {
-    withPlatform('installed')
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/stage`, { catalogue_url: catalogueUrl, release_sha256: sha('b') }))
-    expect(apiMock.get).toHaveBeenCalledWith(`${root}/releases?release_sha256=${sha('b')}`)
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'update', release_sha256: sha('b'), trust_revision: '1', installation_id: installationId }))
-    expect(await screen.findByText('appPlatform.confirmUpdate')).toBeTruthy()
-  })
 
-  it('never leaves the update button enabled while a click cannot act: a pending change blocks it, says why, and stays reachable by keyboard', async () => {
-    // A change whose answer was lost stays pending after its dialog is closed. Every other action waits for it, so
-    // the controls say so (and answer a press) instead of accepting clicks that do nothing.
-    withPlatform('installed')
-    sessionStorage.setItem('portal.app-install.pending:admin', JSON.stringify({ plan_id: plan, plan_sha256: planSha, idempotency_key: plan, action: 'update', app_id: 'notes' }))
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'appPlatform.cancel' }))
-    const button = await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }) as HTMLButtonElement
-    // Not `disabled`: that would drop it from the tab order and hide the reason.
-    expect(button.disabled).toBe(false)
-    expect(button.getAttribute('aria-disabled')).toBe('true')
-    expect(button.title).toBe('appStore.busyPending')
-    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toBe('appStore.busyPending')
-    button.focus()
-    expect(document.activeElement).toBe(button)
-    await user.click(button)
-    expect(apiMock.post.mock.calls.some(([url]) => url === `${root}/market/stage`)).toBe(false)
-    expect(await screen.findByText('appStore.busyPending')).toBeTruthy()
-    const swap = screen.getByRole('button', { name: 'appStore.switchVersion' }) as HTMLButtonElement
-    expect(swap.getAttribute('aria-disabled')).toBe('true')
-    // Reachable by keyboard like the update button: not `disabled`, focusable, and a press answers with the reason.
-    expect(swap.hasAttribute('disabled')).toBe(false)
-    swap.focus()
-    expect(document.activeElement).toBe(swap)
-    expect(swap.getAttribute('aria-describedby')).toBe(button.getAttribute('aria-describedby'))
-    await user.click(swap)
-    expect(screen.queryByRole('menuitem')).toBeNull()
-    expect((await screen.findAllByText('appStore.busyPending')).length).toBeGreaterThan(0)
-  })
 
-  it('keeps View in catalogue usable while an action is blocked, and gates only the lifecycle items', async () => {
-    withPlatform('installed')
-    sessionStorage.setItem('portal.app-install.pending:admin', JSON.stringify({ plan_id: plan, plan_sha256: planSha, idempotency_key: plan, action: 'update', app_id: 'notes' }))
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'appPlatform.cancel' }))
-    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
-    expect((await screen.findByRole('menuitem', { name: 'appStore.disable' })).getAttribute('aria-disabled')).toBe('true')
-    expect(screen.getByRole('menuitem', { name: 'appStore.uninstall' }).getAttribute('aria-disabled')).toBe('true')
-    expect(screen.getByRole('menuitem', { name: 'appStore.viewInCatalogue' }).getAttribute('aria-disabled')).not.toBe('true')
-  })
 
-  it('gives a reason while the console is only busy, too', async () => {
-    withPlatform('installed')
-    const base = apiMock.post.getMockImplementation()!
-    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/stage` ? new Promise(() => undefined) : base(url, body))
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
-    const swap = screen.getByRole('button', { name: 'appStore.switchVersion' })
-    expect(swap.getAttribute('aria-disabled')).toBe('true')
-    expect(swap.title).toBe('appStore.busyWorking')
-  })
 
-  it('shows the button busy the moment it is pressed, not when the download answers', async () => {
-    withPlatform('installed')
-    const base = apiMock.post.getMockImplementation()!
-    let answer: (value: unknown) => void = () => undefined
-    apiMock.post.mockImplementation((url: string, body: unknown) => url === `${root}/market/stage` ? new Promise(resolve => { answer = resolve }) : base(url, body))
-    const user = userEvent.setup()
-    renderPage()
-    const button = await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
-    await user.click(button)
-    expect(button.className).toContain('ant-btn-loading')
-    expect((button as HTMLButtonElement).disabled).toBe(true)
-    await act(async () => { answer({ release_sha256: sha('b') }) })
-  })
 
-  it('shows no update when the installed version is the newest', async () => {
-    withPlatform('installed', '1.1.0')
-    renderPage()
-    await screen.findByText('nav.batch')
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
-  })
 
-  it('lists the catalogue versions newest first with the current one marked, and switches through the update plan', async () => {
-    withPlatform('installed')
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
-    await user.click(screen.getAllByRole('button', { name: 'appStore.switchVersion' })[0])
-    const items = await screen.findAllByRole('menuitem')
-    expect(items.map(i => i.textContent)).toEqual(['1.1.0', '1.0.0appStore.current'])
-    expect(items[1].getAttribute('aria-disabled')).toBe('true')
-    await user.click(items[0])
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, expect.objectContaining({ action: 'update', installation_id: installationId })))
-  })
 
-  it('does not hide an older version from the switch menu: the server decides, and its refusal is shown', async () => {
-    withPlatform('installed', '1.1.0')
-    apiMock.post.mockImplementation(async (url: string, body: { release_sha256?: string }) => {
-      if (url === `${root}/market/catalogue`) return catalogue()
-      if (url === `${root}/market/stage`) return { release_sha256: body.release_sha256 }
-      if (url === `${root}/plans`) throw new Error('downgrade refused')
-      throw new Error(`unexpected ${url}`)
-    })
-    fx.releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false })
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByText('nav.batch')
-    await user.click((await screen.findAllByRole('button', { name: 'appStore.switchVersion' }))[0])
-    await user.click(await screen.findByText('1.0.0'))
-    expect(await screen.findByText('downgrade refused')).toBeTruthy()
-  })
 
   it('disables from the menu after reading the installation’s own release', async () => {
     withPlatform('installed')
@@ -438,36 +251,7 @@ describe('A platform app card', () => {
     expect(apiMock.post).not.toHaveBeenCalledWith(`${root}/plans`, { action: 'repair', installation_id: installationId })
   })
 
-  it('offers nothing beyond Manage for an app that needs recovery, unless its release can be uninstalled', async () => {
-    withPlatform('attention')
-    const user0 = userEvent.setup()
-    const view = renderPage()
-    await screen.findByText('appStore.state.recovery')
-    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith(`${root}/releases?release_sha256=${sha('a')}`))
-    await user0.click(await screen.findByRole('button', { name: 'appStore.more' }))
-    expect(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: 'appStore.uninstall' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'appStore.disable' })).toBeNull()
-    view.unmount()
-    fx.releaseRows[sha('a')] = verifiedRow('a', '1.0.0', { installation_id: installationId, installable: false, uninstallable: true })
-    const user = userEvent.setup()
-    renderPage()
-    await user.click(await screen.findByRole('button', { name: 'appStore.more' }))
-    expect(await screen.findByRole('menuitem', { name: 'appStore.uninstall' })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: 'appStore.disable' })).toBeNull()
-    await user.click(screen.getByRole('menuitem', { name: 'appStore.uninstall' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'uninstall', installation_id: installationId }))
-  })
 
-  it('views the app in the catalogue from the menu', async () => {
-    withPlatform('installed')
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
-    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
-    await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
-    expect(await screen.findByRole('dialog')).toBeTruthy()
-  })
 })
 
 describe('Deep links', () => {
@@ -514,79 +298,7 @@ describe('Sources and trust', () => {
   })
 })
 
-describe('A prerelease install', () => {
-  const prereleaseCatalogue = () => catalogue([{ ...notesApp, versions: [{ version: '1.0.0-beta.2', descriptor_sha256: sha('e') }, { version: '0.9.0', descriptor_sha256: sha('7') }, { version: '1.0.0-beta.1', descriptor_sha256: sha('a') }] }])
-  it('is offered the newer prerelease, and the dialog opens on it', async () => {
-    withPlatform('installed', '1.0.0-beta.1')
-    fx.catalogueResponse = prereleaseCatalogue
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })
-    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
-    await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })).toBeTruthy()
-  })
-  it('opens the dialog on the installed version when nothing newer is offered', async () => {
-    withPlatform('installed', '1.1.0')
-    const user = userEvent.setup()
-    renderPage()
-    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
-    await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('appStore.alreadyInstalled')).toBeTruthy()
-  })
-})
 
-describe('The catalogue dialog of an installed app', () => {
-  const openDialog = async () => {
-    withPlatform('installed', '1.0.0')
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })
-    await user.click((await screen.findAllByRole('button', { name: 'appStore.more' }))[0])
-    await user.click(await screen.findByRole('menuitem', { name: 'appStore.viewInCatalogue' }))
-    return { user, dialog: await screen.findByRole('dialog') }
-  }
-
-  it('offers to update to a newer version rather than to install', async () => {
-    const { user, dialog } = await openDialog()
-    expect(within(dialog).queryByRole('button', { name: 'appStore.installAction' })).toBeNull()
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'update', release_sha256: sha('b'), trust_revision: '1', installation_id: installationId }))
-  })
-
-  it('offers to switch to an older version and hides the button for the installed one', async () => {
-    const { user, dialog } = await openDialog()
-    await user.click(within(dialog).getByRole('combobox', { name: 'appStore.versions' }))
-    const option = Array.from(document.querySelectorAll('.ant-select-item-option')).find(o => o.textContent === '1.0.0')!
-    await user.click(option)
-    expect(within(dialog).queryByRole('button', { name: /appStore\.(installAction|updateTo|switchTo)/ })).toBeNull()
-    expect(within(dialog).getByText('appStore.alreadyInstalled')).toBeTruthy()
-  })
-
-  it('reviews an enable when the staged release is the disabled installation’s own', async () => {
-    fx.releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, enableable: true })
-    const { user, dialog } = await openDialog()
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: installationId }))
-  })
-
-  it('reviews an uninstall when the staged release is one that can only be uninstalled', async () => {
-    fx.releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, uninstallable: true })
-    const { user, dialog } = await openDialog()
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'uninstall', installation_id: installationId }))
-  })
-
-  it('says so instead of planning an update when the staged release is the installed one', async () => {
-    fx.releaseRows[sha('b')] = verifiedRow('b', '1.1.0', { installable: false, installation_id: installationId, installed: true })
-    const { user, dialog } = await openDialog()
-    await user.click(within(dialog).getByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' }))
-    expect(await within(dialog).findByText('appStore.alreadyInstalled')).toBeTruthy()
-    expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/plans`)).toHaveLength(0)
-  })
-})
 
 describe('A different account', () => {
   it('does not open a lifecycle flow that an earlier account started', async () => {
@@ -607,38 +319,79 @@ describe('A different account', () => {
 })
 
 
-describe('Prerelease policy and publisher identity', () => {
-  it('does not nudge a stable install toward a prerelease', async () => {
-    withPlatform('installed', '1.0.0')
-    fx.catalogueResponse = () => catalogue([{ ...notesApp, versions: [{ version: '2.0.0-beta.1', descriptor_sha256: sha('e') }, { version: '1.0.0', descriptor_sha256: sha('a') }] }])
+
+
+
+describe('Switch version loads on demand', () => {
+  const opRow = (extra: Record<string, unknown> = {}) => ({ operation_id: operation, installation_id: installationId, action: 'update', stage: 'download', managed: false, revision: '3', terminal: false, created_ms: '1000', updated_ms: '2000', from_version: '1.0.0', to_version: '1.1.0', ...extra })
+  const serveOperations = (row: Record<string, unknown> | null) => {
+    const original = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string, opts?: unknown) => url === `${root}/operations?latest=1` ? { items: row ? [row] : [] } : original(url, opts))
+  }
+  const marketCalls = () => [...apiMock.get.mock.calls, ...apiMock.post.mock.calls].map(([url]) => String(url)).filter(url => url.includes('/market/'))
+  const notesCard = async () => { await screen.findAllByText('Notes'); return cardOf('Notes') }
+
+  it('reads no catalogue while the page shows, and offers a plain Switch version button', async () => {
+    withPlatform('installed')
     renderPage()
-    await screen.findByText('nav.batch')
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+    const card = await notesCard()
+    expect(within(card).getByRole('button', { name: 'appStore.switchVersion' })).toBeTruthy()
+    expect(within(card).queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+    expect(marketCalls()).toEqual([])
   })
 
-  it('offers a prerelease install the newer prerelease', async () => {
-    withPlatform('installed', '1.0.0-beta.1')
-    fx.catalogueResponse = () => catalogue([{ ...notesApp, versions: [{ version: '1.0.0-beta.2', descriptor_sha256: sha('e') }, { version: '1.0.0-beta.1', descriptor_sha256: sha('a') }] }])
+  it('loads the versions when the button is pressed, and continues into the review inside the same dialog', async () => {
+    withPlatform('installed')
+    const user = userEvent.setup()
     renderPage()
-    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.0.0-beta.2"}' })).toBeTruthy()
+    await user.click(within(await notesCard()).getByRole('button', { name: 'appStore.switchVersion' }))
+    const radio = await screen.findByRole('radio', { name: /1\.1\.0/ })
+    expect(marketCalls()).toEqual([`${root}/market/sources`, `${root}/market/catalogue`])
+    await user.click(radio)
+    await user.click(screen.getByRole('button', { name: 'appPlatform.next' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, expect.objectContaining({ action: 'update', installation_id: installationId })))
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
 
-  it('gives an installation with no publisher in its layout entry no catalogue match', async () => {
-    fx.entries = [...layout(), { ...platformEntry('installed'), publisher_id: undefined }]
+  it('offers the same button in the list view', async () => {
+    withPlatform('installed')
+    localStorage.setItem('rp.apps.view', 'list')
     renderPage()
-    await screen.findByText('nav.batch')
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
+    await screen.findByRole('link', { name: 'Notes' })
+    expect(screen.getAllByRole('button', { name: 'appStore.switchVersion' })).toHaveLength(1)
   })
 
-  it('does not give an installed card another publisher’s versions for the same app id', async () => {
-    withPlatform('installed', '1.0.0')
-    const imposter = { ...notesApp, publisher_id: 'imposter', versions: [{ version: '9.0.0', descriptor_sha256: sha('9') }], display: display('Imposter Notes', 'Not yours') }
-    fx.catalogueResponse = () => catalogue([imposter, notesApp])
+  it('shows a running operation as a progress line: action, target version, step and stage', async () => {
+    withPlatform('installed')
+    serveOperations(opRow())
     renderPage()
-    expect(await screen.findByRole('button', { name: 'appStore.updateTo:{"version":"1.1.0"}' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /appStore\.updateTo:\{"version":"9/ })).toBeNull()
+    const line = await within(await notesCard()).findByRole('button', { name: /appPlatform\.ops\.openProgress/ })
+    expect(line.textContent).toContain('appPlatform.ops.actionVersion')
+    expect(line.textContent).toContain('"version":"1.1.0"')
+    expect(line.textContent).toContain('appPlatform.ops.step:{"step":3,"total":9}')
+    expect(line.textContent).toContain('appPlatform.stage.download')
+    expect(within(line).getByRole('progressbar')).toBeTruthy()
+  })
+
+  it('opens the full step list from the progress line', async () => {
+    withPlatform('installed')
+    serveOperations(opRow())
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await within(await notesCard()).findByRole('button', { name: /appPlatform\.ops\.openProgress/ }))
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith(`${root}/operations/${operation}`, expect.anything()))
+    expect(document.querySelectorAll('.rp-operation-steps .ant-steps-item').length).toBeGreaterThan(0)
+  })
+
+  it('keeps a failure on the card with the translated reason, and a success as a badge', async () => {
+    withPlatform('installed')
+    serveOperations(opRow({ stage: 'failed', terminal: true, error_code: 'capacity_exhausted_disk', completed_ms: '3000' }))
+    renderPage()
+    expect((await within(await notesCard()).findByRole('button', { name: /appPlatform\.ops\.failed/ })).textContent).toContain('err.capacity_exhausted_disk')
+    cleanup()
+    serveOperations(opRow({ stage: 'complete', terminal: true, completed_ms: '3000' }))
+    renderPage()
+    expect(await within(await notesCard()).findByRole('button', { name: /appPlatform\.ops\.succeeded/ })).toBeTruthy()
   })
 })
-

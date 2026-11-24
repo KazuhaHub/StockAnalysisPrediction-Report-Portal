@@ -1,6 +1,5 @@
-import { useId, useRef, useState } from 'react'
-import { Alert, Button, Card, Dropdown, Modal, Progress, Select, Space, Tag, Tooltip, Typography } from 'antd'
-import { ArrowUpOutlined, EllipsisOutlined, SwapOutlined } from '@ant-design/icons'
+import { useState } from 'react'
+import { Alert, Button, Card, Modal, Progress, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -8,9 +7,12 @@ import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { AppDisplayIcon, appDisplayText, publisherLabel, publisherWithId } from '../../lib/appDisplayV2'
 import { compareVersions, latestVersion, offeredUpdate } from '../../lib/semver'
 import type { PlatformMarketApp } from '../../api/appPlatform'
-import { appPath, type AdminApp } from './appsAdminModel'
+import { appHref, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
-import type { LifecycleAction } from './platformLifecycle'
+import type { PlatformOperationRow } from '../../api/appOperations'
+import InstallationActions from './InstallationActions'
+import InstallationOperationLine from './InstallationOperationLine'
+import type { LifecycleAction, PickMode } from './platformLifecycle'
 import type { Staging } from './platformMarket'
 
 /** A platform installation's control state as a status: the words are ours for the states the server defines. */
@@ -24,82 +26,35 @@ export function platformStateTone(state: string | undefined): { tone: StatusTone
     default: return { tone: 'neutral', raw: state }
   }
 }
-/** States in which an administrator may disable, enable or uninstall from the list. A recovery state is handled on the app page. */
-export const RECOVERY_STATES = ['attention', 'recovery_required', 'failed']
-export const LIFECYCLE_STATES = ['installed', 'running', 'active', 'enabled', 'disabled', 'setup_required']
-
 export interface InstalledActionProps {
   app: AdminApp
-  /** The catalogue's entry for this app, when the catalogue on show lists it. */
-  catalogue?: PlatformMarketApp
   /** The installation's release can still be uninstalled although the app needs recovery. */
   uninstallable?: boolean
-  /** This app's own action is running: its update button spins. */
+  /** This app's own action is running: its buttons spin. */
   busy: boolean
-  /** Another action holds the console (`pending`: an unfinished change that needs the administrator). Every control that would be refused is disabled, never left to ignore a click. */
+  /** Another action holds the console (`pending`: an unfinished change that needs the administrator). Every control that would be refused stays reachable and says why. */
   blocked?: '' | 'pending' | 'working'
   /** A press on a control that is blocked: it answers with the reason instead of going quiet. */
   onRefuse?: () => void
-  onSwitchVersion: (version: string) => void
-  /** `opener` is the more-actions button, where focus returns when the flow ends (the menu item itself is gone by then). */
+  /** Opens the version step of the lifecycle dialog; nothing is read from the catalogue before this is pressed. */
+  onPick: (mode: PickMode, opener?: HTMLElement | null) => void
+  /** `opener` is the control pressed, where focus returns when the flow ends (a menu item is gone by then). */
   onLifecycle: (action: LifecycleAction, opener?: HTMLElement | null) => void
-  onViewInCatalogue: () => void
+  /** The newest operation of this installation: a progress line while it runs, a result badge after. */
+  operation?: PlatformOperationRow
+  onOpenOperation?: (id: string, opener: HTMLElement) => void
 }
 
-/** The version an installed platform app would be updated to, by the prerelease policy; undefined when none. */
-export function updateOffer(app: AdminApp, catalogue?: PlatformMarketApp): string | undefined {
-  return app.platform && app.version && catalogue ? offeredUpdate(app.version, catalogue.versions.map(v => v.version)) : undefined
+/** The shared installation actions in their card form (a Switch version button and a more menu), for a platform app. */
+export function InstalledControls({ app, uninstallable, busy, blocked = '', onRefuse, onPick, onLifecycle }: InstalledActionProps) {
+  if (!app.platform || !app.installationId) return null
+  return <InstallationActions variant="card" state={app.state} uninstallable={uninstallable} versioned={!!app.version} busy={busy} blocked={blocked} onRefuse={onRefuse} onPick={onPick} onLifecycle={onLifecycle} />
 }
 
-/** Small icon buttons for an installed app: update, switch version, and the more menu. Used by the card and the list. */
-export function InstalledControls({ app, catalogue, uninstallable, busy, blocked = '', onRefuse, onSwitchVersion, onLifecycle, onViewInCatalogue }: InstalledActionProps) {
-  const { t } = useTranslation()
-  const more = useRef<HTMLButtonElement>(null)
-  const reasonId = useId()
-  const newest = updateOffer(app, catalogue)
-  // One rule for every control here: it acts exactly when pressing it can. A blocked control is not `disabled` (that
-  // would take it out of the keyboard's reach and hide the reason): it stays focusable, says it is unavailable, names
-  // the reason in its description, and a press answers with that reason.
-  const idle = !busy && !blocked
-  const reason = blocked === 'pending' ? t('appStore.busyPending') : blocked ? t('appStore.busyWorking') : ''
-  const inert = blocked ? { 'aria-disabled': true as const, 'aria-describedby': reasonId, className: 'rp-app-inert' } : {}
-  const lifecycleOK = app.platform && !!app.installationId && LIFECYCLE_STATES.includes(app.state ?? '')
-  const recoveryUninstall = !lifecycleOK && app.platform && !!app.installationId && RECOVERY_STATES.includes(app.state ?? '') && !!uninstallable
-  const versionItems = catalogue && app.version ? [{
-    type: 'group' as const,
-    label: t('appStore.switchVersion'),
-    children: catalogue.versions.map(v => ({
-      key: v.version,
-      disabled: v.version === app.version,
-      label: <Space size={8}><span>{v.version}</span>{v.version === app.version && <Tag>{t('appStore.current')}</Tag>}</Space>,
-    })),
-  }] : []
-  const lifecycleItems = [
-    ...(recoveryUninstall ? [{ key: 'uninstall', label: t('appStore.uninstall'), danger: true, disabled: !idle }] : []),
-    ...(lifecycleOK ? [
-      app.state === 'disabled' ? { key: 'enable', label: t('appStore.enable'), disabled: !idle } : { key: 'disable', label: t('appStore.disable'), disabled: !idle },
-      { key: 'uninstall', label: t('appStore.uninstall'), danger: true, disabled: !idle },
-    ] : []),
-    ...(app.platform ? [{ key: 'view', label: t('appStore.viewInCatalogue'), disabled: !catalogue }] : []),
-  ]
-  if (!newest && !versionItems.length && !lifecycleItems.length) return null
-  const updateLabel = newest ? t('appStore.updateTo', { version: newest }) : ''
-  return (
-    <span className="rp-app-controls">
-      {reason && <span id={reasonId} className="rp-sr-only">{reason}</span>}
-      {newest && <Button size="small" type="text" {...inert} className={['rp-app-update', inert.className].filter(Boolean).join(' ')} icon={<ArrowUpOutlined aria-hidden="true" />} aria-label={updateLabel} title={reason || updateLabel} loading={busy} disabled={busy} onClick={e => { e.stopPropagation(); if (blocked) onRefuse?.(); else onSwitchVersion(newest) }} />}
-      {versionItems.length > 0 && (
-        <Dropdown menu={{ items: versionItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onSwitchVersion(key) } }} trigger={idle ? ['click'] : []}>
-          <Button size="small" type="text" {...inert} icon={<SwapOutlined aria-hidden="true" />} aria-label={t('appStore.switchVersion')} title={reason || t('appStore.switchVersion')} onClick={e => { e.stopPropagation(); if (blocked) onRefuse?.() }} />
-        </Dropdown>
-      )}
-      {lifecycleItems.length > 0 && (
-        <Dropdown trigger={['click']} menu={{ items: lifecycleItems, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); if (key === 'view') onViewInCatalogue(); else onLifecycle(key as LifecycleAction, more.current) } }}>
-          <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} onClick={e => e.stopPropagation()} />
-        </Dropdown>
-      )}
-    </span>
-  )
+/** An app's newest operation as the progress line or result badge it is shown as, or nothing before it has had one. */
+export function InstalledOperation({ operation, onOpenOperation }: Pick<InstalledActionProps, 'operation' | 'onOpenOperation'>) {
+  if (!operation || !onOpenOperation) return null
+  return <InstallationOperationLine row={operation} onOpen={opener => onOpenOperation(operation.operation_id, opener)} />
 }
 
 /** A platform app's state as a status tag, or nothing for a built-in or legacy app. */
@@ -145,13 +100,14 @@ export function InstalledCard({ name, description, publisher, source, ...actions
         <div className="rp-app-card-main">
           <div className="rp-app-card-line">
             {/* The link is the card's one way in: its ::after covers the card, so a click anywhere opens the app page while the controls stay separate. */}
-            <Link to={appPath(app.key)} className="rp-app-card-name rp-app-card-link">{name}</Link>
+            <Link to={appHref(app)} className="rp-app-card-name rp-app-card-link">{name}</Link>
             {secondary && <PublisherLine publisherName={app.publisherName} publisherId={app.publisherId} className="rp-app-card-sub" title={source ? `${secondary} · ${source}` : secondary}>{secondary}</PublisherLine>}
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
           <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} compact /></div>
+          <InstalledOperation operation={actions.operation} onOpenOperation={actions.onOpenOperation} />
+          {app.platform && !!app.installationId && <div className="rp-app-card-foot"><InstalledControls {...actions} /></div>}
         </div>
-        <InstalledControls {...actions} />
       </div>
     </Card>
   )

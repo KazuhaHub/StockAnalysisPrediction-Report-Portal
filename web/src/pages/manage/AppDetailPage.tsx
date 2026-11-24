@@ -158,14 +158,6 @@ function AppDetail({ app }: { app: AdminApp }) {
               )
             }
           />
-          {app.platform && (
-            <Section
-              title={t('apps.section.platform.title')}
-              hint={t('apps.section.platform.hint')}
-              value={t('apps.section.platform.value')}
-              onOpen={() => navigate(`/manage/apps/installations/${encodeURIComponent(app.installationId ?? '')}`)}
-            />
-          )}
           {!app.builtin && !app.platform && (
             <>
               <Section

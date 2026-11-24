@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, Route, createMemoryRouter, createRoutesFromElements, useLocation, useParams } from 'react-router'
 import { appsRoutes } from './appsRoutes'
@@ -18,6 +18,7 @@ vi.mock('./AppAccessPage', () => stub('access'))
 vi.mock('./AppCredentialsPage', () => stub('credentials'))
 vi.mock('./AppPlatformSettingsPage', () => stub('settings'))
 vi.mock('./AppAdminTab', () => stub('admin'))
+vi.mock('./InstallationOverview', () => stub('overview'))
 // The installation tabs wrapper only frames its two child routes here.
 vi.mock('./AppInstallationTabs', async () => {
   const { Outlet } = await import('react-router')
@@ -40,7 +41,10 @@ const subRoutes: [string, string][] = [
   ['/manage/apps/builtin%3Aquotes', 'detail:builtin:quotes'],
   ['/manage/apps/builtin%3Aquotes/access', 'access:builtin:quotes'],
   ['/manage/apps/notes/credentials', 'credentials:notes'],
-  ['/manage/apps/installations/33333333-3333-4333-8333-333333333333', 'settings:33333333-3333-4333-8333-333333333333'],
+  ['/manage/apps/installations/33333333-3333-4333-8333-333333333333/overview', 'overview:33333333-3333-4333-8333-333333333333'],
+  ['/manage/apps/installations/33333333-3333-4333-8333-333333333333/permissions', 'settings:33333333-3333-4333-8333-333333333333'],
+  ['/manage/apps/installations/33333333-3333-4333-8333-333333333333/access', 'settings:33333333-3333-4333-8333-333333333333'],
+  ['/manage/apps/installations/33333333-3333-4333-8333-333333333333/data', 'settings:33333333-3333-4333-8333-333333333333'],
   ['/manage/apps/installations/33333333-3333-4333-8333-333333333333/admin', 'admin:33333333-3333-4333-8333-333333333333'],
 ]
 
@@ -54,6 +58,15 @@ describe('the apps console routes', () => {
       expect(within(tabs).getByRole('tab', { name: 'nav.apps' }).getAttribute('aria-selected')).toBe('true')
     })
   }
+
+  it('sends a platform app\'s old page and access URLs to its installation page', async () => {
+    const id = '33333333-3333-4333-8333-333333333333'
+    mount(`/manage/apps/platform%3A${id}`)
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe(`/manage/apps/installations/${id}/overview`))
+    cleanup()
+    mount(`/manage/apps/platform%3A${id}/access`)
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe(`/manage/apps/installations/${id}/access`))
+  })
 
   it('declares the install page before the app page, so "install" is never read as an app key', async () => {
     mount('/manage/apps/install')

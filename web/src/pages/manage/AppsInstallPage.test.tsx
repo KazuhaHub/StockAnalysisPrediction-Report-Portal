@@ -41,6 +41,7 @@ const pageTree = (path = '/manage/apps/install') => (
           <Route path="/manage/apps" element={<AppsAdminPage />} />
           <Route path="/manage/apps/install" element={<AppsInstallPage />} />
           <Route path="/manage/apps/:key" element={<Detail />} />
+          <Route path="/manage/apps/installations/:installation/overview" element={<div>overview-page</div>} />
         </Routes>
       </MemoryRouter>
     </App>
@@ -373,7 +374,7 @@ describe('The install page', () => {
     const settings = await screen.findByRole('button', { name: 'appPlatform.openSettings' })
     expect(screen.getByRole('button', { name: 'appStore.backToApps' })).toBeTruthy()
     await userEvent.setup().click(settings)
-    expect(await screen.findByText(`detail:platform:${installationId}`)).toBeTruthy()
+    expect(await screen.findByText('overview-page')).toBeTruthy()
   })
 
   it('reads the sources again each time it opens, so the official switch is honoured', async () => {

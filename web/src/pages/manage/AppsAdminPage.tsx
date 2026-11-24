@@ -26,7 +26,7 @@ export default function AppsAdminPage() {
 
   return <AppsConsoleTabs active={activeTab} onChange={setActiveTab} panes={{
     apps: <LoadGate loading={loading} error={error} onRetry={reload}>
-      <AppsMarketplace apps={apps} reload={reload} active={activeTab === 'apps'} onOpenTrust={() => setActiveTab('publishers')} />
+      <AppsMarketplace apps={apps} reload={reload} active={activeTab === 'apps'} />
     </LoadGate>,
     publishers: <Space orientation="vertical" size={16} style={{ width: '100%' }}><OfficialCatalogueSwitch /><AppPlatformStorageStatus /><AppPlatformRuntimePanel reload={runtimeReload} /><AppPlatformPublishersPanel onInitialized={() => setRuntimeReload(v => v + 1)} /></Space>,
     tasks: <AppPlatformTasksPanel />,

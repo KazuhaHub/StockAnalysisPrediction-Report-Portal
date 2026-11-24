@@ -330,7 +330,7 @@ describe('application installation flow', () => {
     expect(changes).toBe(1)
     expect(mock.post).not.toHaveBeenCalled()
     await userEvent.setup().click(settings)
-    expect(screen.getByTestId('location').textContent).toBe(`/manage/apps/${encodeURIComponent(`platform:${operation}`)}`)
+    expect(screen.getByTestId('location').textContent).toBe(`/manage/apps/installations/${operation}/overview`)
   })
 
   // antd spaces footer buttons with `.ant-btn + .ant-btn`; a button wrapped in a link breaks that adjacency and the

@@ -6,7 +6,7 @@ import { useAuth } from '../../auth'
 import { notifyError } from '../../lib/notify'
 import { latestVersion } from '../../lib/semver'
 import type { AdminApp } from './appsAdminModel'
-import { usePlatformLifecycle, type LifecycleAction } from './platformLifecycle'
+import { releaseAction, usePlatformLifecycle, type LifecycleAction, type PickMode } from './platformLifecycle'
 import { loadInstalledRelease, usePlatformMarket } from './platformMarket'
 
 /** How a catalogue source is named: the official one by its name, a custom one by its host. */
@@ -65,17 +65,11 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
   // an enable when it is the disabled installation's own release, or as an uninstall when that is all it allows.
   // Returns why not, when it cannot.
   const openStaged = (release: PlatformRelease, installation?: string, opener?: HTMLElement | null): string => {
-    if (release.installed) return t('appStore.alreadyInstalled')
-    const target = installation ?? release.installation_id
+    const flow = releaseAction(release, installation, t)
+    if ('error' in flow) return flow.error
     // A flow that cannot start (another change is pending) says so; it is never a silent success.
-    const start = (item: PlatformRelease, action: LifecycleAction) => { const result = lifecycle.begin(item, action, opener); return result === 'started' ? '' : t(result === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking') }
-    if (release.uninstallable && target) return start({ ...release, installation_id: target }, 'uninstall')
-    if (release.enableable && target) return start({ ...release, installation_id: target }, 'enable')
-    // A version chosen for an installed app is always an update: the server, not this page, refuses a downgrade.
-    if (installation) return start({ ...release, installation_id: installation }, 'update')
-    if (release.installable) return start(release, 'install')
-    if (target) return start({ ...release, installation_id: target }, 'update')
-    return t(`appPlatform.reason.${release.reason}`, { defaultValue: t('appMarket.verificationChanged') })
+    const result = lifecycle.begin(flow.release, flow.action, opener)
+    return result === 'started' ? '' : t(result === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking')
   }
 
   /** Downloads and verifies one version, then opens its flow. Resolves to the failure text, '' for success, null if nothing happened. */
@@ -134,6 +128,13 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     finally { if (live(account, epoch)) setActing('') }
   }
 
+  /** Opens the version choice of an installed app. The catalogue is read by that step, not before. */
+  const pickVersion = (a: AdminApp, name: string, mode: PickMode, from?: HTMLElement | null) => {
+    if (!a.installationId) return
+    const result = lifecycle.pick({ installationId: a.installationId, appId: a.appId ?? '', publisherId: a.publisherId ?? '', name, version: a.version }, mode, from ?? focusedControl())
+    if (result !== 'started') notifyError(t(result === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking'))
+  }
+
   const uploaded = async (e: ChangeEvent<HTMLInputElement>) => {
     const chosen = e.target.files?.[0]
     e.target.value = ''
@@ -152,7 +153,7 @@ export function useAppsConsoleFlow({ apps, reload, active = true }: { apps: Admi
     user, live, generation, lifecycle, market, busy, busyReason, acting,
     detail, setDetail, detailError, openDetail, cardErrors,
     catalogueApps, catalogueOf, installedOf,
-    stageAndOpen, installFromDetail, quickInstall, switchVersion, act, uploaded,
+    stageAndOpen, installFromDetail, quickInstall, switchVersion, act, pickVersion, uploaded,
   }
 }
 export type AppsConsoleFlow = ReturnType<typeof useAppsConsoleFlow>

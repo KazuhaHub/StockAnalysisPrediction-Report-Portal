@@ -247,6 +247,17 @@ async function contrastStates(page, violations) {
     }), targets);
 }
 
+// An installation's page has one URL per tab; this moves to a tab of the installation the page is on.
+async function gotoSettingsTab(page, tab) {
+  await page.evaluate((name) => {
+    const base = window.location.pathname.replace(/\/(overview|permissions|access|data|admin)(\/.*)?$/, "");
+    window.history.pushState({}, "", `${base}/${name}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, tab);
+  await page.waitForFunction((name) => window.location.pathname.endsWith(`/${name}`), tab);
+  await page.getByRole("tab").first().waitFor();
+}
+
 // Client-side navigation keeps the language, theme and session the page already has.
 async function navigateClient(page, pathname) {
   await page.evaluate((target) => {
@@ -292,9 +303,13 @@ async function openReview(page, options) {
   const card = installedCard(page);
   await card.waitFor({ timeout: 20_000 });
   if (kind === "update") {
-    trigger = card.locator(".rp-app-update");
+    // Switch version loads the versions when pressed; the version offered as the update is preselected.
+    trigger = card.getByRole("button", { name: "Switch version", exact: true });
     await trigger.waitFor({ timeout: 20_000 });
     await trigger.click();
+    const picker = page.getByRole("dialog");
+    await picker.getByRole("radio").first().waitFor({ timeout: 30_000 });
+    await picker.locator(".ant-modal-footer .ant-btn-primary").click();
   } else {
     trigger = card.locator(".rp-app-controls button:has(.anticon-ellipsis)");
     await trigger.click();
@@ -567,6 +582,9 @@ async function settingsScenario(browser, url, options) {
   page.setDefaultTimeout(20_000);
   try {
     await page.goto(url, { waitUntil: "networkidle" });
+    // The bare installation URL lands on the Overview; the permissions and credentials sit on their own tab.
+    await page.getByRole("tab").first().waitFor();
+    await gotoSettingsTab(page, "permissions");
     if (options.language !== "English") {
       await page.getByRole("button", { name: options.language }).click();
     }
@@ -582,7 +600,7 @@ async function settingsScenario(browser, url, options) {
       });
     }
     try {
-      await page.getByText(options.title, { exact: true }).waitFor();
+      await page.locator(".rp-platform-settings").waitFor();
     } catch (error) {
       throw new Error(`settings page did not render: ${(await page.locator("body").innerText()).slice(0, 2000)}`, { cause: error });
     }
@@ -590,7 +608,13 @@ async function settingsScenario(browser, url, options) {
       await page.getByText(options.capability, { exact: false }).waitFor();
     }
     if (options.ready) {
+      await gotoSettingsTab(page, "overview");
       await page.getByText(options.ready, { exact: true }).waitFor();
+      await gotoSettingsTab(page, "permissions");
+    }
+    // Restore, repair and the retained data's deletion are on the Data tab.
+    if (options.restorePausedText || options.repairButton || options.restoreButton || options.deleteButton) {
+      await gotoSettingsTab(page, "data");
     }
     if (options.restorePausedText) {
       await page.getByText(options.restorePausedText, {

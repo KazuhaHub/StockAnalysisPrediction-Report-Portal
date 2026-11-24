@@ -51,6 +51,7 @@ export function usePlatformMarket(visible: boolean = true) {
   const [stagingNow, setStagingNow] = useState<Staging>(null)
   const [uploading, setUploading] = useState(false)
   const [stageError, setStageError] = useState('')
+  const [sourcesTick, setSourcesTick] = useState(0)
   const live = (account: string | null, epoch: object) => mounted.current && owner.current === account && generation.current === epoch
 
   useEffect(() => {
@@ -86,7 +87,7 @@ export function usePlatformMarket(visible: boolean = true) {
         if (!abort.signal.aborted) setSourcesState(state)
       })
     return () => abort.abort()
-  }, [user, visible])
+  }, [user, visible, sourcesTick])
 
   const sources: MarketSource[] = [
     ...(official?.enabled ? [{ url: official.url, name: official.name, official: true }] : []),
@@ -200,6 +201,8 @@ export function usePlatformMarket(visible: boolean = true) {
     official, sourcesState, sources, active, setActive: setSelected, addCustom,
     catalogue: catalogues[active] as CatalogueState | undefined, catalogues,
     reload: () => { if (active) void load(active) },
+    /** Reads the sources again (and shows them loading), after a failed read. */
+    reloadSources: () => { setSourcesState('loading'); setSourcesTick(v => v + 1) },
     stage, stageOffline, staging: stagingNow, uploading, stageError, clearStageError: () => setStageError(''),
   }
 }

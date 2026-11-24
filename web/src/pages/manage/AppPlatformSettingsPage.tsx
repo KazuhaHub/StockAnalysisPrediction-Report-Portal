@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, App, Button, Card, Checkbox, Descriptions, Empty, Input, Modal, Result, Space, Tag, Typography, theme } from 'antd'
-import { AppstoreOutlined, ArrowLeftOutlined, CheckCircleOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, DeleteOutlined, ImportOutlined, KeyOutlined, ReloadOutlined, ToolOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
 import type { AppDisplayView } from '../../lib/appDisplayV2'
-import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import { LoadingPlaceholder } from '../../components/LoadGate'
 import ReleaseDigest from '../../components/ReleaseDigest'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import { confirmAction } from '../../components/Confirm'
-import { AppsBreadcrumb } from './appsAdminParts'
 import AppAdministratorsCard from './AppAdministratorsCard'
+import AppAccessPage from './AppAccessPage'
 import type { InstallationSettingsContext } from './AppInstallationTabs'
 import AppNetworkProxyPanel from './AppNetworkProxyPanel'
 import AppIngressPanel from './AppIngressPanel'
@@ -194,14 +193,6 @@ const migrationTone = { settling: 'processing', settled: 'success', blocked: 'er
 const root = '/api/admin/app-platform'
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-function phaseTone(settings: Settings): StatusTone {
-  if (settings.phase === 'ready' && settings.desired_state === 'enabled') return 'success'
-  if (settings.phase === 'disabled') return 'neutral'
-  if (settings.phase === 'pending' || settings.phase === 'setup_required') return 'processing'
-  if (settings.phase === 'review_required' || settings.phase === 'recovery_required' || settings.phase === 'quarantined') return 'error'
-  return 'neutral'
-}
-
 export default function AppPlatformSettingsPage() {
   const { t } = useTranslation()
   const { modal } = App.useApp()
@@ -232,6 +223,11 @@ export default function AppPlatformSettingsPage() {
     sharedReload?.()
     if (!(sharedReload && given)) setRefresh(value => value + 1)
   }, [sharedReload, given])
+  // Under the installation tabs an operation started here is followed in the tabs' own lifecycle dialog; mounted alone
+  // it is followed on the console page.
+  const tabParam = useParams().tab
+  const show = (name: 'permissions' | 'access' | 'data') => !tabParam || tabParam === name
+  const openOperation = (id: string) => { if (shared?.openOperation) shared.openOperation(id); else navigate(`/manage/apps?operation=${id}`) }
   // The settings a quiet re-read handed up to the tabs: they come back as `given`, and are already shown.
   const handedUp = useRef<Settings | null>(null)
   const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
@@ -345,14 +341,7 @@ export default function AppPlatformSettingsPage() {
     />
   }
 
-  const copy = appDisplayText(settings.app_id, settings.display, lang)
   const capabilityLabel = (capability: string) => t(`appPlatform.capability.${capability}`, { defaultValue: capability })
-  const gapLabel = (gap: string) => {
-    if (gap.startsWith('capability:')) return t('appPlatform.settings.missingCapability', { capability: capabilityLabel(gap.slice('capability:'.length)) })
-    if (gap.startsWith('secret_binding:')) return t('appPlatform.settings.missingSecretBinding', { binding: gap.slice('secret_binding:'.length) })
-    return t(`appPlatform.settings.gap.${gap}`, { defaultValue: t('appPlatform.settings.gap.unknown') })
-  }
-  const setupRequired = settings.configuration_gaps.some((gap) => gap === 'setup_required' || gap.startsWith('secret_binding:'))
   const usagePercent = settings?.data && BigInt(settings.data.quota_bytes) > 0n
     ? Number((BigInt(settings.data.observed_bytes) * 100n) / BigInt(settings.data.quota_bytes))
     : 0
@@ -422,7 +411,7 @@ export default function AppPlatformSettingsPage() {
       })
       if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       setDeletePlan(null)
-      navigate(`/manage/apps?operation=${result.operation_id}`)
+      openOperation(result.operation_id)
     } catch (failure) {
       setDeleteError(errText(failure, t))
     } finally {
@@ -462,7 +451,7 @@ export default function AppPlatformSettingsPage() {
       })
       if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       setRepairPlan(null)
-      navigate(`/manage/apps?operation=${result.operation_id}`)
+      openOperation(result.operation_id)
     } catch (failure) {
       setRepairError(errText(failure, t))
     } finally {
@@ -577,7 +566,7 @@ export default function AppPlatformSettingsPage() {
       })
       if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       setRaiseOpen(false); setRaisePlan(null)
-      navigate(`/manage/apps?operation=${result.operation_id}`)
+      openOperation(result.operation_id)
     } catch (failure) {
       setRaiseError(errText(failure, t))
     } finally {
@@ -638,7 +627,7 @@ export default function AppPlatformSettingsPage() {
       })
       if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       setImportOpen(false); setImportPlan(null)
-      navigate(`/manage/apps?operation=${result.operation_id}`)
+      openOperation(result.operation_id)
     } catch (failure) {
       setImportError(errText(failure, t))
     } finally {
@@ -703,7 +692,7 @@ export default function AppPlatformSettingsPage() {
       })
       if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
       setRestorePlan(null)
-      navigate(`/manage/apps?operation=${result.operation_id}`)
+      openOperation(result.operation_id)
     } catch (failure) {
       setRestoreError(errText(failure, t))
     } finally {
@@ -711,40 +700,8 @@ export default function AppPlatformSettingsPage() {
     }
   }
   return <Space className="rp-platform-settings" orientation="vertical" size={16} style={{ width: '100%' }}>
-    {!shared?.headed && <AppsBreadcrumb name={copy.name} />}
-    {!shared?.headed && <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>}
-    <Typography.Title level={4} style={{ margin: 0 }}>{t('appPlatform.settings.title')}</Typography.Title>
     {error && <Alert type="error" showIcon title={error} action={<Button size="small" icon={<ReloadOutlined aria-hidden="true" />} onClick={() => reload()}>{t('common.retry')}</Button>} />}
-    <Card>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
-        {settings.display ? <AppDisplayIcon display={settings.display} /> : <AppstoreOutlined aria-hidden="true" style={{ fontSize: 32, color: token.colorPrimary }} />}
-        <div style={{ minWidth: 0, flex: '1 1 240px' }}>
-          <Typography.Title level={4} style={{ margin: 0 }}>{copy.name}</Typography.Title>
-          <Typography.Text type="secondary">{settings.publisher_id} · {settings.app_id}</Typography.Text>
-        </div>
-        <StatusTag className={phaseTone(settings) === 'success' ? 'rp-platform-success-tag' : undefined} tone={phaseTone(settings)}>{t(`appPlatform.settings.phase.${settings.phase}`, { defaultValue: settings.phase })}</StatusTag>
-      </div>
-      {copy.description && <Typography.Paragraph type="secondary">{copy.description}</Typography.Paragraph>}
-      <Descriptions column={1} size="small" items={[
-        { key: 'state', label: t('appPlatform.settings.state'), children: t(`appPlatform.settings.desired.${settings.desired_state}`, { defaultValue: settings.desired_state }) },
-        { key: 'generation', label: t('appPlatform.settings.generation'), children: settings.generation },
-        { key: 'policy', label: t('appPlatform.settings.policyRevision'), children: settings.policy_revision },
-        { key: 'release', label: t('appPlatform.settings.currentRelease'), children: settings.current_release_sha256 ? <Space orientation="vertical" size={0}><span>{settings.version || '—'}</span><ReleaseDigest value={settings.current_release_sha256} /></Space> : t('appPlatform.settings.noRelease') },
-      ]} />
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 }}>
-        {(settings.desired_state === 'enabled' && settings.phase === 'ready') && <Link to={`/apps/v2/${installation}`}>{t('appPlatform.settings.openApplication')}</Link>}
-        <Link to={`/manage/apps?installation=${installation}`}><SettingOutlined aria-hidden="true" /> {t('appPlatform.settings.lifecycleActions')}</Link>
-      </div>
-    </Card>
-
-    <Card title={t('appPlatform.settings.configuration')} extra={setupRequired
-      ? <Link to={`/manage/apps/${encodeURIComponent(settings.app_id)}/credentials`}><KeyOutlined aria-hidden="true" /> {t('appPlatform.settings.manageCredentials')}</Link>
-      : undefined}>
-      {settings.configuration_gaps.length
-        ? <Alert type="warning" showIcon title={t('appPlatform.settings.configurationNeeded')} description={<ul style={{ margin: 0, paddingInlineStart: 20 }}>{settings.configuration_gaps.map((gap) => <li key={gap}>{gapLabel(gap)}</li>)}</ul>} />
-        : <Alert type="success" showIcon title={t('appPlatform.settings.configurationReady')} />}
-    </Card>
-
+    {show('access') && <>
     <Card title={t('appPlatform.settings.audience')}>
       {settings.audience.length
         ? <Space size={[6, 6]} wrap>{settings.audience.map((item) => {
@@ -756,12 +713,14 @@ export default function AppPlatformSettingsPage() {
         })}</Space>
         : <Typography.Text type="secondary">{t('appPlatform.settings.noAudience')}</Typography.Text>}
       {(settings.audience_total ?? 0) > settings.audience.length && <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>{t('appPlatform.settings.audienceMore', { count: (settings.audience_total ?? 0) - settings.audience.length })}</Typography.Paragraph>}
-      <div style={{ marginTop: 12 }}><Link to={`/manage/apps/${encodeURIComponent(`platform:${settings.installation_id}`)}/access`}>{t('appPlatform.settings.manageAccess')}</Link></div>
     </Card>
 
     {/* Always shown: a delegation outlives the admin page of a release, and must stay visible to be revoked. */}
+    <AppAccessPage appKey={`platform:${installation}`} embedded />
     <AppAdministratorsCard installation={installation} adminPage={settings.admin_page === true} />
 
+    </>}
+    {show('permissions') && <>
     <Card title={t('appPlatform.settings.capabilities')}>
       {settings.capabilities.length
         ? <Space size={[6, 6]} wrap>{settings.capabilities.map((item) => <StatusTag key={item.capability} className={item.granted ? 'rp-platform-success-tag' : undefined} tone={item.granted ? 'success' : item.required ? 'error' : 'neutral'}>
@@ -786,6 +745,16 @@ export default function AppPlatformSettingsPage() {
       <AppNetworkTargetsPanel key={settings.networkPolicy.policy_sha256} installation={installation} policyRevision={settings.policy_revision} policy={settings.networkPolicy}
         ready={principalsReady} onChanged={() => reload()} />
     </Card>}
+    <Card title={t('appPlatform.settings.credentials')} extra={<Link to={`/manage/apps/${encodeURIComponent(settings.app_id)}/credentials`}><KeyOutlined aria-hidden="true" /> {t('appPlatform.settings.manageCredentials')}</Link>}>
+      {bindingError && <Alert type="warning" showIcon title={bindingError} />}
+      {bindings.length ? <Space orientation="vertical" style={{ width: '100%' }}>
+        {bindings.map((binding) => <div key={binding.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: `1px solid ${token.colorBorderSecondary}`, paddingBlock: 8 }}>
+          <Space size={8} wrap><Typography.Text strong>{binding.name}</Typography.Text><Tag>{binding.operation}</Tag><StatusTag className={binding.state === 'active' ? 'rp-platform-success-tag' : undefined} tone={binding.state === 'active' ? 'success' : binding.state === 'review_required' ? 'warning' : 'neutral'}>{binding.state}</StatusTag></Space>
+          <Typography.Text type="secondary">{binding.credential_label} · {t('appPlatform.settings.bindingRevision', { revision: binding.revision })}</Typography.Text>
+        </div>)}
+      </Space> : (!bindingError && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('appPlatform.settings.noCredentials')} />)}
+    </Card>
+    </>}
     <Modal
       className="rp-platform-review-modal"
       open={principalsOpen}
@@ -805,17 +774,7 @@ export default function AppPlatformSettingsPage() {
       </Space>
     </Modal>
 
-    <Card title={t('appPlatform.settings.backend')}>
-      <Descriptions column={1} size="small" items={[
-        { key: 'required', label: t('appPlatform.settings.backendRequired'), children: settings.backend.required ? t('appPlatform.settings.yes') : t('appPlatform.settings.staticOnly') },
-        { key: 'state', label: t('appPlatform.settings.backendState'), children: settings.backend.required
-          ? settings.backend.registered
-            ? settings.backend.enabled ? t('appPlatform.settings.backendEnabled') : t('appPlatform.settings.backendDisabled')
-            : t('appPlatform.settings.backendNotRegistered')
-          : t('appPlatform.settings.notApplicable') },
-      ]} />
-    </Card>
-
+    {show('data') && <>
     <Card title={t('appPlatform.settings.data')} extra={(canDeleteData || settings.quota_raise_eligible || settings.data)
       ? <Space wrap>
         {settings.quota_raise_eligible && <Button icon={<VerticalAlignTopOutlined aria-hidden="true" />} onClick={openRaise}>{t('appPlatform.settings.raiseQuota')}</Button>}
@@ -891,15 +850,7 @@ export default function AppPlatformSettingsPage() {
       </Space>
     </Card>}
 
-    <Card title={t('appPlatform.settings.credentials')} extra={<Link to={`/manage/apps/${encodeURIComponent(settings.app_id)}/credentials`}><KeyOutlined aria-hidden="true" /> {t('appPlatform.settings.manageCredentials')}</Link>}>
-      {bindingError && <Alert type="warning" showIcon title={bindingError} />}
-      {bindings.length ? <Space orientation="vertical" style={{ width: '100%' }}>
-        {bindings.map((binding) => <div key={binding.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: `1px solid ${token.colorBorderSecondary}`, paddingBlock: 8 }}>
-          <Space size={8} wrap><Typography.Text strong>{binding.name}</Typography.Text><Tag>{binding.operation}</Tag><StatusTag className={binding.state === 'active' ? 'rp-platform-success-tag' : undefined} tone={binding.state === 'active' ? 'success' : binding.state === 'review_required' ? 'warning' : 'neutral'}>{binding.state}</StatusTag></Space>
-          <Typography.Text type="secondary">{binding.credential_label} · {t('appPlatform.settings.bindingRevision', { revision: binding.revision })}</Typography.Text>
-        </div>)}
-      </Space> : (!bindingError && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('appPlatform.settings.noCredentials')} />)}
-    </Card>
+    </>}
     <Modal
       className="rp-platform-review-modal"
       open={!!deletePlan}
