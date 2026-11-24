@@ -4465,5 +4465,14 @@
   "appPlatform.overview.proxyToday": "今日代理流量",
   "appPlatform.overview.usageValue": "{{used}} / {{total}}",
   "appPlatform.overview.operation": "目前或最近的操作",
-  "appPlatform.overview.noOperation": "還沒有操作"
+  "appPlatform.overview.noOperation": "還沒有操作",
+  "appPlatform.overview.status": "狀態",
+  "appPlatform.overview.readyOff": "已關閉",
+  "appPlatform.overview.readyPaused": "已暫停",
+  "appPlatform.overview.readyPending": "安裝中",
+  "appPlatform.overview.readyNot": "未就緒",
+  "appPlatform.overview.configOk": "已完成",
+  "appPlatform.overview.configFix": "去處理",
+  "appPlatform.overview.backendStatic": "靜態前端",
+  "appPlatform.overview.backendManaged": "託管 · {{status}}"
 }

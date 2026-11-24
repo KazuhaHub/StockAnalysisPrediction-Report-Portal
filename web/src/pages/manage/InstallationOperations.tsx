@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import CardTable from '../../components/CardTable'
+import Expand from '../../components/Expand'
 import StatusTag from '../../components/StatusTag'
 import type { PlatformOperationRow } from '../../api/appOperations'
 import { usePrefs } from '../../prefs'
@@ -29,6 +31,22 @@ export function formatDuration(t: TFunction, ms: number): string {
 export default function InstallationOperations({ feed }: { feed: OperationFeed }) {
   const { t } = useTranslation()
   const { lang } = usePrefs()
+  // A row's steps unfold and fold (Expand) instead of appearing: the table row is kept while it plays, and mounted
+  // closed first so opening animates too.
+  const [rendered, setRendered] = useState<string[]>([])
+  const [open, setOpen] = useState<string[]>([])
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
+  const toggle = (expanded: boolean, row: PlatformOperationRow) => {
+    const key = row.operation_id
+    if (expanded) {
+      setRendered(v => v.includes(key) ? v : [...v, key])
+      timers.current.push(setTimeout(() => setOpen(v => v.includes(key) ? v : [...v, key]), 30))
+    } else {
+      setOpen(v => v.filter(k => k !== key))
+      timers.current.push(setTimeout(() => setRendered(v => v.filter(k => k !== key)), 450))
+    }
+  }
   const started = (value: string) => new Intl.DateTimeFormat(lang, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(Number(value)))
   const columns: ColumnsType<PlatformOperationRow> = [
     { title: t('appPlatform.ops.col.action'), key: 'action', render: (_: unknown, row) => <Typography.Text strong>{actionLabel(t, row.action)}</Typography.Text> },
@@ -59,7 +77,9 @@ export default function InstallationOperations({ feed }: { feed: OperationFeed }
         locale={{ emptyText: t('appPlatform.ops.empty') }}
         expandable={{
           rowExpandable: row => operationStages(row.action, row.managed).length > 0,
-          expandedRowRender: row => <OperationSteps progress={row} />,
+          expandedRowKeys: rendered,
+          onExpand: toggle,
+          expandedRowRender: row => <Expand open={open.includes(row.operation_id)}><OperationSteps progress={row} /></Expand>,
         }} />
       : null}
   </Card>

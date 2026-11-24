@@ -4465,5 +4465,14 @@
   "appPlatform.overview.proxyToday": "Proxy traffic today",
   "appPlatform.overview.usageValue": "{{used}} of {{total}}",
   "appPlatform.overview.operation": "Current or last operation",
-  "appPlatform.overview.noOperation": "No operation yet"
+  "appPlatform.overview.noOperation": "No operation yet",
+  "appPlatform.overview.status": "Status",
+  "appPlatform.overview.readyOff": "Off",
+  "appPlatform.overview.readyPaused": "Paused",
+  "appPlatform.overview.readyPending": "Installing",
+  "appPlatform.overview.readyNot": "Not ready",
+  "appPlatform.overview.configOk": "Complete",
+  "appPlatform.overview.configFix": "Fix",
+  "appPlatform.overview.backendStatic": "Static frontend",
+  "appPlatform.overview.backendManaged": "Managed · {{status}}"
 }

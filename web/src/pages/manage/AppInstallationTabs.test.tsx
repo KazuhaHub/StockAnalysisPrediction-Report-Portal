@@ -31,7 +31,7 @@ const base = `/manage/apps/installations/${id}`
 const settingsUrl = `/api/admin/app-platform/installations/${id}/settings`
 const display = { icon: 'dashboard', texts: [{ locale: 'en-US', name: 'Demo App', description: 'd' }] }
 const settingsOf = (extra: Record<string, unknown> = {}) => ({
-  installation_id: id, app_id: 'demo-app', publisher_id: 'kazuha', version: '1.0.0', display, revision: '1',
+  installation_id: id, app_id: 'demo-app', publisher_id: 'kazuha', version: '1.0.0', display, revision: '1', phase: 'ready', desired_state: 'enabled', repair_eligible: false, configuration_gaps: [],
   backend: { required: false, registered: false, enabled: false }, recovery: { count: 0, points: [], pending: false }, ...extra,
 })
 

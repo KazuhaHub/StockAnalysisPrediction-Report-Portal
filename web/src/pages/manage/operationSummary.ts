@@ -43,3 +43,17 @@ export function operationVersions(row: Pick<PlatformOperationRow, 'from_version'
   const only = to ?? from
   return only ? { to: only } : {}
 }
+
+/** A success stays on an app card this long after it completed; a failure stays until the next operation. */
+export const RESULT_BADGE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Whether an app card shows its newest operation: while it runs, a failure until the next operation, and a success for
+ * `RESULT_BADGE_MS` after it completed (so an old install does not carry "Install succeeded" for ever). The one rule.
+ */
+export function showsOperationLine(row: Pick<PlatformOperationRow, 'stage' | 'terminal' | 'completed_ms' | 'updated_ms'>, now: number = Date.now()): boolean {
+  const outcome = operationOutcome(row)
+  if (outcome !== 'succeeded') return true
+  const finished = Number(row.completed_ms ?? row.updated_ms)
+  return Number.isFinite(finished) && now - finished <= RESULT_BADGE_MS
+}

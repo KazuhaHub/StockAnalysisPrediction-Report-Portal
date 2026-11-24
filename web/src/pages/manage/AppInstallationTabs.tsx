@@ -10,6 +10,7 @@ import { AppsBreadcrumb } from './appsAdminParts'
 import { installationPath, INSTALLATION_TABS, type InstallationTab } from './appsAdminModel'
 import { useAppsConsoleFlow, type AppsConsoleFlow } from './appsConsoleFlow'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
+import InstallationHeaderActions, { installationApp, useInstallationRepair } from './InstallationHeaderActions'
 import { AppDisplayIcon, appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 
@@ -31,6 +32,8 @@ export type InstallationSettingsContext = {
   operationsKey: number
   /** Follows a running operation in the page's lifecycle dialog. */
   openOperation: (id: string) => void
+  /** Opens the repair review: the flow the header's Repair runs. */
+  repair: () => void
 }
 
 /** The tabs this installation has. Data only for an app that has a backend or data of its own; the app's own page only when its release declares one. */
@@ -81,11 +84,13 @@ export default function AppInstallationTabs() {
   const settings = answer?.settings ?? null
   const name = settings ? appDisplayText(settings.app_id, settings.display, lang).name : ''
   const openOperation = useCallback((id: string) => flow.lifecycle.showOperation(id), [flow.lifecycle])
+  const app = useMemo(() => installationApp(settings, name), [settings, name])
+  const repair = useInstallationRepair(app, flow)
   const shared = useMemo<InstallationSettingsContext>(
-    () => ({ settings, reload, replace, headed: true, name, flow, operationsKey, openOperation }),
+    () => ({ settings, reload, replace, headed: true, name, flow, operationsKey, openOperation, repair }),
     // `flow` is a new object every render; what the tabs read from it is read at the time they act.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings, reload, replace, name, flow.lifecycle, flow.busyReason, flow.acting, operationsKey, openOperation],
+    [settings, reload, replace, name, flow.lifecycle, flow.busyReason, flow.acting, operationsKey, openOperation, repair],
   )
   if (answer?.installation !== installation) return <LoadingPlaceholder minHeight={320} />
   if (!settings) {
@@ -102,13 +107,18 @@ export default function AppInstallationTabs() {
   return <div className="rp-installation-tabs" style={onAdmin ? { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 } : undefined}>
     <AppsBreadcrumb name={name} />
     <Link to="/manage/apps" style={{ display: 'inline-block', marginBottom: 8 }}><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>
-    <div className="rp-installation-identity">
-      {settings.display ? <AppDisplayIcon display={settings.display} /> : <AppstoreOutlined aria-hidden="true" style={{ fontSize: 32 }} />}
-      <div className="rp-installation-identity-text">
-        <Typography.Title level={4} style={{ margin: 0 }}>{name}</Typography.Title>
-        <Typography.Text type="secondary">{settings.publisher_id} · {settings.app_id}</Typography.Text>
+    <div className="rp-installation-header">
+      <div className="rp-installation-identity">
+        <span className="rp-installation-glyph">{settings.display ? <AppDisplayIcon display={settings.display} /> : <AppstoreOutlined aria-hidden="true" />}</span>
+        <div className="rp-installation-identity-text">
+          <Typography.Title level={4} style={{ margin: 0 }}>{name}</Typography.Title>
+          <Space size={8} wrap className="rp-installation-meta">
+            {settings.version && <Tag style={{ margin: 0 }}>{settings.version}</Tag>}
+            <Typography.Text type="secondary">{settings.publisher_id} · {settings.app_id}</Typography.Text>
+          </Space>
+        </div>
       </div>
-      {settings.version && <Tag>{settings.version}</Tag>}
+      {app && <InstallationHeaderActions settings={settings} app={app} name={name} flow={flow} />}
     </div>
     <Tabs className="rp-apps-tabs" activeKey={segment}
       onTabClick={key => { void navigate(key === 'admin' ? adminBase : installationPath(installation, key as InstallationTab)) }}

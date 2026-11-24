@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router'
-import InstallationOverview, { controlState, runState } from './InstallationOverview'
+import InstallationOverview, { gapTab, readiness } from './InstallationOverview'
+import { controlState, runState } from './installationState'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: apiMock, errText: (e: unknown) => (e instanceof Error ? e.message : String(e)) }))
@@ -60,6 +61,22 @@ describe('run state and control state', () => {
   })
 })
 
+describe('readiness and where a gap is fixed', () => {
+  it('says ready, paused, installing, not ready or off', () => {
+    const r = (phase: string, desired = 'enabled', paused = false) => readiness({ phase, desired_state: desired, control_paused: paused }).key
+    expect(r('ready')).toBe('appPlatform.overview.healthReady')
+    expect(r('ready', 'enabled', true)).toBe('appPlatform.overview.readyPaused')
+    expect(r('pending')).toBe('appPlatform.overview.readyPending')
+    expect(r('recovery_required')).toBe('appPlatform.overview.readyNot')
+    expect(r('ready', 'disabled')).toBe('appPlatform.overview.readyOff')
+  })
+  it('sends a gap to the tab that fixes it', () => {
+    expect(gapTab('capability:network.http')).toBe('permissions')
+    expect(gapTab('secret_binding:feed')).toBe('permissions')
+    expect(gapTab('data_review_required')).toBe('data')
+  })
+})
+
 describe('the Overview tab', () => {
   it('shows run state, readiness, data against its quota and the proxy traffic against its budget', async () => {
     mount({ capabilities: [{ capability: 'network.proxy', granted: true, required: false }] })
@@ -68,6 +85,17 @@ describe('the Overview tab', () => {
     expect(screen.getByText('appPlatform.overview.usageValue:{"used":"512 KiB","total":"1 MiB"}')).toBeTruthy()
     expect(await screen.findByText('appPlatform.overview.usageValue:{"used":"512 B","total":"2 KiB"}')).toBeTruthy()
     expect(screen.getAllByRole('progressbar')).toHaveLength(2)
+  })
+
+  it('is one Status card: no separate configuration, backend or release cards, and no toolbar or policy revision in it', async () => {
+    mount()
+    await screen.findByText('appPlatform.overview.run.running')
+    const titles = [...document.querySelectorAll('.ant-card-head-title')].map(n => n.textContent)
+    expect(titles).toEqual(['appPlatform.overview.status', 'appPlatform.ops.recent'])
+    expect(screen.queryByRole('group', { name: 'appPlatform.settings.lifecycleActions' })).toBeNull()
+    expect(screen.queryByText(/appPlatform\.settings\.policyRevision/)).toBeNull()
+    expect(screen.getByText('appPlatform.overview.backendManaged:{"status":"appPlatform.settings.backendEnabled"}')).toBeTruthy()
+    expect(screen.getByText('1.0.0')).toBeTruthy()
   })
 
   it('shows no proxy line when the proxy is off, and says how many things need setup', async () => {
@@ -80,37 +108,12 @@ describe('the Overview tab', () => {
   it('links a missing business binding to its reviewed setup', async () => {
     mount({ app_id: 'scheduled-digest', phase: 'setup_required', configuration_gaps: ['setup_required', 'secret_binding:digest-feed'] })
     expect(await screen.findByText(/appPlatform\.settings\.missingSecretBinding/)).toBeTruthy()
-    expect(screen.getByRole('link', { name: /appPlatform\.settings\.manageCredentials/ }).getAttribute('href')).toBe('/manage/apps/scheduled-digest/credentials')
+    // The gap links to the tab that fixes it.
+    expect(screen.getByRole('link', { name: /appPlatform\.settings\.missingSecretBinding/ }).getAttribute('href')).toBe(`/manage/apps/installations/${id}/permissions`)
   })
 
-  it('offers Update, Switch version, Disable and Uninstall, and Repair only when the server offers it', async () => {
-    mount()
-    const group = await screen.findByRole('group', { name: 'appPlatform.settings.lifecycleActions' })
-    expect(within(group).getAllByRole('button').map(b => b.textContent)).toEqual(['appPlatform.update', 'appStore.switchVersion', 'appStore.disable', 'appStore.uninstall'])
-    cleanup()
-    mount({ repair_eligible: true })
-    expect(within(await screen.findByRole('group', { name: 'appPlatform.settings.lifecycleActions' })).getByRole('button', { name: 'appPlatform.repair' })).toBeTruthy()
-  })
 
-  it('offers Enable instead of Disable for a disabled app', async () => {
-    mount({ desired_state: 'disabled', phase: 'disabled' })
-    const group = await screen.findByRole('group', { name: 'appPlatform.settings.lifecycleActions' })
-    expect(within(group).getByRole('button', { name: 'appStore.enable' })).toBeTruthy()
-    expect(within(group).queryByRole('button', { name: 'appStore.disable' })).toBeNull()
-  })
 
-  it('runs the same flows as the card: the version step for Update and Switch version, a review for the rest', async () => {
-    mount({ repair_eligible: true })
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'appPlatform.update' }))
-    expect(flow.pickVersion).toHaveBeenLastCalledWith(expect.objectContaining({ installationId: id, key: `platform:${id}` }), 'Notes', 'update', expect.anything())
-    await user.click(screen.getByRole('button', { name: 'appStore.switchVersion' }))
-    expect(flow.pickVersion).toHaveBeenLastCalledWith(expect.anything(), 'Notes', 'switch', expect.anything())
-    await user.click(screen.getByRole('button', { name: 'appStore.disable' }))
-    expect(flow.act).toHaveBeenLastCalledWith(expect.objectContaining({ installationId: id }), 'disable', expect.anything())
-    await user.click(screen.getByRole('button', { name: 'appPlatform.repair' }))
-    expect(flow.act).toHaveBeenLastCalledWith(expect.anything(), 'repair', expect.anything())
-  })
 
   it('reserves a slot for runtime metrics and shows no CPU or memory number in it', async () => {
     mount()
@@ -133,6 +136,8 @@ describe('the Overview tab', () => {
     expect(within(card).getByText(/err\.capacity_exhausted_disk/)).toBeTruthy()
     await userEvent.click(within(card).getAllByRole('button', { name: /expand/i })[0])
     expect(await screen.findByText('appPlatform.stage.validate')).toBeTruthy()
+    // The steps unfold (Expand) rather than appear.
+    expect(card.querySelector('.rp-fold')).not.toBeNull()
     expect(card.querySelector('.ant-steps-item-error')).not.toBeNull()
   })
 

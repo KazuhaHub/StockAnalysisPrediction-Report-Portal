@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseOperationRows, type PlatformOperationRow } from '../../api/appOperations'
-import { operationDurationMs, operationOutcome, operationProgress, operationVersions } from './operationSummary'
+import { operationDurationMs, operationOutcome, operationProgress, operationVersions, RESULT_BADGE_MS, showsOperationLine } from './operationSummary'
 
 const row = (extra: Partial<PlatformOperationRow> = {}): PlatformOperationRow => ({
   operation_id: '11111111-1111-4111-8111-111111111111', installation_id: '22222222-2222-4222-8222-222222222222',
@@ -58,5 +58,22 @@ describe('operationVersions', () => {
     expect(operationVersions(row())).toEqual({ from: '1.0.0', to: '1.1.0' })
     expect(operationVersions(row({ action: 'install', from_version: undefined, to_version: '1.0.0' }))).toEqual({ to: '1.0.0' })
     expect(operationVersions(row({ action: 'disable', from_version: '1.0.0', to_version: '1.0.0' }))).toEqual({ to: '1.0.0' })
+  })
+})
+
+describe('showsOperationLine (what an app card says about its newest operation)', () => {
+  const now = 10 * RESULT_BADGE_MS
+  const done = (stage: string, ago: number) => row({ stage, terminal: true, completed_ms: String(now - ago), updated_ms: String(now - ago) })
+  it('always shows a running operation', () => {
+    expect(showsOperationLine(row(), now)).toBe(true)
+  })
+  it('keeps a failure until the next operation, however old', () => {
+    expect(showsOperationLine(done('failed', 30 * RESULT_BADGE_MS), now)).toBe(true)
+    expect(showsOperationLine(done('recovery_required', 5 * RESULT_BADGE_MS), now)).toBe(true)
+  })
+  it('shows a success for 24 hours after it completed, then drops it', () => {
+    expect(showsOperationLine(done('complete', 60_000), now)).toBe(true)
+    expect(showsOperationLine(done('complete', RESULT_BADGE_MS), now)).toBe(true)
+    expect(showsOperationLine(done('complete', RESULT_BADGE_MS + 1), now)).toBe(false)
   })
 })

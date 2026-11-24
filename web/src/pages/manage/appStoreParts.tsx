@@ -12,6 +12,7 @@ import { AppIcon, ServiceStatus } from './appsAdminParts'
 import type { PlatformOperationRow } from '../../api/appOperations'
 import InstallationActions from './InstallationActions'
 import InstallationOperationLine from './InstallationOperationLine'
+import { showsOperationLine } from './operationSummary'
 import type { LifecycleAction, PickMode } from './platformLifecycle'
 import type { Staging } from './platformMarket'
 
@@ -53,7 +54,7 @@ export function InstalledControls({ app, uninstallable, busy, blocked = '', onRe
 
 /** An app's newest operation as the progress line or result badge it is shown as, or nothing before it has had one. */
 export function InstalledOperation({ operation, onOpenOperation }: Pick<InstalledActionProps, 'operation' | 'onOpenOperation'>) {
-  if (!operation || !onOpenOperation) return null
+  if (!operation || !onOpenOperation || !showsOperationLine(operation)) return null
   return <InstallationOperationLine row={operation} onOpen={opener => onOpenOperation(operation.operation_id, opener)} />
 }
 
