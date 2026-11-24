@@ -7,6 +7,7 @@ import type { AppAccessOU, AppLayoutEntry, AppLayoutResp } from '../../api/types
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
 import { appDisplayText, parseAppDisplay, type AppDisplayView } from '../../lib/appDisplayV2'
 import { useOptionalPrefs } from '../../prefs'
+import { installationPath } from './installationPaths'
 
 /**
  * The publisher name of an installed platform app, from the layout alone: it carries the verified name with the app, so
@@ -62,6 +63,10 @@ export function builtinSlug(key: string): string {
 }
 
 export const appPath = (key: string) => `/manage/apps/${encodeURIComponent(key)}`
+
+export { INSTALLATION_TABS, installationPath, type InstallationTab } from './installationPaths'
+/** Where an app's card leads: a platform installation has one page of its own; every other app keeps its detail page. */
+export const appHref = (app: Pick<AdminApp, 'key' | 'platform' | 'installationId'>) => (app.platform && app.installationId ? installationPath(app.installationId) : appPath(app.key))
 
 /** Display strings for an app: a built-in one is translated, an installed one speaks for itself. */
 export function useAppLabels() {

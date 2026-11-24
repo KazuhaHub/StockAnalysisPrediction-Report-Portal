@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { api, ApiError, errText } from '../../api/client'
 import { useAuth } from '../../auth'
 import type { PlatformRelease } from '../../api/appPlatform'
@@ -115,8 +116,30 @@ function readIntent(key: string): PendingIntent | null {
   } catch { return null }
 }
 
-/** Where a lifecycle flow is: choosing who can use a new app, reviewing the plan, or following the operation. */
-export type LifecycleStep = 'audience' | 'review' | 'progress'
+/** Where a lifecycle flow is: choosing who can use a new app, choosing a version, reviewing the plan, or following the operation. */
+export type LifecycleStep = 'audience' | 'version' | 'review' | 'progress'
+
+/** The installed app a version choice is for. Only what is needed to find it in a catalogue and to plan against it. */
+export type VersionSubject = { installationId: string; appId: string; publisherId: string; name: string; version?: string }
+/** `update` offers the versions newer than the installed one; `switch` offers every version, as the server decides what it accepts. */
+export type PickMode = 'update' | 'switch'
+export type VersionPicker = { subject: VersionSubject; mode: PickMode }
+
+/**
+ * The flow a verified release opens for an installed app, or why it opens none. A release the installation can only
+ * be uninstalled with is an uninstall review; the installation's own release, while it is disabled, is an enable; any
+ * other release is an update, and the server (not this page) refuses a downgrade it does not accept.
+ */
+export function releaseAction(release: PlatformRelease, installation: string | undefined, t: TFunction): { release: PlatformRelease; action: LifecycleAction } | { error: string } {
+  if (release.installed) return { error: t('appStore.alreadyInstalled') }
+  const target = installation ?? release.installation_id
+  if (release.uninstallable && target) return { release: { ...release, installation_id: target }, action: 'uninstall' }
+  if (release.enableable && target) return { release: { ...release, installation_id: target }, action: 'enable' }
+  if (installation) return { release: { ...release, installation_id: installation }, action: 'update' }
+  if (release.installable) return { release, action: 'install' }
+  if (target) return { release: { ...release, installation_id: target }, action: 'update' }
+  return { error: t(`appPlatform.reason.${release.reason}`, { defaultValue: t('appMarket.verificationChanged') }) }
+}
 
 export function usePlatformLifecycle(onChange?: () => void) {
   const { t } = useTranslation()
@@ -150,6 +173,9 @@ export function usePlatformLifecycle(onChange?: () => void) {
   const [refresh, setRefresh] = useState(0)
   const [definitive, setDefinitive] = useState(false)
   const [hidden, setHidden] = useState(false)
+  // The version choice a switch or an update starts with, kept for the whole flow so Back returns to it.
+  const [picker, setPicker] = useState<VersionPicker | null>(null)
+  const [withVersion, setWithVersion] = useState(false)
   const live = (account: string | null, epoch: number) => mounted.current && owner.current === account && generation.current === epoch
   const needsGroups = target?.action === 'install'
 
@@ -159,7 +185,7 @@ export function usePlatformLifecycle(onChange?: () => void) {
     generation.current = epoch
     writing.current = false; setBusy(false); setDefinitive(false); setHidden(false)
     setIntent(readIntent(storageKey))
-    setReview(null); setActionError(''); setSelected([]); setTarget(null)
+    setReview(null); setActionError(''); setSelected([]); setTarget(null); setPicker(null); setWithVersion(false)
     return () => { mounted.current = false; generation.current = epoch + 1 }
   }, [storageKey])
 
@@ -236,6 +262,10 @@ export function usePlatformLifecycle(onChange?: () => void) {
       const result = await api.post<Review>(`${platformRoot}/plans`, body)
       const returnedInstallation = result.review.action === 'install' ? '' : result.review.installation_id
       if (result.review.action !== action || result.review.release_sha256 !== release.release_sha256 || result.review.app_id !== release.app_id || (action !== 'install' && returnedInstallation !== release.installation_id) || !uuid.test(result.plan_id) || !sha.test(result.plan_sha256)) throw new Error(t('appPlatform.invalidOperation'))
+      // A repair keeps the data and takes a fresh checkpoint; a review that says anything else is not one this page may show as that.
+      if (result.review.action === 'repair' && result.review.data_effect !== 'checkpoint_and_retain') throw new Error(t('appPlatform.invalidOperation'))
+      // A repair keeps the data and takes a fresh checkpoint; a review that says anything else is not one this page may show as that.
+      if (result.review.action === 'repair' && result.review.data_effect !== 'checkpoint_and_retain') throw new Error(t('appPlatform.invalidOperation'))
       if (live(account, epoch)) { setReview(result); setDefinitive(false) }
     } catch (e) { if (live(account, epoch)) setActionError(errText(e, t)) }
     finally { if (live(account, epoch)) { writing.current = false; setBusy(false) } }
@@ -246,15 +276,33 @@ export function usePlatformLifecycle(onChange?: () => void) {
   // is disabled while a package downloads), and it is where focus returns when the flow ends.
   // Says why a flow did not start, so a caller can answer instead of doing nothing: an unfinished confirmed change
   // needs the administrator ('pending'); a request still in flight only needs a moment ('writing').
-  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null): 'started' | 'pending' | 'writing' => {
+  // `fromPicker` is the version step handing on the release it staged: the dialog is already open, so the opener stays.
+  const begin = (release: PlatformRelease, action: LifecycleAction, opener?: HTMLElement | null, fromPicker = false): 'started' | 'pending' | 'writing' => {
     if (intent) return 'pending'
     if (writing.current) return 'writing'
-    trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    if (!fromPicker) trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     // A managed app's Enable is its repair review; a frontend-only app keeps the enable review.
     const next = { release, action: action === 'enable' && release.backend ? 'repair' as const : action }
+    if (!fromPicker) { setPicker(null); setWithVersion(false) }
     setTarget(next); setSelected([]); setReview(null); setActionError(''); setHidden(false)
     if (next.action !== 'install') void plan(next, [])
     return 'started'
+  }
+  /** Opens the version choice of an installed app: the versions load when this step shows, never before. */
+  const pick = (subject: VersionSubject, mode: PickMode, opener?: HTMLElement | null): 'started' | 'pending' | 'writing' => {
+    if (intent) return 'pending'
+    if (writing.current) return 'writing'
+    trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    setPicker({ subject, mode }); setWithVersion(true)
+    setTarget(null); setSelected([]); setReview(null); setActionError(''); setHidden(false)
+    return 'started'
+  }
+  /** Shows the progress of an operation that is already running (a card's progress line), in the same dialog. */
+  const showOperation = (id: string, opener?: HTMLElement | null) => {
+    if (!uuid.test(id)) return
+    trigger.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    setHidden(false)
+    setParams(p => { p.set('operation', id); return p }, { replace: true })
   }
   /** Install step one done: ask the server for the review of the chosen audience. */
   const next = () => { if (target) void plan(target, selected) }
@@ -292,22 +340,26 @@ export function usePlatformLifecycle(onChange?: () => void) {
     // audience step, and a flow resumed after a reload has no target left to review, so it simply ends.
     if (target && target.action !== 'install') void plan(target, [], true)
   }
-  /** Back from the review to the audience choice of an install. */
-  const back = () => { if (!busy && !intent) { setReview(null); setActionError('') } }
+  /** Back from the review: to the audience choice of an install, or to the version choice of a switch. */
+  const back = () => {
+    if (busy || intent) return
+    setReview(null); setActionError('')
+    if (withVersion && target?.action !== 'install') setTarget(null)
+  }
   /** Leaves the flow. A pending request identity is kept (the modal is only hidden) so it is never lost. */
   const close = () => {
     if (busy) return
     if (intent) { setHidden(true); return }
-    setReview(null); setTarget(null); setActionError('')
+    setReview(null); setTarget(null); setActionError(''); setPicker(null); setWithVersion(false)
     if (operation) setParams(p => { p.delete('operation'); return p }, { replace: true })
     // Hand focus back to what opened the flow.
     setTimeout(() => { if (trigger.current?.isConnected) trigger.current.focus(); trigger.current = null }, 0)
   }
 
-  const action: LifecycleAction | undefined = target?.action ?? review?.review.action ?? intent?.action
-  const step: LifecycleStep | null = operation ? 'progress' : review || intent ? 'review' : target ? (target.action === 'install' ? 'audience' : 'review') : null
+  const action: LifecycleAction | undefined = target?.action ?? review?.review.action ?? intent?.action ?? (picker ? 'update' : undefined)
+  const step: LifecycleStep | null = operation ? 'progress' : review || intent ? 'review' : target ? (target.action === 'install' ? 'audience' : 'review') : picker ? 'version' : null
   return {
-    target, action, step, open: step !== null && !hidden, hiddenPending: !!intent && hidden, reopen: () => setHidden(false),
+    target, action, step, picker, withVersion, pick, showOperation, open: step !== null && !hidden, hiddenPending: !!intent && hidden, reopen: () => setHidden(false),
     groups, groupCursor, groupsLoading, groupsError, loadMoreGroups, selected, setSelected,
     review, expired, intent, definitive, busy, actionError,
     operation, progress, progressError, refreshProgress: () => setRefresh(v => v + 1),

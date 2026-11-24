@@ -20,11 +20,12 @@ import { usePendingSettings } from './AdminDraftBoundary'
 //
 // A value is only written when Save is pressed, and "Inherit" removes the override. A built-in app is
 // only hidden by this: the server cannot gate the API behind it, which the note under the choice says.
-export default function AppAccessPage() {
+export default function AppAccessPage({ appKey, embedded = false }: { appKey?: string; embedded?: boolean } = {}) {
   const { t } = useTranslation()
   const { failure, catchLoad, retryKey } = useLoadFailure()
   const navigate = useNavigate()
-  const key = useParams().key ?? ''
+  const routeKey = useParams().key ?? ''
+  const key = appKey ?? routeKey
   const catalog = useAppsCatalog()
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [groupsLoading, setGroupsLoading] = useState(true)
@@ -57,7 +58,7 @@ export default function AppAccessPage() {
   return (
     <LoadGate loading={catalog.loading || groupsLoading} error={catalog.error || groupsError} onRetry={retry}>
       {app ? (
-        <AccessWorkspace app={app} groups={groups} selectedId={selectedId} onSelect={setSelectedId} reload={catalog.reload} />
+        <AccessWorkspace embedded={embedded} app={app} groups={groups} selectedId={selectedId} onSelect={setSelectedId} reload={catalog.reload} />
       ) : (
         <Result status="404" title={t('apps.notFound')} extra={<Button onClick={() => navigate('/manage/apps')}>{t('apps.backToList')}</Button>} />
       )}
@@ -66,12 +67,15 @@ export default function AppAccessPage() {
 }
 
 function AccessWorkspace({
+  embedded,
   app,
   groups,
   selectedId,
   onSelect,
   reload,
 }: {
+  /** Shown as a tab of an installation's page: that page carries the breadcrumb. */
+  embedded: boolean
   app: AdminApp
   groups: UserGroupRow[]
   selectedId: number | null
@@ -108,7 +112,7 @@ function AccessWorkspace({
 
   return (
     <>
-      <AppsBreadcrumb app={app} name={name} page={t('apps.section.status.title')} />
+      {!embedded && <AppsBreadcrumb app={app} name={name} page={t('apps.section.status.title')} />}
       <Card className="rp-flush-card" styles={{ body: { padding: 0 } }}>
         <div className="rp-app-access">
           <div className="rp-app-access__tree">

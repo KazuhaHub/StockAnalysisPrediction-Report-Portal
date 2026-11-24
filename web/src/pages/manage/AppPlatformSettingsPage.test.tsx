@@ -5,7 +5,6 @@ import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
-import AppInstallationTabs from './AppInstallationTabs'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 const translate = vi.hoisted(() => (key: string, options?: Record<string, unknown>) => options ? `${key}:${JSON.stringify(options)}` : key)
@@ -73,23 +72,15 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('application installation settings', () => {
-  it('shows the current package, audience, permissions, data, recovery and credential metadata', async () => {
+  it('shows the audience, permissions, data, recovery and credential metadata', async () => {
     mount()
-    expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
-    expect(screen.getByText('appPlatform.settings.title')).toBeTruthy()
-    expect(screen.getByText('2.0.0')).toBeTruthy()
-    expect(screen.getByText(release.slice(0, 12))).toBeTruthy()
+    expect(await screen.findByText('appPlatform.settings.capabilities')).toBeTruthy()
     expect(screen.getByText(/appPlatform\.settings\.principal\.user:.*Reader/)).toBeTruthy()
     expect(screen.getByText(/appPlatform\.capability\.storage\.files/)).toBeTruthy()
-    expect(screen.getByText(/appPlatform\.settings\.configurationNeeded/)).toBeTruthy()
-    expect(screen.getByText(/appPlatform\.settings\.missingCapability/)).toBeTruthy()
-    expect(screen.getByText(/appPlatform\.settings\.backendEnabled/)).toBeTruthy()
     expect(screen.getByText(/268,435,456/)).toBeTruthy()
     expect(screen.getByText('verified')).toBeTruthy()
     expect(screen.getByText('upstream-api')).toBeTruthy()
     expect(screen.getByText('Provider key · appPlatform.settings.bindingRevision:{"revision":2}')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'appPlatform.settings.openApplication' }).getAttribute('href')).toBe(`/apps/v2/${installation}`)
-    expect(screen.getByRole('link', { name: /appPlatform\.settings\.lifecycleActions/ }).getAttribute('href')).toBe(`/manage/apps?installation=${installation}`)
     expect(apiMock.get).toHaveBeenCalledWith(`/api/admin/app-platform/installations/${installation}/settings`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
@@ -121,34 +112,6 @@ describe('application installation settings', () => {
     })
   })
 
-  describe('under the installation tabs', () => {
-    const admins = `${root}/installations/${installation}/app-admins`
-    const settingsUrl = `${root}/installations/${installation}/settings`
-    const mountTabs = () => render(
-      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
-        <Routes>
-          <Route path="/manage/apps/installations/:installation" element={<AppInstallationTabs />}>
-            <Route index element={<AppPlatformSettingsPage />} />
-          </Route>
-        </Routes>
-      </MemoryRouter></App>,
-    )
-    const serve = () => apiMock.get.mockImplementation(async (url: string) => {
-      if (url.endsWith('/settings')) return { ...settings, admin_page: true }
-      if (url.endsWith('/app-admins')) return { admins: [] }
-      return { bindings: [] }
-    })
-
-    it('makes one settings request for the tab bar and the page together', async () => {
-      serve()
-      mountTabs()
-      expect(await screen.findByRole('heading', { name: 'notes' })).toBeTruthy()
-      await screen.findByText('appAdmin.admins.empty')
-      expect(screen.getAllByRole('tab')).toHaveLength(2)
-      expect(apiMock.get.mock.calls.filter(([url]) => url === settingsUrl)).toHaveLength(1)
-      expect(apiMock.get).toHaveBeenCalledWith(admins, expect.anything())
-    })
-  })
 
   describe('principals.read grant (doc 181 section 4)', () => {
     const route = `${root}/installations/${installation}/principals-read`
@@ -208,7 +171,7 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'public.projection', granted: false, required: true }] } : { bindings: [] })
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
+      await screen.findByText('appPlatform.settings.capabilities')
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.public\./ })).toBeNull()
     })
 
@@ -219,7 +182,7 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'machine.read', granted: false, required: true }] } : { bindings: [] })
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
+      await screen.findByText('appPlatform.settings.capabilities')
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.machine\./ })).toBeNull()
     })
 
@@ -231,31 +194,17 @@ describe('application installation settings', () => {
       cleanup()
       apiMock.get.mockImplementation(async (url: string) => url.endsWith('/postgres-policy') ? { ...preview, declared: false } : url.endsWith('/settings') ? { ...settings, capabilities: [...settings.capabilities, { capability: 'network.postgres', granted: false, required: false }] } : { bindings: [] })
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
+      await screen.findByText('appPlatform.settings.capabilities')
       expect(screen.queryByText('appPostgres.title')).toBeNull()
     })
 
     it('offers no control for other capabilities or without the capability', async () => {
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
+      await screen.findByText('appPlatform.settings.capabilities')
       expect(screen.queryByRole('button', { name: /appPlatform\.settings\.principals\./ })).toBeNull()
     })
   })
 
-  it('leaves the breadcrumb and Back link to the tabs when they carry the header', async () => {
-    render(
-      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}`]}>
-        <Routes>
-          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: { ...settings, admin_page: true }, reload: () => {}, replace: () => {}, headed: true }} />}>
-            <Route index element={<AppPlatformSettingsPage />} />
-          </Route>
-        </Routes>
-      </MemoryRouter></App>,
-    )
-    await waitFor(() => expect(document.querySelector('.rp-platform-settings')).not.toBeNull())
-    expect(screen.queryByRole('navigation', { name: 'apps.breadcrumb' })).toBeNull()
-    expect(screen.queryByRole('link', { name: /appPlatform.settings.back/ })).toBeNull()
-  })
 
   it('hands a quiet re-read up to the tabs, so switching tabs and back does not show the spent action again', async () => {
     const user = userEvent.setup()
@@ -321,24 +270,6 @@ describe('application installation settings', () => {
     expect(apiMock.get).not.toHaveBeenCalled()
   })
 
-  it('shows the exact missing business binding and links to its reviewed setup', async () => {
-    apiMock.get.mockImplementation(async (url: string) => {
-      if (url.endsWith('/settings')) return {
-        ...settings,
-        app_id: 'scheduled-digest',
-        phase: 'setup_required',
-        configuration_gaps: ['setup_required', 'secret_binding:digest-feed'],
-      }
-      return { bindings: [] }
-    })
-    mount()
-    expect(await screen.findByText(/appPlatform\.settings\.missingSecretBinding/)).toBeTruthy()
-    expect(screen.getByText(/digest-feed/)).toBeTruthy()
-    expect(screen.getAllByRole('link', { name: /appPlatform\.settings\.manageCredentials/ }).map((link) => link.getAttribute('href'))).toEqual([
-      '/manage/apps/scheduled-digest/credentials',
-      '/manage/apps/scheduled-digest/credentials',
-    ])
-  })
 
   it('reviews and confirms permanent deletion of the exact retained data namespace', async () => {
     const user = userEvent.setup()
@@ -399,75 +330,23 @@ describe('application installation settings', () => {
     expect(await screen.findByText('apps')).toBeTruthy()
   })
 
-  it('ends its breadcrumb with the app name, rendered with the page', async () => {
-    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings')
-      ? { ...settings, display: { icon: 'file-text', texts: ['en-US', 'zh-CN', 'zh-TW'].map(locale => ({ locale, name: 'Market Monitor', description: 'd' })) } }
-      : { bindings: [] })
-    mount()
-    const crumb = await screen.findByRole('navigation', { name: 'apps.breadcrumb' })
-    // The first render that has the page has the full trail: Apps / Market Monitor, the app's name and never its id.
-    expect(within(crumb).getByRole('link', { name: 'apps.title' })).toBeTruthy()
-    expect(within(crumb).getByText('Market Monitor')).toBeTruthy()
-    expect(within(crumb).queryByText('notes')).toBeNull()
-  })
 
-  it('reviews and confirms repair of the current managed release without changing grants', async () => {
-    const user = userEvent.setup()
-    const plan = '66666666-6666-4666-8666-666666666666'
-    const operation = '77777777-7777-4777-8777-777777777777'
-    apiMock.get.mockImplementation(async (url: string) => {
-      if (url.endsWith('/settings')) {
-        return {
-          ...settings,
-          desired_state: 'disabled',
-          phase: 'disabled',
-          generation: '2',
-          backend: { required: true, registered: true, enabled: true },
-          repair_eligible: true,
-        }
-      }
-      return { bindings: [] }
-    })
-    apiMock.post.mockImplementation(async (url: string) => {
-      if (url.endsWith('/plans')) {
-        return {
-          plan_id: plan,
-          plan_sha256: 'c'.repeat(64),
-          expires_ms: String(Date.now() + 900000),
-          review: {
-            action: 'repair',
-            installation_id: installation,
-            app_id: 'notes',
-            publisher_id: 'publisher',
-            release_sha256: release,
-            source_generation: '2',
-            target_generation: '3',
-            policy_revision: '3',
-            grants_sha256: 'd'.repeat(64),
-            data_effect: 'checkpoint_and_retain',
-          },
-        }
-      }
-      return { operation_id: operation }
-    })
-    mount()
-    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.repair' }))
-    expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
-      action: 'repair',
-      installation_id: installation,
-    })
-    const dialog = await screen.findByRole('dialog')
-    expect(dialog.textContent).toContain('appPlatform.settings.repairWarning')
-    expect(dialog.textContent).toContain(release.slice(0, 12))
-    expect(dialog.textContent).toContain('2 → 3')
-    expect(dialog.textContent).toContain('appPlatform.settings.repairGrantsUnchanged')
-    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.repairAction' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
-      plan_id: plan,
-      plan_sha256: 'c'.repeat(64),
-      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
-    })))
-    expect(await screen.findByText('apps')).toBeTruthy()
+  it('starts the page\'s one repair flow from the recovery card, instead of a review of its own', async () => {
+    const repair = vi.fn()
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? { ...settings, desired_state: 'disabled', phase: 'recovery_required', repair_eligible: true } : { bindings: [] })
+    render(
+      <App><MemoryRouter initialEntries={[`/manage/apps/installations/${installation}/data`]}>
+        <Routes>
+          <Route path="/manage/apps/installations/:installation" element={<Outlet context={{ settings: null, reload: () => {}, replace: () => {}, headed: true, repair }} />}>
+            <Route path=":tab" element={<AppPlatformSettingsPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter></App>,
+    )
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'appPlatform.settings.repair' }))
+    expect(repair).toHaveBeenCalledTimes(1)
+    expect(apiMock.post).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('reviews and accepts the data a failed import left, only after an explicit acknowledgement', async () => {
@@ -739,13 +618,13 @@ describe('application installation settings', () => {
 
     it('shows no re-upload notice when the image is intact', async () => {
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
+      await screen.findByText('appPlatform.settings.capabilities')
       expect(screen.queryByTestId('image-delivery-reupload')).toBeNull()
     })
 
     it('renders nothing when the field is absent', async () => {
       mount()
-      await screen.findByRole('heading', { name: 'notes' })
+      await screen.findByText('appPlatform.settings.capabilities')
       expect(screen.queryByText('appPlatform.settings.migrationRecovery.title')).toBeNull()
     })
 

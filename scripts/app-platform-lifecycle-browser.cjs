@@ -84,8 +84,9 @@ async function main() {
       encodeURIComponent(installation);
 
     if (mode === "confirm") {
-      await page.goto(settingsURL, { waitUntil: "networkidle" });
-      await page.getByText("Application settings", { exact: true }).waitFor();
+      // Repair and restore live on the installation page's Data tab.
+      await page.goto(`${settingsURL}/data`, { waitUntil: "networkidle" });
+      await page.getByRole("tab").first().waitFor();
       const reviewName =
         action === "repair" ? "Review repair" : "Review restore";
       const confirmName =

@@ -3441,6 +3441,13 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 /* A failed step's title in antd's error red (#ff4d4f) is 3.2:1 on white, under WCAG AA. Use the palette's red-7, which
    the dark algorithm maps to a light red, as the forecast colours already do (lib/forecastPresentation.ts). */
 .rp-lifecycle-progress .ant-steps-item-error .ant-steps-item-title { color: var(--ant-red-7, #cf1322); }
+/* The same for a danger button on a page surface: antd's #ff4d4f label on white is 3.2:1. Outlined, default and text danger
+   buttons take red-7 for the label (and the outline's border); a solid danger button keeps its white-on-red, and a disabled
+   one its grey. */
+.ant-btn-dangerous.ant-btn-variant-outlined:not(:disabled),
+.ant-btn-dangerous.ant-btn-variant-text:not(:disabled),
+.ant-btn-dangerous.ant-btn-variant-link:not(:disabled) { color: var(--ant-red-7, #cf1322); }
+.ant-btn-dangerous.ant-btn-variant-outlined:not(:disabled) { border-color: var(--ant-red-7, #cf1322); }
 /* The operation's stage list scrolls inside the dialog, so a long list never pushes the footer off a short phone screen. */
 .rp-lifecycle-progress { display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
 .rp-operation-steps { flex: none; }
@@ -3467,3 +3474,36 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 :root[data-theme='dark'] .rp-apps-tabs > .ant-tabs-nav .ant-tabs-tab:hover .ant-tabs-tab-btn { color: #69b1ff; }
 /* A control that cannot act right now but stays in the keyboard's reach so its reason can be read (see InstalledControls). */
 .rp-app-inert.ant-btn { opacity: 0.45; cursor: not-allowed; }
+
+/* The apps console: a card's footer (Switch version and the more menu), its operation line, the version list of the
+   lifecycle dialog and an installation's page. */
+.rp-app-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; min-width: 0; }
+.rp-update-tag.ant-tag { margin: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-app-card-foot .rp-app-controls { margin: 0; flex-wrap: wrap; }
+.rp-op-line.ant-btn {
+  position: relative; z-index: 1; display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: calc(100% + 12px);
+  height: auto; margin: 6px -6px 0; padding: 3px 6px; text-align: start; white-space: normal; font-size: 12px; line-height: 18px;
+}
+.rp-op-line.ant-btn > span { display: block; min-width: 0; }
+.rp-op-line-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-op-line-stage { color: var(--ant-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-op-line .ant-progress { margin: 0; line-height: 1; }
+.rp-op-line--result.ant-btn { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 2px 6px; }
+.rp-op-line--result .ant-tag { margin: 0; }
+.rp-op-line-reason { color: var(--ant-color-error); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.rp-version-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding: 2px; }
+/* The installation page header: glyph and name on one row, the version and publisher under the name, the actions
+   right-aligned and wrapping under the title on a narrow screen. */
+.rp-installation-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; margin-bottom: 4px; }
+.rp-installation-identity { display: flex; flex: 1 1 320px; align-items: center; gap: 12px; min-width: 0; }
+.rp-installation-glyph { flex: none; display: inline-flex; font-size: 32px; line-height: 1; }
+.rp-installation-identity-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.rp-installation-header-actions { flex: 0 1 auto; justify-content: flex-end; max-width: 100%; }
+@media (max-width: 767px) { .rp-installation-header-actions { justify-content: flex-start; width: 100%; } }
+.rp-installation-usage { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 360px; }
+.rp-installation-usage .ant-progress { flex: 1 1 140px; min-width: 120px; margin: 0; line-height: 1; }
+.rp-installation-usage .ant-typography { flex: none; white-space: nowrap; }
+.rp-installation-description { display: block; max-width: 100%; }
+.rp-installation-gaps { margin: 0; padding-inline-start: 18px; }
+.rp-installation-operation { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--ant-color-border-secondary); }
+.rp-installation-overview, .rp-installation-operations { min-width: 0; }

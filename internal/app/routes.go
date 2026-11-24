@@ -516,6 +516,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/plans", s.apiPlatformInstallPlan)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/operations", s.apiPlatformInstallCommit)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/operations/{id}", s.apiPlatformOperationProgress)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/operations", s.apiPlatformOperationList)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/releases", s.apiPlatformStagedReleases)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/subjects", s.apiPlatformSubjects)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/storage-status", s.apiPlatformImageStorageStatus)

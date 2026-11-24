@@ -8,6 +8,8 @@ import { joinList } from '../../lib/joinList'
 import StatusTag, { type StatusTone } from '../../components/StatusTag'
 import PlatformReviewDetails, { reviewBlocked } from './PlatformReviewDetails'
 import OperationSteps, { useLastRunning } from './OperationSteps'
+import { useVersionChoice, VersionStepBody } from './PlatformVersionStep'
+import { installationPath } from './appsAdminModel'
 import type { PlatformLifecycle } from './platformLifecycle'
 
 const TITLE = { install: 'appPlatform.confirmTitle', update: 'appPlatform.confirmUpdateTitle', disable: 'appPlatform.confirmDisableTitle', uninstall: 'appPlatform.confirmUninstallTitle', enable: 'appPlatform.confirmEnableTitle', repair: 'appPlatform.confirmRepairTitle' } as const
@@ -25,16 +27,19 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
   const { target, step, review, intent, busy, expired, progress, progressError, actionError, groups } = lifecycle
   const action = lifecycle.action ?? 'install'
   const lastRunning = useLastRunning(progress)
+  const choice = useVersionChoice(lifecycle)
   const install = action === 'install'
+  // The step before the review: who can use a new app, or which version a switch or an update goes to.
+  const lead = install ? 'audience' : lifecycle.withVersion ? 'version' : null
   // The review fetched for a flow that was resumed after a reload has no release; the review is then the only record.
   const release = target?.release
   const copy = release ? appDisplayText(release.app_id, release.display, lang) : null
   const stepItems = [
-    ...(install ? [{ title: t('appPlatform.step.audience') }] : []),
+    ...(lead ? [{ title: t(`appPlatform.step.${lead}`) }] : []),
     { title: t('appPlatform.step.review') },
     { title: t('appPlatform.step.progress') },
   ]
-  const stepIndex = step === 'audience' ? 0 : step === 'review' ? (install ? 1 : 0) : (install ? 2 : 1)
+  const stepIndex = step === 'audience' || step === 'version' ? 0 : step === 'review' ? (lead ? 1 : 0) : (lead ? 2 : 1)
 
   // Keep keyboard focus inside the dialog, and on the review itself when it appears, so a keyboard user lands on
   // what they are confirming.
@@ -60,31 +65,38 @@ export default function PlatformLifecycleModal({ lifecycle, backTo }: { lifecycl
   const go = (path: string) => { lifecycle.close(); navigate(path) }
 
   const footer = () => {
+    if (step === 'version') return [
+      <Button key="cancel" onClick={lifecycle.close}>{t('appPlatform.cancel')}</Button>,
+      <Button key="next" type="primary" loading={choice.staging} disabled={!choice.canContinue} onClick={() => void choice.next()}>{t('appPlatform.next')}</Button>,
+    ]
     if (step === 'audience') return [
       <Button key="cancel" disabled={busy} onClick={lifecycle.close}>{t('appPlatform.cancel')}</Button>,
       <Button key="next" type="primary" loading={busy} disabled={lifecycle.groupsLoading || !!lifecycle.groupsError} onClick={lifecycle.next}>{t('appPlatform.next')}</Button>,
     ]
     if (step === 'review') return [
       <Button key="cancel" disabled={busy} onClick={lifecycle.close}>{t('appPlatform.cancel')}</Button>,
-      ...(install && !intent && review ? [<Button key="back" disabled={busy} onClick={lifecycle.back}>{t('appPlatform.back')}</Button>] : []),
+      ...(lead && !intent && review ? [<Button key="back" disabled={busy} onClick={lifecycle.back}>{t('appPlatform.back')}</Button>] : []),
       ...(review || intent ? [<Button key="ok" type="primary" danger={action === 'uninstall'} loading={busy} disabled={!intent && (expired || reviewBlocked(review))} onClick={() => void lifecycle.confirm()}>{intent ? t('appPlatform.retrySame') : t(OK[action])}</Button>] : []),
     ]
     return [
       <Button key="refresh" disabled={busy} onClick={lifecycle.refreshProgress}>{t('appPlatform.refresh')}</Button>,
       // Plain buttons, not links around buttons: antd spaces footer buttons with `.ant-btn + .ant-btn`, which a
       // wrapping link breaks. An uninstall leaves no settings to open.
-      ...(complete && installationId && !uninstalled ? [<Button key="settings" onClick={() => go(`/manage/apps/${encodeURIComponent(`platform:${installationId}`)}`)}>{t('appPlatform.openSettings')}</Button>] : []),
+      ...(complete && installationId && !uninstalled ? [<Button key="settings" onClick={() => go(installationPath(installationId))}>{t('appPlatform.openSettings')}</Button>] : []),
       ...(complete && backTo ? [<Button key="back" onClick={() => go(backTo)}>{t('appStore.backToApps')}</Button>] : []),
       <Button key="done" type="primary" onClick={lifecycle.close}>{t('appPlatform.done')}</Button>,
     ]
   }
 
-  return <Modal className="rp-platform-review-modal" open={lifecycle.open} title={t(TITLE[action])} footer={footer()} mask={{ closable: false }} closable={!busy} keyboard={!busy} onCancel={lifecycle.close} destroyOnHidden>
+  return <Modal className="rp-platform-review-modal" open={lifecycle.open} title={step === 'version' && lifecycle.picker?.mode === 'switch' ? t('appPlatform.switchVersionTitle') : t(TITLE[action])} footer={footer()} mask={{ closable: false }} closable={!busy} keyboard={!busy} onCancel={lifecycle.close} destroyOnHidden>
     <div className="rp-lifecycle-body">
       <Steps size="small" current={stepIndex} items={stepItems} />
-      {copy ? <Typography.Text strong>{copy.name} · {release?.version}</Typography.Text> : intent?.app_id && <Typography.Text strong>{intent.app_id}</Typography.Text>}
+      {step === 'version' && lifecycle.picker
+        ? <Typography.Text strong>{[lifecycle.picker.subject.name, lifecycle.picker.subject.version].filter(Boolean).join(' · ')}</Typography.Text>
+        : copy ? <Typography.Text strong>{copy.name} · {release?.version}</Typography.Text> : intent?.app_id && <Typography.Text strong>{intent.app_id}</Typography.Text>}
       {actionError && <Alert type="error" title={actionError} />}
       {intent && <Alert type="warning" title={t('appPlatform.uncertain')} action={lifecycle.definitive ? <Button disabled={busy} onClick={lifecycle.clearRejected}>{t('appPlatform.reviewAgain')}</Button> : undefined} />}
+      {step === 'version' && <VersionStepBody choice={choice} />}
       {step === 'audience' && <Space orientation="vertical" style={{ width: '100%' }}>
         {release && <Descriptions column={1} size="small" items={[
           { key: 'publisher', label: t('appPlatform.publisher'), children: release.publisher_id },

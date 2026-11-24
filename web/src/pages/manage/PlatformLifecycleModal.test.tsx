@@ -330,7 +330,7 @@ describe('application installation flow', () => {
     expect(changes).toBe(1)
     expect(mock.post).not.toHaveBeenCalled()
     await userEvent.setup().click(settings)
-    expect(screen.getByTestId('location').textContent).toBe(`/manage/apps/${encodeURIComponent(`platform:${operation}`)}`)
+    expect(screen.getByTestId('location').textContent).toBe(`/manage/apps/installations/${operation}/overview`)
   })
 
   // antd spaces footer buttons with `.ant-btn + .ant-btn`; a button wrapped in a link breaks that adjacency and the
@@ -536,6 +536,24 @@ describe('application installation flow', () => {
     await user.click(screen.getByRole('button', { name: 'appPlatform.confirmRepair' }))
     await screen.findByRole('button', { name: 'appPlatform.done' })
     expect(operations()).toHaveLength(1)
+  })
+
+  it('refuses a repair review whose data effect is not "checkpoint and retain", instead of saying the data is retained', async () => {
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? (() => { const r = repairReview(); return { ...r, review: { ...r.review, data_effect: 'delete' } } })() : { operation_id: operation }))
+    mount(installed({ current_release_sha256: release, enableable: true, backend: true }), 'enable')
+    await start(false)
+    expect(await screen.findByText('appPlatform.invalidOperation')).toBeTruthy()
+    expect(screen.queryByText('appPlatform.repairDataRetained')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.confirmRepair' })).toBeNull()
+  })
+
+  it('refuses a repair review whose data effect is not "checkpoint and retain", instead of saying the data is retained', async () => {
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? (() => { const r = repairReview(); return { ...r, review: { ...r.review, data_effect: 'delete' } } })() : { operation_id: operation }))
+    mount(installed({ current_release_sha256: release, enableable: true, backend: true }), 'enable')
+    await start(false)
+    expect(await screen.findByText('appPlatform.invalidOperation')).toBeTruthy()
+    expect(screen.queryByText('appPlatform.repairDataRetained')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.confirmRepair' })).toBeNull()
   })
 
   it('keeps the uninstall review accessible to assistive technology', async () => {

@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Input, Segmented, Space, Typography } from 'antd'
+import { Alert, Button, Empty, Input, Segmented, Space } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { AppstoreOutlined, BarsOutlined, OrderedListOutlined, PlusOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import CardTable from '../../components/CardTable'
-import { appDisplayText } from '../../lib/appDisplayV2'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
-import { InstalledCard, InstalledControls, InstalledState, MarketDetailModal, PublisherLine, RECOVERY_STATES } from './appStoreParts'
-import { appPath, installedDisplay, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
+import { InstalledCard, InstalledControls, InstalledOperation, InstalledUpdateTag, InstalledState, PublisherLine } from './appStoreParts'
+import { RECOVERY_STATES } from './InstallationActions'
+import { appHref, installedDisplay, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
-import { sourceName, useAppsConsoleFlow } from './appsConsoleFlow'
+import type { PickMode } from './platformLifecycle'
+import { useAppsConsoleFlow } from './appsConsoleFlow'
+import { useLatestOperations } from './useOperationFeed'
 import { loadInstalledRelease } from './platformMarket'
 import { notifyError } from '../../lib/notify'
 
@@ -24,16 +26,21 @@ const readView = (): View => {
 
 /**
  * The installed apps: built-ins and platform installations, as compact cards (or a dense list), in the
- * administrator's order. The catalogue is read quietly so a card can offer an update and a version switch;
- * installing something new is a page of its own (/manage/apps/install).
+ * administrator's order. Nothing is read from a catalogue here: Switch version opens a dialog that loads the
+ * versions when it is pressed. Each card says what its newest operation is doing or how it ended. Installing
+ * something new is a page of its own (/manage/apps/install).
  */
-export default function AppsMarketplace({ apps, reload, onOpenTrust, active = true }: { apps: AdminApp[]; reload: (opts?: { quiet?: boolean }) => Promise<boolean>; onOpenTrust: () => void; active?: boolean }) {
+export default function AppsMarketplace({ apps, reload, active = true }: { apps: AdminApp[]; reload: (opts?: { quiet?: boolean }) => Promise<boolean>; active?: boolean }) {
   const { t } = useTranslation()
   const { lang } = usePrefs()
   const navigate = useNavigate()
   const labels = useAppLabels()
-  const flow = useAppsConsoleFlow({ apps, reload, active })
-  const { lifecycle, market, busy, acting, user, live, generation } = flow
+  // The catalogue stays unread (`active: false`): the version dialog turns it on when it opens.
+  const flow = useAppsConsoleFlow({ apps, reload, active: false })
+  const { lifecycle, busy, acting, user, live, generation } = flow
+  // The newest operation of every installation, read again whenever the layout is.
+  // An operation seen finishing re-reads the layout (state, version), even if its dialog was closed mid-run.
+  const operations = useLatestOperations(active, apps, () => { void reload({ quiet: true }) })
   const [search, setSearch] = useState('')
   const [reordering, setReordering] = useState(false)
   const [view, setView] = useState<View>(readView)
@@ -63,39 +70,35 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
   }, [apps, user])
 
   // The first view needs only the layout (one local read, already behind the page's gate): it carries each app's verified
-  // name, publisher, version and display. The market catalogue is a remote read that loads in the background; what it
-  // knows (an update, a version switch) joins a card as a new element and never replaces text already shown.
-  const activeSource = market.sources.find(s => s.url === market.active)
+  // name, publisher, version and display.
   const matches = (text: string) => !search.trim() || text.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
   const shown = apps.filter(a => matches(`${installedDisplay(a, lang, labels.title(a)).name} ${a.key} ${a.appId ?? ''} ${a.name}`))
 
   const refuse = () => notifyError(t(flow.busyReason === 'pending' ? 'appStore.busyPending' : 'appStore.busyWorking'))
   // Everything one app needs to show itself, in either view.
   const describe = (a: AdminApp) => {
-    const cat = flow.catalogueOf(a)
     const copy = installedDisplay(a, lang, labels.title(a))
     return {
-      app: a, catalogue: cat,
+      app: a,
       name: copy.name,
       description: a.builtin ? labels.description(a) : copy.description,
       publisher: installedPublisher(a),
-      source: !a.builtin && cat && activeSource ? sourceName(activeSource.name, activeSource.url, activeSource.official) : undefined,
       uninstallable: !!a.installationId && uninstallable[a.installationId],
-      busy: acting === a.key || (!!market.staging && market.staging.appId === a.appId),
+      busy: acting === a.key,
       blocked: flow.busyReason,
       onRefuse: refuse,
-      // The controls are disabled whenever these would refuse, so this is only a race (state changed between render and
-      // click): it still answers instead of dropping the click.
-      onSwitchVersion: (version: string) => {
-        if (!cat) return
+      operation: a.installationId ? operations[a.installationId] : undefined,
+      onOpenOperation: (id: string, opener: HTMLElement) => lifecycle.showOperation(id, opener),
+      // The controls stay reachable while blocked, so this is only a race (state changed between render and click):
+      // it still answers instead of dropping the click.
+      onPick: (mode: PickMode, opener?: HTMLElement | null) => {
         if (busy) { refuse(); return }
-        void flow.switchVersion(a, cat, version)
+        flow.pickVersion(a, copy.name, mode, opener)
       },
       onLifecycle: (action: Parameters<typeof flow.act>[1], opener?: HTMLElement | null) => {
         if (busy) { refuse(); return }
         void flow.act(a, action, opener)
       },
-      onViewInCatalogue: () => { if (cat) flow.openDetail(cat) },
     }
   }
 
@@ -107,15 +110,15 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
         return <Space size={10} className="rp-app-list-app">
           <AppIcon app={a} size={28} />
           <div className="rp-app-list-name">
-            <Link to={appPath(a.key)}>{d.name}</Link>
+            <Link to={appHref(a)}>{d.name}</Link>
             <div><PublisherLine publisherName={a.publisherName} publisherId={a.publisherId} className="rp-app-card-sub">{[d.publisher, a.version].filter(Boolean).join(' · ')}</PublisherLine></div>
           </div>
         </Space>
       },
     },
-    { title: t('appStore.col.status'), render: (_: unknown, a: AdminApp) => <InstalledState app={a} /> },
+    { title: t('appStore.col.status'), render: (_: unknown, a: AdminApp) => { const { operation, onOpenOperation } = describe(a); return <Space orientation="vertical" size={2} align="start"><InstalledState app={a} /><InstalledUpdateTag app={a} /><InstalledOperation operation={operation} onOpenOperation={onOpenOperation} /></Space> } },
     { title: t('appStore.col.access'), render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
-    { title: '', align: 'right', render: (_: unknown, a: AdminApp) => { const { app, name: _name, description: _desc, publisher: _pub, source: _src, ...controls } = describe(a); return <InstalledControls app={app} {...controls} /> } },
+    { title: '', align: 'right', render: (_: unknown, a: AdminApp) => { const { app, name: _name, description: _desc, publisher: _pub, ...controls } = describe(a); return <InstalledControls app={app} {...controls} /> } },
   ]
 
   return <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -140,13 +143,6 @@ export default function AppsMarketplace({ apps, reload, onOpenTrust, active = tr
           ? <div className="rp-app-grid">{shown.map(a => <InstalledCard key={a.key} {...describe(a)} />)}</div>
           : <CardTable<AdminApp> className="rp-app-list" rowKey="key" dataSource={shown} columns={columns} pagination={false} size="small" filtered={!!search.trim()} onClearFilters={() => setSearch('')} />}
     </section>
-
-    {/* The catalogue's failure is told below the cards, so it moves nothing that is already on screen. */}
-    {market.catalogue?.status === 'error' && <Alert type="warning" showIcon title={t('appStore.catalogueFailed')} description={market.catalogue.error || undefined} action={<Button size="small" onClick={market.reload}>{t('common.retry')}</Button>} />}
-
-    <MarketDetailModal app={flow.detail} installed={flow.detail ? flow.installedOf(flow.detail) : undefined} lang={lang} staging={market.staging && flow.detail && market.staging.appId === flow.detail.app_id ? market.staging : null}
-      blocked={busy} error={flow.detailError || market.stageError} onClose={() => flow.setDetail(null)}
-      onInstall={version => flow.detail && void flow.installFromDetail(flow.detail, version)} onOpenTrust={() => { flow.setDetail(null); onOpenTrust() }} />
 
     <PlatformLifecycleModal lifecycle={lifecycle} />
     <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => void reload({ quiet: true })} />
