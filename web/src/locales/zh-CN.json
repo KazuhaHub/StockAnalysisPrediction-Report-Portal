@@ -4474,5 +4474,7 @@
   "appPlatform.overview.configOk": "已完成",
   "appPlatform.overview.configFix": "去处理",
   "appPlatform.overview.backendStatic": "静态前端",
-  "appPlatform.overview.backendManaged": "托管 · {{status}}"
+  "appPlatform.overview.backendManaged": "托管 · {{status}}",
+  "appPlatform.settings.refreshFailed": "无法刷新此页面，显示的内容可能已过期。",
+  "appStore.updateAvailable": "有可用更新 · {{version}}"
 }

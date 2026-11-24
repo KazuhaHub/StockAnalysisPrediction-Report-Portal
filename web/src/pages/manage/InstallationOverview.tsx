@@ -15,7 +15,6 @@ import type { Settings } from './AppPlatformSettingsPage'
 import { RUN_TONE, runState } from './installationState'
 import { platformRoot } from './platformLifecycle'
 import { operationOutcome, operationProgress } from './operationSummary'
-import { useOperationFeed } from './useOperationFeed'
 
 type ProxyToday = { bytes: number; budget: number; reported: boolean }
 
@@ -44,7 +43,7 @@ export default function InstallationOverview() {
   const { settings, operationsKey } = shared
   const installation = settings?.installation_id ?? ''
   const [proxy, setProxy] = useState<ProxyToday | null>(null)
-  const feed = useOperationFeed(`installation=${installation}&limit=20`, !!settings, `${operationsKey}`)
+  const { feed } = shared
   const proxyGranted = !!settings?.capabilities.some(c => c.capability === 'network.proxy' && c.granted)
 
   useEffect(() => {

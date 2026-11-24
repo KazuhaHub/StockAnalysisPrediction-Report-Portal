@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router'
 import InstallationOverview, { gapTab, readiness } from './InstallationOverview'
+import { useOperationFeed } from './useOperationFeed'
 import { controlState, runState } from './installationState'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn() }))
@@ -24,9 +25,14 @@ const op = (extra: Record<string, unknown> = {}) => ({ operation_id: '22222222-2
 
 const flow = { busy: false, busyReason: '' as const, acting: '', pickVersion: vi.fn(), act: vi.fn(async () => undefined) }
 let rows: unknown[] = []
+// The frame reads the history once for every tab; this stands in for it.
+function Frame({ settings }: { settings: Record<string, unknown> }) {
+  const feed = useOperationFeed(`installation=${id}&limit=20`, true, 0)
+  return <Outlet context={{ settings: { ...base, ...settings }, reload: () => undefined, replace: () => undefined, headed: true, name: 'Notes', flow, operationsKey: 0, openOperation: () => undefined, repair: () => undefined, feed }} />
+}
 const mount = (settings: Record<string, unknown> = {}) => render(
   <MemoryRouter initialEntries={['/o']}><Routes>
-    <Route element={<Outlet context={{ settings: { ...base, ...settings }, reload: () => undefined, replace: () => undefined, headed: true, name: 'Notes', flow, operationsKey: 0, openOperation: () => undefined }} />}>
+    <Route element={<Frame settings={settings} />}>
       <Route path="/o" element={<InstallationOverview />} />
     </Route>
   </Routes></MemoryRouter>,

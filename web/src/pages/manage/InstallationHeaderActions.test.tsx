@@ -16,10 +16,10 @@ const base = {
   recovery: { count: 0, points: [], pending: false }, configuration_gaps: [], repair_eligible: false, control_paused: false,
 } as unknown as Settings
 const flow = { busy: false, busyReason: '' as const, acting: '', pickVersion: vi.fn(), act: vi.fn(async () => undefined) }
-const mount = (extra: Record<string, unknown> = {}) => {
+const mount = (extra: Record<string, unknown> = {}, update?: string) => {
   const settings = { ...base, ...extra } as Settings
   return render(<MemoryRouter initialEntries={['/h']}><Routes>
-    <Route path="/h" element={<InstallationHeaderActions settings={settings} app={installationApp(settings, 'Notes')!} name="Notes" flow={flow as unknown as AppsConsoleFlow} />} />
+    <Route path="/h" element={<InstallationHeaderActions settings={settings} app={installationApp(settings, 'Notes')!} name="Notes" flow={flow as unknown as AppsConsoleFlow} update={update} />} />
     <Route path="/apps/v2/:id" element={<div>application</div>} />
   </Routes></MemoryRouter>)
 }
@@ -29,9 +29,16 @@ beforeEach(() => { flow.pickVersion.mockReset(); flow.act.mockReset() })
 afterEach(cleanup)
 
 describe('the header actions of an installation', () => {
-  it('offers Update, Switch version, Disable and Uninstall, and Repair only when the server offers it', () => {
+  it('offers only Switch version, Disable and Uninstall when no newer release is known, and Update (naming the version) when one is', () => {
     mount()
-    expect(within(group()).getAllByRole('button').map(b => b.textContent)).toEqual(['appPlatform.update', 'appStore.switchVersion', 'appStore.disable', 'appStore.uninstall'])
+    expect(within(group()).getAllByRole('button').map(b => b.textContent)).toEqual(['appStore.switchVersion', 'appStore.disable', 'appStore.uninstall'])
+    cleanup()
+    mount({}, '1.1.0')
+    expect(within(group()).getAllByRole('button').map(b => b.textContent)).toEqual(['appStore.updateTo', 'appStore.switchVersion', 'appStore.disable', 'appStore.uninstall'])
+  })
+
+  it('offers Repair only when the server offers it', () => {
+    mount()
     cleanup()
     mount({ repair_eligible: true })
     expect(within(group()).getByRole('button', { name: 'appPlatform.repair' })).toBeTruthy()
@@ -45,9 +52,9 @@ describe('the header actions of an installation', () => {
   })
 
   it('runs the same flows as the card: the version step for Update and Switch version, a review for the rest', async () => {
-    mount({ repair_eligible: true })
+    mount({ repair_eligible: true }, '1.1.0')
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'appPlatform.update' }))
+    await user.click(screen.getByRole('button', { name: 'appStore.updateTo' }))
     expect(flow.pickVersion).toHaveBeenLastCalledWith(expect.objectContaining({ installationId: id, key: `platform:${id}` }), 'Notes', 'update', expect.anything())
     await user.click(screen.getByRole('button', { name: 'appStore.switchVersion' }))
     expect(flow.pickVersion).toHaveBeenLastCalledWith(expect.anything(), 'Notes', 'switch', expect.anything())

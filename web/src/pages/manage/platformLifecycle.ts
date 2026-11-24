@@ -262,6 +262,10 @@ export function usePlatformLifecycle(onChange?: () => void) {
       const result = await api.post<Review>(`${platformRoot}/plans`, body)
       const returnedInstallation = result.review.action === 'install' ? '' : result.review.installation_id
       if (result.review.action !== action || result.review.release_sha256 !== release.release_sha256 || result.review.app_id !== release.app_id || (action !== 'install' && returnedInstallation !== release.installation_id) || !uuid.test(result.plan_id) || !sha.test(result.plan_sha256)) throw new Error(t('appPlatform.invalidOperation'))
+      // A repair keeps the data and takes a fresh checkpoint; a review that says anything else is not one this page may show as that.
+      if (result.review.action === 'repair' && result.review.data_effect !== 'checkpoint_and_retain') throw new Error(t('appPlatform.invalidOperation'))
+      // A repair keeps the data and takes a fresh checkpoint; a review that says anything else is not one this page may show as that.
+      if (result.review.action === 'repair' && result.review.data_effect !== 'checkpoint_and_retain') throw new Error(t('appPlatform.invalidOperation'))
       if (live(account, epoch)) { setReview(result); setDefinitive(false) }
     } catch (e) { if (live(account, epoch)) setActionError(errText(e, t)) }
     finally { if (live(account, epoch)) { writing.current = false; setBusy(false) } }

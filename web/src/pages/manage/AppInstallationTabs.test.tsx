@@ -6,6 +6,7 @@ import { createMemoryRouter, RouterProvider, useOutletContext, useParams } from 
 import { ApiError } from '../../api/client'
 import AppInstallationTabs from './AppInstallationTabs'
 import AppAdminTab from './AppAdminTab'
+import { resetCatalogueHint } from './useUpdateHint'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', async original => ({ ...await original<typeof import('../../api/client')>(), api: apiMock, errText: (e: unknown) => (e instanceof Error ? e.message : String(e)) }))
@@ -50,7 +51,7 @@ function mount(path = base) {
 const serve = (extra: Record<string, unknown> = {}) => apiMock.get.mockImplementation(async () => settingsOf(extra))
 const tabNames = () => screen.getAllByRole('tab').map(tab => tab.textContent)
 
-beforeEach(() => { apiMock.get.mockReset(); mounts.page = 0 })
+beforeEach(() => { apiMock.get.mockReset(); apiMock.post.mockReset(); resetCatalogueHint(); mounts.page = 0 })
 afterEach(cleanup)
 
 describe('the installation page', () => {
@@ -144,7 +145,7 @@ describe('the installation page', () => {
 
   it('makes one settings request for the frame and the tab together, and reloads without remounting the tab', async () => {
     let revision = 1
-    apiMock.get.mockImplementation(async () => settingsOf({ revision: String(revision++) }))
+    apiMock.get.mockImplementation(async (url: string) => url === settingsUrl ? settingsOf({ revision: String(revision++) }) : { items: [] })
     mount()
     await screen.findByText('overview page')
     expect(screen.getByTestId('shared').textContent).toBe('1|Demo App')
@@ -153,5 +154,76 @@ describe('the installation page', () => {
     await waitFor(() => expect(screen.getByTestId('shared').textContent).toBe('2|Demo App'))
     expect(mounts.page).toBe(1)
     expect(screen.getAllByRole('tab').length).toBeGreaterThan(0)
+  })
+
+  it('shows the app\'s description under its name, on one truncated line', async () => {
+    serve()
+    mount()
+    await screen.findByText('overview page')
+    expect(screen.getByText('d').className).toContain('rp-installation-description')
+  })
+
+  it('keeps the query string when it redirects to the Overview', async () => {
+    serve()
+    const router = mount(`${base}/nonsense?operation=abc`)
+    await screen.findByText('overview page')
+    expect(router.state.location.pathname).toBe(`${base}/overview`)
+    expect(router.state.location.search).toBe('?operation=abc')
+  })
+
+  it('keeps the page, its tabs and the last good settings when a quiet re-read fails, and says so with a retry', async () => {
+    let fail = false
+    apiMock.get.mockImplementation(async () => { if (fail) throw new Error('refresh down'); return settingsOf({ revision: '1' }) })
+    mount()
+    await screen.findByText('overview page')
+    fail = true
+    await userEvent.click(screen.getByRole('button', { name: 'reload' }))
+    expect(await screen.findByText('refresh down')).toBeTruthy()
+    expect(screen.getByText('appPlatform.settings.refreshFailed')).toBeTruthy()
+    expect(screen.getByText('overview page')).toBeTruthy()
+    expect(screen.getByTestId('shared').textContent).toBe('1|Demo App')
+    expect(screen.getAllByRole('tab').length).toBeGreaterThan(0)
+    fail = false
+    await userEvent.click(screen.getByRole('button', { name: /common\.retry/ }))
+    await waitFor(() => expect(screen.queryByText('refresh down')).toBeNull())
+  })
+
+  it('re-reads the settings when an operation is seen finishing, with the dialog closed: the header offers Enable and shows the new version', async () => {
+    let finished = false
+    const row = (stage: string, terminal: boolean) => ({ operation_id: '22222222-2222-4222-8222-222222222222', installation_id: id, action: 'disable', stage, managed: false, revision: '3', terminal, created_ms: '1000', updated_ms: '2000', ...(terminal ? { completed_ms: '3000' } : {}) })
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.includes('/operations?')) return { items: [finished ? row('complete', true) : row('revoke', false)] }
+      return finished ? settingsOf({ version: '1.1.0', phase: 'disabled', desired_state: 'disabled' }) : settingsOf()
+    })
+    mount()
+    await screen.findByText('overview page')
+    expect(screen.getByRole('button', { name: 'appStore.disable' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'appStore.enable' })).toBeNull()
+    finished = true
+    // No dialog is open: the feed alone sees the operation end.
+    expect(await screen.findByRole('button', { name: 'appStore.enable' }, { timeout: 8000 })).toBeTruthy()
+    expect(screen.getByText('1.1.0')).toBeTruthy()
+  })
+
+  it('tags a newer release next to the version and offers Update to it, without waiting for the catalogue', async () => {
+    const sha = (c: string) => c.repeat(64)
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/market/sources') ? { official: { name: 'Hub', url: 'https://market.example/index.json', enabled: true } } : url.includes('/operations?') ? { items: [] } : settingsOf())
+    apiMock.post.mockResolvedValue({ catalogue_sha256: sha('9'), publisher_verified: false, releases: [], apps: [{ publisher_id: 'kazuha', app_id: 'demo-app', publisher_trusted: true, versions: [{ version: '1.2.0', descriptor_sha256: sha('b') }, { version: '1.0.0', descriptor_sha256: sha('a') }] }] })
+    mount()
+    // The page is up first, without the hint.
+    await screen.findByText('overview page')
+    expect(await screen.findByText('appStore.updateAvailable')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'appStore.updateTo' })).toBeTruthy()
+  })
+
+  it('shows neither the tag nor an Update button when the catalogue fails, and no error', async () => {
+    apiMock.get.mockImplementation(async (url: string) => url.endsWith('/market/sources') ? { official: { name: 'Hub', url: 'https://market.example/index.json', enabled: true } } : url.includes('/operations?') ? { items: [] } : settingsOf())
+    apiMock.post.mockRejectedValue(new Error('catalogue down'))
+    mount()
+    await screen.findByText('overview page')
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('appStore.updateAvailable')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appStore.updateTo' })).toBeNull()
+    expect(screen.queryByText('catalogue down')).toBeNull()
   })
 })

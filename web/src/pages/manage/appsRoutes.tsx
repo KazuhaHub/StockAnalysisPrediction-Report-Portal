@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Navigate, Route, useParams } from 'react-router'
+import { Navigate, Route, useLocation, useParams } from 'react-router'
 import { installationPath, type InstallationTab } from './installationPaths'
 import { lazyRetry } from '../../lib/lazyRetry'
 import { AppsSubpageShell } from './AppsConsoleTabs'
@@ -17,7 +17,8 @@ const InstallationOverview = lazyRetry(() => import('./InstallationOverview'))
 /** A platform app's old page and access URLs (`/manage/apps/platform:<id>[/access]`) lead to its installation page. */
 function PlatformRedirect({ tab, children }: { tab: InstallationTab; children: ReactNode }) {
   const key = useParams().key ?? ''
-  return key.startsWith('platform:') ? <Navigate to={installationPath(key.slice('platform:'.length), tab)} replace /> : children
+  const { search } = useLocation()
+  return key.startsWith('platform:') ? <Navigate to={installationPath(key.slice('platform:'.length), tab) + search} replace /> : children
 }
 
 /**

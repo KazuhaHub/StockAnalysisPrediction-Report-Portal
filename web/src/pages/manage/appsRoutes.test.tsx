@@ -66,6 +66,10 @@ describe('the apps console routes', () => {
     cleanup()
     mount(`/manage/apps/platform%3A${id}/access`)
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe(`/manage/apps/installations/${id}/access`))
+    cleanup()
+    // The query string (an operation to follow) survives the redirect.
+    mount(`/manage/apps/platform%3A${id}?operation=abc`)
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe(`/manage/apps/installations/${id}/overview?operation=abc`))
   })
 
   it('declares the install page before the app page, so "install" is never read as an app key', async () => {

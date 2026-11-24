@@ -141,6 +141,14 @@ describe('the version step of the lifecycle dialog', () => {
     expect(await screen.findByText('appStore.versionsNotListed')).toBeTruthy()
   })
 
+  it('matches the catalogue entry by publisher and app: another publisher\'s app of the same id offers nothing', async () => {
+    mock.post.mockImplementation(async () => catalogue([{ ...notes, publisher_id: 'stranger' }]))
+    mount()
+    await userEvent.click(screen.getByRole('button', { name: 'open picker' }))
+    expect(await screen.findByText('appStore.versionsNotListed')).toBeTruthy()
+    expect(screen.queryByRole('radio')).toBeNull()
+  })
+
   it('shows the refusal of a download in the dialog and stays on the version step', async () => {
     mock.post.mockImplementation(async (url: string, body: { release_sha256?: string }) => {
       if (url === `${root}/market/catalogue`) return catalogue()

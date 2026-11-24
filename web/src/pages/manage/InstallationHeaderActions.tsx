@@ -25,7 +25,7 @@ export function installationApp(settings: Settings | null, name: string): AdminA
  * Enable, Repair and Uninstall (the app card's own rules and flows), and Open application. Each opens the page's
  * lifecycle dialog.
  */
-export default function InstallationHeaderActions({ settings, app, name, flow }: { settings: Settings; app: AdminApp; name: string; flow: AppsConsoleFlow }) {
+export default function InstallationHeaderActions({ settings, app, name, flow, update }: { settings: Settings; app: AdminApp; name: string; flow: AppsConsoleFlow; update?: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [uninstallable, setUninstallable] = useState(false)
@@ -44,7 +44,7 @@ export default function InstallationHeaderActions({ settings, app, name, flow }:
   const onLifecycle = (action: LifecycleAction, opener?: HTMLElement | null) => { if (flow.busy) { refuse(); return } void flow.act(app, action, opener) }
   const open = runState(settings) === 'running'
   return <Space wrap className="rp-installation-header-actions">
-    <InstallationActions variant="toolbar" state={state} uninstallable={uninstallable} repairEligible={settings.repair_eligible} versioned={!!settings.version}
+    <InstallationActions variant="toolbar" state={state} uninstallable={uninstallable} repairEligible={settings.repair_eligible} versioned={!!settings.version} updateTo={update}
       busy={flow.acting === app.key} blocked={flow.busyReason} onRefuse={refuse} onPick={onPick} onLifecycle={onLifecycle} />
     {open && <Button onClick={() => void navigate(`/apps/v2/${settings.installation_id}`)}>{t('appPlatform.settings.openApplication')}</Button>}
   </Space>

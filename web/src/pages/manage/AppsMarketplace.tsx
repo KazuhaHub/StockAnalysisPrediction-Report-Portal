@@ -8,7 +8,7 @@ import CardTable from '../../components/CardTable'
 import { usePrefs } from '../../prefs'
 import AppReorderModal from './AppReorderModal'
 import PlatformLifecycleModal from './PlatformLifecycleModal'
-import { InstalledCard, InstalledControls, InstalledOperation, InstalledState, PublisherLine } from './appStoreParts'
+import { InstalledCard, InstalledControls, InstalledOperation, InstalledUpdateTag, InstalledState, PublisherLine } from './appStoreParts'
 import { RECOVERY_STATES } from './InstallationActions'
 import { appHref, installedDisplay, installedPublisher, useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
@@ -39,7 +39,8 @@ export default function AppsMarketplace({ apps, reload, active = true }: { apps:
   const flow = useAppsConsoleFlow({ apps, reload, active: false })
   const { lifecycle, busy, acting, user, live, generation } = flow
   // The newest operation of every installation, read again whenever the layout is.
-  const operations = useLatestOperations(active, apps)
+  // An operation seen finishing re-reads the layout (state, version), even if its dialog was closed mid-run.
+  const operations = useLatestOperations(active, apps, () => { void reload({ quiet: true }) })
   const [search, setSearch] = useState('')
   const [reordering, setReordering] = useState(false)
   const [view, setView] = useState<View>(readView)
@@ -115,7 +116,7 @@ export default function AppsMarketplace({ apps, reload, active = true }: { apps:
         </Space>
       },
     },
-    { title: t('appStore.col.status'), render: (_: unknown, a: AdminApp) => { const { operation, onOpenOperation } = describe(a); return <Space orientation="vertical" size={2} align="start"><InstalledState app={a} /><InstalledOperation operation={operation} onOpenOperation={onOpenOperation} /></Space> } },
+    { title: t('appStore.col.status'), render: (_: unknown, a: AdminApp) => { const { operation, onOpenOperation } = describe(a); return <Space orientation="vertical" size={2} align="start"><InstalledState app={a} /><InstalledUpdateTag app={a} /><InstalledOperation operation={operation} onOpenOperation={onOpenOperation} /></Space> } },
     { title: t('appStore.col.access'), render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
     { title: '', align: 'right', render: (_: unknown, a: AdminApp) => { const { app, name: _name, description: _desc, publisher: _pub, ...controls } = describe(a); return <InstalledControls app={app} {...controls} /> } },
   ]

@@ -538,6 +538,24 @@ describe('application installation flow', () => {
     expect(operations()).toHaveLength(1)
   })
 
+  it('refuses a repair review whose data effect is not "checkpoint and retain", instead of saying the data is retained', async () => {
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? (() => { const r = repairReview(); return { ...r, review: { ...r.review, data_effect: 'delete' } } })() : { operation_id: operation }))
+    mount(installed({ current_release_sha256: release, enableable: true, backend: true }), 'enable')
+    await start(false)
+    expect(await screen.findByText('appPlatform.invalidOperation')).toBeTruthy()
+    expect(screen.queryByText('appPlatform.repairDataRetained')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.confirmRepair' })).toBeNull()
+  })
+
+  it('refuses a repair review whose data effect is not "checkpoint and retain", instead of saying the data is retained', async () => {
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? (() => { const r = repairReview(); return { ...r, review: { ...r.review, data_effect: 'delete' } } })() : { operation_id: operation }))
+    mount(installed({ current_release_sha256: release, enableable: true, backend: true }), 'enable')
+    await start(false)
+    expect(await screen.findByText('appPlatform.invalidOperation')).toBeTruthy()
+    expect(screen.queryByText('appPlatform.repairDataRetained')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'appPlatform.confirmRepair' })).toBeNull()
+  })
+
   it('keeps the uninstall review accessible to assistive technology', async () => {
     mock.post.mockResolvedValue(uninstallReview())
     mount(installed({ current_release_sha256: release, installed: true }), 'uninstall')

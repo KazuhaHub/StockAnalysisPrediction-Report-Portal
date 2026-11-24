@@ -1,5 +1,5 @@
 import { useId, useRef } from 'react'
-import { Button, Dropdown, Space } from 'antd'
+import { Button, Dropdown, Space, Tag } from 'antd'
 import { ArrowUpOutlined, EllipsisOutlined, PauseCircleOutlined, PlayCircleOutlined, SwapOutlined, ToolOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { LifecycleAction, PickMode } from './platformLifecycle'
@@ -19,6 +19,8 @@ export interface InstallationActionFacts {
   repairEligible?: boolean
   /** The installed version is known, which a switch needs to name the current one. */
   versioned?: boolean
+  /** A newer compatible release the catalogue has: Update is offered only then, and names it. */
+  updateTo?: string
 }
 
 /**
@@ -26,11 +28,13 @@ export interface InstallationActionFacts {
  * never disagree: the lifecycle states allow a switch, an update, disable or enable and uninstall; a recovery state
  * allows only an uninstall its release permits, and a repair the server offers.
  */
-export function availableActions({ state = '', uninstallable, repairEligible, versioned = true }: InstallationActionFacts): InstallationActionKey[] {
+export function availableActions({ state = '', uninstallable, repairEligible, versioned = true, updateTo }: InstallationActionFacts): InstallationActionKey[] {
   const keys: InstallationActionKey[] = []
   if (LIFECYCLE_STATES.includes(state)) {
-    if (versioned) keys.push('update', 'switch')
-    keys.push(state === 'disabled' ? 'enable' : 'disable')
+    if (versioned) { if (updateTo) keys.push('update'); keys.push('switch') }
+    // A disabled app the server can repair has one way back, and Enable and Repair open the same flow: Repair alone.
+    if (state !== 'disabled') keys.push('disable')
+    else if (!repairEligible) keys.push('enable')
   }
   if (repairEligible) keys.push('repair')
   if (LIFECYCLE_STATES.includes(state) || (RECOVERY_STATES.includes(state) && uninstallable)) keys.push('uninstall')
@@ -90,7 +94,7 @@ export default function InstallationActions({ variant, busy, blocked = '', onRef
   const button = (key: InstallationActionKey, extra: { type?: 'primary' | 'default' | 'link'; size?: 'small' } = {}) => (
     <Button key={key} size={extra.size} type={extra.type} danger={key === 'uninstall'} icon={ICONS[key]} {...inert} className={blocked ? 'rp-app-inert' : undefined}
       title={reason || undefined} loading={busy && (key === 'update' || key === 'switch')} disabled={busy}
-      onClick={e => { e.stopPropagation(); run(key, e.currentTarget) }}>{t(LABELS[key])}</Button>
+      onClick={e => { e.stopPropagation(); run(key, e.currentTarget) }}>{key === 'update' && facts.updateTo ? t('appStore.updateTo', { version: facts.updateTo }) : t(LABELS[key])}</Button>
   )
   if (variant === 'toolbar') {
     return <Space wrap className="rp-installation-actions" role="group" aria-label={t('appPlatform.settings.lifecycleActions')}>
@@ -108,4 +112,10 @@ export default function InstallationActions({ variant, busy, blocked = '', onRef
       <Button ref={more} size="small" type="text" icon={<EllipsisOutlined aria-hidden="true" />} aria-label={t('appStore.more')} onClick={e => e.stopPropagation()} />
     </Dropdown>}
   </span>
+}
+
+/** "Update available · 1.1.0": a quiet tag, not a status, so a card or header that carries it keeps its layout. */
+export function UpdateAvailableTag({ version }: { version: string }) {
+  const { t } = useTranslation()
+  return <Tag className="rp-update-tag" icon={<ArrowUpOutlined aria-hidden="true" />}>{t('appStore.updateAvailable', { version })}</Tag>
 }

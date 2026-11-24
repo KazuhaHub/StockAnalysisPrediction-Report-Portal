@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router'
 import AppsAdminPage from './AppsAdminPage'
 import { layout } from './appsAdminFixtures'
+import { resetCatalogueHint } from './useUpdateHint'
 import { cardOf, catalogue, plan, planSha, chartsApp, display, fx, installationId, notesApp, operation, platformEntry, resetFixtures, root, sha, verifiedRow, withPlatform, catalogueUrl } from './appsConsoleFixtures'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), postBytes: vi.fn() }))
@@ -51,7 +52,7 @@ const renderPage = (path = '/manage/apps') => render(pageTree(path))
 
 
 
-beforeEach(() => { auth.user = 'admin'; localStorage.clear(); sessionStorage.clear(); resetFixtures(apiMock) })
+beforeEach(() => { auth.user = 'admin'; localStorage.clear(); sessionStorage.clear(); resetCatalogueHint(); resetFixtures(apiMock) })
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Installed apps', () => {
@@ -331,13 +332,40 @@ describe('Switch version loads on demand', () => {
   const marketCalls = () => [...apiMock.get.mock.calls, ...apiMock.post.mock.calls].map(([url]) => String(url)).filter(url => url.includes('/market/'))
   const notesCard = async () => { await screen.findAllByText('Notes'); return cardOf('Notes') }
 
-  it('reads no catalogue while the page shows, and offers a plain Switch version button', async () => {
+  it('reads the catalogue once in the background, offers a plain Switch version button, and tags a newer release', async () => {
     withPlatform('installed')
     renderPage()
     const card = await notesCard()
+    // The cards are there before the read answers; the tag joins them.
     expect(within(card).getByRole('button', { name: 'appStore.switchVersion' })).toBeTruthy()
-    expect(within(card).queryByRole('button', { name: /appStore\.updateTo/ })).toBeNull()
-    expect(marketCalls()).toEqual([])
+    expect(await within(card).findByText('appStore.updateAvailable:{"version":"1.1.0"}')).toBeTruthy()
+    expect(marketCalls()).toEqual([`${root}/market/sources`, `${root}/market/catalogue`])
+  })
+
+  it('shows no tag and no error when the app has nothing newer, and when the catalogue cannot be read', async () => {
+    withPlatform('installed', '1.1.0')
+    renderPage()
+    await notesCard()
+    await waitFor(() => expect(marketCalls()).toHaveLength(2))
+    expect(screen.queryByText(/appStore\.updateAvailable/)).toBeNull()
+    cleanup(); resetCatalogueHint()
+    withPlatform('installed')
+    const original = apiMock.post.getMockImplementation()!
+    apiMock.post.mockImplementation(async (url: string, body: unknown) => { if (url === `${root}/market/catalogue`) throw new Error('catalogue down'); return original(url, body) })
+    renderPage()
+    await notesCard()
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/market/catalogue`, expect.anything()))
+    expect(screen.queryByText(/appStore\.updateAvailable/)).toBeNull()
+    expect(screen.queryByText('catalogue down')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('makes one catalogue request per page load, however many cards there are', async () => {
+    fx.entries = [...layout(), platformEntry('installed'), { ...platformEntry('installed'), key: 'platform:44444444-4444-4444-8444-444444444444', installation_id: '44444444-4444-4444-8444-444444444444' }]
+    renderPage()
+    await screen.findAllByText('Notes')
+    await waitFor(() => expect(screen.getAllByText(/appStore\.updateAvailable/)).toHaveLength(2))
+    expect(apiMock.post.mock.calls.filter(([url]) => url === `${root}/market/catalogue`)).toHaveLength(1)
   })
 
   it('loads the versions when the button is pressed, and continues into the review inside the same dialog', async () => {
@@ -346,7 +374,7 @@ describe('Switch version loads on demand', () => {
     renderPage()
     await user.click(within(await notesCard()).getByRole('button', { name: 'appStore.switchVersion' }))
     const radio = await screen.findByRole('radio', { name: /1\.1\.0/ })
-    expect(marketCalls()).toEqual([`${root}/market/sources`, `${root}/market/catalogue`])
+    expect(marketCalls()).toHaveLength(4)
     await user.click(radio)
     await user.click(screen.getByRole('button', { name: 'appPlatform.next' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, expect.objectContaining({ action: 'update', installation_id: installationId })))
@@ -398,5 +426,18 @@ describe('Switch version loads on demand', () => {
     serveOperations(opRow({ stage: 'complete', terminal: true, completed_ms: String(Date.now() - 25 * 3600_000) }))
     renderPage()
     expect(within(await notesCard()).queryByRole('button', { name: /appPlatform\.ops\.succeeded/ })).toBeNull()
+  })
+
+  it('re-reads the layout when an operation is seen finishing, so the card shows the new state without a dialog', async () => {
+    withPlatform('installed')
+    let finished = false
+    const original = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string, opts?: unknown) => url === `${root}/operations?latest=1` ? { items: [opRow(finished ? { stage: 'complete', terminal: true, completed_ms: String(Date.now()) } : {})] } : original(url, opts))
+    renderPage()
+    await within(await notesCard()).findByRole('button', { name: /appPlatform\.ops\.openProgress/ })
+    const layoutReads = () => apiMock.get.mock.calls.filter(([url]) => url === '/api/admin/apps/layout').length
+    const before = layoutReads()
+    finished = true
+    await waitFor(() => expect(layoutReads()).toBeGreaterThan(before), { timeout: 8000 })
   })
 })

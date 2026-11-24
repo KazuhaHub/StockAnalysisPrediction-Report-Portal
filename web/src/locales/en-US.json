@@ -4474,5 +4474,7 @@
   "appPlatform.overview.configOk": "Complete",
   "appPlatform.overview.configFix": "Fix",
   "appPlatform.overview.backendStatic": "Static frontend",
-  "appPlatform.overview.backendManaged": "Managed · {{status}}"
+  "appPlatform.overview.backendManaged": "Managed · {{status}}",
+  "appPlatform.settings.refreshFailed": "Could not refresh this page, so what it shows may be out of date.",
+  "appStore.updateAvailable": "Update available · {{version}}"
 }
