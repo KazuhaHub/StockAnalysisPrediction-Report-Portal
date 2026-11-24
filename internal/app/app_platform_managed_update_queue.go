@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -19,6 +21,24 @@ type platformAdmittedManagedUpdate struct {
 	verified                    platformStagedRelease
 	target                      *platformManagedInstallTarget
 	currentInstallationRevision int64
+}
+
+// platformAdmitManagedUpdate is the admission check of a claim. Tests replace it to make one operation fail.
+var platformAdmitManagedUpdate = func(s *Server, e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) (platformAdmittedManagedUpdate, error) {
+	return s.loadPlatformAdmittedManagedUpdate(e, lease, trust, now)
+}
+
+// platformManagedUpdateSkipLog remembers the last reason logged for each skipped operation, so that an operation that
+// stays unadmittable is logged when its reason changes and not on every tick.
+var platformManagedUpdateSkipLog sync.Map
+
+func logPlatformManagedUpdateSkipped(operation string, err error) {
+	reason := err.Error()
+	if previous, ok := platformManagedUpdateSkipLog.Load(operation); ok && previous == reason {
+		return
+	}
+	platformManagedUpdateSkipLog.Store(operation, reason)
+	log.Printf("app-platform managed update claim: skipping operation %s: %v", operation, err)
 }
 
 func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker string) (platformInstallSelection, error) {
@@ -107,7 +127,12 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 			if errors.Is(err, errAppPlatformLeaseConflict) {
 				continue
 			}
-			return zero, err
+			if ctx.Err() != nil {
+				return zero, err
+			}
+			// One operation whose evidence does not load must not starve the claims of every other one.
+			logPlatformManagedUpdateSkipped(id, err)
+			continue
 		}
 		if facts.lease.leaseUntilMS > facts.now ||
 			facts.lease.snapshot.Action != appplatform.ActionUpdate ||
@@ -117,10 +142,16 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 			facts.lease.snapshot.Stage == appplatform.StageRecoveryRequired {
 			continue
 		}
-		admitted, err := s.loadPlatformAdmittedManagedUpdate(
-			e, facts.lease, trust, facts.now)
+		admitted, err := platformAdmitManagedUpdate(
+			s, e, facts.lease, trust, facts.now)
 		if err != nil {
-			return zero, err
+			if ctx.Err() != nil {
+				return zero, err
+			}
+			// An operation that cannot be admitted is skipped and logged, never returned: an error here would
+			// starve the claims behind it, for every app and every kind of operation, on every tick.
+			logPlatformManagedUpdateSkipped(id, err)
+			continue
 		}
 		lease, err := writePlatformOperationLease(e, facts, worker, nil)
 		if err != nil {
@@ -150,6 +181,17 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		return platformInstallSelection{lease: lease, operationID: id}, nil
 	}
 	return zero, nil
+}
+
+// platformManagedUpdateIsNewStart reports whether the update has not begun to act on the installation. The expiry of
+// its review plan governs only that: an operation already admitted (its source quiesced, or about to be) is carried
+// through to its end or to review whatever the clock says, because refusing it would leave the app stopped.
+func platformManagedUpdateIsNewStart(stage appplatform.Stage) bool {
+	switch stage {
+	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage:
+		return true
+	}
+	return false
 }
 
 func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) (platformAdmittedManagedUpdate, error) {
@@ -189,7 +231,8 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 		uint64(sourceGeneration) != lease.snapshot.Generation-1 ||
 		uint64(targetGeneration) != lease.snapshot.Generation ||
 		targetGeneration != sourceGeneration+1 ||
-		!consumed.Valid || consumed.Int64 > now || expires <= now ||
+		!consumed.Valid || consumed.Int64 > now ||
+		(expires <= now && platformManagedUpdateIsNewStart(lease.snapshot.Stage)) ||
 		epoch != lease.controllerEpoch ||
 		platformDigest([]byte(raw)) != digest ||
 		!platformValidSHA(source) || !platformValidSHA(targetRelease) {

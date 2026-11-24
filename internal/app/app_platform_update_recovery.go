@@ -73,7 +73,7 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 	if err != nil {
 		return err
 	}
-	plan, _, err := loadPlatformManagedUpdatePlan(e, expected, source)
+	plan, err := loadPlatformManagedUpdateFinishPlan(e, expected, source)
 	if err != nil {
 		return err
 	}
@@ -161,4 +161,50 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		return err
 	}
 	return tx.Commit()
+}
+
+// loadPlatformManagedUpdateFinishPlan is the plan an update is ended against. From the migrate stage on it is the
+// finalized plan the checkpoint committed. An update that ended at the snapshot stage has no finalized plan: the
+// checkpoint never committed, and finalizing is what the commit does. It is ended against the exact review it was
+// admitted with, which carries every fact the ending reads (the generations, the source policy and release, the
+// update it retries), checked against the operation and the source as the finalized plan is.
+func loadPlatformManagedUpdateFinishPlan(e migExec, expected platformOperationLease, source platformCheckpointSource) (platformManagedUpdatePlan, error) {
+	var zero platformManagedUpdatePlan
+	if expected.snapshot.Stage != appplatform.StageSnapshot {
+		plan, _, err := loadPlatformManagedUpdatePlan(e, expected, source)
+		return plan, err
+	}
+	var raw, digest, operationScope, planScope string
+	var sourceGeneration, targetGeneration int64
+	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,o.actor_scope,p.actor_scope,o.source_generation,o.target_generation
+		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1 AND o.stage='snapshot' AND p.action='update'`,
+		expected.id, expected.installationID).Scan(&raw, &digest, &operationScope, &planScope, &sourceGeneration, &targetGeneration); err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	var review platformUpdateProjection
+	unmarshalErr := json.Unmarshal([]byte(raw), &review)
+	canonical, marshalErr := json.Marshal(review)
+	if unmarshalErr != nil || marshalErr != nil || string(canonical) != raw || platformDigest([]byte(raw)) != digest ||
+		operationScope != planScope || review.Format != platformUpdateReviewFormat ||
+		review.InstallationID != expected.installationID || review.ControllerEpoch != expected.controllerEpoch ||
+		review.SourceGeneration != sourceGeneration || review.TargetGeneration != targetGeneration ||
+		sourceGeneration != int64(expected.snapshot.Generation)-1 || targetGeneration != int64(expected.snapshot.Generation) ||
+		review.SourceGeneration < 1 || review.TargetGeneration != review.SourceGeneration+1 ||
+		review.PolicyRevision < 1 || review.TargetPolicyRevision <= review.PolicyRevision ||
+		review.SourceReleaseSHA256 != source.releaseSHA256 || review.AppID != source.appID || review.PublisherID != source.publisherID ||
+		!platformValidSHA(review.SourceReleaseSHA256) || !platformValidSHA(review.Target.ReleaseSHA256) ||
+		review.Target.ReleaseSHA256 == review.SourceReleaseSHA256 ||
+		!samePlatformManagedUpdateRuntime(review.Target.Runtime, source.runtimeTarget) {
+		return zero, errAppPlatformStageEvidence
+	}
+	return platformManagedUpdatePlan{
+		Format:         platformManagedUpdateFormat,
+		InstallationID: review.InstallationID, AppID: review.AppID, PublisherID: review.PublisherID,
+		SourceReleaseSHA256: review.SourceReleaseSHA256, TargetReleaseSHA256: review.Target.ReleaseSHA256,
+		SourceGeneration: review.SourceGeneration, TargetGeneration: review.TargetGeneration,
+		SourcePolicyRevision: review.PolicyRevision, TargetPolicyRevision: review.TargetPolicyRevision,
+		ControllerEpoch: review.ControllerEpoch, TargetRuntime: review.Target.Runtime,
+		Migration: review.Migration, RecoversOperationID: review.RecoversOperationID,
+	}, nil
 }

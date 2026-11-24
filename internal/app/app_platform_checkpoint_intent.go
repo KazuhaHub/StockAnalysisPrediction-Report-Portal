@@ -467,6 +467,10 @@ func loadPlatformCheckpointIntent(e migExec, expected platformOperationLease, ru
 	verifiedFields := allowVerified && state == "verified" && manifest.Valid && platformValidSHA(manifest.String) &&
 		checkpointBytes.Valid && checkpointBytes.Int64 > 0 && verifiedMS.Valid && !deletedMS.Valid
 	preparedEffect := effectState == "prepared" && observed == 0 && receipt == "{}"
+	// Every claim of the operation raises its fence, so an intent written under an earlier claim is behind the lease
+	// it is now read under. It is still the operation's own effect: the digest below binds it, and the runner does not
+	// compare the fence of a command it already holds. A fence ahead of the lease's is not.
+	fenceBehind := preparedEffect && admitted < expected.fence
 	appliedEffect := allowVerified && effectState == "applied" && observed == expected.fence && receipt != "{}"
 	if effectErr != nil || effectCount != 1 || !platformValidUUID(recoverySetID) || !platformValidUUID(checkpointID) || !platformValidUUID(effectID) ||
 		release != source.releaseSHA256 || format != mustPlatformCheckpointInt(source.dataFormat) ||
@@ -474,13 +478,24 @@ func loadPlatformCheckpointIntent(e migExec, expected platformOperationLease, ru
 		writerFence != mustPlatformCheckpointInt(source.writerFence) ||
 		(!preparingFields && !verifiedFields) ||
 		kind != "snapshot" || runtimeID != runtime.id || effectEpoch != expected.controllerEpoch ||
-		admitted != expected.fence || (!preparedEffect && !appliedEffect) ||
+		(admitted != expected.fence && !fenceBehind) || (!preparedEffect && !appliedEffect) ||
 		(preparingFields && !preparedEffect) || (verifiedFields && !appliedEffect) {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	command, err := platformCheckpointCommand(expected, runtime, source, checkpointID, effectID)
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, false, errAppPlatformStageEvidence
+	}
+	if fenceBehind && create {
+		// Carry the intent to the current claim, so the commit that follows finds it at the lease's own fence.
+		changed, err := e.exec(`UPDATE app_platform_operation_effects SET admitted_fence=?,updated_ms=?
+			WHERE operation_id=? AND stage=? AND effect_number=1 AND effect_id=? AND kind='snapshot'
+			AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared'
+			AND observed_fence=0 AND receipt_json='{}'`,
+			expected.fence, now, expected.id, effectStage, effectID, digest, runtime.id, expected.controllerEpoch, admitted)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return zero, false, err
+		}
 	}
 	return platformCheckpointIntent{
 		recoverySetID: recoverySetID, effectID: effectID, runtime: runtime,
