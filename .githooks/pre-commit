@@ -1,0 +1,36 @@
+#!/bin/sh
+# Optional pre-commit check. Enable it once per clone with:
+#   git config core.hooksPath .githooks
+# It looks only at staged files, stays fast, and exits 0 when there is nothing to check.
+# CI is the gate: this only saves a round trip for formatting and lint slips.
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+# Added, copied, modified or renamed files; a deleted file has nothing to check.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$staged" ] || exit 0
+
+status=0
+
+go_files=$(printf '%s\n' "$staged" | grep '\.go$' || true)
+if [ -n "$go_files" ] && command -v gofmt >/dev/null 2>&1; then
+	unformatted=$(printf '%s\n' "$go_files" | tr '\n' '\0' | xargs -0 gofmt -l)
+	if [ -n "$unformatted" ]; then
+		echo "gofmt: these staged files are not formatted (run gofmt -w on them):" >&2
+		printf '%s\n' "$unformatted" >&2
+		status=1
+	fi
+fi
+
+web_files=$(printf '%s\n' "$staged" | grep -E '^web/src/.*\.(ts|tsx|js|jsx|mjs|cjs)$' || true)
+if [ -n "$web_files" ] && [ -d web/node_modules ]; then
+	# oxlint runs inside web/, so the paths lose their web/ prefix.
+	if ! printf '%s\n' "$web_files" | sed 's|^web/||' | tr '\n' '\0' | (cd web && xargs -0 npx --no-install oxlint); then
+		echo "oxlint: fix the findings above in the staged web/src files." >&2
+		status=1
+	fi
+fi
+
+exit "$status"
