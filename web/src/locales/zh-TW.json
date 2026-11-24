@@ -3756,7 +3756,7 @@
   "appPlatform.dataSchemaRetained": "保留現有資料架構 {{schema}}；不相容的升級會被拒絕。",
   "appPlatform.enableDataRetained": "沿用目前可信版本與資料設定，不做遷移。",
   "appPlatform.repair": "修復",
-  "appPlatform.confirmRepairTitle": "確認啟用（修復審查）",
+  "appPlatform.confirmRepairTitle": "確認修復",
   "appPlatform.confirmRepair": "啟用應用",
   "appPlatform.repairConfirmHint": "此應用帶有後端，啟用將執行一次修復：重新校驗目前已簽署的製品、執行環境、授權與相容性，建立新的檢查點，然後啟動應用。不新增權限，也不改變資料架構。",
   "appPlatform.repairDataRetained": "現有應用資料命名空間會保留，並於啟動前建立檢查點。",

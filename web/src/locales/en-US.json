@@ -3756,7 +3756,7 @@
   "appPlatform.dataSchemaRetained": "Existing data schema {{schema}} is retained; incompatible upgrades are refused.",
   "appPlatform.enableDataRetained": "The current trusted release and data configuration are reused unchanged.",
   "appPlatform.repair": "Repair",
-  "appPlatform.confirmRepairTitle": "Confirm enable (repair review)",
+  "appPlatform.confirmRepairTitle": "Confirm repair",
   "appPlatform.confirmRepair": "Enable app",
   "appPlatform.repairConfirmHint": "This app has a backend, so enabling it runs a repair: it rechecks the current signed release, runtime, grants and compatibility, takes a fresh checkpoint, then starts the app. It does not add permissions or change the data schema.",
   "appPlatform.repairDataRetained": "The existing application data namespace is retained and checkpointed before the app starts.",

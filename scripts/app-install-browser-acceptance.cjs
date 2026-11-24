@@ -957,7 +957,7 @@ async function main() {
           viewport: { width: 1440, height: 900 },
           title: "Application settings",
           repairButton: "Review repair",
-          repairBoundary: "creates a fresh checkpoint",
+          repairBoundary: "takes a fresh checkpoint",
         }),
         await settingsScenario(browser, url, {
           name: "settings-repair-review-320-zh-cn-light",
@@ -966,7 +966,7 @@ async function main() {
           viewport: { width: 320, height: 800 },
           title: "应用设置",
           repairButton: "审核修复",
-          repairBoundary: "创建新的恢复点",
+          repairBoundary: "创建新的检查点",
         }),
         await settingsScenario(browser, url, {
           name: "settings-repair-review-1440-en-light-zoom-200",
@@ -974,7 +974,7 @@ async function main() {
           dark: false,
           title: "Application settings",
           repairButton: "Review repair",
-          repairBoundary: "creates a fresh checkpoint",
+          repairBoundary: "takes a fresh checkpoint",
           ...desktopZoom200,
         }),
       );
