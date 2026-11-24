@@ -1,21 +1,8 @@
 name: app runner daemon probe
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'internal/apprunner/**'
-      - 'internal/app/app_platform_runtime*'
-      - 'internal/app/app_platform_actor*'
-      - 'internal/app/secretbox*'
-      - 'cmd/app-runner/**'
-      - 'deploy/app-runner/**'
-      - 'docker-compose.yml'
-      - 'Dockerfile.app-runner'
-      - 'scripts/probe-compose-runner.sh'
-      - 'scripts/probe-runner-image.sh'
-      - '.github/workflows/app-runner-probe.yml'
-      - 'go.mod'
-      - 'go.sum'
+  # Not a pull request check: it runs on pushes to main and by hand. A pull request is checked by
+  # test.yml's unit and integration jobs; a red run here shows on main and must be fixed before the next release.
   push:
     branches: [main]
     paths:

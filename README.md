@@ -213,7 +213,7 @@ An optional pre-commit hook checks the staged files for `gofmt` and, when `web/n
 git config core.hooksPath .githooks
 ~~~
 
-The required pull request checks are `go-test`, `web typecheck + build`, `docker image (font gate + smoke)` and `workflow lint` (which also scans the change for secrets with gitleaks; `.gitleaks.toml` allows only throwaway fixture literals in Go and Python test files, and `.gitleaksignore` lists the other known false positives by fingerprint). The Go race detector is not a pull request check: it runs on pushes to main and on manual runs of the `test` workflow (`go race full` jobs, including the app platform's PostgreSQL tests), and a release is tagged only from a commit where they passed. The licence scan runs on a pull request only when the dependency manifests or the licence tooling change, and the arm64 runner probes and the capacity soak run on main or by hand.
+The required pull request checks are `go-test`, `web typecheck + build`, `docker image (font gate + smoke)` and `workflow lint` (which also scans the change for secrets with gitleaks; `.gitleaks.toml` allows only throwaway fixture literals in Go and Python test files, and `.gitleaksignore` lists the other known false positives by fingerprint). The Go race detector is not a pull request check: it runs on pushes to main and on manual runs of the `test` workflow (`go race full` jobs, including the app platform's PostgreSQL tests), and a release is tagged only from a commit where they passed. The licence scan runs on a pull request only when the dependency manifests or the licence tooling change, and the app runner probe and the app project quota probe (including the capacity soak) run only on main or by hand.
 
 ## Release process
 

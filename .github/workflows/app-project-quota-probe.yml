@@ -56,39 +56,8 @@ on:
         description: The full SHA of the reviewed commit the run must measure. When it is given and differs from the commit that ran, the run is never OPS-08 evidence
         type: string
         default: ''
-  # A pull request runs this probe only for the backend platform, the runner and the scripts the
-  # jobs execute. The push list below holds all of these paths and keeps its older, wider ones, so main
-  # runs the probe for anything a pull request runs it for, and for more. The web files kept are the app frame and
-  # the bridge the browser fixtures drive in Chromium; every other web file reaches these jobs only as
-  # the SPA that `npm run build --prefix web` embeds, and the web jobs of test.yml check that code.
-  pull_request:
-    paths:
-      # the runner, the platform's backend packages and the Portal's app-platform handlers: what the quota, image
-      # delivery and lifecycle tests run against
-      - 'internal/apprunner/**'
-      - 'internal/appplatform/**'
-      - 'internal/app/app_platform*'
-      - 'cmd/app-runner/**'
-      - 'cmd/app-task-worker/**'
-      - 'deploy/app-runner/**'
-      # the probe's own scripts, fixtures and harness tests
-      - 'scripts/acceptance/**'
-      - 'scripts/app-*browser*.cjs'
-      - 'scripts/app-*browser-fixture.py'
-      - 'scripts/fixture_http*.py'
-      - 'scripts/project_quota_probe_test.py'
-      - 'scripts/sdk_browser_public_fixture_test.py'
-      # the app frame and the bridge the Chromium fixtures drive
-      - 'web/src/components/apps/AppFrameV2.tsx'
-      - 'web/src/components/apps/AppSurfaceView.tsx'
-      - 'web/src/pages/AppView.tsx'
-      - 'web/src/pages/AppViewV2.tsx'
-      - 'web/src/lib/bridge-v2.ts'
-      - 'web/src/lib/appBridge.ts'
-      # the module graph every job compiles, and this workflow
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/app-project-quota-probe.yml'
+  # Not a pull request check: it runs on pushes to main and by hand. A pull request is checked by
+  # test.yml's unit and integration jobs; a red run here shows on main and must be fixed before the next release.
   push:
     branches: [main]
     paths:
