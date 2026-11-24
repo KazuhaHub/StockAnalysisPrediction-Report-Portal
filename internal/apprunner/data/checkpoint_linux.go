@@ -63,7 +63,7 @@ func newCheckpointArchiveHash() *checkpointArchiveHash {
 // Checkpoint serializes one stopped namespace into an exclusive archive under
 // the distinct checkpoint root. It does not decide whether the source process is
 // stopped or whether a Portal operation is admitted.
-func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Root, sourceExpected RootIdentity, request CheckpointRequest) (CheckpointObservation, error) {
+func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Root, sourceExpected RootIdentity, request CheckpointRequest) (observation CheckpointObservation, err error) {
 	var zero CheckpointObservation
 	if r == nil || source == nil || r == source || !request.valid() {
 		return zero, ErrUnsafe
@@ -114,8 +114,9 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	defer func() {
 		if !ok {
 			_ = archive.Sync()
-			if limited != nil && limited.exceeded {
-				// Over the cap is final: no partial archive is left behind for a reconciliation to find.
+			if limited != nil && (limited.exceeded || checkpointRefused(err)) {
+				// A definite refusal (over the cap, or a tree the walker will not archive) is final: no partial
+				// archive is left behind for a reconciliation to find.
 				_ = unix.Unlinkat(int(directory.Fd()), name, 0)
 			}
 		}
@@ -191,6 +192,13 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	return CheckpointObservation{snapshot: verified, valid: true}, nil
 }
 
+// checkpointRefused reports whether err is a definite refusal of the namespace's content: unsafe or too large, and
+// not joined with ErrCheckpointIncomplete (an archive that may be half written or unverified is for reconciliation).
+func checkpointRefused(err error) bool {
+	return err != nil && !errors.Is(err, ErrCheckpointIncomplete) &&
+		(errors.Is(err, ErrCheckpointUnsafe) || errors.Is(err, ErrCheckpointTooLarge))
+}
+
 func checkpointIncomplete(err error) error {
 	if errors.Is(err, ErrCheckpointTooLarge) {
 		// A definite refusal, not something to reconcile.
@@ -215,7 +223,11 @@ func checkpointNamespaceStat(source *Root, namespace *os.File, request Checkpoin
 		return unix.Stat_t{}, ErrCheckpointUnsafe
 	}
 	limits, err := readLimits(source.file, request.ProjectID)
-	if err != nil || limits.bytes <= 0 || limits.inodes <= 0 || limits.usedBytes < 0 || limits.usedInodes < 0 {
+	if err != nil {
+		// Not being able to read the limits says nothing about the content: it is for reconciliation.
+		return unix.Stat_t{}, checkpointIncomplete(err)
+	}
+	if limits.bytes <= 0 || limits.inodes <= 0 || limits.usedBytes < 0 || limits.usedInodes < 0 {
 		return unix.Stat_t{}, ErrCheckpointUnsafe
 	}
 	return stat, nil
@@ -345,7 +357,7 @@ func (w *checkpointWalker) link(relative string, stat unix.Stat_t) (first string
 	}
 	// Every path of one inode reports the same attributes; anything else means it changed during the walk.
 	if !sameInodeAttributes(inode.stat, stat) {
-		return "", false, ErrCheckpointUnsafe
+		return "", false, checkpointChanged()
 	}
 	inode.found++
 	return inode.first, true, nil
@@ -441,7 +453,8 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 		}
 		var extra [1]byte
 		if n, err := file.Read(extra[:]); n != 0 || err != io.EOF {
-			return ErrCheckpointUnsafe
+			// More bytes than the file's size: it grew while it was read.
+			return checkpointChanged()
 		}
 		w.entries++
 		w.bytes += before.Size
@@ -468,9 +481,56 @@ func checkpointAfter(file *os.File, before unix.Stat_t) error {
 		return checkpointIncomplete(err)
 	}
 	if before.Dev != after.Dev || before.Ino != after.Ino || before.Mode != after.Mode || before.Uid != after.Uid || before.Gid != after.Gid || before.Size != after.Size || before.Mtim != after.Mtim || before.Ctim != after.Ctim {
-		return ErrCheckpointUnsafe
+		return checkpointChanged()
 	}
 	return nil
+}
+
+// checkpointChanged is a file or directory that changed while it was archived. The source is stopped before a
+// checkpoint, so a change means the quiesce did not hold: that is not a verdict on the content, and the archive is not
+// trusted, so it is reconciled (the walk is repeated) and never settled as a refusal.
+func checkpointChanged() error {
+	return checkpointIncomplete(fmt.Errorf("%w: the data changed during the checkpoint, so the source was not quiesced", ErrCheckpointUnsafe))
+}
+
+// DiscardCheckpointArchive removes the archive a checkpoint left under its id, whatever state it is in. A checkpoint
+// only reads the data, so a partial archive is never needed: it is removed before a walk is repeated and after a
+// refusal. An absent archive is not an error.
+func (r *Root) DiscardCheckpointArchive(ctx context.Context, expected RootIdentity, checkpointID string) error {
+	if r == nil || !namespaceID.MatchString(checkpointID) || !expected.valid() {
+		return ErrUnsafe
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return ErrUnsafe
+	}
+	identity, err := r.identity(ctx)
+	if err != nil || identity != expected {
+		return ErrUnsafe
+	}
+	directory, err := r.openCheckpointDirectoryMode(false)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	name := checkpointID + ".tar"
+	var stat unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return ErrUnsafe
+	}
+	if err := unix.Unlinkat(int(directory.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	return unix.Fsync(int(directory.Fd()))
 }
 
 // extraOwnerAllowed lets a test admit the owners an unprivileged test tree can have. It is nil in production.

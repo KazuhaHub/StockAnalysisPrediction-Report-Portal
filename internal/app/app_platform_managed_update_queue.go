@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -19,6 +21,59 @@ type platformAdmittedManagedUpdate struct {
 	verified                    platformStagedRelease
 	target                      *platformManagedInstallTarget
 	currentInstallationRevision int64
+}
+
+// platformAdmitManagedUpdate is the admission check of a claim. Tests replace it to make one operation fail.
+var platformAdmitManagedUpdate = func(s *Server, e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) (platformAdmittedManagedUpdate, error) {
+	return s.loadPlatformAdmittedManagedUpdate(e, lease, trust, now)
+}
+
+// platformManagedUpdateSkipLog remembers the last reason logged for each skipped operation, so that an operation that
+// stays unadmittable is logged when its reason changes and not on every tick. It is bounded: past its size it starts
+// over, which costs at most one repeated line per operation still being skipped.
+var platformManagedUpdateSkipLog = struct {
+	sync.Mutex
+	reasons map[string]string
+}{reasons: map[string]string{}}
+
+const platformManagedUpdateSkipLogLimit = 256
+
+func resetPlatformManagedUpdateSkipLog() {
+	platformManagedUpdateSkipLog.Lock()
+	defer platformManagedUpdateSkipLog.Unlock()
+	clear(platformManagedUpdateSkipLog.reasons)
+}
+
+func logPlatformManagedUpdateSkipped(operation string, err error) {
+	reason := err.Error()
+	platformManagedUpdateSkipLog.Lock()
+	previous, seen := platformManagedUpdateSkipLog.reasons[operation]
+	if seen && previous == reason {
+		platformManagedUpdateSkipLog.Unlock()
+		return
+	}
+	if !seen && len(platformManagedUpdateSkipLog.reasons) >= platformManagedUpdateSkipLogLimit {
+		clear(platformManagedUpdateSkipLog.reasons)
+	}
+	platformManagedUpdateSkipLog.reasons[operation] = reason
+	platformManagedUpdateSkipLog.Unlock()
+	log.Printf("app-platform managed update claim: skipping operation %s: %v", operation, err)
+}
+
+// platformManagedUpdateSkippable reports whether a failure to admit one operation is a statement about that
+// operation (its evidence, its plan, its state) and so no reason to stop looking at the others. Anything else, a
+// database or driver error above all, is returned: on PostgreSQL one failed statement aborts the transaction, and
+// every later operation would fail for a reason that is not theirs.
+func platformManagedUpdateSkippable(err error) bool {
+	for _, evidence := range []error{
+		errAppPlatformStageEvidence, errAppPlatformPlanChanged, errAppPlatformPlanExpired, errAppPlatformOperationConflict,
+		errAppPlatformRuntimeConflict, errAppPlatformReleaseConflict, errAppPlatformTrustConflict, sql.ErrNoRows,
+	} {
+		if errors.Is(err, evidence) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker string) (platformInstallSelection, error) {
@@ -101,13 +156,19 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 	if err != nil {
 		return zero, err
 	}
+	ended := false
 	for _, id := range ids {
 		facts, err := loadPlatformOperationLease(e, id)
 		if err != nil {
 			if errors.Is(err, errAppPlatformLeaseConflict) {
 				continue
 			}
-			return zero, err
+			if ctx.Err() != nil || !platformManagedUpdateSkippable(err) {
+				return zero, err
+			}
+			// One operation whose evidence does not load must not starve the claims of every other one.
+			logPlatformManagedUpdateSkipped(id, err)
+			continue
 		}
 		if facts.lease.leaseUntilMS > facts.now ||
 			facts.lease.snapshot.Action != appplatform.ActionUpdate ||
@@ -117,10 +178,24 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 			facts.lease.snapshot.Stage == appplatform.StageRecoveryRequired {
 			continue
 		}
-		admitted, err := s.loadPlatformAdmittedManagedUpdate(
-			e, facts.lease, trust, facts.now)
+		admitted, err := platformAdmitManagedUpdate(
+			s, e, facts.lease, trust, facts.now)
 		if err != nil {
-			return zero, err
+			if errors.Is(err, errAppPlatformPlanExpired) {
+				// A start whose review plan expired before it began ends, failed, in this same transaction.
+				if endErr := endExpiredPlatformManagedUpdate(e, facts); endErr != nil {
+					return zero, endErr
+				}
+				ended = true
+				continue
+			}
+			if ctx.Err() != nil || !platformManagedUpdateSkippable(err) {
+				return zero, err
+			}
+			// An operation that cannot be admitted is skipped and logged, never returned: an error here would
+			// starve the claims behind it, for every app and every kind of operation, on every tick.
+			logPlatformManagedUpdateSkipped(id, err)
+			continue
 		}
 		lease, err := writePlatformOperationLease(e, facts, worker, nil)
 		if err != nil {
@@ -149,7 +224,68 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		}
 		return platformInstallSelection{lease: lease, operationID: id}, nil
 	}
+	if ended {
+		if err := tx.Commit(); err != nil {
+			return zero, err
+		}
+	}
 	return zero, nil
+}
+
+// platformManagedUpdateStarted reports whether the update has begun to act on the installation. The expiry of its
+// review plan governs only a start that has not begun: an operation whose source may be stopped is carried through to
+// its end or to review whatever the clock says, because refusing it would leave the app stopped. The stages before
+// quiesce act on nothing. The quiesce stage acts as soon as its effect row exists, in any state, because the stop may
+// have been sent; with no row nothing was sent, and the update has still stopped nothing.
+func platformManagedUpdateStarted(e migExec, lease platformOperationLease) (bool, error) {
+	switch lease.snapshot.Stage {
+	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage:
+		return false, nil
+	case appplatform.StageQuiesce:
+		var effects int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce'`, lease.id).Scan(&effects); err != nil {
+			return false, err
+		}
+		return effects > 0, nil
+	}
+	return true, nil
+}
+
+// endExpiredPlatformManagedUpdate ends an update whose review plan expired before it began to act: it is failed with
+// plan_expired, with no effect to settle and the installation untouched, so it neither runs on a plan that no longer
+// holds nor waits to be skipped for ever.
+func endExpiredPlatformManagedUpdate(e migExec, facts platformLeaseFacts) error {
+	lease := facts.lease
+	var effects int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil || effects != 0 {
+		return errAppPlatformStageEvidence
+	}
+	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	failed, err := model.Fail(lease.snapshot.Revision, appplatform.EffectsNone)
+	if err != nil || failed.Snapshot().Stage != appplatform.StageFailed {
+		return errAppPlatformStageEvidence
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations
+		SET stage='failed',state_revision=?,row_revision=row_revision+1,error_code='plan_expired',
+		completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
+		WHERE id=? AND installation_id=? AND stage=? AND state_revision=? AND row_revision=? AND completed_ms IS NULL
+		AND (lease_until_ms IS NULL OR lease_until_ms<=?)`,
+		int64(failed.Snapshot().Revision), facts.now, facts.now, lease.id, lease.installationID,
+		string(lease.snapshot.Stage), int64(lease.snapshot.Revision), lease.rowRevision, facts.now)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(struct {
+		Stage appplatform.Stage `json:"stage"`
+		Code  string            `json:"code"`
+	}{lease.snapshot.Stage, "plan_expired"})
+	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
+		VALUES(?,'system',0,'app_platform.update_plan_expired','app_platform_operation',?,?,'')`,
+		time.UnixMilli(facts.now).UTC().Format(time.RFC3339), lease.id, string(detail))
+	return err
 }
 
 func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) (platformAdmittedManagedUpdate, error) {
@@ -189,11 +325,21 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 		uint64(sourceGeneration) != lease.snapshot.Generation-1 ||
 		uint64(targetGeneration) != lease.snapshot.Generation ||
 		targetGeneration != sourceGeneration+1 ||
-		!consumed.Valid || consumed.Int64 > now || expires <= now ||
+		!consumed.Valid || consumed.Int64 > now ||
 		epoch != lease.controllerEpoch ||
 		platformDigest([]byte(raw)) != digest ||
 		!platformValidSHA(source) || !platformValidSHA(targetRelease) {
 		return result, errAppPlatformStageEvidence
+	}
+	if expires <= now {
+		// Expiry governs only a start that has not begun; one that has is carried on (see platformManagedUpdateStarted).
+		started, err := platformManagedUpdateStarted(e, lease)
+		if err != nil {
+			return result, err
+		}
+		if !started {
+			return result, errAppPlatformPlanExpired
+		}
 	}
 	var formatProbe struct {
 		Format string `json:"format"`

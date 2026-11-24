@@ -138,6 +138,16 @@ func parseCheckpoint(raw []byte) (CheckpointCommand, error) {
 }
 
 func VerifyCheckpoint(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCheckpointCommand, error) {
+	return verifyCheckpoint(raw, signature, authority, nowMS, false)
+}
+
+// VerifyCheckpointSettlement checks the exact command already admitted for an in-flight checkpoint. Expiry governs
+// dispatch; a refusal that is recorded after the signed window (a long walk) must still be settled.
+func VerifyCheckpointSettlement(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCheckpointCommand, error) {
+	return verifyCheckpoint(raw, signature, authority, nowMS, true)
+}
+
+func verifyCheckpoint(raw, signature []byte, authority Authority, nowMS int64, settling bool) (VerifiedCheckpointCommand, error) {
 	fail := func() (VerifiedCheckpointCommand, error) { return VerifiedCheckpointCommand{}, ErrInvalidCommand }
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 || nowMS < 0 || len(signature) != ed25519.SignatureSize {
 		return fail()
@@ -159,7 +169,7 @@ func VerifyCheckpoint(raw, signature []byte, authority Authority, nowMS int64) (
 		return fail()
 	}
 	expires, ok := counter(c.ExpiresMS, false)
-	if !ok || expires <= issued || expires-issued > 30000 || issued > nowMS || nowMS >= expires {
+	if !ok || expires <= issued || expires-issued > 30000 || issued > nowMS || (!settling && nowMS >= expires) {
 		return fail()
 	}
 	digest, err := CheckpointLogicalDigest(c)

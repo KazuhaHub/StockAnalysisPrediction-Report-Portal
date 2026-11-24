@@ -52,6 +52,11 @@ func platformAttemptTimeout(lease platformOperationLease) time.Duration {
 	if lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageStart {
 		return platformImportAttemptTimeout
 	}
+	// A checkpoint walks the data and reads the archive back to verify it, under the runner's bulk bound.
+	if lease.snapshot.Managed && (lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Stage == appplatform.StageSnapshot ||
+		platformSameReleaseLifecycle(lease.snapshot.Action) && lease.snapshot.Stage == platformSameReleaseCheckpointStage(lease.snapshot.Action)) {
+		return platformImportAttemptTimeout
+	}
 	return platformInstallAttemptTimeout
 }
 
@@ -398,7 +403,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	if errors.Is(err, errPlatformDataEffectFailed) {
 		// The runner proved the raise or the import failed: a definite end, never a retry. An import restores its
-		// pre-import checkpoint; a raise changed nothing.
+		// pre-import checkpoint; a raise changed nothing. A refused checkpoint tells the finisher why.
+		var failed *platformDataEffectFailedError
+		if errors.As(err, &failed) {
+			ctx = withPlatformSnapshotRefusal(ctx, failed.code)
+		}
 		return w.finish(ctx)
 	}
 	if orphan, ok := platformCandidateOrphanOf(err); ok {

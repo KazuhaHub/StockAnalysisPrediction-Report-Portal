@@ -20,14 +20,13 @@ import (
 )
 
 func TestWritableLifecycleServerTimeoutMatchesRestoreWork(t *testing.T) {
-	for _, action := range []WritableLifecycleAction{RestoreExecute, ImportCheckpointExecute, MigrateDataExecute, DiscardMigrationExecute} {
+	for _, action := range []WritableLifecycleAction{CheckpointCreate, RestoreExecute, ImportCheckpointExecute, MigrateDataExecute, DiscardMigrationExecute} {
 		if got := writableLifecycleServerTimeout(action); got != 2*time.Minute {
 			t.Fatalf("action %d execution window = %s", action, got)
 		}
 	}
 	for _, action := range []WritableLifecycleAction{
 		ManagedRemovalStop,
-		CheckpointCreate,
 		RestoreRead,
 		ImportCheckpointRead,
 		MigrateDataRead,

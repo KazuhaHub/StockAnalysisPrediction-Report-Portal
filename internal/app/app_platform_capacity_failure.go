@@ -51,7 +51,7 @@ func platformCapacityRefusalOf(err error) (journal.CapacityRefusal, bool) {
 func platformPublicOperationErrorCode(code string) string {
 	switch code {
 	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required", platformInstallFormatUnsupportedCode, platformStartNeverRanErrorCode, platformStartReviewErrorCode,
-		"data_quota_unavailable", "data_quota_recovery_required":
+		"data_quota_unavailable", "data_quota_recovery_required", "checkpoint_unsafe", "checkpoint_too_large", "checkpoint_incomplete", "plan_expired":
 		return code
 	}
 	if isPlatformCapacityErrorCode(code) {

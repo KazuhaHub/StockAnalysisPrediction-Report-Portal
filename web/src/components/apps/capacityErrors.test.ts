@@ -40,6 +40,19 @@ describe('capacity failure messages', () => {
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted' })).toBeNull()
   })
 
+  it('the installation status shows an update the runner could not checkpoint under its own code, with a message in every language', () => {
+    const base = { state: 'attention', openable: false, control_paused: false, timeline: [] }
+    for (const code of ['checkpoint_unsafe', 'checkpoint_too_large', 'checkpoint_incomplete', 'plan_expired']) {
+      expect(parseAppStatus({ ...base, error_code: code })).toEqual({ ...base, error_code: code })
+      expect(parseAppStatus({ ...base, timeline: [{ at: '2026-11-04T12:00:00Z', event: 'failed', error_code: code }] })).not.toBeNull()
+      for (const bundle of [en, zhCN, zhTW] as Array<Record<string, string>>) expect(bundle[`err.${code}`], code).toBeTruthy()
+    }
+    // The unsafe text names the cause the operator has to remove.
+    expect(en['err.checkpoint_unsafe']).toMatch(/symlink/i)
+    expect(zhCN['err.checkpoint_unsafe']).toMatch(/符号链接/)
+    expect(zhTW['err.checkpoint_unsafe']).toMatch(/符號連結/)
+  })
+
   it('the installation status accepts the code of a start the runner proved never ran, with a message in every language', () => {
     const base = { state: 'attention', openable: false, control_paused: false, timeline: [] }
     expect(parseAppStatus({ ...base, error_code: 'start_never_ran' })).toEqual({ ...base, error_code: 'start_never_ran' })

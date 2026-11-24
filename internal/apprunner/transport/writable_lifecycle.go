@@ -642,6 +642,16 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return err == nil && refusal.Matches(id) && receiptSettledBy(refusal.SettledMS, received)
 		}, r.setDataQuota.IssuedMS, received)
 	}
+	if action == CheckpointCreate || action == CheckpointRead {
+		if status, err := journal.ParseMigrateDataStatus(body); err == nil {
+			// A refused checkpoint is replied as a typed, definite failed status for exactly this command. A
+			// checkpoint is otherwise answered by its receipt, never by another status.
+			observed, observedErr := strconv.ParseInt(status.ObservedMS, 10, 64)
+			issued, issuedErr := strconv.ParseInt(r.checkpoint.IssuedMS, 10, 64)
+			return status.State == "failed" && journal.DataEffectStatusMatchesHeader(status, journal.CheckpointCommandHeader(r.checkpoint)) &&
+				observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
+		}
+	}
 	if action == ImportDataExecute || action == ImportDataRead {
 		return validDataEffectReply(body, r.importData.CommandHeader, func() bool {
 			receipt, err := journal.ParseImportDataReceipt(body)
@@ -1107,7 +1117,8 @@ func dataEffectAbsenceReply(action WritableLifecycleAction, body []byte) bool {
 // DataEffectStatus returns the typed "pending" or "orphaned" answer to a set-data-quota or import-data execute or
 // read-back. A definite absence is reported as journal.ErrNoSuchEffect.
 func (o WritableLifecycleObservation) DataEffectStatus() (journal.MigrateDataStatus, error) {
-	if o.action != SetDataQuotaExecute && o.action != SetDataQuotaRead && o.action != ImportDataExecute && o.action != ImportDataRead {
+	if o.action != SetDataQuotaExecute && o.action != SetDataQuotaRead && o.action != ImportDataExecute && o.action != ImportDataRead &&
+		o.action != CheckpointCreate && o.action != CheckpointRead {
 		return journal.MigrateDataStatus{}, driver.ErrContainerUncertain
 	}
 	return journal.ParseMigrateDataStatus([]byte(o.body))

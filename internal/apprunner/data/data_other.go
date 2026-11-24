@@ -58,6 +58,9 @@ func (*Root) InspectCheckpointArchive(context.Context, RootIdentity, string) (Ch
 func (*Root) RemoveCheckpointArchive(context.Context, RootIdentity, string, int64, string) (CheckpointArchive, error) {
 	return CheckpointArchive{}, ErrUnsupported
 }
+func (*Root) DiscardCheckpointArchive(context.Context, RootIdentity, string) error {
+	return ErrUnsupported
+}
 func (*Root) QuarantineSummary(context.Context, RootIdentity) (QuarantineReport, error) {
 	return QuarantineReport{}, ErrUnsupported
 }

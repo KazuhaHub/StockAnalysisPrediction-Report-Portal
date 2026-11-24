@@ -62,6 +62,13 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	}
 	intent.raw, intent.signature = bytes.Clone(intent.raw), bytes.Clone(intent.signature)
 	intent.authority.PublicKey = bytes.Clone(intent.authority.PublicKey)
+	if status, typed := observation.(platformDataEffectStatusObservation); typed {
+		// The runner refused the checkpoint (a tree it will not archive) and settled that. It is a definite end of
+		// the stage, never a receipt and never something to retry: the same command is refused the same way.
+		if failure := platformDataEffectFailure(status, journal.CheckpointCommandHeader(intent.command), intent.raw, intent.authority, endpoint); failure != nil {
+			return zero, failure
+		}
+	}
 	receipt, ok := validPlatformCheckpointObservation(observation, intent, endpoint)
 	if !ok {
 		return zero, errAppPlatformStageEvidence

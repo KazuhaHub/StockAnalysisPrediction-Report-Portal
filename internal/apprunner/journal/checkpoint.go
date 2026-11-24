@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"time"
@@ -115,6 +116,12 @@ type checkpointSource struct {
 	resource    managedRemovalResource
 	raw         []byte
 	signature   []byte
+	// resumed is a snapshot an earlier attempt claimed and left unknown: it is walked again, after the partial
+	// archive that attempt left is removed.
+	resumed bool
+	// superseded are the checkpoint ids of earlier snapshots of the installation this one settled as reverted; their
+	// archives are removed once the claim is committed.
+	superseded []string
 	// quotaBytes and quotaInodes are the namespace's current limits: the last link of its quota chain. The install's
 	// receipt in data keeps the limits the namespace was created with, because its digest is rebuilt from them.
 	quotaBytes, quotaInodes string
@@ -569,6 +576,8 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 	}
 	command := verified.Command()
 	createdCommand := false
+	resumed := false
+	var superseded []string
 	var storedOperation, storedInstallation, storedStage, storedKind, storedPayload, storedEpoch, storedState, storedReceipt string
 	var storedSlot, storedGeneration, storedFence int64
 	err = tx.QueryRowContext(ctx, `SELECT operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json
@@ -589,10 +598,32 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 			}
 			return zero, true, nil
 		}
-		if storedState != "prepared" || storedReceipt != "{}" {
+		if storedState == "reverted" {
+			// A refusal settled by an earlier attempt is the answer again, with no native work.
+			failure, ok := parseDataEffectFailure(storedReceipt)
+			if !ok || failure.NamespaceID != command.Payload.NamespaceID {
+				return zero, false, fmt.Errorf("%w: checkpoint replay failure record", ErrFenceReconciliation)
+			}
+			return checkpointSource{command: command}, false, checkpointRefusedError(command, failure.Code, nil)
+		}
+		if storedState == "unknown" && storedReceipt == "{}" {
+			// An earlier attempt claimed the snapshot and never settled it: it may have timed out, run out of space
+			// or failed to sync, all of which a walk can recover from, so it is not a refusal. The caller holds the
+			// data execution gate, so no dispatch is still working on it. A checkpoint only reads the data, so the
+			// walk is repeated under the same command once the partial archive is removed, and its outcome settles
+			// normally. That is allowed only while the checkpoint row is exactly what the claim wrote (checked below).
+			resumed = true
+			if superseded, err = supersedeUnknownSnapshots(ctx, tx, command, now); err != nil {
+				return zero, false, err
+			}
+		} else if storedState != "prepared" || storedReceipt != "{}" {
 			return zero, false, fmt.Errorf("%w: checkpoint replay state %s", ErrFenceReconciliation, storedState)
 		}
 	} else if errors.Is(err, sql.ErrNoRows) {
+		// An earlier snapshot of the installation that never settled must not block this one for ever.
+		if superseded, err = supersedeUnknownSnapshots(ctx, tx, command, now); err != nil {
+			return zero, false, err
+		}
 		source, err := loadCheckpointSource(ctx, tx, command, now)
 		if err != nil {
 			return zero, false, err
@@ -616,6 +647,22 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 	if err != nil {
 		return zero, false, err
 	}
+	if resumed {
+		// A resume admits the same command again, so it meets what a fresh one meets: the signed fence must not be
+		// below the source's or the one the command was admitted under.
+		fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
+		if fence < source.sourceFence || fence < source.resource.controlFence || fence < storedFence {
+			return zero, false, fmt.Errorf("%w: checkpoint resume fence", ErrFenceReconciliation)
+		}
+		moved, err := tx.ExecContext(ctx, `UPDATE runner_commands SET admitted_fence=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}' AND admitted_fence<=?`,
+			fence, now, command.EffectID, fence)
+		if err != nil {
+			return zero, false, err
+		}
+		if n, err := moved.RowsAffected(); err != nil || n != 1 {
+			return zero, false, fmt.Errorf("%w: checkpoint resume fence move", ErrFenceReconciliation)
+		}
+	}
 	if createdCommand {
 		format, _ := strconv.ParseInt(command.Payload.DataFormat, 10, 64)
 		writer, _ := strconv.ParseInt(command.Payload.WriterFence, 10, 64)
@@ -628,24 +675,27 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 	} else if err := validateCheckpointRecord(ctx, tx, command, "", 0, false); err != nil {
 		return zero, false, err
 	}
-	changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='unknown',updated_ms=? WHERE effect_id=? AND state='prepared' AND receipt_json='{}'`, now, command.EffectID)
-	if err != nil {
-		return zero, false, err
-	}
-	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, false, fmt.Errorf("%w: checkpoint intent transition", ErrFenceReconciliation)
+	if !resumed {
+		changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='unknown',updated_ms=? WHERE effect_id=? AND state='prepared' AND receipt_json='{}'`, now, command.EffectID)
+		if err != nil {
+			return zero, false, err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return zero, false, fmt.Errorf("%w: checkpoint intent transition", ErrFenceReconciliation)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, false, err
 	}
+	source.resumed = resumed
+	source.superseded = superseded
 	return source, false, nil
 }
 
-func (s *Store) settleCheckpoint(ctx context.Context, source checkpointSource, observation data.CheckpointObservation) (CheckpointReceipt, error) {
+func (s *Store) settleCheckpoint(ctx context.Context, source checkpointSource, snapshot data.CheckpointSnapshot) (CheckpointReceipt, error) {
 	var zero CheckpointReceipt
-	snapshot, err := observation.Snapshot()
 	projectID, projectErr := checkpointProjectID(source.command.Payload.ProjectID)
-	if err != nil || snapshot.NamespaceID != source.command.Payload.NamespaceID || snapshot.ReleaseSHA256 != source.command.Payload.ReleaseSHA256 ||
+	if snapshot.NamespaceID != source.command.Payload.NamespaceID || snapshot.ReleaseSHA256 != source.command.Payload.ReleaseSHA256 ||
 		projectErr != nil || snapshot.ProjectID != projectID || snapshot.DataFormat != mustDataInt(source.command.Payload.DataFormat) ||
 		snapshot.ArchiveBytes <= 0 || snapshot.ArchiveBytes > maxCheckpointArchiveBytes || snapshot.Entries < 0 {
 		return zero, ErrFenceReconciliation
@@ -664,7 +714,8 @@ func (s *Store) settleCheckpoint(ctx context.Context, source checkpointSource, o
 	}
 	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 	now := time.Now().UTC().UnixMilli()
-	if _, err := control.VerifyCheckpoint(source.commandRaw(), source.commandSignature(), authority, now); err != nil {
+	// A walk that outlived its signed window and verified is still settled: the window governs dispatch only.
+	if _, err := control.VerifyCheckpointSettlement(source.commandRaw(), source.commandSignature(), authority, now); err != nil {
 		return zero, ErrFenceReconciliation
 	}
 	current, err := loadCheckpointSource(ctx, tx, source.command, now)
@@ -739,9 +790,35 @@ func sameCheckpointSource(a, b checkpointSource) bool {
 		a.sourceFence == b.sourceFence && a.resource == b.resource
 }
 
+// checkpointNative is the native checkpoint call: it archives the namespace and returns what it observed.
+type checkpointNative func(ctx context.Context, request data.CheckpointRequest) (data.CheckpointSnapshot, error)
+
 func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, dataRoot *data.Root, dataPin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity) (CheckpointReceipt, error) {
 	var zero CheckpointReceipt
 	if dataRoot == nil || checkpointRoot == nil || s.closing.Load() {
+		return zero, ErrCheckpointUnavailable
+	}
+	return s.dispatchCheckpointWith(ctx, raw, signature, func(ctx context.Context, request data.CheckpointRequest) (data.CheckpointSnapshot, error) {
+		observation, err := checkpointRoot.Checkpoint(ctx, checkpointPin, dataRoot, dataPin, request)
+		if err != nil {
+			return data.CheckpointSnapshot{}, err
+		}
+		snapshot, err := observation.Snapshot()
+		if err != nil {
+			return data.CheckpointSnapshot{}, ErrFenceReconciliation
+		}
+		return snapshot, nil
+	}, func(ctx context.Context, checkpointID string) error {
+		return checkpointRoot.DiscardCheckpointArchive(ctx, checkpointPin, checkpointID)
+	})
+}
+
+// checkpointDiscard removes the archive a checkpoint left under its id; an absent archive is not an error.
+type checkpointDiscard func(ctx context.Context, checkpointID string) error
+
+func (s *Store) dispatchCheckpointWith(ctx context.Context, raw, signature []byte, native checkpointNative, discard checkpointDiscard) (CheckpointReceipt, error) {
+	var zero CheckpointReceipt
+	if native == nil || discard == nil || s.closing.Load() {
 		return zero, ErrCheckpointUnavailable
 	}
 	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
@@ -749,13 +826,42 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 		return zero, err
 	}
 	defer s.releaseDataExecution()
+	// An archive is removed on a context of its own, so a dispatch that was cancelled still cleans up, and a failure to
+	// remove is logged: the settlement it follows stands, but an archive left behind must be seen.
+	remove := func(checkpointID string) error {
+		removeCtx, cancel := failureRecordContext(ctx)
+		defer cancel()
+		return discard(removeCtx, checkpointID)
+	}
+	removeLogged := func(checkpointID string) {
+		if err := remove(checkpointID); err != nil {
+			log.Printf("runner checkpoint %s: its archive could not be removed: %v", checkpointID, err)
+		}
+	}
 	source, replay, err := s.beginCheckpoint(ctx, raw, signature)
 	if err != nil {
+		var settled *DataEffectFailedError
+		if errors.As(err, &settled) && source.command.Payload.CheckpointID != "" {
+			// A refusal settled earlier: nothing may be left of its archive.
+			removeLogged(source.command.Payload.CheckpointID)
+		}
 		return zero, err
+	}
+	for _, earlier := range source.superseded {
+		removeLogged(earlier)
 	}
 	source.raw, source.signature = raw, signature
 	if replay {
 		return s.ReadCheckpointReceipt(ctx, raw, signature)
+	}
+	if source.resumed {
+		// The attempt that claimed this snapshot never settled it and left an archive of unknown completeness. The
+		// archive is removed and the walk is repeated under the same command; if it cannot be removed the snapshot
+		// stays unknown and is replayed again.
+		if err := remove(source.command.Payload.CheckpointID); err != nil {
+			log.Printf("runner checkpoint %s: its partial archive could not be removed: %v", source.command.Payload.CheckpointID, err)
+			return zero, fmt.Errorf("remove the partial checkpoint archive: %w", err)
+		}
 	}
 	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
 	if err != nil {
@@ -771,11 +877,21 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 		ExpectedDevice: mustDataUint(source.command.Payload.Device), ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
 		WriterFence: mustDataInt(source.command.Payload.WriterFence),
 	}
-	observation, err := checkpointRoot.Checkpoint(ctx, checkpointPin, dataRoot, dataPin, request)
+	snapshot, err := native(ctx, request)
 	if err != nil {
+		if code, refused := classifyCheckpointRefusal(err); refused {
+			// The walker refused the content of the namespace. Nothing was written to the data, so the outcome is
+			// known: settle it, and answer with the typed refusal instead of an error the sender must retry.
+			if recordErr := s.refuseCheckpoint(ctx, raw, signature, source.command, code, err); recordErr != nil {
+				return zero, errors.Join(err, recordErr)
+			}
+			// The refusal is settled: no partial archive may outlive it.
+			removeLogged(source.command.Payload.CheckpointID)
+			return zero, checkpointRefusedError(source.command, code, err)
+		}
 		return zero, err
 	}
-	return s.settleCheckpoint(ctx, source, observation)
+	return s.settleCheckpoint(ctx, source, snapshot)
 }
 
 func checkpointProjectID(value string) (uint32, error) {
@@ -837,6 +953,16 @@ func (s *Store) ReadCheckpointReceipt(ctx context.Context, raw, signature []byte
 		return zero, err
 	}
 	command := verified.Command()
+	var storedState, storedReceipt string
+	if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=? AND operation_id=? AND installation_id=? AND kind='snapshot'`,
+		command.EffectID, command.OperationID, command.InstallationID).Scan(&storedState, &storedReceipt); err == nil && storedState == "reverted" {
+		// A refusal is a definite answer to a read-back too.
+		failure, ok := parseDataEffectFailure(storedReceipt)
+		if !ok || failure.NamespaceID != command.Payload.NamespaceID {
+			return zero, ErrFenceReconciliation
+		}
+		return zero, checkpointRefusedError(command, failure.Code, nil)
+	}
 	var receipt string
 	if err := tx.QueryRowContext(ctx, `SELECT receipt_json FROM runner_commands WHERE effect_id=? AND operation_id=? AND installation_id=? AND state='applied'`,
 		command.EffectID, command.OperationID, command.InstallationID).Scan(&receipt); err != nil {

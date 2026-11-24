@@ -48,6 +48,35 @@ func sha256Hex(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// A checkpoint that finishes after its signed window (a long walk) is settled against the exact command it was
+// admitted with; the window governs dispatch only, and a command not yet issued is never settled.
+func TestCheckpointSettlementIgnoresExpiryButNotTheRest(t *testing.T) {
+	command, key, authority, now := checkpointFixture(t)
+	raw, signature, err := SignCheckpoint(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyCheckpoint(raw, signature, authority, 55000); err == nil {
+		t.Fatal("an expired command was dispatched")
+	}
+	if verified, err := VerifyCheckpointSettlement(raw, signature, authority, 55000); err != nil || verified.Command() != command {
+		t.Fatal("an expired command was not settled", err)
+	}
+	if _, err := VerifyCheckpointSettlement(raw, signature, authority, 28000); err == nil {
+		t.Fatal("a command not yet issued was settled")
+	}
+	changed := append([]byte(nil), raw...)
+	changed[len(changed)-3] ^= 1
+	if _, err := VerifyCheckpointSettlement(changed, signature, authority, 55000); err == nil {
+		t.Fatal("a changed command was settled")
+	}
+	other := authority
+	other.ControlRevision++
+	if _, err := VerifyCheckpointSettlement(raw, signature, other, 55000); err == nil {
+		t.Fatal("a settlement under another authority was accepted")
+	}
+}
+
 func TestCheckpointCommandRoundTripAndBinding(t *testing.T) {
 	command, key, authority, now := checkpointFixture(t)
 	raw, signature, err := SignCheckpoint(command, key, authority, now)
