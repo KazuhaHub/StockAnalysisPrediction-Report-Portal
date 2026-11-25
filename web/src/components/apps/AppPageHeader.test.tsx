@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, cleanup } from '@testing-library/react'
-import { afterEach, expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen, cleanup } from '@testing-library/react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import AppPageHeader from './AppPageHeader'
 import { createPageActions } from '../../lib/page-v2'
+import { mockNarrowViewport } from '../../test/narrow'
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}))
 afterEach(cleanup)
 test('keeps signed identity visible and renders page strings as text with common Ant actions',()=>{
@@ -37,7 +38,7 @@ test('Back is shown only when the page has a way back, and an extra control sits
   fireEvent.click(screen.getByRole('button',{name:/apps.back/}));expect(back).toHaveBeenCalledOnce()
   expect(screen.queryByRole('button',{name:'Manage'})).toBeNull()
 })
-test('lets the title group wrap below Back instead of squeezing the title on a narrow screen',()=>{
+test('on a wide screen, lets the title group wrap below Back instead of squeezing the title',()=>{
   const view=render(<AppPageHeader name="Market Monitor" icon={<span>Icon</span>} onBack={()=>{}} state={null}/>)
   const back=screen.getByRole('button',{name:/apps.back/})
   const heading=screen.getByRole('heading',{name:'Market Monitor'})
@@ -49,4 +50,23 @@ test('lets the title group wrap below Back instead of squeezing the title on a n
   expect(group.contains(screen.getByText('Icon'))).toBe(true)
   expect(group.style.flex).toMatch(/1 1 (1[6-9]\d|2\d\d)px/)
   view.unmount()
+})
+describe('on a phone',()=>{
+  const viewport=mockNarrowViewport(true)
+  test('stacks Back, the title and the actions on their own rows',()=>{
+    const view=render(<AppPageHeader name="Market Monitor" icon={<span>Icon</span>} onBack={()=>{}} state={null} extra={<button>Manage</button>}/>)
+    const stack=screen.getByTestId('app-page-header-stacked')
+    expect(stack.className).toContain('ant-flex-vertical')
+    const rows=[...stack.children]
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toBe(screen.getByRole('button',{name:/apps.back/}))
+    expect(rows[1].contains(screen.getByRole('heading',{name:'Market Monitor'}))).toBe(true)
+    expect(rows[1].contains(screen.getByText('Icon'))).toBe(true)
+    expect((rows[1] as HTMLElement).style.width).toBe('100%')
+    expect(rows[2].contains(screen.getByRole('button',{name:'Manage'}))).toBe(true)
+    // Crossing back to a wide viewport restores the single row.
+    act(()=>viewport.set(false))
+    expect(screen.queryByTestId('app-page-header-stacked')).toBeNull()
+    view.unmount()
+  })
 })
