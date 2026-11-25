@@ -1288,10 +1288,9 @@ func TestExportListAndActiveFilter(t *testing.T) {
 // range "action >= 'auth.' AND action < 'auth/'" selects nothing there. CI's Alpine image compares
 // bytes by default, which is why the throwaway database is created with an explicit ICU locale.
 func TestPostgresSigninsUnderLinguisticCollation(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
-	}
+	// A pool database is only the connection the ICU database is created from; the test's own data
+	// lives in that throwaway database.
+	dsn := testPostgresDSN(t)
 	u, err := url.Parse(dsn)
 	if err != nil || u.Scheme == "" {
 		t.Skipf("TEST_POSTGRES_DSN is not a URL; cannot derive a second database from it")
