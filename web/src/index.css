@@ -1393,6 +1393,14 @@ body {
   text-decoration: underline;
 }
 
+/* Segmented options never touch. Ant Design packs the items edge to edge, so hovering the option
+   next to the selected one paints a grey block flush against the white thumb and the two read as one
+   pill. A small gap on every segmented group keeps each option its own shape; the sliding thumb
+   measures the items' own offsets, so it still lands on the chosen option. */
+.ant-segmented .ant-segmented-group {
+  gap: 2px;
+}
+
 /* The theme switcher — the login page's icon-only control and the account menu's icon-and-label
    one. Its icons are 1em SVGs aligned to the text baseline, which inside Ant Design 6's segmented
    item leaves them ~2.8px above the middle of a label that centres its own line box (measured:
