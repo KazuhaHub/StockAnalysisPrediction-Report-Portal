@@ -28,6 +28,7 @@ func writeTestConfig(t *testing.T, dbPath string) string {
 
 // randPassword must respect its length and never emit easily confused characters.
 func TestRandPasswordAlphabet(t *testing.T) {
+	t.Parallel()
 	const confusing = "0O1lI"
 	for _, n := range []int{8, 16, 32} {
 		pw := randPassword(n)
@@ -44,6 +45,7 @@ func TestRandPasswordAlphabet(t *testing.T) {
 
 // handleVersion answers the signed-in app's build identity from the ldflags-injected package vars.
 func TestHandleVersionReportsBuildIdentity(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	s := tenancyServer(t)
 	s.handleVersion(rec, httptest.NewRequest("GET", "/api/version", nil), "alice")
@@ -65,6 +67,7 @@ func TestHandleVersionReportsBuildIdentity(t *testing.T) {
 // requireUser redirects an anonymous browser to /login and hands the resolved session to the
 // wrapped handler otherwise.
 func TestRequireUserRedirectsAndPassesIdentity(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "test-secret"}}
 	if err := s.st.UpsertUser(User{Username: "alice", PasswordHash: "x", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -96,6 +99,7 @@ func TestRequireUserRedirectsAndPassesIdentity(t *testing.T) {
 // apiSymbols serves the omnibox autocomplete to a query token or a browser session, and refuses
 // anonymous callers.
 func TestApiSymbolsAuthAndPayload(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "test-secret"}, names: LoadNames(t.TempDir(), st)}
 	if err := st.CreateToken("query-token", "autocomplete", "query", ""); err != nil {
@@ -150,6 +154,7 @@ func TestApiSymbolsAuthAndPayload(t *testing.T) {
 // AddUser is the lockout fallback: it must enforce the password policy up front and otherwise
 // create/overwrite the account in the database the config points at.
 func TestAddUserCLI(t *testing.T) {
+	t.Parallel()
 	cfgPath := writeTestConfig(t, filepath.Join(t.TempDir(), "portal.db"))
 
 	// A weak password fails before any config/database is created.
@@ -193,6 +198,7 @@ func TestAddUserCLI(t *testing.T) {
 // in the test binary outlives the test and races with any later test that changes sqliteJournalSizeLimit.
 // Closing the last connection checkpoints the log and removes the -wal file, so its absence proves it.
 func TestAddUserClosesItsStore(t *testing.T) {
+	t.Parallel()
 	db := filepath.Join(t.TempDir(), "portal.db")
 	cfgPath := writeTestConfig(t, db)
 	if err := AddUser(cfgPath, "admin", "correct-horse-battery", true); err != nil {
@@ -218,6 +224,7 @@ func TestAddUserClosesItsStore(t *testing.T) {
 
 // RecomputeKinds re-derives stored report kinds from the current taxonomy rules.
 func TestRecomputeKindsCLI(t *testing.T) {
+	t.Parallel()
 	cfgPath := writeTestConfig(t, filepath.Join(t.TempDir(), "portal.db"))
 	if err := AddUser(cfgPath, "admin", "correct-horse-battery", true); err != nil {
 		t.Fatal(err)
@@ -253,6 +260,7 @@ func TestRecomputeKindsCLI(t *testing.T) {
 
 // FreezeReportNames snapshots current stock names onto un-named reports exactly once.
 func TestFreezeReportNamesCLI(t *testing.T) {
+	t.Parallel()
 	cfgPath := writeTestConfig(t, filepath.Join(t.TempDir(), "portal.db"))
 	if err := AddUser(cfgPath, "admin", "correct-horse-battery", true); err != nil {
 		t.Fatal(err)

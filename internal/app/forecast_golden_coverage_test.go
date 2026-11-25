@@ -34,6 +34,7 @@ func goldenArchivedCoverageOf(c forecastCoverage) goldenArchivedCoverage {
 }
 
 func TestGoldenCoverageAdapterPreservesEveryLiveField(t *testing.T) {
+	t.Parallel()
 	var coverage forecastCoverage
 	live := reflect.ValueOf(&coverage).Elem()
 	for i := 0; i < live.NumField(); i++ {

@@ -70,6 +70,7 @@ func (e *appsEnv) putUserInOU(user string) {
 }
 
 func TestFeatureSwitchGatesOnlyFeatureOwnedRoutes(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	if err := e.s.st.UpsertUser(User{Username: "olive", PasswordHash: "hash", Role: "operator", Active: true}); err != nil {
 		t.Fatal(err)
@@ -105,6 +106,7 @@ func TestFeatureSwitchGatesOnlyFeatureOwnedRoutes(t *testing.T) {
 }
 
 func TestFeatureGateKeepsTheRouteGuardInFront(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess(featureRecurring, e.ou, "false")
 	e.putUserInOU("bob")
@@ -118,6 +120,7 @@ func TestFeatureGateKeepsTheRouteGuardInFront(t *testing.T) {
 }
 
 func TestFeatureGatedRoutesAreAnnotatedInTheRouteTable(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	got := map[string]string{}
@@ -144,6 +147,7 @@ func TestFeatureGatedRoutesAreAnnotatedInTheRouteTable(t *testing.T) {
 // so a web-only change never needs the Go suite.
 
 func TestAnUnreadableSwitchPolicyAnswers503(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.putUserInOU("admin")
 	e.mustSetAccess(featureRecurring, e.ou, "false")
@@ -158,12 +162,14 @@ func TestAnUnreadableSwitchPolicyAnswers503(t *testing.T) {
 // A6a: an administrator whose OU and the Default OU have every built-in key closed is refused on a
 // feature route, yet can still read the layout, reach the OU policy pages and open the switch again.
 func TestAdministratorCannotBeLockedOutOfTheSwitches(t *testing.T) {
+	t.Parallel()
 	runLockoutGuard(t, newAppsEnv(t))
 }
 
 // The same guard on the driver production uses. Skipped unless TEST_POSTGRES_DSN is set. The tables it
 // touches are emptied before and after, because the Postgres database is shared by the whole suite.
 func TestPostgresAdministratorCannotBeLockedOutOfTheSwitches(t *testing.T) {
+	t.Parallel()
 	tables := []string{"app_ou_access", "app_order", "app_files", "apps", "users", "user_groups"}
 	st := pgStore(t, tables...)
 	t.Cleanup(func() {
@@ -242,6 +248,7 @@ func runLockoutGuard(t *testing.T, e *appsEnv) {
 
 // Closing Scheduled tasks governs interactive access only: existing schedules keep running.
 func TestRecurringTickIgnoresTheSwitch(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := okProviderServer(st)

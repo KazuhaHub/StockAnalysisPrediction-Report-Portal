@@ -53,8 +53,14 @@ func testPlatformRuntimeConfirmation(t *testing.T, pg bool) {
 		t.Fatal("identity confirmation created application work")
 	}
 }
-func TestPlatformRuntimeConfirmationSQLite(t *testing.T)   { testPlatformRuntimeConfirmation(t, false) }
-func TestPlatformRuntimeConfirmationPostgres(t *testing.T) { testPlatformRuntimeConfirmation(t, true) }
+func TestPlatformRuntimeConfirmationSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeConfirmation(t, false)
+}
+func TestPlatformRuntimeConfirmationPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeConfirmation(t, true)
+}
 func testPlatformRuntimeConfirmationRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"zero", "stale", "future", "deployment", "epoch", "revision", "public_key", "pin", "stale_row", "cleared_key", "paused", "demoted"} {
 		t.Run(kind, func(t *testing.T) {
@@ -102,9 +108,11 @@ func testPlatformRuntimeConfirmationRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeConfirmationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeConfirmationRefusals(t, false)
 }
 func TestPlatformRuntimeConfirmationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeConfirmationRefusals(t, true)
 }
 
@@ -135,13 +143,16 @@ func testPlatformRuntimeConfirmationAuditRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeConfirmationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeConfirmationAuditRollback(t, false)
 }
 func TestPlatformRuntimeConfirmationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeConfirmationAuditRollback(t, true)
 }
 
 func TestPostgresRuntimeConfirmationExpiryAfterAuditWait(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"session", "observation"} {
 		t.Run(kind, func(t *testing.T) {
 			s, session := runtimeRegistrationFixture(t, true)
@@ -219,6 +230,7 @@ func TestPostgresRuntimeConfirmationExpiryAfterAuditWait(t *testing.T) {
 }
 
 func TestPlatformRuntimeConfirmationEndpointRefusesInvalidBootstrap(t *testing.T) {
+	t.Parallel()
 	s, session := runtimeRegistrationFixture(t, false)
 	expected, err := s.preparePlatformRuntimeBinding(session, platformFixtureID(400))
 	if err != nil {

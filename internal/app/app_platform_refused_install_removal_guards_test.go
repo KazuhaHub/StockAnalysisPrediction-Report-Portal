@@ -34,6 +34,7 @@ func refusedBecause(t *testing.T, err error, reason string) {
 // accepts only recovery_required, so admitting it would let the runner delete the namespace and then fail every
 // settlement retry on the close.
 func TestNeverStartedRemovalDoesNotAdmitAnInstallAtStageFailed(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	if _, err := f.evidence(); err != nil {
 		t.Fatalf("the refused install is not admitted: %v", err)
@@ -52,6 +53,7 @@ func TestNeverStartedRemovalDoesNotAdmitAnInstallAtStageFailed(t *testing.T) {
 
 // Item 2: every guard of the eligibility refuses for its own reason.
 func TestNeverStartedEvidenceGuardsRefuseForTheirOwnReason(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, statement, reason string }{
 		{"install_generation_source", `UPDATE app_platform_operations SET source_generation=1,target_generation=2 WHERE action='install'`, "the install is not the first-generation install"},
 		{"install_generation_target", `UPDATE app_platform_operations SET target_generation=2 WHERE action='install'`, "the install is not the first-generation install"},
@@ -90,6 +92,7 @@ func (f refusedInstall) addImageEffect(t *testing.T, state string) {
 // Item 3: the effect cannot have been admitted at a newer fence than the install operation holds. The delete-data
 // intent compares them too, so a change after the review is caught where the command is built.
 func TestNeverStartedFenceIsComparedWithTheInstallOperation(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET admitted_fence=(SELECT fence FROM app_platform_operations WHERE action='install')+5 WHERE kind='prepare-data'`)
 	_, err := f.evidence()
@@ -116,6 +119,7 @@ func TestNeverStartedFenceIsComparedWithTheInstallOperation(t *testing.T) {
 
 // Item 4: an unsettled load_image effect blocks the variant and the close the same way; settled ones do not.
 func TestNeverStartedLoadImageEffectsBlockOnlyWhenUnsettled(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"prepared", "unknown"} {
 		f := newRefusedInstall(t, false)
 		f.addImageEffect(t, state)
@@ -143,6 +147,7 @@ func TestNeverStartedLoadImageEffectsBlockOnlyWhenUnsettled(t *testing.T) {
 // Item 5: a started install in review_required or recovery_required keeps the error type it always had, whichever
 // of its states stops the review first.
 func TestStartedInstallInReviewPhasesKeepsThePlanChangedError(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"review_required", "recovery_required"} {
 		for _, tc := range []struct{ name, statement string }{
 			{"plain", ``},

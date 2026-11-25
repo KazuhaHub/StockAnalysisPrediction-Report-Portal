@@ -54,6 +54,7 @@ func putTarget(t *testing.T, h func(http.ResponseWriter, *http.Request, string),
 // Editing a Dify target: GET returns its editable config (never the api_key), and
 // PUT updates name + inputs while keeping the stored key when the client sends none.
 func TestDifyTargetEditRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	id := seedDifyTarget(t, s, "Old name")
 
@@ -118,6 +119,7 @@ func TestDifyTargetEditRoundTrip(t *testing.T) {
 }
 
 func TestDifyTargetAddStoresCollapseOptionalInputs(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.UpsertPlugin(difyPluginSlug, "Dify", "1.0.0", "{}", "bundled"); err != nil {
 		t.Fatalf("UpsertPlugin: %v", err)
@@ -137,6 +139,7 @@ func TestDifyTargetAddStoresCollapseOptionalInputs(t *testing.T) {
 
 // The Dify edit endpoints only serve Dify targets, and never a missing one.
 func TestDifyTargetEditRejectsNonDifyAndMissing(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.UpsertPlugin("custom", "Custom", "1.0.0", "{}", "bundled"); err != nil {
 		t.Fatalf("UpsertPlugin: %v", err)
@@ -158,6 +161,7 @@ func TestDifyTargetEditRejectsNonDifyAndMissing(t *testing.T) {
 // PUT rejects an empty name or base_url, and refuses to save a target with no key
 // when none is stored yet.
 func TestDifyTargetUpdateValidation(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	id := seedDifyTarget(t, s, "T")
 
@@ -174,6 +178,7 @@ func TestDifyTargetUpdateValidation(t *testing.T) {
 // Re-probing an existing target with a blank key reuses the target's stored key +
 // base URL, so the admin never has to re-paste the secret to refresh inputs.
 func TestDifyProbeReusesStoredKey(t *testing.T) {
+	t.Parallel()
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -240,6 +245,7 @@ func uploadToTarget(t *testing.T, s *Server, id int64, user, filename string, ra
 // The upload proxy forwards the file to the target's Dify with the STORED api key (which
 // never reaches the browser) and hands back the file id a row will carry.
 func TestDifyFileUploadProxy(t *testing.T) {
+	t.Parallel()
 	var gotAuth, gotUser string
 	var gotBody []byte
 	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +299,7 @@ func TestDifyFileUploadProxy(t *testing.T) {
 // A file over Dify's own 15MB limit is refused here, before it is pushed upstream; and the
 // proxy only serves Dify targets.
 func TestDifyFileUploadLimitsAndScope(t *testing.T) {
+	t.Parallel()
 	var forwarded int
 	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		forwarded++
@@ -328,6 +335,7 @@ func TestDifyFileUploadLimitsAndScope(t *testing.T) {
 // A restricted OU may only upload to a workflow its allow-list grants — the file goes up with
 // the target's own key, so an ungranted target must not be usable as an upload endpoint.
 func TestDifyFileUploadRespectsAllowList(t *testing.T) {
+	t.Parallel()
 	dst := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"id":"file-1"}`)
 	}))

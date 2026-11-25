@@ -21,6 +21,7 @@ func bootstrapShell(t *testing.T, source func() map[string]any) (body, csp strin
 
 // The public site settings ride in the shell, so the SPA paints its first frame branded without asking for them.
 func TestSpaEmbedsTheSiteBootstrapAsAnInertJSONBlock(t *testing.T) {
+	t.Parallel()
 	body, _ := bootstrapShell(t, func() map[string]any { return map[string]any{"siteTitle": "智研平台", "pwaEnabled": true} })
 	match := bootstrapBlock.FindStringSubmatch(body)
 	if match == nil {
@@ -38,6 +39,7 @@ func TestSpaEmbedsTheSiteBootstrapAsAnInertJSONBlock(t *testing.T) {
 
 // An administrator's text cannot close the block or open markup: the encoding escapes angle brackets and ampersands.
 func TestSpaBootstrapEscapesAdministratorText(t *testing.T) {
+	t.Parallel()
 	hostile := `</script><img src=x onerror=alert(1)>&"` + " "
 	body, _ := bootstrapShell(t, func() map[string]any { return map[string]any{"siteTitle": hostile, "footerText": hostile} })
 	if strings.Count(body, "</script>") != 1 || strings.Contains(body, "<img src=x") {
@@ -52,6 +54,7 @@ func TestSpaBootstrapEscapesAdministratorText(t *testing.T) {
 
 // Only what the public /api/site serves is embedded, from the very same source: nothing per user, nothing secret.
 func TestSpaBootstrapIsTheServersPublicSiteSettingsAndNothingElse(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	public := s.siteSettingsJSON()
 	body, _ := bootstrapShell(t, s.siteSettingsJSON)
@@ -78,6 +81,7 @@ func TestSpaBootstrapIsTheServersPublicSiteSettingsAndNothingElse(t *testing.T) 
 
 // An inert data block needs no policy change: scripts stay same-origin and no inline execution or nonce is allowed.
 func TestSpaBootstrapLeavesTheContentSecurityPolicyAlone(t *testing.T) {
+	t.Parallel()
 	withBlock, csp := bootstrapShell(t, func() map[string]any { return map[string]any{"siteTitle": "x"} })
 	_, without := bootstrapShell(t, nil)
 	if withBlock == "" || csp == "" || csp != without {

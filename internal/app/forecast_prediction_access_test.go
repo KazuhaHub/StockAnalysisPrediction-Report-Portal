@@ -13,6 +13,7 @@ import (
 )
 
 func TestInternalPredictionReaderDiagnosticsAndMembership(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 	for _, scope := range []string{scopeAll, scopeOwn} {
@@ -97,6 +98,7 @@ func TestInternalPredictionReaderDiagnosticsAndMembership(t *testing.T) {
 }
 
 func TestExternalPredictionScopeChangeFailsClosed(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "unrestrict"} {
 		t.Run(change, func(t *testing.T) {
 			s := newV1Server(t)
@@ -145,6 +147,7 @@ func TestExternalPredictionScopeChangeFailsClosed(t *testing.T) {
 }
 
 func TestProtectedPredictionFilterBeforeLimit(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
 			st := newTestStore(t)
@@ -174,6 +177,7 @@ func TestProtectedPredictionFilterBeforeLimit(t *testing.T) {
 }
 
 func TestPredictionCookieRoutesRequireForecastScope(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 	for _, scope := range []string{scopeNone, scopeAll, scopeOwn} {
@@ -202,6 +206,7 @@ func TestPredictionCookieRoutesRequireForecastScope(t *testing.T) {
 // refused with forecast_unavailable on both reads; a user held at the wall gets enrolment_required
 // (the wall comes first, even for a none user); an allowed user is served.
 func TestV1CookieAppliesForecastScope(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	seedForecastReader(t, s, "v1-all", scopeAll, false)
 	seedForecastReader(t, s, "v1-none", scopeNone, false)
@@ -231,6 +236,7 @@ func TestV1CookieAppliesForecastScope(t *testing.T) {
 }
 
 func TestExternalPredictionReadsFilterBeforeLimitAndHideDiagnostics(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 	seedForecastReader(t, s, "external", scopeAll, true)

@@ -145,9 +145,11 @@ func testResumeAfterImportAdmittedWhilePaused(t *testing.T, pg bool) {
 }
 
 func TestResumeAfterImportAdmittedWhilePausedSQLite(t *testing.T) {
+	t.Parallel()
 	testResumeAfterImportAdmittedWhilePaused(t, false)
 }
 func TestResumeAfterImportAdmittedWhilePausedPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeAfterImportAdmittedWhilePaused(t, true)
 }
 
@@ -207,9 +209,11 @@ func testResumeRefusedWithoutConsumedGrant(t *testing.T, pg bool) {
 }
 
 func TestResumeRefusedWithoutConsumedGrantSQLite(t *testing.T) {
+	t.Parallel()
 	testResumeRefusedWithoutConsumedGrant(t, false)
 }
 func TestResumeRefusedWithoutConsumedGrantPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeRefusedWithoutConsumedGrant(t, true)
 }
 
@@ -286,9 +290,11 @@ func (f *platformResumeFixtureState) namespaceID(t *testing.T) string {
 }
 
 func TestResumeStagesSkipNativeDataEffectsSQLite(t *testing.T) {
+	t.Parallel()
 	testResumeStagesSkipNativeDataEffects(t, false)
 }
 func TestResumeStagesSkipNativeDataEffectsPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeStagesSkipNativeDataEffects(t, true)
 }
 
@@ -405,11 +411,12 @@ func testResumeReachesReady(t *testing.T, pg bool) {
 	}
 }
 
-func TestResumeReachesReadySQLite(t *testing.T)   { testResumeReachesReady(t, false) }
-func TestResumeReachesReadyPostgres(t *testing.T) { testResumeReachesReady(t, true) }
+func TestResumeReachesReadySQLite(t *testing.T)   { t.Parallel(); testResumeReachesReady(t, false) }
+func TestResumeReachesReadyPostgres(t *testing.T) { t.Parallel(); testResumeReachesReady(t, true) }
 
 // The scheduler of a paused Portal carries a resume across its evidence-only stages unattended.
 func TestResumeSchedulerDrivesEvidenceStages(t *testing.T) {
+	t.Parallel()
 	f := platformResumeFixture(t, false)
 	commit := f.reviewAndConsumeResume(t)
 	worker, err := newPlatformWritableInstallScheduler(f.s, f.endpoint, platformFixtureID(5605), time.Second)
@@ -494,8 +501,12 @@ func testResumeRetryAfterFailedStart(t *testing.T, pg bool) {
 	}
 }
 
-func TestResumeRetryAfterFailedStart(t *testing.T) { testResumeRetryAfterFailedStart(t, false) }
+func TestResumeRetryAfterFailedStart(t *testing.T) {
+	t.Parallel()
+	testResumeRetryAfterFailedStart(t, false)
+}
 func TestResumeRetryAfterFailedStartPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeRetryAfterFailedStart(t, true)
 }
 
@@ -538,15 +549,18 @@ func testResumeUnknownStartStaysRecoveryRequired(t *testing.T, pg bool) {
 }
 
 func TestResumeUnknownStartStaysRecoveryRequired(t *testing.T) {
+	t.Parallel()
 	testResumeUnknownStartStaysRecoveryRequired(t, false)
 }
 func TestResumeUnknownStartStaysRecoveryRequiredPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeUnknownStartStaysRecoveryRequired(t, true)
 }
 
 // A queued resume whose import evidence no longer loads is ended for review by the claim, rather than
 // failing every claim after it and so blocking the resumes that are fine.
 func TestResumeClaimEndsAQueuedResumeWhoseEvidenceFails(t *testing.T) {
+	t.Parallel()
 	f := platformResumeFixture(t, false)
 	ctx := context.Background()
 	commit := f.reviewAndConsumeResume(t)
@@ -568,6 +582,7 @@ func TestResumeClaimEndsAQueuedResumeWhoseEvidenceFails(t *testing.T) {
 // A restore disables every publisher, which erases which ones the operator had disabled. The restore
 // records the publishers that were enabled before it, and recovery trusts no others.
 func TestRestoreRecordsPublishersEnabledBeforeIt(t *testing.T) {
+	t.Parallel()
 	enabled := func(t *testing.T, s *Server) string {
 		return scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_trusted_publishers'`)
 	}
@@ -590,6 +605,7 @@ func TestRestoreRecordsPublishersEnabledBeforeIt(t *testing.T) {
 }
 
 func TestResumeRefusesAPublisherDisabledBeforeTheRestore(t *testing.T) {
+	t.Parallel()
 	f := platformResumeFixture(t, false)
 	if _, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target()); err != nil {
 		t.Fatal("fixture: the enabled publisher was refused:", err)

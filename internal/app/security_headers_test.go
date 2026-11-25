@@ -7,6 +7,7 @@ import (
 )
 
 func TestSecurityHeadersMiddleware(t *testing.T) {
+	t.Parallel()
 	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -30,6 +31,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 // of it, and a response with no Cache-Control at all is one a cache is free to make its own
 // decision about. Static, non-personal paths keep deciding for themselves.
 func TestPrivateResponsesAreNotStored(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"/api/me", "/api/v1/reports", "/report/7/pdf", "/report/day.zip"} {
 		w := httptest.NewRecorder()
 		h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

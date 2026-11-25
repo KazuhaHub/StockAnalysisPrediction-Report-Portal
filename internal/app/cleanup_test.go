@@ -14,6 +14,7 @@ import (
 // cleanupDue fires at most once per matching day, gated by frequency, weekday/month-day, the
 // scheduled time, and the last-run stamp (restart double-fire guard).
 func TestCleanupDue(t *testing.T) {
+	t.Parallel()
 	loc := time.UTC
 	base := time.Date(2026, 7, 13, 3, 30, 0, 0, loc) // a Monday, 03:30
 	daily := cleanupConfig{Freq: "daily", Time: "03:00"}
@@ -53,6 +54,7 @@ func TestCleanupDue(t *testing.T) {
 // A scheduled pass acts only on the enabled targets, records a cleanup_runs row + last-result blob,
 // and leaves disabled targets untouched.
 func TestRunCleanupRespectsToggles(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	// Only batch is enabled.
@@ -85,6 +87,7 @@ func TestRunCleanupRespectsToggles(t *testing.T) {
 // The reports retention is clamped to its floor on read: a hand-set below-floor value can't delete
 // recent reports.
 func TestRunCleanupReportsFloorClamp(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	st.SetSetting("cleanup_reports_enabled", "1")
@@ -103,6 +106,7 @@ func TestRunCleanupReportsFloorClamp(t *testing.T) {
 
 // A dry run counts but deletes nothing and records no audit row.
 func TestRunCleanupDryRun(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	st.SetSetting("cleanup_batch_enabled", "1")
@@ -122,6 +126,7 @@ func TestRunCleanupDryRun(t *testing.T) {
 
 // The config save rejects a below-floor retention and leaves the stored value unchanged.
 func TestApiCleanupConfigSaveRejectsBelowFloor(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "k"}}
 	req := httptest.NewRequest("POST", "/api/admin/cleanup/config", strings.NewReader(`{"reports_days":5}`))
@@ -140,6 +145,7 @@ func TestApiCleanupConfigSaveRejectsBelowFloor(t *testing.T) {
 // cleanup_runs is a ring buffer, those no-ops evict the one row an admin would ever need: the pass
 // that actually deleted something. Noise crowding out the signal is worse than no history at all.
 func TestNoOpCleanupWritesNoHistory(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	st.SetSetting("cleanup_batch_enabled", "1")
@@ -170,6 +176,7 @@ func TestNoOpCleanupWritesNoHistory(t *testing.T) {
 // it; a walk over the struct does, and it does so on the day the field is added rather than the day
 // an admin notices a zero.
 func TestReadTargetsCoversEveryTarget(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	typ := reflect.TypeOf(cleanupTargets{})
 

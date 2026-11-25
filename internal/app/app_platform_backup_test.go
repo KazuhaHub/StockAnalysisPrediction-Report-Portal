@@ -93,9 +93,11 @@ func testPlatformRestorePausesAuthority(t *testing.T, postgres bool) {
 	}
 }
 func TestAppPlatformRestorePausesAuthority(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePausesAuthority(t, false)
 }
 func TestPostgresAppPlatformRestorePausesAuthority(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePausesAuthority(t, true)
 }
 
@@ -133,9 +135,11 @@ func testPlatformRestoreRetainsRevocations(t *testing.T, postgres bool) {
 	}
 }
 func TestAppPlatformRestoreRetainsRevocations(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRetainsRevocations(t, false)
 }
 func TestPostgresAppPlatformRestoreRetainsRevocations(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRetainsRevocations(t, true)
 }
 
@@ -156,9 +160,11 @@ func testPlatformRestoreRejectsCorruptArtifact(t *testing.T, postgres bool) {
 	}
 }
 func TestAppPlatformRestoreRejectsCorruptArtifact(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRejectsCorruptArtifact(t, false)
 }
 func TestPostgresAppPlatformRestoreRejectsCorruptArtifact(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRejectsCorruptArtifact(t, true)
 }
 
@@ -237,15 +243,18 @@ func testPlatformRestoreReleaseIntegrity(t *testing.T, postgres bool) {
 }
 
 func TestAppPlatformRestoreReleaseIntegrity(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreReleaseIntegrity(t, false)
 }
 func TestPostgresAppPlatformRestoreReleaseIntegrity(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreReleaseIntegrity(t, true)
 }
 
 // A dump taken while the source Portal was itself in recovery has every publisher disabled; the
 // publishers it trusted are in the record it carries, and a second restore must keep that record.
 func TestRepeatedRestoreCarriesTheDumpsTrustedPublisherRecord(t *testing.T) {
+	t.Parallel()
 	s, _, _, _ := platformObjectsFixturePG(t, false)
 	publisher := scalar[string](t, s.st, `SELECT id FROM app_platform_publishers`)
 	platformSimulateRestore(t, s)

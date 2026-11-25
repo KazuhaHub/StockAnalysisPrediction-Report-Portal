@@ -149,6 +149,7 @@ func stockCall(h func(http.ResponseWriter, *http.Request, string), user, query s
 }
 
 func TestStockPageGroupsItsReads(t *testing.T) {
+	t.Parallel()
 	s, d, _ := stockSpyServer(t)
 	s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-06-03", RType: "类型0", Version: "manual", Title: "600519 类型0", MD: "人工版"})
 	queries := []string{"", "?date=2026-06-03", "?date=2026-06-02&kind=" + kindOrder[0], "?date=1999-01-01", "?kind=nope", "?r=1", "?r=999999", "?r=" + strconv.Itoa(7) + "&date=2026-06-01"}

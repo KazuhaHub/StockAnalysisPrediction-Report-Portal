@@ -66,6 +66,7 @@ func templateCandidate(t *testing.T, dir string) (appplatform.ParsedDescriptor, 
 }
 
 func TestGeneratedV2TemplateCandidate(t *testing.T) {
+	t.Parallel()
 	dir := os.Getenv("APP_V2_AUTHORING_BUILD_DIR")
 	if dir == "" {
 		t.Skip("explicit generated-template candidate only")
@@ -91,6 +92,7 @@ func TestGeneratedV2TemplateCandidate(t *testing.T) {
 // user, then installs the real generated frontend/routes through the installer.
 // It neither tests production publisher enrollment nor provisions a backend.
 func TestGeneratedV2TemplateBrowser(t *testing.T) {
+	t.Parallel()
 	dir := os.Getenv("APP_V2_AUTHORING_BUILD_DIR")
 	runner := os.Getenv("APP_V2_AUTHORING_BROWSER_RUNNER")
 	if dir == "" || runner == "" {

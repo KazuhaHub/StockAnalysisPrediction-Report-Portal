@@ -45,6 +45,7 @@ func docMachineDDL(t *testing.T) (postgres, sqlite string, indexes []string) {
 }
 
 func TestMigration0023MatchesTheApprovedDDL(t *testing.T) {
+	t.Parallel()
 	postgres, sqlite, indexes := docMachineDDL(t)
 	table := platformMachineTokenTables()[0]
 	// The doc lays the statement out over lines and ends it with a semicolon; only that differs.
@@ -115,8 +116,8 @@ func testMigration0023Table(t *testing.T, pg bool) {
 	}
 }
 
-func TestMigration0023TableSQLite(t *testing.T)   { testMigration0023Table(t, false) }
-func TestMigration0023TablePostgres(t *testing.T) { testMigration0023Table(t, true) }
+func TestMigration0023TableSQLite(t *testing.T)   { t.Parallel(); testMigration0023Table(t, false) }
+func TestMigration0023TablePostgres(t *testing.T) { t.Parallel(); testMigration0023Table(t, true) }
 
 func testMigration0023Upgrade(t *testing.T, pg bool) {
 	st := platformTestStore(t, pg)
@@ -142,10 +143,11 @@ func testMigration0023Upgrade(t *testing.T, pg bool) {
 	}
 }
 
-func TestMigration0023UpgradeSQLite(t *testing.T)   { testMigration0023Upgrade(t, false) }
-func TestMigration0023UpgradePostgres(t *testing.T) { testMigration0023Upgrade(t, true) }
+func TestMigration0023UpgradeSQLite(t *testing.T)   { t.Parallel(); testMigration0023Upgrade(t, false) }
+func TestMigration0023UpgradePostgres(t *testing.T) { t.Parallel(); testMigration0023Upgrade(t, true) }
 
 func TestMigration0023AnOlderDumpRestoresWithAnEmptyTable(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	dump := withoutSections(t, dumpOf(t, src), migration0023().tables, []string{"0023", "0024", "0025"})
 	if bytes.Contains(dump, []byte("app_platform_machine_tokens")) || bytes.Contains(dump, []byte(`"0023"`)) {

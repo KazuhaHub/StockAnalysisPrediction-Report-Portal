@@ -28,6 +28,7 @@ func reportOwner(t *testing.T, st *Store, id int64) (int64, bool) {
 // TestOwnerGroupOf resolves a user to the OU that owns their output: the primary group, or the
 // Default group when unassigned (ADR 0022 R1).
 func TestOwnerGroupOf(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	def := st.EnsureDefaultGroup()
 	st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
@@ -47,6 +48,7 @@ func TestOwnerGroupOf(t *testing.T) {
 // TestStampReportOwnerFirstWriterWins proves the owner is stamped only while NULL, so a re-ingest
 // or a second OU racing the same shared identity row never reassigns it.
 func TestStampReportOwnerFirstWriterWins(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	id, _, err := st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-24", RType: "val", Title: "x"})
 	if err != nil {
@@ -74,6 +76,7 @@ func TestStampReportOwnerFirstWriterWins(t *testing.T) {
 // TestOwnerTokenRoundTrip locks the server-authoritative attribution token: it round-trips the OU,
 // and a tampered / empty / foreign token is rejected so ownership can't be forged.
 func TestOwnerTokenRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := &Server{cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	tok := s.mintOwnerToken(42, "asker")
 	if tok == "" {
@@ -104,6 +107,7 @@ func TestOwnerTokenRoundTrip(t *testing.T) {
 // carries a token, a name that could not be verified would silently leave that person's runs
 // unattributed.
 func TestOwnerTokenRoundTripsAUsernameContainingTheFieldSeparator(t *testing.T) {
+	t.Parallel()
 	s := &Server{cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	for _, name := range []string{"ops|desk", "|lead", "trail|", "a||b", "|", "x|1|2", "12|34"} {
 		tok := s.mintOwnerToken(42, name)
@@ -140,6 +144,7 @@ func TestOwnerTokenRoundTripsAUsernameContainingTheFieldSeparator(t *testing.T) 
 // neither side may mint or accept one. A server with no configuration at all (the shape of many
 // test servers) must refuse rather than panic.
 func TestMintOwnerTokenRefusesAnEmptySecret(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	root := st.EnsureDefaultGroup()
 
@@ -182,6 +187,7 @@ func TestMintOwnerTokenRefusesAnEmptySecret(t *testing.T) {
 // TestV1IngestStampsOwnerFromToken proves ingest stamps owner_group from a valid owner_token, and
 // leaves the report unattributed (NULL) when the token is absent or invalid.
 func TestV1IngestStampsOwnerFromToken(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 

@@ -8,6 +8,7 @@ import (
 )
 
 func TestNotificationJobIntentSurvivesServerRestart(t *testing.T) {
+	t.Parallel()
 	testNotificationJobIntentSurvivesServerRestart(t, newTestStore(t))
 }
 
@@ -60,6 +61,7 @@ func testNotificationJobIntentSurvivesServerRestart(t *testing.T, st *Store) {
 }
 
 func TestNotificationJobRecoveryDoesNotRenewExpiry(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	id, err := st.CreateBatchJob(seedTarget(t, st), 1, 0, "submitter", []map[string]string{{"code": "a"}}, "normal", true)
 	if err != nil {
@@ -92,6 +94,7 @@ func TestNotificationJobRecoveryDoesNotRenewExpiry(t *testing.T) {
 }
 
 func TestNotificationOldJobCannotNotifyReplacementAccountThroughCreatorRule(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	createUser := func() {
@@ -147,6 +150,7 @@ func TestNotificationOldJobCannotNotifyReplacementAccountThroughCreatorRule(t *t
 }
 
 func TestNotificationJobRetryHasNewOccurrenceWithoutNewConsent(t *testing.T) {
+	t.Parallel()
 	testNotificationJobRetryHasNewOccurrenceWithoutNewConsent(t, newTestStore(t))
 }
 
@@ -188,6 +192,7 @@ func testNotificationJobRetryHasNewOccurrenceWithoutNewConsent(t *testing.T, st 
 }
 
 func TestNotificationDeletedJobCannotConsumeReusedIDConsent(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "submitter", PasswordHash: "h", Role: "user"}); err != nil {
 		t.Fatal(err)

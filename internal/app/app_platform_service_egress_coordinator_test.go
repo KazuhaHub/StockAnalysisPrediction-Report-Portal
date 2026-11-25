@@ -898,21 +898,27 @@ func testPlatformServiceEgressAuditOpenedClosedSummaryDeniedCap(t *testing.T, pg
 }
 
 func TestPlatformServiceEgressCoordinatorOpensRenewsClosesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorOpensRenewsCloses(t, false)
 }
 func TestPlatformServiceEgressCoordinatorOpensRenewsClosesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorOpensRenewsCloses(t, true)
 }
 func TestPlatformServiceEgressCoordinatorRenewalKeepsInFlightCallsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorRenewalKeepsInFlightCalls(t, false)
 }
 func TestPlatformServiceEgressCoordinatorRenewalKeepsInFlightCallsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorRenewalKeepsInFlightCalls(t, true)
 }
 func TestPlatformServiceEgressCoordinatorReplacedSessionStillGuardedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t, false)
 }
 func TestPlatformServiceEgressCoordinatorReplacedSessionStillGuardedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t, true)
 }
 func TestPlatformServiceEgressCoordinatorBoundsDriftReloadsSQLite(t *testing.T) {
@@ -922,50 +928,66 @@ func TestPlatformServiceEgressCoordinatorBoundsDriftReloadsPostgres(t *testing.T
 	testPlatformServiceEgressCoordinatorBoundsDriftReloads(t, true)
 }
 func TestPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRowSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRow(t, false)
 }
 func TestPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRowPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRow(t, true)
 }
 func TestPlatformServiceEgressDeniedCapSlidesAndSurvivesRestartSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressDeniedCapSlidesAndSurvivesRestart(t, false)
 }
 func TestPlatformServiceEgressDeniedCapSlidesAndSurvivesRestartPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressDeniedCapSlidesAndSurvivesRestart(t, true)
 }
 func TestPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerIntervalSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerInterval(t, false)
 }
 func TestPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerIntervalPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerInterval(t, true)
 }
 func TestPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfileSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t, false)
 }
 func TestPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfilePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t, true)
 }
 func TestPlatformServiceEgressCoordinatorClosesOnRestorePauseSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorClosesOnRestorePause(t, false)
 }
 func TestPlatformServiceEgressCoordinatorClosesOnRestorePausePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorClosesOnRestorePause(t, true)
 }
 func TestPlatformServiceEgressCoordinatorServesCallsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorServesCalls(t, false)
 }
 func TestPlatformServiceEgressCoordinatorServesCallsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorServesCalls(t, true)
 }
 func TestPlatformServiceEgressCoordinatorServesNoticesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorServesNotices(t, false)
 }
 func TestPlatformServiceEgressCoordinatorServesNoticesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCoordinatorServesNotices(t, true)
 }
 func TestPlatformServiceEgressAuditOpenedClosedSummaryDeniedCapSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressAuditOpenedClosedSummaryDeniedCap(t, false)
 }
 func TestPlatformServiceEgressAuditOpenedClosedSummaryDeniedCapPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressAuditOpenedClosedSummaryDeniedCap(t, true)
 }

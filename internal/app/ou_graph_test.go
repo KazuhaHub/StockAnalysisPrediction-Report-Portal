@@ -7,6 +7,7 @@ import (
 )
 
 func TestUnifiedOUGraphSeparatesActualAndPolicyAncestry(t *testing.T) {
+	t.Parallel()
 	g := newOUGraph(map[int64]ouNode{
 		1: {isDefault: true}, 2: {parent: 1}, 3: {parent: 2},
 		4: {}, 5: {parent: 4},
@@ -34,6 +35,7 @@ func TestUnifiedOUGraphSeparatesActualAndPolicyAncestry(t *testing.T) {
 }
 
 func TestUnifiedOUGraphRejectsInvalidTopology(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		nodes map[int64]ouNode
@@ -56,6 +58,7 @@ func TestUnifiedOUGraphRejectsInvalidTopology(t *testing.T) {
 }
 
 func TestUnifiedOUGraphDoesNotHideCyclesInASubtree(t *testing.T) {
+	t.Parallel()
 	g := newOUGraph(map[int64]ouNode{1: {isDefault: true}, 2: {parent: 3}, 3: {parent: 2}})
 	if _, err := g.subtree(2); !errors.Is(err, errCyclicOU) {
 		t.Fatalf("cyclic subtree: %v", err)
@@ -66,6 +69,7 @@ func TestUnifiedOUGraphDoesNotHideCyclesInASubtree(t *testing.T) {
 }
 
 func TestUnifiedOUResolutionPreservesZeroAndProvenance(t *testing.T) {
+	t.Parallel()
 	chain := []int64{3, 2, 1}
 	values := map[int64]*int{2: quotaPtr(9), 1: quotaPtr(3)}
 	read := func(id int64) *int { return values[id] }

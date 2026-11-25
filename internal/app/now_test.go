@@ -13,6 +13,7 @@ import (
 // civil date in the configured panel timezone. Dify anchors "today" here so a
 // UTC-only sandbox clock can't mis-date a China-market report by a day.
 func TestV1Now(t *testing.T) {
+	t.Parallel()
 	s := seedDedupServer(t) // provides tok-query + tok-ingest
 
 	call := func(token string) (*httptest.ResponseRecorder, map[string]any) {
@@ -90,6 +91,7 @@ func TestV1Now(t *testing.T) {
 // persist, invalid ones are rejected without clobbering, and an omitted field is
 // left untouched (so saving legacy-import settings never wipes the timezone).
 func TestTimezoneSetting(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	save := func(payload string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/admin/settings", strings.NewReader(payload))
@@ -152,6 +154,7 @@ func TestTimezoneSetting(t *testing.T) {
 }
 
 func TestSiteSettings(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	save := func(payload string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/admin/settings", strings.NewReader(payload))
@@ -267,6 +270,7 @@ func TestSiteSettings(t *testing.T) {
 }
 
 func TestPWAManifestAndIcon(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.st.SetSetting("site_title", "智研平台")
 
@@ -310,6 +314,7 @@ func TestPWAManifestAndIcon(t *testing.T) {
 // panelLocation resolves the configured panel tz, falling back to the system
 // zone (time.Local) when unset or invalid.
 func TestPanelLocation(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if s.panelLocation() != time.Local {
 		t.Errorf("default panelLocation = %v, want time.Local", s.panelLocation())

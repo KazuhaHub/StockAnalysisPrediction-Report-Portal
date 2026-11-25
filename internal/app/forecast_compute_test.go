@@ -13,6 +13,7 @@ import (
 )
 
 func TestForecastLimitsAreAudited(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	if code := saveSecurity(t, s, `{"limits":{"forecast_slots_official":3,"forecast_slots_explore":0,"forecast_wait_sec":5,"forecast_custom_per_min":11,"forecast_members_per_min":13}}`); code != http.StatusOK {
 		t.Fatal(code)
@@ -42,6 +43,7 @@ func TestForecastLimitsAreAudited(t *testing.T) {
 }
 
 func TestForecastLimitsAuditSurvivesLaterValidationFailure(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	if code := saveSecurity(t, s, `{"limits":{"forecast_slots_official":3},"login":{"mode":"invalid-fixture"}}`); code != http.StatusBadRequest {
 		t.Fatal(code)
@@ -56,6 +58,7 @@ func TestForecastLimitsAuditSurvivesLaterValidationFailure(t *testing.T) {
 }
 
 func TestForecastPurgeBetweenLoadAndAdmission(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "reader", scopeAll, false)
 	sampleMembers(t, s, 32, nil)
@@ -89,6 +92,7 @@ func TestForecastPurgeBetweenLoadAndAdmission(t *testing.T) {
 }
 
 func TestForecastComputeCachedAndSmallBypassSlots(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.st.SetSetting(setForecastSlotsOfficial, "1")
 	sets := sampleMembers(t, s, 32, nil)
@@ -114,6 +118,7 @@ func TestForecastComputeCachedAndSmallBypassSlots(t *testing.T) {
 }
 
 func TestForecastBusyReturnsNoPartialRecord(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.st.SetSetting(setForecastSlotsExplore, "0")
 	sampleMembers(t, s, 32, nil)
@@ -125,6 +130,7 @@ func TestForecastBusyReturnsNoPartialRecord(t *testing.T) {
 }
 
 func TestForecastLimitsAreSettings(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	defaults := map[string]int{"forecast_slots_official": 2, "forecast_slots_explore": 2, "forecast_wait_sec": 10, "forecast_custom_per_min": 20, "forecast_members_per_min": 60}
 	for key, value := range defaults {
@@ -197,6 +203,7 @@ func waitFlightCallers(t *testing.T, c *forecastCompute, key string, n int) {
 }
 
 func TestForecastComputeIsBounded(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	cfg := forecastComputeConfig{Official: 1, Explore: 1, Wait: 80 * time.Millisecond}
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -225,6 +232,7 @@ func TestForecastComputeIsBounded(t *testing.T) {
 }
 
 func TestForecastComputeSharesDetachedFlight(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	cfg := forecastComputeConfig{Official: 1, Explore: 1, Wait: time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -255,6 +263,7 @@ func TestForecastComputeSharesDetachedFlight(t *testing.T) {
 }
 
 func TestForecastComputePromotesQueuedOfficialFollower(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	cfg := forecastComputeConfig{Official: 1, Explore: 1, Wait: time.Second}
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -278,6 +287,7 @@ func TestForecastComputePromotesQueuedOfficialFollower(t *testing.T) {
 }
 
 func TestForecastComputeFailureReleasesCapacity(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	cfg := forecastComputeConfig{Official: 1, Explore: 0, Wait: time.Second}
 	if _, err := c.do(context.Background(), "disabled", false, cfg, func() (*forecastCell, error) { t.Error("disabled exploration ran"); return nil, nil }); !errors.Is(err, errForecastBusy) {

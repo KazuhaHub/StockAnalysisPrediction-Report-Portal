@@ -40,6 +40,7 @@ func (f *taskRefusalFixture) forgedSubmit(t *testing.T, n int) int {
 }
 
 func TestPlatformServiceTaskForgedIdentityFloodTouchesNoDatabaseOnceTheMaterialIsWarm(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	if code, body := f.submit(t, "warm"); code != 200 {
 		t.Fatalf("warm-up: %d %s", code, body)
@@ -92,6 +93,7 @@ func TestPlatformServiceTaskForgedIdentityFloodTouchesNoDatabaseOnceTheMaterialI
 }
 
 func TestPlatformServiceTaskColdVerificationIsLimitedAndNeverWaits(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	f.s.platformServiceMaterial.reset()
 	var held []func()
@@ -125,6 +127,7 @@ func TestPlatformServiceTaskColdVerificationIsLimitedAndNeverWaits(t *testing.T)
 }
 
 func TestPlatformServiceTaskMalformedCredentialsNeverTouchTheDatabase(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	f.s.platformServiceMaterial.reset()
 	for name, raw := range map[string][]byte{
@@ -147,6 +150,7 @@ func TestPlatformServiceTaskMalformedCredentialsNeverTouchTheDatabase(t *testing
 // enabled still goes through the live verification and is refused there. The material is kept: its MAC check
 // was just proved right, and the refresh drops the material of an installation that is no longer ready.
 func TestPlatformServiceTaskMaterialNeverAcceptsAndIsKeptWhenTheLiveVerificationRefuses(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	f.submit(t, "warm")
 	if f.s.platformServiceMaterial.size() != 1 {
@@ -172,6 +176,7 @@ func TestPlatformServiceTaskMaterialNeverAcceptsAndIsKeptWhenTheLiveVerification
 // cold-verification limit: with that limit full, the refused credential keeps being answered 404 from its own
 // slots, and a forged one still never reaches the database.
 func TestPlatformServiceTaskALiveRefusalCannotPushTheInstallationIntoColdVerification(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	if code, body := f.submit(t, "warm"); code != 200 {
 		t.Fatalf("warm-up: %d %s", code, body)
@@ -204,6 +209,7 @@ func TestPlatformServiceTaskALiveRefusalCannotPushTheInstallationIntoColdVerific
 // expiry is judged on the database's clock, as the live verification judges it, through the offset the refresh
 // learns.
 func TestPlatformServiceTaskExpiredCredentialIsRefusedFromMemory(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	if code, body := f.submit(t, "warm"); code != 200 {
 		t.Fatalf("warm-up: %d %s", code, body)
@@ -242,6 +248,7 @@ func TestPlatformServiceTaskExpiredCredentialIsRefusedFromMemory(t *testing.T) {
 // On PostgreSQL the refresh learns how far the database's clock is from the Portal's, so the in-memory expiry
 // check agrees with the live verification even when the two clocks differ.
 func TestPlatformServiceMaterialRefreshLearnsThePostgresClockOffset(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: pgStore(t)}
 	s.platformServiceMaterial.databaseOffsetMS.Store(1 << 40)
 	if err := s.refreshPlatformServiceMaterial(); err != nil {
@@ -264,6 +271,7 @@ func TestPlatformServiceMaterialRefreshLearnsThePostgresClockOffset(t *testing.T
 // put the database's clock late by half the wait, and the in-memory check would then refuse a live credential
 // before its expiry.
 func TestPlatformClockOffsetKeepsOnlyAShortReading(t *testing.T) {
+	t.Parallel()
 	before := time.UnixMilli(1_000_000)
 	if offset, ok := platformClockOffset(before, 1_000_510, before.Add(20*time.Millisecond)); !ok || offset != 500 {
 		t.Fatalf("a short reading: %d %v, want 500 true", offset, ok)
@@ -278,6 +286,7 @@ func TestPlatformClockOffsetKeepsOnlyAShortReading(t *testing.T) {
 
 // On SQLite the database's clock is the Portal's own, so the offset is zero whatever a reading says.
 func TestPlatformServiceMaterialRefreshOnSQLiteKeepsNoOffset(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	if f.s.st.driver != "sqlite" {
 		t.Skip("SQLite only")
@@ -294,6 +303,7 @@ func TestPlatformServiceMaterialRefreshOnSQLiteKeepsNoOffset(t *testing.T) {
 
 // The Portal-wide limit on cold verification has the size its constant names.
 func TestPlatformUnverifiedLimitIsItsConstant(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	var held []func()
 	for {
@@ -315,6 +325,7 @@ func TestPlatformUnverifiedLimitIsItsConstant(t *testing.T) {
 }
 
 func TestPlatformServiceMaterialExpiresIsBoundedAndIsZeroedOnEviction(t *testing.T) {
+	t.Parallel()
 	var c platformServiceMaterialCache
 	now := time.Unix(1_000, 0)
 	c.now = func() time.Time { return now }
@@ -426,6 +437,7 @@ func TestPlatformServiceTaskRememberedRefusalTakesTheInstallationsOwnSlot(t *tes
 // every enabled, ready installation by the Portal itself, not only after a backend's own first success: a
 // flood that fills the cold-verification limit then delays nothing a real installation sends.
 func TestPlatformServiceMaterialRefreshWarmsEveryReadyInstallationAndSpareTheBackendFromAColdFlood(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	f.s.platformServiceMaterial.reset()
 	if err := f.s.refreshPlatformServiceMaterial(); err != nil {
@@ -456,6 +468,7 @@ func TestPlatformServiceMaterialRefreshWarmsEveryReadyInstallationAndSpareTheBac
 }
 
 func TestPlatformServiceMaterialRefreshSkipsRetiredInstallationsAndDropsTheirMaterial(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	f.s.platformServiceMaterial.reset()
 	f.s.refreshPlatformServiceMaterial()

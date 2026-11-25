@@ -818,6 +818,7 @@ func TestPruneSignsTheExactCommandTheSeamSends(t *testing.T) {
 // execute action with the command signature and the read action with the read signature. The transport itself needs a
 // root-owned socket, so this reads the source as the scheduler guard test does.
 func TestPruneProductionSeamUsesTheDeleteCheckpointActions(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("app_platform_recovery_prune.go")
 	if err != nil {
 		t.Fatal(err)
@@ -836,6 +837,7 @@ func TestPruneProductionSeamUsesTheDeleteCheckpointActions(t *testing.T) {
 
 // Both operation endings and the idle tick must run the pruning step: an ending that forgot it would leave archives.
 func TestEveryOperationEndingAndTheIdleTickPruneRecoverySets(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("app_platform_install_scheduler.go")
 	if err != nil {
 		t.Fatal(err)
@@ -868,6 +870,7 @@ func TestSchedulerIdleTickPrunesRecoverySets(t *testing.T) {
 }
 
 func TestDeleteCheckpointKindIsInTheEffectAllowList(t *testing.T) {
+	t.Parallel()
 	if !platformEffectKindAllowed("remove_data", platformDeleteCheckpointKind) || !platformEffectKindAllowed("remove_data", "delete-data") {
 		t.Fatal("remove_data does not accept delete_checkpoint beside delete-data")
 	}

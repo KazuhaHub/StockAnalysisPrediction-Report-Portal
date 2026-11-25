@@ -35,6 +35,7 @@ func publicSiteSettings(t *testing.T, s *Server) map[string]any {
 }
 
 func TestSiteSettingsSplitPagesDoNotClobberEachOther(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 
 	rec := postSettingsJSON(t, s, map[string]any{
@@ -111,6 +112,7 @@ func TestSiteSettingsSplitPagesDoNotClobberEachOther(t *testing.T) {
 }
 
 func TestVersionDisplayPlacementIsValidatedAndKeepsLegacyReadersCompatible(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 
 	if got := publicSiteSettings(t, s)["versionDisplay"]; got != "footer" {
@@ -150,6 +152,7 @@ func TestVersionDisplayPlacementIsValidatedAndKeepsLegacyReadersCompatible(t *te
 }
 
 func TestAnnouncementSettingsRejectLongFieldsAtomically(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	rec := postSettingsJSON(t, s, map[string]any{
 		"announcementEnabled": true,
@@ -194,6 +197,7 @@ func TestAnnouncementSettingsRejectLongFieldsAtomically(t *testing.T) {
 // longer does, because the announcement left that payload (ADR 0025). The reader-side half of the
 // same rule — that an empty stored level reads as notice — is now TestAnnouncementLevelFallback.
 func TestAnnouncementLevelNormalizationIsStored(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 
 	rec := postSettingsJSON(t, s, map[string]any{"announcementLevel": " Warning "})

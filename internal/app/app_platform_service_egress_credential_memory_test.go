@@ -59,8 +59,10 @@ func testPlatformServiceEgressCallKeepsNoCredentialValue(t *testing.T, pg bool) 
 }
 
 func TestPlatformServiceEgressCallKeepsNoCredentialValueSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCallKeepsNoCredentialValue(t, false)
 }
 func TestPlatformServiceEgressCallKeepsNoCredentialValuePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCallKeepsNoCredentialValue(t, true)
 }

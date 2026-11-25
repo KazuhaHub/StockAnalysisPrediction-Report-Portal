@@ -15,6 +15,7 @@ import (
 )
 
 func TestOpenAPIReadSchemasCoverWireFields(t *testing.T) {
+	t.Parallel()
 	for _, lang := range []string{"zh-CN", "zh-TW", "en-US"} {
 		t.Run(lang, func(t *testing.T) {
 			data, err := localizedOpenAPIJSON(lang)
@@ -67,6 +68,7 @@ func TestOpenAPIReadSchemasCoverWireFields(t *testing.T) {
 // The embedded OpenAPI spec must be valid 3.1 JSON and cover every v1 endpoint
 // (plus the public ones) so the served spec / rendered docs never drift.
 func TestOpenAPISpecValid(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -93,6 +95,7 @@ func TestOpenAPISpecValid(t *testing.T) {
 // always required, while the identity requires either symbol or title and the report type accepts
 // either subtype or its rtype alias.
 func TestOpenAPIIngestRequestMatchesRuntimeValidation(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -144,6 +147,7 @@ func TestOpenAPIIngestRequestMatchesRuntimeValidation(t *testing.T) {
 // Failure direction: FC (fail-closed on contract drift). A field present on one side and not the other
 // fails the test in either direction, so it cannot be satisfied by deleting the documentation.
 func TestOpenAPIIngestRequestDocumentsEveryWireField(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -204,6 +208,7 @@ func TestOpenAPIIngestRequestDocumentsEveryWireField(t *testing.T) {
 // every run with a submitter, so a description that still says "restricted OUs only" is a contract
 // that lies to the workflow authors reading it.
 func TestOpenAPIIngestRequestDocumentsOwnerToken(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -246,6 +251,7 @@ func TestOpenAPIIngestRequestDocumentsOwnerToken(t *testing.T) {
 // contract explicit so a refreshed Dify API tool teaches new workflows the value that the reader
 // actually consumes.
 func TestOpenAPIDocumentsStructuredProducerSource(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -277,6 +283,7 @@ func TestOpenAPIDocumentsStructuredProducerSource(t *testing.T) {
 }
 
 func TestOpenAPILocalizedEndpoint(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequest("GET", "/api/openapi.json?lang=en-US", nil)
 	rec := httptest.NewRecorder()
 	(&Server{}).apiOpenAPI(rec, req)
@@ -312,6 +319,7 @@ func TestOpenAPILocalizedEndpoint(t *testing.T) {
 // This has already happened once: v0.4.45 fixed a field the v1 read had always returned and the spec
 // had never listed.
 func TestOpenAPIDocumentsEveryV1Route(t *testing.T) {
+	t.Parallel()
 	var spec struct {
 		Paths map[string]map[string]json.RawMessage `json:"paths"`
 	}
@@ -362,6 +370,7 @@ func TestOpenAPIDocumentsEveryV1Route(t *testing.T) {
 // database check and a 503 in v0.4.45, and a spec that still described the old two-field answer
 // would tell an orchestrator to treat an unreachable database as healthy.
 func TestHealthzSpecMatchesTheHandler(t *testing.T) {
+	t.Parallel()
 	var spec struct {
 		Paths map[string]struct {
 			Get struct {
@@ -406,6 +415,7 @@ func TestHealthzSpecMatchesTheHandler(t *testing.T) {
 // the other is either a claim refused despite the documentation, or a value the documentation invites
 // and the portal throws away. Both are silent.
 func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -476,6 +486,7 @@ func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
 // in the v1 Error envelope (a cookie session held at the enrolment wall). The spec documents both as
 // alternatives and every live body must match one of them.
 func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
+	t.Parallel()
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
 		t.Fatalf("openapi.json is not valid JSON: %v", err)
@@ -600,6 +611,7 @@ func openapiJSONForLang(t *testing.T, lang string) []byte {
 // must be told the fields exist. Every top-level field of a live response has to be documented, and
 // every field of a live link has to be a property of the documented link.
 func TestOpenAPIDocumentsEditionLinksOnTheCookiePredictionRead(t *testing.T) {
+	t.Parallel()
 	eachReaderServer(t, func(t *testing.T, s *Server) {
 		s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 		fx := seedEditionFixture(t, s)

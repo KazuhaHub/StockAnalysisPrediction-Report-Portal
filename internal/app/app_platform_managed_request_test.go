@@ -12,6 +12,7 @@ import (
 )
 
 func TestPlatformManagedRequestPayloadBoundary(t *testing.T) {
+	t.Parallel()
 	// An invalid payload must be refused before even opening the database.
 	s := &Server{}
 	for _, c := range []struct{ method, path, body string }{
@@ -30,6 +31,7 @@ func TestPlatformManagedRequestPayloadBoundary(t *testing.T) {
 }
 
 func TestPlatformManagedRequestSigningSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformManagedAccessFixture(t, false)
 	var raw, sig []byte
 	var assertion string

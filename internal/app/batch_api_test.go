@@ -73,6 +73,7 @@ func waitForJobDone(t *testing.T, st *Store, jobID int64) BatchJob {
 // Full path: import a plugin, configure a target at a fake Dify, run a job, and
 // confirm per-row outcomes land as final aggregate counts.
 func TestBatchEndToEndViaHandlers(t *testing.T) {
+	t.Parallel()
 	dify := difyServer(t)
 	defer dify.Close()
 	srv := batchServer(t)
@@ -97,6 +98,7 @@ func TestBatchEndToEndViaHandlers(t *testing.T) {
 
 // The operator's concurrency is clamped to the admin ceiling.
 func TestBatchConcurrencyClampedToAdminMax(t *testing.T) {
+	t.Parallel()
 	dify := difyServer(t)
 	defer dify.Close()
 	srv := batchServer(t)
@@ -118,6 +120,7 @@ func TestBatchConcurrencyClampedToAdminMax(t *testing.T) {
 }
 
 func TestBatchConfigSaveIsPartial(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	srv.st.SetSetting("batch_max_concurrent_jobs", "8")
 	srv.st.SetSetting("batch_reserved_slots", "3")
@@ -138,6 +141,7 @@ func TestBatchConfigSaveIsPartial(t *testing.T) {
 
 // A malformed manifest is rejected at import.
 func TestBatchPluginImportRejectsInvalid(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	rec := httptest.NewRecorder()
 	srv.apiBatchPluginImport(rec, httptest.NewRequest("POST", "/x", strings.NewReader(`{"id":"x"}`)), "admin")
@@ -150,6 +154,7 @@ func TestBatchPluginImportRejectsInvalid(t *testing.T) {
 // number is ignored and resolved from their group / the system default, so they
 // can't jump the queue. (Scheduled far in the future so nothing launches.)
 func TestJobCreateBasePriorityAdminOnly(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: "x", Role: "admin"})
 	s.st.UpsertUser(User{Username: "op", PasswordHash: "x", Role: "operator"})
@@ -180,6 +185,7 @@ func TestJobCreateBasePriorityAdminOnly(t *testing.T) {
 // Cancelling a job aborts its in-flight run's context immediately (so the blocking
 // Dify call is dropped) — and an unknown job id is a harmless no-op.
 func TestCancelRunningJobAbortsContext(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.jobRuns.Store(int64(7), &jobRun{ctx: ctx, cancel: cancel})
@@ -196,6 +202,7 @@ func TestCancelRunningJobAbortsContext(t *testing.T) {
 }
 
 func TestJobJSONExecutionMode(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		job   BatchJob
 		mode  string
@@ -216,6 +223,7 @@ func TestJobJSONExecutionMode(t *testing.T) {
 }
 
 func TestQueuePresetPresentationFromStore(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.SetSetting("timezone", "UTC")
 	id, err := s.st.CreateBatchJob(1, 1, 0, "admin", []map[string]string{{"symbol": "300001"}}, "urgent")
@@ -249,6 +257,7 @@ func TestQueuePresetPresentationFromStore(t *testing.T) {
 }
 
 func TestRunningPresetWaitIsNotPresentedAsRunning(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.SetSetting("timezone", "UTC")
 	makeRunningJob := func() int64 {
@@ -299,6 +308,7 @@ func TestRunningPresetWaitIsNotPresentedAsRunning(t *testing.T) {
 }
 
 func TestQueueJobsExposeSubmissionSurface(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	makeJob := func(rows int) int64 {
 		inputs := make([]map[string]string, rows)
@@ -341,6 +351,7 @@ func TestQueueJobsExposeSubmissionSurface(t *testing.T) {
 }
 
 func TestRescheduleReplacesPresetWindow(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	id, err := s.st.CreateBatchJob(1, 1, 0, "admin", []map[string]string{{"symbol": "300001"}}, "urgent")
 	if err != nil {

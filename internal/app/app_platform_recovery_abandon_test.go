@@ -29,6 +29,7 @@ func (f *platformImportFixtureState) abandonRuntime(runtime string) (platformAba
 // The owner's decision: the replacement host is discarded. Everything that rested on it is settled
 // without asking it anything, and a new replacement runtime can be enrolled and the import redone.
 func TestAbandonReplacementRuntimeFreesGrantsAndInstallations(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	// A second operation is still in flight on the same runtime.
 	generation := scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
@@ -74,6 +75,7 @@ func TestAbandonReplacementRuntimeFreesGrantsAndInstallations(t *testing.T) {
 }
 
 func TestAbandonEndsAnOperationInFlightAndRefusesOutsideRecovery(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	platformSetPause(t, f.s.st, "0")
@@ -100,6 +102,7 @@ func TestAbandonEndsAnOperationInFlightAndRefusesOutsideRecovery(t *testing.T) {
 // The listing is a contract: a confirmation is refused when what it listed has changed, and a repeated
 // confirmation of the same listing replays the first answer rather than acting again.
 func TestAbandonConfirmationIsRefusedWhenTheListedWorkChanged(t *testing.T) {
+	t.Parallel()
 	f, _ := unknownImportFixture(t)
 	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
 	if err != nil {
@@ -116,6 +119,7 @@ func TestAbandonConfirmationIsRefusedWhenTheListedWorkChanged(t *testing.T) {
 
 // After the abandon a receipt that arrives late from the discarded host settles nothing.
 func TestAbandonedRuntimeCannotSettleLateReceipt(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	candidates, err := f.s.platformRecoveryImportCandidates(context.Background())
 	if err != nil || len(candidates) != 1 {
@@ -145,6 +149,7 @@ func TestAbandonedRuntimeCannotSettleLateReceipt(t *testing.T) {
 // An import whose answer is lost wedges recovery. The owner abandons the replacement runtime through the
 // HTTP surface, enrolls a new one, redoes the import and the resume, and recovery ends.
 func TestRecoveryAbandonThroughHTTP(t *testing.T) {
+	t.Parallel()
 	s, actor, updateLease, recoverySetID := platformManagedRestoreReviewFixture(t, false)
 	installation := updateLease.installationID
 	platformSimulateRestore(t, s)
@@ -289,6 +294,7 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 // an application and a publisher), so the abandon must not write one with borrowed values: nothing in
 // that table may name a publisher the abandon has no business with.
 func TestAbandonWritesNoReviewPlanAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	f, _ := unknownImportFixture(t)
 	plans := func() int { return scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) }
 	before := plans()
@@ -325,6 +331,7 @@ func TestAbandonWritesNoReviewPlanAndIsIdempotent(t *testing.T) {
 // An operation that had already ended recovery_required when the runtime was abandoned is settled too:
 // every effect it left is reverted, so it ends failed and no longer blocks launch.
 func TestAbandonSettlesAFinishedUnknownImportAndFreesLaunch(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	if !platformOperationBlocksLaunch(t, f.s, operation) {
 		t.Fatal("fixture: an unsettled import does not block launch")
@@ -344,6 +351,7 @@ func TestAbandonSettlesAFinishedUnknownImportAndFreesLaunch(t *testing.T) {
 // The record of an abandon belongs to one controller epoch. After another restore the same runtime id
 // and listing are a different decision, so the recorded outcome is not replayed for them.
 func TestAbandonConfirmationIsNotReplayedInAnotherEpoch(t *testing.T) {
+	t.Parallel()
 	f, _ := unknownImportFixture(t)
 	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
 	if err != nil {
@@ -365,6 +373,7 @@ func TestAbandonConfirmationIsNotReplayedInAnotherEpoch(t *testing.T) {
 // An installation the administrator already disabled in recovery keeps that decision: abandoning the
 // runtime does not return it to review. The listing shows it apart, as left alone.
 func TestAbandonLeavesRecoveryDisabledInstallationsIntact(t *testing.T) {
+	t.Parallel()
 	f, _ := unknownImportFixture(t)
 	mustExec(t, f.s.st, `UPDATE app_platform_installations SET desired_state='disabled',phase='disabled' WHERE id=?`, f.installation)
 	generation := scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
@@ -424,6 +433,7 @@ func (f *platformImportFixtureState) reenrollAndImport(t *testing.T, deployment,
 // the abandon, and a replacement whose import lands on that same root is refused: the abandoned host was
 // never asked what it had done, so its root may hold an import the new journal knows nothing about.
 func TestAbandonedRuntimeDataRootIsRefusedForTheReplacement(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	if done, err := f.drive(t, commit.OperationID); err != nil || done.snapshot.Stage != appplatform.StageComplete {
@@ -448,6 +458,7 @@ func TestAbandonedRuntimeDataRootIsRefusedForTheReplacement(t *testing.T) {
 }
 
 func TestAbandonedRuntimeRootDoesNotRefuseADifferentRoot(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	if _, err := f.drive(t, commit.OperationID); err != nil {
@@ -467,6 +478,7 @@ func TestAbandonedRuntimeRootDoesNotRefuseADifferentRoot(t *testing.T) {
 // to the settlement driver. Fails if the abandon is refused or blocked by the load, if it reverts the load itself,
 // or if the driver then leaves the row of a retired runtime unsettled, which would block the installation for ever.
 func TestAbandonLeavesALoadImageRowToTheDriverAndTheDriverRevertsItForARetiredRuntime(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
 		SELECT o.id,'stage',1,?,'load_image',?,?,o.controller_epoch,1,0,'unknown','{}',o.created_ms,o.updated_ms FROM app_platform_operations o WHERE o.id=?`,

@@ -159,6 +159,7 @@ func platformManagedEnableSnapshotFixture(t *testing.T, pg bool) (*Server, platf
 }
 
 func TestPlatformManagedEnableBuildsSameTupleStartPlan(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformManagedRemovalStopFixtureAction(
 		t, false, appplatform.ActionDisable)
 	intent, err := s.preparePlatformManagedRemovalIntent(
@@ -263,6 +264,7 @@ func TestPlatformManagedEnableBuildsSameTupleStartPlan(t *testing.T) {
 }
 
 func TestPlatformManagedEnableOperationWaitsForSnapshotReadiness(t *testing.T) {
+	t.Parallel()
 	op, err := appplatform.NewOperation(
 		appplatform.ActionEnable, true, 3)
 	if err != nil {
@@ -284,6 +286,7 @@ func TestPlatformManagedEnableOperationWaitsForSnapshotReadiness(t *testing.T) {
 }
 
 func TestPlatformManagedEnableCheckpointToStartUsesEnableCommand(t *testing.T) {
+	t.Parallel()
 	s, lease := platformManagedEnableSnapshotFixture(t, false)
 	checkpoint, err := s.preparePlatformCheckpoint(
 		context.Background(), lease)
@@ -475,10 +478,12 @@ func platformRunSyntheticManagedEnable(
 }
 
 func TestPlatformManagedEnableSyntheticStartActivatesCurrentTupleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedEnableSyntheticStart(t, false)
 }
 
 func TestPlatformManagedEnableSyntheticStartActivatesCurrentTuplePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedEnableSyntheticStart(t, true)
 }
 
@@ -645,10 +650,12 @@ func testPlatformManagedEnableSecondCycle(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedEnableSecondCycleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedEnableSecondCycle(t, false)
 }
 
 func TestPlatformManagedEnableSecondCyclePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedEnableSecondCycle(t, true)
 }
 
@@ -874,6 +881,7 @@ func testPlatformManagedRepairCurrentTupleReview(t *testing.T, pg, policyReview,
 }
 
 func TestPlatformManagedRepairLaunchAfterPolicyReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairCurrentTupleReview(t, false, true, false)
 }
 
@@ -881,12 +889,14 @@ func TestPlatformManagedRepairLaunchAfterPolicyReviewSQLite(t *testing.T) {
 // disabled. The source repair plan still carries the older target policy; reviewing a repair from it
 // must succeed and the repair must run to completion.
 func TestPlatformManagedRepairAfterPolicyReviewAndDisableSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairCurrentTupleReview(t, false, true, true)
 }
 
 // A source plan that targets a newer policy than the activation it describes is not history; it is
 // still refused.
 func TestPlatformManagedRepairSourcePlanNewerThanActivationRefusedSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, false)
 	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
 	var previous platformManagedUpdatePlan
@@ -929,10 +939,12 @@ func TestPlatformManagedRepairSourcePlanNewerThanActivationRefusedSQLite(t *test
 }
 
 func TestPlatformManagedRepairCurrentTupleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairCurrentTuple(t, false)
 }
 
 func TestPlatformManagedRepairCurrentTuplePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairCurrentTuple(t, true)
 }
 
@@ -1047,10 +1059,12 @@ func testPlatformManagedRepairGrantDriftRefused(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRepairGrantDriftRefusedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairGrantDriftRefused(t, false)
 }
 
 func TestPlatformManagedRepairGrantDriftRefusedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairGrantDriftRefused(t, true)
 }
 
@@ -1156,10 +1170,12 @@ func testPlatformManagedRepairFailureRequiresRecovery(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRepairFailureRequiresRecoverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairFailureRequiresRecovery(t, false)
 }
 
 func TestPlatformManagedRepairFailureRequiresRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairFailureRequiresRecovery(t, true)
 }
 
@@ -1191,14 +1207,17 @@ func testPlatformManagedRepairConcurrentClaim(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRepairConcurrentClaimSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairConcurrentClaim(t, false)
 }
 
 func TestPlatformManagedRepairConcurrentClaimPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairConcurrentClaim(t, true)
 }
 
 func TestPlatformManagedRepairActiveAppRefused(t *testing.T) {
+	t.Parallel()
 	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, false)
 	var target platformInstallProjection
 	var raw string
@@ -1334,10 +1353,12 @@ func testPlatformManagedRepairEnableOperatorRace(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRepairEnableOperatorRaceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairEnableOperatorRace(t, false)
 }
 
 func TestPlatformManagedRepairEnableOperatorRacePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRepairEnableOperatorRace(t, true)
 }
 
@@ -1388,14 +1409,17 @@ func testPlatformManagedDisablePreparesCurrentEnabledGeneration(t *testing.T, pg
 }
 
 func TestPlatformManagedDisablePreparesCurrentEnabledGenerationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisablePreparesCurrentEnabledGeneration(t, false)
 }
 
 func TestPlatformManagedDisablePreparesCurrentEnabledGenerationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisablePreparesCurrentEnabledGeneration(t, true)
 }
 
 func TestPlatformManagedEnableCheckpointToStartPostgres(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("PostgreSQL integration")
 	}
@@ -1426,6 +1450,7 @@ func TestPlatformManagedEnableCheckpointToStartPostgres(t *testing.T) {
 }
 
 func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t *testing.T) {
+	t.Parallel()
 	s, restored, _ := platformRestoreStartActivatedFixture(t, false)
 	actor := platformManagedFixtureSession(t, s)
 	review, err := s.createPlatformRemovalReview(

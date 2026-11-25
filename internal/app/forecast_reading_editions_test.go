@@ -11,6 +11,7 @@ import (
 )
 
 func TestEditionWithoutASetLinksItsReadableSibling(t *testing.T) {
+	t.Parallel()
 	eachReaderServer(t, assertReadingEditions)
 }
 
@@ -18,6 +19,7 @@ func TestEditionWithoutASetLinksItsReadableSibling(t *testing.T) {
 // is a sibling edition's set, an internal all reader or an administrator reads "counted on edition X"
 // instead of a duplicate, and nobody else learns that the sibling exists through the count.
 func TestSiblingEditionMemberReadsCountedOnEdition(t *testing.T) {
+	t.Parallel()
 	eachReaderServer(t, func(t *testing.T, s *Server) {
 		fx := seedEditionFixture(t, s)
 		grantSiblingEdition(t, s)
@@ -351,6 +353,7 @@ func assertSiblingEditionMemberReadsCountedOnEdition(t *testing.T, s *Server, cu
 }
 
 func TestReadingEditionLinksDoNotCrossAnalysisKeys(t *testing.T) {
+	t.Parallel()
 	for _, different := range []string{"symbol", "date", "rtype"} {
 		t.Run(different, func(t *testing.T) {
 			s := newV1Server(t)

@@ -10,6 +10,7 @@ import (
 
 // The operator role runs batch jobs but has no admin access; admin holds both.
 func TestOperatorPermissionMatrix(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		role, perm string
 		want       bool
@@ -30,6 +31,7 @@ func TestOperatorPermissionMatrix(t *testing.T) {
 
 // requirePermJSON: 200 for holders, 403 for a logged-in non-holder, 401 for anon.
 func TestRequirePermJSON(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.UpsertUser(User{Username: "adm", Role: "admin"})
 	st.UpsertUser(User{Username: "op", Role: "operator"})

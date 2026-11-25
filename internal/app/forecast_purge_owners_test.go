@@ -9,6 +9,7 @@ import (
 )
 
 func TestPredictionPurgeOwnerStore(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { testPredictionPurgeOwnerStore(t, newTestStore(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		testPredictionPurgeOwnerStore(t, pgStore(t, "prediction_claims", "prediction_marks", "prediction_sets", "prediction_purges"))
@@ -16,6 +17,7 @@ func TestPredictionPurgeOwnerStore(t *testing.T) {
 }
 
 func TestPostgresPredictionPurgeOwnershipSerialization(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
 		t.Fatal(err)

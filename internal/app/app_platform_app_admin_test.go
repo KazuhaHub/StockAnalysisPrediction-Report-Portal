@@ -109,6 +109,7 @@ func decodeLaunch(t *testing.T, w *httptest.ResponseRecorder) adminLaunchBody {
 // Fails if the admin surface needs audience membership, if a reader gets an admin page, or if the reader
 // launch stopped following the audience.
 func TestPlatformAppAdminLaunchAndDocument(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	// Nobody is in the audience. A user that is neither a Portal administrator nor delegated is refused on
 	// every admin entry, with the answer an unknown installation gets.
@@ -168,6 +169,7 @@ func TestPlatformAppAdminLaunchAndDocument(t *testing.T) {
 
 // Fails if a release without admin_routes can be opened as an admin page.
 func TestPlatformAppAdminLaunchRefusedWithoutAdminRoutes(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, false)
 	if w := e.adminLaunch(e.adminCookie); w.Code != 404 {
 		t.Fatalf("a release without admin_routes opened: %d", w.Code)
@@ -193,6 +195,7 @@ func TestPlatformAppAdminLaunchRefusedWithoutAdminRoutes(t *testing.T) {
 // Fails if a delegation does not open the admin page outside the audience, survives revocation, or is
 // inherited by an account that was recreated under the same name.
 func TestPlatformAppAdminDelegation(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	_, delegateCookie := e.newUser("app-delegate", "user")
 	if w := e.adminLaunch(delegateCookie); w.Code != 404 {
@@ -253,6 +256,7 @@ func TestPlatformAppAdminDelegation(t *testing.T) {
 // Fails if a delegated administrator can grant or revoke, if grants are not idempotent, if an unknown user
 // is accepted, or if the audit rows are not written exactly once per change.
 func TestPlatformAppAdminGrantAPI(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	_, delegateCookie := e.newUser("app-delegate", "user")
 	e.newUser("second-delegate", "user")
@@ -329,6 +333,7 @@ func TestPlatformAppAdminGrantAPI(t *testing.T) {
 
 // Fails if uninstalling leaves delegations or deleting a user leaves theirs behind.
 func TestPlatformAppAdminRowsFollowTheirOwners(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	e.newUser("app-delegate", "user")
 	e.newUser("other-delegate", "user")
@@ -361,6 +366,7 @@ func TestPlatformAppAdminRowsFollowTheirOwners(t *testing.T) {
 
 // Fails if a removed installation can be delegated or listed.
 func TestPlatformAppAdminRefusesRemovedInstallation(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	e.newUser("app-delegate", "user")
 	mustExec(t, e.s.st, `UPDATE app_platform_installations SET desired_state='removed' WHERE id=?`, e.id)
@@ -374,6 +380,7 @@ func TestPlatformAppAdminRefusesRemovedInstallation(t *testing.T) {
 
 // Fails if the settings projection does not say whether the release declares an admin page.
 func TestPlatformAppAdminSettingsProjection(t *testing.T) {
+	t.Parallel()
 	for _, withPage := range []bool{true, false} {
 		e := platformAdminPageFixture(t, withPage)
 		w := e.call("GET", "/api/admin/app-platform/installations/"+e.id+"/settings", e.adminCookie, "")
@@ -389,6 +396,7 @@ func TestPlatformAppAdminSettingsProjection(t *testing.T) {
 // the server log. The admitted paths are covered by TestPlatformWritableAdminSurfaceBackend and
 // TestPlatformAdminRequestAuditWriter.
 func TestPlatformAppAdminRequestAudit(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	body := func(method, path string) string {
 		raw, _ := json.Marshal(map[string]any{"binding": map[string]string{"generation": "1", "policyRevision": "1", "releaseSha256": e.releaseSHA()}, "method": method, "path": path, "body": ""})
@@ -423,6 +431,7 @@ func (e *appAdminEnv) releaseSHA() string {
 // Fails if the admin directory entries are wrong: manageable follows the app-admin check and the release,
 // an administrator outside the audience is listed as not openable, and a plain user sees neither.
 func TestPlatformAppAdminDirectory(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	_, delegateCookie := e.newUser("app-delegate", "user")
 	list := func(cookie string) []platformAppDirectoryItem {
@@ -491,6 +500,7 @@ func decodeAssertionClaims(t *testing.T, token string) protocol.Claims {
 // Fails if a reader request carries a surface claim, or an admin-surface request does not carry
 // surface=admin, at either signing site.
 func TestPlatformBackendAssertionSurface(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"v":1}`)
 	check := func(t *testing.T, sign func(admin bool) string) {
 		t.Helper()
@@ -547,6 +557,7 @@ func TestPlatformBackendAssertionSurface(t *testing.T) {
 // Fails if the admin surface is admitted for a backend whose release declares no admin page, or if the
 // session of a reader request is admitted for the admin check by anything but its own marker.
 func TestPlatformBackendAdminSurfaceNeedsAnAdminPage(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformWritableAccessFixture(t, false)
 	admin := actor
 	admin.adminSurface = true
@@ -578,10 +589,9 @@ func appAdminSessionID(name string) string { return platformDigest([]byte("sessi
 // assertion the backend would receive, and the handler's refusal and audit behaviour.
 func withAdminRoutesHook(t *testing.T) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		m.Presentation.AdminRoutes = []appplatform.Route{{ID: "admin", Path: "/admin", Layout: "viewport"}}
-	}
-	t.Cleanup(func() { platformFixtureManifestHook = nil })
+	})
 }
 
 func appAdminSession(t *testing.T, s *Server, name string) (platformActorSession, string) {
@@ -601,6 +611,7 @@ func appAdminSession(t *testing.T, s *Server, name string) (platformActorSession
 }
 
 func TestPlatformWritableAdminSurfaceBackend(t *testing.T) {
+	t.Parallel()
 	withAdminRoutesHook(t)
 	s, actor, lease := platformWritableAccessFixture(t, false)
 	installation := lease.installationID
@@ -688,6 +699,7 @@ func TestPlatformWritableAdminSurfaceBackend(t *testing.T) {
 
 // The managed gate admits the admin surface under the same rules.
 func TestPlatformManagedAdminSurfaceBackend(t *testing.T) {
+	t.Parallel()
 	withAdminRoutesHook(t)
 	s, actor, lease := platformManagedAccessFixture(t, false)
 	installation := lease.installationID

@@ -81,9 +81,16 @@ func testPlatformStaticActivation(t *testing.T, pg bool) {
 		t.Fatal("activation replayed")
 	}
 }
-func TestPlatformStaticActivationSQLite(t *testing.T)   { testPlatformStaticActivation(t, false) }
-func TestPlatformStaticActivationPostgres(t *testing.T) { testPlatformStaticActivation(t, true) }
+func TestPlatformStaticActivationSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformStaticActivation(t, false)
+}
+func TestPlatformStaticActivationPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformStaticActivation(t, true)
+}
 func TestPlatformStaticActivationNoImplicitAdminSQLite(t *testing.T) {
+	t.Parallel()
 	s, session, lease := platformActivationFixture(t, false, false)
 	if _, err := s.activatePlatformStaticInstall(context.Background(), lease); err != nil {
 		t.Fatal(err)
@@ -158,8 +165,14 @@ func testPlatformStaticActivationOU(t *testing.T, pg bool) {
 		t.Fatal("policy fallback retained ancestor grant")
 	}
 }
-func TestPlatformStaticActivationOUSQLite(t *testing.T)   { testPlatformStaticActivationOU(t, false) }
-func TestPlatformStaticActivationOUPostgres(t *testing.T) { testPlatformStaticActivationOU(t, true) }
+func TestPlatformStaticActivationOUSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformStaticActivationOU(t, false)
+}
+func TestPlatformStaticActivationOUPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformStaticActivationOU(t, true)
+}
 func testPlatformStaticActivationRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"namespace", "receipt", "effect", "backend", "desired", "policy", "lease", "sponsor", "runtime", "key", "artifact", "pause", "recipient"} {
 		t.Run(kind, func(t *testing.T) {
@@ -205,9 +218,11 @@ func testPlatformStaticActivationRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformStaticActivationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticActivationRefusals(t, false)
 }
 func TestPlatformStaticActivationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticActivationRefusals(t, true)
 }
 func testPlatformStaticActivationRollback(t *testing.T, pg bool) {
@@ -250,15 +265,18 @@ func testPlatformStaticActivationRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformStaticActivationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticActivationRollback(t, false)
 }
 func TestPlatformStaticActivationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticActivationRollback(t, true)
 }
 
 // An authentic publisher signature does not imply that the host can safely
 // compile the package into the supported frontend document profile.
 func TestPlatformStaticActivationUnsupportedFrontendSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, _ := platformInstallFixture(t, false)
 	var archive bytes.Buffer
 	writer := zip.NewWriter(&archive)
@@ -303,6 +321,7 @@ func TestPlatformStaticActivationUnsupportedFrontendSQLite(t *testing.T) {
 }
 
 func TestPlatformStaticActivationLateAuditPostgres(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"expired_lease", "canceled_context"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _, lease := platformActivationFixture(t, true, true)

@@ -11,6 +11,7 @@ import (
 )
 
 func TestPlatformWritableSchedulerRoutesManagedUninstall(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformWritableAccessFixture(t, false)
 	plan, err := s.createPlatformRemovalReview(actor, lease.installationID, appplatform.ActionUninstall)
 	if err != nil {
@@ -71,8 +72,14 @@ func testPlatformWritableQueueClaim(t *testing.T, pg bool) {
 		t.Fatal("old owner regained lease")
 	}
 }
-func TestPlatformWritableQueueClaimSQLite(t *testing.T)   { testPlatformWritableQueueClaim(t, false) }
-func TestPlatformWritableQueueClaimPostgres(t *testing.T) { testPlatformWritableQueueClaim(t, true) }
+func TestPlatformWritableQueueClaimSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableQueueClaim(t, false)
+}
+func TestPlatformWritableQueueClaimPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableQueueClaim(t, true)
+}
 
 func testPlatformWritableQueueRecovery(t *testing.T, pg bool) {
 	for _, stage := range []string{"writer", "start", "probe", "activate", "revoked_runtime"} {
@@ -108,9 +115,11 @@ func testPlatformWritableQueueRecovery(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableQueueRecoverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableQueueRecovery(t, false)
 }
 func TestPlatformWritableQueueRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableQueueRecovery(t, true)
 }
 
@@ -138,9 +147,11 @@ func testPlatformWritableSchedulerRetries(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableSchedulerRetriesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableSchedulerRetries(t, false)
 }
 func TestPlatformWritableSchedulerRetriesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableSchedulerRetries(t, true)
 }
 
@@ -178,13 +189,16 @@ func testPlatformWritableQueueAuthority(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableQueueAuthoritySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableQueueAuthority(t, false)
 }
 func TestPlatformWritableQueueAuthorityPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableQueueAuthority(t, true)
 }
 
 func TestPlatformWritableSchedulerCancellationSQLite(t *testing.T) {
+	t.Parallel()
 	s, _ := platformWritableQueueFixture(t, false)
 	if _, err := newPlatformWritableInstallScheduler(s, platformRuntimeEndpoint{}, platformFixtureID(946), time.Second); err == nil {
 		t.Fatal("writable scheduler accepted frontend-only bootstrap")
@@ -206,6 +220,7 @@ func TestPlatformWritableSchedulerCancellationSQLite(t *testing.T) {
 }
 
 func TestPlatformWritableReadinessWaitRevocationSQLite(t *testing.T) {
+	t.Parallel()
 	s, lease, _ := platformWritableProbeFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=0`)
 	before := dumpOf(t, s.st)
@@ -244,8 +259,10 @@ func testPlatformWritableFailureBinding(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableFailureBindingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableFailureBinding(t, false)
 }
 func TestPlatformWritableFailureBindingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableFailureBinding(t, true)
 }

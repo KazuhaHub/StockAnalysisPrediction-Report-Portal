@@ -9,6 +9,7 @@ import (
 )
 
 func TestNotificationWorkerAcceptedAndPaused(t *testing.T) {
+	t.Parallel()
 	for _, paused := range []bool{false, true} {
 		t.Run(map[bool]string{false: "accepted", true: "paused"}[paused], func(t *testing.T) {
 			st := newTestStore(t)
@@ -54,6 +55,7 @@ func TestNotificationWorkerAcceptedAndPaused(t *testing.T) {
 }
 
 func TestNotificationWorkerCancelsReplacedDestination(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	enableEmail(s)
@@ -86,6 +88,7 @@ func TestNotificationWorkerCancelsReplacedDestination(t *testing.T) {
 func TestNotificationDeliveryFailureLeavesPortalBusinessAvailableSQLite(
 	t *testing.T,
 ) {
+	t.Parallel()
 	st := platformTestStore(t, false)
 	s, actor := platformActorTestServerWithStore(t, st)
 	enableEmail(s)
@@ -125,6 +128,7 @@ func TestNotificationDeliveryFailureLeavesPortalBusinessAvailableSQLite(
 }
 
 func TestNotificationWorkerRechecksAudienceAndPreferences(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name              string
 		mandatory, revoke bool

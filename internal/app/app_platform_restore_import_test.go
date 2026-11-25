@@ -256,9 +256,11 @@ func testRestoreImportRepointsRuntimeAndIssuesGrant(t *testing.T, pg bool) {
 }
 
 func TestRestoreImportRepointsRuntimeAndIssuesGrantSQLite(t *testing.T) {
+	t.Parallel()
 	testRestoreImportRepointsRuntimeAndIssuesGrant(t, false)
 }
 func TestRestoreImportRepointsRuntimeAndIssuesGrantPostgres(t *testing.T) {
+	t.Parallel()
 	testRestoreImportRepointsRuntimeAndIssuesGrant(t, true)
 }
 
@@ -301,8 +303,14 @@ func testRestoreImportReviewRefusals(t *testing.T, pg bool) {
 	}
 }
 
-func TestRestoreImportReviewRefusalsSQLite(t *testing.T)   { testRestoreImportReviewRefusals(t, false) }
-func TestRestoreImportReviewRefusalsPostgres(t *testing.T) { testRestoreImportReviewRefusals(t, true) }
+func TestRestoreImportReviewRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testRestoreImportReviewRefusals(t, false)
+}
+func TestRestoreImportReviewRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testRestoreImportReviewRefusals(t, true)
+}
 
 func testConsumedGrantRefused(t *testing.T, pg bool) {
 	for _, state := range []string{"consumed", "revoked"} {
@@ -336,8 +344,8 @@ func testConsumedGrantRefused(t *testing.T, pg bool) {
 	}
 }
 
-func TestConsumedGrantRefusedSQLite(t *testing.T)   { testConsumedGrantRefused(t, false) }
-func TestConsumedGrantRefusedPostgres(t *testing.T) { testConsumedGrantRefused(t, true) }
+func TestConsumedGrantRefusedSQLite(t *testing.T)   { t.Parallel(); testConsumedGrantRefused(t, false) }
+func TestConsumedGrantRefusedPostgres(t *testing.T) { t.Parallel(); testConsumedGrantRefused(t, true) }
 
 func testForeignRuntimeGrantRefused(t *testing.T, pg bool) {
 	f := platformRestoreImportFixture(t, pg)
@@ -358,8 +366,14 @@ func testForeignRuntimeGrantRefused(t *testing.T, pg bool) {
 	}
 }
 
-func TestForeignRuntimeGrantRefusedSQLite(t *testing.T)   { testForeignRuntimeGrantRefused(t, false) }
-func TestForeignRuntimeGrantRefusedPostgres(t *testing.T) { testForeignRuntimeGrantRefused(t, true) }
+func TestForeignRuntimeGrantRefusedSQLite(t *testing.T) {
+	t.Parallel()
+	testForeignRuntimeGrantRefused(t, false)
+}
+func TestForeignRuntimeGrantRefusedPostgres(t *testing.T) {
+	t.Parallel()
+	testForeignRuntimeGrantRefused(t, true)
+}
 
 func testRestoreImportCommandCarriesProvenance(t *testing.T, pg bool) {
 	f := platformRestoreImportFixture(t, pg)
@@ -425,9 +439,11 @@ func testRestoreImportCommandCarriesProvenance(t *testing.T, pg bool) {
 }
 
 func TestRestoreImportCommandCarriesProvenanceSQLite(t *testing.T) {
+	t.Parallel()
 	testRestoreImportCommandCarriesProvenance(t, false)
 }
 func TestRestoreImportCommandCarriesProvenancePostgres(t *testing.T) {
+	t.Parallel()
 	testRestoreImportCommandCarriesProvenance(t, true)
 }
 
@@ -476,15 +492,18 @@ func testGrantConsumedAtomicallyWithReceipt(t *testing.T, pg bool) {
 }
 
 func TestGrantConsumedAtomicallyWithReceiptSQLite(t *testing.T) {
+	t.Parallel()
 	testGrantConsumedAtomicallyWithReceipt(t, false)
 }
 func TestGrantConsumedAtomicallyWithReceiptPostgres(t *testing.T) {
+	t.Parallel()
 	testGrantConsumedAtomicallyWithReceipt(t, true)
 }
 
 // A failure at the very end of the commit must leave neither half behind: no applied receipt with an
 // unconsumed grant, and no consumed grant without a receipt.
 func TestGrantConsumedAtomicallyWithReceiptRollsBackTogether(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	lease, err := f.s.st.claimPlatformOperation(commit.OperationID, platformFixtureID(5300))
@@ -527,6 +546,7 @@ func TestGrantConsumedAtomicallyWithReceiptRollsBackTogether(t *testing.T) {
 }
 
 func TestRestoreImportRefusesAChangedReceipt(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(*journal.ImportCheckpointReceipt){
 		"other manifest":   func(r *journal.ImportCheckpointReceipt) { r.ManifestSHA256 = strings.Repeat("c", 64) },
 		"other checkpoint": func(r *journal.ImportCheckpointReceipt) { r.CheckpointID = platformFixtureID(1) },
@@ -551,6 +571,7 @@ func TestRestoreImportRefusesAChangedReceipt(t *testing.T) {
 }
 
 func TestRestoreImportFinishForReview(t *testing.T) {
+	t.Parallel()
 	t.Run("never dispatched", func(t *testing.T) {
 		f := platformRestoreImportFixture(t, false)
 		commit := f.reviewAndConsume(t)
@@ -585,6 +606,7 @@ func TestRestoreImportFinishForReview(t *testing.T) {
 }
 
 func TestRestoreImportSchedulerDrivesOperation(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5301), time.Second)
@@ -620,9 +642,11 @@ func testRestoreRevokesIssuedImportGrants(t *testing.T, pg bool) {
 }
 
 func TestRestoreRevokesIssuedImportGrantsSQLite(t *testing.T) {
+	t.Parallel()
 	testRestoreRevokesIssuedImportGrants(t, false)
 }
 func TestRestoreRevokesIssuedImportGrantsPostgres(t *testing.T) {
+	t.Parallel()
 	testRestoreRevokesIssuedImportGrants(t, true)
 }
 
@@ -655,8 +679,12 @@ func testRevokedImportGrantAllowsRetry(t *testing.T, pg bool) {
 	}
 }
 
-func TestRevokedImportGrantAllowsRetry(t *testing.T) { testRevokedImportGrantAllowsRetry(t, false) }
+func TestRevokedImportGrantAllowsRetry(t *testing.T) {
+	t.Parallel()
+	testRevokedImportGrantAllowsRetry(t, false)
+}
 func TestRevokedImportGrantAllowsRetryPostgres(t *testing.T) {
+	t.Parallel()
 	testRevokedImportGrantAllowsRetry(t, true)
 }
 
@@ -702,8 +730,10 @@ func testRestoreImportRetryAfterFailedImport(t *testing.T, pg bool) {
 }
 
 func TestRestoreImportRetryAfterFailedImport(t *testing.T) {
+	t.Parallel()
 	testRestoreImportRetryAfterFailedImport(t, false)
 }
 func TestRestoreImportRetryAfterFailedImportPostgres(t *testing.T) {
+	t.Parallel()
 	testRestoreImportRetryAfterFailedImport(t, true)
 }

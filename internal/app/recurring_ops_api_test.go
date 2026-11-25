@@ -9,6 +9,7 @@ import (
 // Recurring-task management endpoints: detail, update, enable toggle and run-now, with the
 // ownership guard and the no-op path (target gone) that must answer 400 rather than fire nothing.
 func TestRecurringTaskOperationHandlers(t *testing.T) {
+	t.Parallel()
 	dify := difyServer(t)
 	defer dify.Close()
 	s := userAdminServer(t)

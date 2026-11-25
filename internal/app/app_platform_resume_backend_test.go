@@ -106,9 +106,11 @@ func testResumedManagedAppLaunchesAndServesBackend(t *testing.T, pg bool) {
 }
 
 func TestResumedManagedAppLaunchesAndServesBackendSQLite(t *testing.T) {
+	t.Parallel()
 	testResumedManagedAppLaunchesAndServesBackend(t, false)
 }
 func TestResumedManagedAppLaunchesAndServesBackendPostgres(t *testing.T) {
+	t.Parallel()
 	testResumedManagedAppLaunchesAndServesBackend(t, true)
 }
 
@@ -142,9 +144,11 @@ func testResumedManagedAppRefusedOnBrokenEvidence(t *testing.T, pg bool) {
 }
 
 func TestResumedManagedAppRefusedOnBrokenEvidenceSQLite(t *testing.T) {
+	t.Parallel()
 	testResumedManagedAppRefusedOnBrokenEvidence(t, false)
 }
 func TestResumedManagedAppRefusedOnBrokenEvidencePostgres(t *testing.T) {
+	t.Parallel()
 	testResumedManagedAppRefusedOnBrokenEvidence(t, true)
 }
 
@@ -191,8 +195,10 @@ func testResumeAfterAbandonedAppliedImport(t *testing.T, pg bool) {
 }
 
 func TestResumeAfterAbandonedAppliedImportSQLite(t *testing.T) {
+	t.Parallel()
 	testResumeAfterAbandonedAppliedImport(t, false)
 }
 func TestResumeAfterAbandonedAppliedImportPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeAfterAbandonedAppliedImport(t, true)
 }

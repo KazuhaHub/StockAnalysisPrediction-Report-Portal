@@ -10,6 +10,7 @@ import (
 )
 
 func TestForecastShadowSinaContinuationUsesRealAdmissionAcrossPasses(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"resume", "source_order", "mode", "day", "session", "observation_changed"} {
 		t.Run(change, func(t *testing.T) {
 			s := newV1Server(t)

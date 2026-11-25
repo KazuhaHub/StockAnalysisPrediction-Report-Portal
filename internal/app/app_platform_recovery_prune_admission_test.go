@@ -31,6 +31,7 @@ func platformInsertDeleteCheckpointRow(t *testing.T, s *Server, operation, set, 
 // Test 17, the bundle writer. Fails if a set with a decided deletion still demands its archive, or if a refused
 // deletion (reverted) stops the bundle requiring an archive the runner still holds.
 func TestBundleDoesNotRequireTheArchiveOfASetWhoseDeletionIsDecided(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"prepared", "unknown", "applied"} {
 		t.Run(state, func(t *testing.T) {
 			b := platformBundleFixture(t)
@@ -88,6 +89,7 @@ func TestBundleWrittenWhileADeletionCommitsRefuses(t *testing.T) {
 // Test 17, restore admission. The review is the first admission, the stage's intent the second: each must refuse a
 // set with a decided deletion with its existing typed refusal, and admit one whose deletion was refused.
 func TestRestoreAdmissionRefusesASetWhoseDeletionIsDecided(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"prepared", "unknown", "applied"} {
 		t.Run("review "+state, func(t *testing.T) {
 			eachPlatformDriver(t, func(t *testing.T, pg bool) {
@@ -125,6 +127,7 @@ func TestRestoreAdmissionRefusesASetWhoseDeletionIsDecided(t *testing.T) {
 // Test 17, import-grant issuance and restore-from-import. A decided deletion refuses both with the existing typed
 // refusal, and no grant is written.
 func TestImportAdmissionRefusesASetWhoseDeletionIsDecided(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"prepared", "unknown", "applied"} {
 		t.Run(state, func(t *testing.T) {
 			eachPlatformDriver(t, func(t *testing.T, pg bool) {
@@ -168,6 +171,7 @@ func TestPlatformPruneSelectionExcludesASetWithADecidedDeletionFromRetention(t *
 // Test 22, the retention pin. Fails if the operation holding a completed deletion is swept: its effect would go with
 // it, and the next sweep of sets of deleted namespaces would send the same deletion again.
 func TestRetentionKeepsTheOperationHoldingACompletedCheckpointDeletion(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		old := retNow - 100*retDay
@@ -213,6 +217,7 @@ func TestRetentionKeepsTheOperationHoldingACompletedCheckpointDeletion(t *testin
 
 // A delete_checkpoint effect row whose receipt names no set cannot be attributed, so the operation is kept.
 func TestRetentionKeepsTheOperationOfADeletionItCannotAttribute(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	f.namespace(removed, "deleted")
@@ -270,6 +275,7 @@ func TestPlatformPruneSerializesWithAdmissionOnPostgres(t *testing.T) {
 // held OU mutation lock or trust lock makes either wait, and neither runs before the locks are taken. This needs no
 // runtime, so it runs where the full fixture above cannot.
 func TestPlatformPruneTransactionTakesTheAdmissionLocksOnPostgres(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, true)
 	hold := func(statement string) func() {
 		tx, err := f.st.db.Begin()
@@ -307,6 +313,7 @@ func TestPlatformPruneTransactionTakesTheAdmissionLocksOnPostgres(t *testing.T) 
 // (open effects through the state index, applied ones through the derived effect id), the retained-set predicate built from it, the leak selection,
 // the effect history and the effect-number allocation. The driver tests above need a full runtime fixture.
 func TestPlatformPruneQueriesOnBothDrivers(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()

@@ -59,6 +59,7 @@ func orphanedRestoreStartFixture(t *testing.T, pg bool) (*settleFixture, string)
 // restore ends with the start orphaned, the idle settlement asks the runner to settle it (once), and closes the start
 // effect on what the runner then reads; the reservation is released by the runner's settlement.
 func TestSettlementTickSettlesAnOrphanedRestoreStartOutsideARecoveryResume(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f, operation := orphanedRestoreStartFixture(t, pg)
 		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
@@ -97,6 +98,7 @@ func TestSettlementTickSettlesAnOrphanedRestoreStartOutsideARecoveryResume(t *te
 
 // Nothing is settled while the runner may still be executing the start, or inside the start's signed window.
 func TestSettlementTickLeavesARestoreStartThatMayBeExecuting(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f, operation := orphanedRestoreStartFixture(t, pg)
 		script := &settleScript{before: held("pending"), after: held("pending")}
@@ -121,6 +123,7 @@ func TestSettlementTickLeavesARestoreStartThatMayBeExecuting(t *testing.T) {
 // A recovery resume keeps its own path, the recovery reconciliation, which runs only while the Portal is paused: the
 // held-start settlement never selects it.
 func TestHeldStartSettlementLeavesARecoveryResumeToItsOwnReconciliation(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f, operation, _ := unknownResumeStartFixtureFor(t, pg)
 		candidates, err := f.s.platformHeldStartsToSettle(context.Background())

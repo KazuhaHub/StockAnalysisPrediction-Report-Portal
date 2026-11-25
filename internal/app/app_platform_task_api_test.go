@@ -39,6 +39,7 @@ func platformTaskHTTPWithIdentity(t *testing.T, s *Server, installation, body st
 }
 
 func TestPlatformTaskSchedulingAPIUsesServiceIdentityAndOccurrenceIdentity(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	body := `{"occurrenceId":"api-task","handler":"app.backend.task","payload":{"value":1}}`
 	first := platformTaskHTTPFixture(t, s, installation, body)
@@ -81,6 +82,7 @@ func TestPlatformTaskSchedulingAPIUsesServiceIdentityAndOccurrenceIdentity(t *te
 }
 
 func TestPlatformAdminTaskAPIExposesSafeHistoryAndReview(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "admin-pending",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":true}`))
@@ -117,6 +119,7 @@ func TestPlatformAdminTaskAPIExposesSafeHistoryAndReview(t *testing.T) {
 }
 
 func TestPlatformAdminTaskReviewClosesUncertainTaskWithoutReplay(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "admin-uncertain",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":true}`))

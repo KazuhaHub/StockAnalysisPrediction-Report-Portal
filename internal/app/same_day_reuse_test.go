@@ -17,6 +17,7 @@ import (
 // exists to serve, and every request ran for real. The entitlement check moved to the caller, which
 // is where TestReuseRefusesAnUngrantedVersion holds it.
 func TestFindSameDayReportIsAContentLookup(t *testing.T) {
+	t.Parallel()
 	st, s, _, _, _ := readScopeFixture(t)
 	today := time.Now().Format("2006-01-02")
 	def := st.DefaultVersion()
@@ -45,6 +46,7 @@ func TestFindSameDayReportIsAContentLookup(t *testing.T) {
 // "already generated today" would become a way to receive a form of a report the caller was never
 // entitled to read — the run allow-list would gate generating it while reuse handed it over.
 func TestReuseRefusesAnUngrantedVersion(t *testing.T) {
+	t.Parallel()
 	s, org, _, tgtA, _ := ouFixture(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})
@@ -73,6 +75,7 @@ func TestReuseRefusesAnUngrantedVersion(t *testing.T) {
 // restricted member requests a report that already exists today, the portal returns it instead of
 // running — creating no job and consuming no quota — and falls through to a real run otherwise.
 func TestApiBatchJobCreateReusesSameDayReport(t *testing.T) {
+	t.Parallel()
 	s, org, _, tgtA, _ := ouFixture(t)
 	st := s.st
 	// Declare what the target produces and which input carries the stock code; reuse needs both.
@@ -143,6 +146,7 @@ func TestApiBatchJobCreateReusesSameDayReport(t *testing.T) {
 // symbol_input declared, the portal runs rather than risk handing back the wrong report — and a
 // symbol-less (thematic) request never reuses.
 func TestSameDayReuseNeedsDeclaredTargetFields(t *testing.T) {
+	t.Parallel()
 	s, org, _, tgtA, _ := ouFixture(t)
 	st := s.st
 	st.SetGroupTargets(org, []GroupTarget{{TargetID: tgtA, Surfaces: ""}})

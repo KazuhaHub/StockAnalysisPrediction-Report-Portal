@@ -49,6 +49,7 @@ func brokenTreeReader(t *testing.T, s *Server, kind string) string {
 // The exception is narrow by design: any other route still gets the wall's 503 for a dangling
 // chain, so a broken tree keeps the portal closed everywhere the forecast decision has no say.
 func TestBrokenOUChainAnswersForecastUnavailableOnForecastReads(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -95,6 +96,7 @@ func TestBrokenOUChainAnswersForecastUnavailableOnForecastReads(t *testing.T) {
 // on it is a registered GET route, every forecast-gated row is on it, and the prediction card and
 // history reads in both the session and the v1 classes are on it.
 func TestForecastReadPatternsMatchTheRouteTable(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	registered := map[string]routeRow{}

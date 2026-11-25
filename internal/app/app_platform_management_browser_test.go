@@ -14,6 +14,7 @@ import (
 // Explicitly requested loopback browser fixture with a disposable database and
 // synthetic publisher/session. No listener exists in ordinary tests or binaries.
 func TestPlatformManagementBrowserFixture(t *testing.T) {
+	t.Parallel()
 	stateFile := os.Getenv("APP_INSTALL_HTTP_STATE")
 	if stateFile == "" {
 		t.Skip("installation browser fixture not requested")

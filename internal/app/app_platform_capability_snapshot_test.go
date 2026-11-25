@@ -70,9 +70,11 @@ func testPlatformCapabilitySnapshotRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCapabilitySnapshotSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilitySnapshotRefusals(t, false)
 }
 func TestPlatformCapabilitySnapshotPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilitySnapshotRefusals(t, true)
 }
 
@@ -126,8 +128,10 @@ func testPlatformBackendCapabilitySnapshot(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformBackendCapabilitySnapshotSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendCapabilitySnapshot(t, false)
 }
 func TestPlatformBackendCapabilitySnapshotPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendCapabilitySnapshot(t, true)
 }

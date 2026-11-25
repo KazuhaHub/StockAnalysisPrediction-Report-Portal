@@ -402,12 +402,14 @@ func testPlatformDataQuotaPlanFenceAfterDisable(t *testing.T, s *Server, install
 }
 
 func TestPlatformDataQuotaPlanFenceAfterDisableUpdateSourcedSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, enabled, target, runtime := platformDataActionFixture(t, false)
 	platformCompleteSyntheticDisable(t, s, actor, enabled)
 	testPlatformDataQuotaPlanFenceAfterDisable(t, s, enabled.installationID, runtime, target)
 }
 
 func TestPlatformDataQuotaPlanFenceAfterDisableInstallSourcedSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixtureAction(t, false, appplatform.ActionDisable)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {

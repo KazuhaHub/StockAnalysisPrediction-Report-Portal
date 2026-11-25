@@ -9,6 +9,7 @@ import (
 )
 
 func TestReaderStageNeverWidensScope(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "stage-reader", scopeAll, false)
 	seedForecastReader(t, s, "stage-none", scopeNone, false)
@@ -38,6 +39,7 @@ func TestReaderStageNeverWidensScope(t *testing.T) {
 }
 
 func TestReaderStageChangesAreValidatedAndAudited(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, body := range []string{`{"reader":"broken","mode":"dry"}`, `{"reader":false}`, `{"reader":null}`} {
 		if w := saveForecastSettings(t, s, body); w.Code != 400 {
@@ -71,6 +73,7 @@ func TestReaderStageChangesAreValidatedAndAudited(t *testing.T) {
 }
 
 func TestReaderStageAndShadowControlsValidateBeforeEitherWrite(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, body := range []string{`{"reader":"broken","fallback":"shadow"}`, `{"reader":"full","fallback":"on"}`} {
 		if w := saveForecastSettings(t, s, body); w.Code != 400 {
@@ -98,6 +101,7 @@ func TestReaderStageAndShadowControlsValidateBeforeEitherWrite(t *testing.T) {
 // v1 reads) with forecast_unavailable, while a persistent query token is unchanged and the record
 // does not depend on the stage at all.
 func TestReaderStageEverywhere(t *testing.T) {
+	t.Parallel()
 	eachReaderServer(t, func(t *testing.T, s *Server) {
 		s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 		seedForecastReader(t, s, "stage-reader", scopeAll, false)
@@ -144,6 +148,7 @@ func TestReaderStageEverywhere(t *testing.T) {
 }
 
 func TestMeForecastReaderStageTracksCurrentPolicy(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, scope := range []string{scopeAll, scopeOwn, scopeNone} {
 		seedForecastReader(t, s, "stage-"+scope, scope, false)

@@ -22,6 +22,7 @@ var deliveryLayers = []string{
 // Fails if the "image absent before the load" proof passes while a copy of the target is still in the store,
 // which would turn the whole scenario into a start of a pre-existing image.
 func TestDeliveryProofRefusesATargetThatIsStillPresentBeforeTheLoad(t *testing.T) {
+	t.Parallel()
 	if err := imageDeliveryCheckAbsent([]imageDeliveryImage{{ID: deliveryOtherID}}, deliveryTargetID); err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +38,7 @@ func TestDeliveryProofRefusesATargetThatIsStillPresentBeforeTheLoad(t *testing.T
 
 // Fails if the load may add a tag, a digest reference or a second image, or may alter another image.
 func TestDeliveryProofAcceptsOnlyTheUntaggedTargetAsTheDifference(t *testing.T) {
+	t.Parallel()
 	before := []imageDeliveryImage{{ID: deliveryOtherID, RepoTags: []string{"keep:1"}}}
 	good := append(append([]imageDeliveryImage{}, before...), imageDeliveryImage{ID: deliveryTargetID})
 	if err := imageDeliveryCheckAfterLoad(before, good, deliveryTargetID); err != nil {
@@ -61,6 +63,7 @@ func TestDeliveryProofAcceptsOnlyTheUntaggedTargetAsTheDifference(t *testing.T) 
 // Fails if the event proof is vacuous (a watcher that saw nothing), lets a pull, a tag or a push through, or
 // accepts anything but exactly one image load, on the target.
 func TestDeliveryProofRequiresALiveWatcherExactlyOneLoadAndNoPullTagOrPush(t *testing.T) {
+	t.Parallel()
 	live := imageDeliveryEvent{Type: "container", Action: "create", Image: deliveryTargetID}
 	load := imageDeliveryEvent{Type: "image", Action: "load", ID: deliveryTargetID}
 	if err := imageDeliveryCheckEvents([]imageDeliveryEvent{load, live}, deliveryTargetID); err != nil {
@@ -96,6 +99,7 @@ func TestDeliveryProofRequiresALiveWatcherExactlyOneLoadAndNoPullTagOrPush(t *te
 
 // Fails if the running container is accepted although its image is not exactly the package's image.
 func TestDeliveryProofBindsTheRunningContainerToTheExactImage(t *testing.T) {
+	t.Parallel()
 	running := []imageDeliveryContainer{{ID: "c1", ImageID: deliveryTargetID, State: "running"}}
 	if err := imageDeliveryCheckContainers(running, deliveryTargetID); err != nil {
 		t.Fatal(err)
@@ -122,6 +126,7 @@ func TestDeliveryProofBindsTheRunningContainerToTheExactImage(t *testing.T) {
 
 // Fails if the stored image passes with another layer chain, another platform or a name.
 func TestDeliveryProofChecksTheStoredImageAgainstThePackage(t *testing.T) {
+	t.Parallel()
 	ok := imageDeliveryInspect{ID: deliveryTargetID, OS: "linux", Architecture: "amd64", Layers: deliveryLayers}
 	if err := imageDeliveryCheckInspect(ok, deliveryTargetID, "linux/amd64", deliveryLayers); err != nil {
 		t.Fatal(err)
@@ -143,6 +148,7 @@ func TestDeliveryProofChecksTheStoredImageAgainstThePackage(t *testing.T) {
 // Fails if the expected ID follows the wrong store: the classic store names an image by its config digest, the
 // containerd store by its manifest digest.
 func TestDeliveryExpectedImageIDFollowsTheStore(t *testing.T) {
+	t.Parallel()
 	if imageDeliveryExpectedID(false, "sha256:m", "sha256:c") != "sha256:c" || imageDeliveryExpectedID(true, "sha256:m", "sha256:c") != "sha256:m" {
 		t.Fatal("expected image id")
 	}
@@ -151,6 +157,7 @@ func TestDeliveryExpectedImageIDFollowsTheStore(t *testing.T) {
 // Fails if a descriptor digest (bare hex) is compared with the daemon's form ("sha256:" and the hex) without
 // normalising it, which would make "the image is absent from the store" pass on a store that still holds it.
 func TestDeliveryDigestsAreComparedInTheDaemonsForm(t *testing.T) {
+	t.Parallel()
 	hex := strings.Repeat("9", 64)
 	if imageDeliveryDaemonID(hex) != "sha256:"+hex || imageDeliveryDaemonID("sha256:"+hex) != "sha256:"+hex {
 		t.Fatal("daemon id form")
@@ -165,6 +172,7 @@ func TestDeliveryDigestsAreComparedInTheDaemonsForm(t *testing.T) {
 
 // Fails if the runner's ready line is not parsed from the captured output, so the profile claim is an observation.
 func TestDeliveryRunnerReadyLineIsObservedNotAssumed(t *testing.T) {
+	t.Parallel()
 	out := "2026/11/09 22:31:26 app-runner ready profile=linux-docker-rootful-projectquota/v1-dev platform=linux/amd64 images=production\n"
 	profile, platform, images, err := imageDeliveryParseRunnerReady(out)
 	if err != nil || profile != "linux-docker-rootful-projectquota/v1-dev" || platform != "linux/amd64" || images != "production" {
@@ -182,6 +190,7 @@ func TestDeliveryRunnerReadyLineIsObservedNotAssumed(t *testing.T) {
 
 // Fails if the native ID of a start receipt is not found wherever the receipt nests it, or is invented.
 func TestDeliveryNativeIDIsReadFromTheReceipt(t *testing.T) {
+	t.Parallel()
 	id := strings.Repeat("a", 64)
 	for _, raw := range []string{`{"native_id":"` + id + `"}`, `{"claim":{"x":1},"outer":{"native_id":"` + id + `"}}`, `[{"a":1},{"native_id":"` + id + `"}]`} {
 		if got := imageDeliveryNativeID(raw); got != id {
@@ -198,6 +207,7 @@ func TestDeliveryNativeIDIsReadFromTheReceipt(t *testing.T) {
 // Fails if a running container is accepted that the runner did not start for this installation, operation and
 // release, or whose ID is not the native ID in the start receipt.
 func TestDeliveryContainerIsTiedToTheRunnersStartReceipt(t *testing.T) {
+	t.Parallel()
 	native := strings.Repeat("b", 64)
 	labels := map[string]string{
 		"org.portal.app.installation": "inst", "org.portal.app.operation": "op", "org.portal.app.release": "rel",
@@ -240,6 +250,7 @@ func TestDeliveryContainerIsTiedToTheRunnersStartReceipt(t *testing.T) {
 // plain floor never matches a pre-release version (semver pre-release rule), and a plain ceiling still admits the
 // first pre-release of the next breaking version. Fails if either half of that rule stops holding for either range.
 func TestDeliveryCompatibilityRangesNeedPreReleaseBounds(t *testing.T) {
+	t.Parallel()
 	parts := newPlatformManagedImageParts(t, "2.0.0", "range")
 	var m appplatform.Manifest
 	if err := json.Unmarshal(parts.descriptor, &m); err != nil || m.Backend == nil {
@@ -316,6 +327,7 @@ func imageDeliveryRunnerProtocolAdmits(t *testing.T, m appplatform.Manifest, tar
 
 // Fails if the removal proof accepts no delete, a second delete, or a delete of an image the package did not carry.
 func TestDeliveryProofRequiresExactlyOneDeleteOfTheDeliveredImage(t *testing.T) {
+	t.Parallel()
 	drop := imageDeliveryEvent{Type: "image", Action: "delete", ID: deliveryTargetID}
 	if err := imageDeliveryCheckRemoval([]imageDeliveryEvent{{Type: "image", Action: "load", ID: deliveryTargetID}, drop}, deliveryTargetID); err != nil {
 		t.Fatal(err)
@@ -340,6 +352,7 @@ func TestDeliveryProofRequiresExactlyOneDeleteOfTheDeliveredImage(t *testing.T) 
 // Fails if the daemon passes after the removal with the delivered image still in it, or with another image gone or
 // renamed.
 func TestDeliveryProofRequiresTheRemovalToTakeOnlyTheDeliveredImage(t *testing.T) {
+	t.Parallel()
 	keep := imageDeliveryImage{ID: deliveryOtherID, RepoTags: []string{"keep:1"}}
 	target := imageDeliveryImage{ID: deliveryTargetID}
 	if err := imageDeliveryCheckAfterRemoval([]imageDeliveryImage{keep}, []imageDeliveryImage{keep}, deliveryTargetID); err != nil {

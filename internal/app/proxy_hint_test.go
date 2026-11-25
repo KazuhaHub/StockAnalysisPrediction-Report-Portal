@@ -16,6 +16,7 @@ import (
 // address that is the same for everyone.
 
 func TestForwardedRequestFromAnUntrustedPeerIsNoticed(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t) // no trusted_proxies configured, like the deployment that reported this
 	req := httptest.NewRequest(http.MethodPost, "/api/login", nil)
 	req.RemoteAddr = "172.20.0.1:41234" // a Docker bridge gateway: the proxy, not the visitor
@@ -31,6 +32,7 @@ func TestForwardedRequestFromAnUntrustedPeerIsNoticed(t *testing.T) {
 
 // No header, no hint: a portal reached directly must not nag about a proxy it does not have.
 func TestDirectRequestsRaiseNoHint(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/login", nil)
 	req.RemoteAddr = "203.0.113.9:41234"
@@ -43,6 +45,7 @@ func TestDirectRequestsRaiseNoHint(t *testing.T) {
 // Once the proxy IS trusted the header is believed, the recorded address is the visitor's, and
 // there is nothing left to warn about.
 func TestATrustedProxyRecordsTheVisitorAndClearsTheHint(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	nets, err := parseTrustedProxies([]string{"172.20.0.0/16"})
 	if err != nil {
@@ -64,6 +67,7 @@ func TestATrustedProxyRecordsTheVisitorAndClearsTheHint(t *testing.T) {
 
 // The console has to say it, or the admin never finds out: the column looks populated either way.
 func TestAuditResponseCarriesTheProxyHint(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 

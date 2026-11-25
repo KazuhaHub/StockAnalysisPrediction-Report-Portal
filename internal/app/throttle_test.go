@@ -12,6 +12,7 @@ import (
 )
 
 func TestClientIPTrustsOnlyConfiguredProxyChain(t *testing.T) {
+	t.Parallel()
 	nets, err := parseTrustedProxies([]string{"10.0.0.0/8", "192.0.2.10"})
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +34,7 @@ func TestClientIPTrustsOnlyConfiguredProxyChain(t *testing.T) {
 }
 
 func TestRequestIsHTTPSTrustsForwardedProtoOnlyFromConfiguredProxy(t *testing.T) {
+	t.Parallel()
 	trusted, err := parseTrustedProxies([]string{"10.0.0.0/8"})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +54,7 @@ func TestRequestIsHTTPSTrustsForwardedProtoOnlyFromConfiguredProxy(t *testing.T)
 // Regression for the account-lockout DoS: an attacker failing an account past the ceiling must NOT
 // prevent the real owner (correct password, from a different IP) from logging in.
 func TestLoginNoAccountLockout(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	hash, _ := bcrypt.GenerateFromPassword([]byte("right"), bcrypt.MinCost)
 	if err := st.UpsertUser(User{Username: "victim", PasswordHash: string(hash), Role: "user", Active: true}); err != nil {
@@ -82,6 +85,7 @@ func TestLoginNoAccountLockout(t *testing.T) {
 // The throttle blocks a key after loginFailMax failures within the window, a success resets it, and
 // the window rolls over after loginFailWindow.
 func TestLoginThrottle(t *testing.T) {
+	t.Parallel()
 	l := newLoginThrottle()
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	key := "u:admin"
@@ -115,6 +119,7 @@ func TestLoginThrottle(t *testing.T) {
 
 // With no configured trusted proxy, clientIP uses RemoteAddr and ignores X-Forwarded-For.
 func TestClientIP(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("POST", "/api/login", nil)
 	r.RemoteAddr = "203.0.113.9:5555"
 	if got := clientIP(r, nil); got != "203.0.113.9" {
@@ -130,6 +135,7 @@ func TestClientIP(t *testing.T) {
 // ListQueueJobs returns every active job plus only the most recent termLimit terminal jobs, newest
 // first, and the true total — so a large finished history is bounded but no pending job is hidden.
 func TestListQueueJobs(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	// 5 terminal jobs (ids 1..5) + 1 active queued job (id 6) + 1 old-ish active running (id 7).
 	for i := 0; i < 5; i++ {

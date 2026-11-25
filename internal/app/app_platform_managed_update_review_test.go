@@ -16,12 +16,11 @@ import (
 
 // platformUpdateFixtureWritable makes the update fixtures install a writable managed application, the kind that
 // can launch. A test sets it through platformWritableUpdateFixtures.
-var platformUpdateFixtureWritable bool
+var platformUpdateFixtureWritable testScoped[bool]
 
 func platformWritableUpdateFixtures(t *testing.T) {
 	t.Helper()
-	platformUpdateFixtureWritable = true
-	t.Cleanup(func() { platformUpdateFixtureWritable = false })
+	platformUpdateFixtureWritable.set(t, true)
 }
 
 type platformManagedUpdateReviewFixture struct {
@@ -49,12 +48,12 @@ func platformManagedUpdateProjectionFixture(t *testing.T, pg bool) platformManag
 func platformManagedUpdateProjectionFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) platformManagedUpdateReviewFixture {
 	t.Helper()
 	access := platformManagedAccessFixture
-	if platformUpdateFixtureWritable {
+	if platformUpdateFixtureWritable.get(t) {
 		access = platformWritableAccessFixture
 	}
 	s, actor, lease := access(t, pg)
-	if platformUpdateFixtureAfterInstall != nil {
-		platformUpdateFixtureAfterInstall(t, s, lease.installationID)
+	if platformUpdateFixtureAfterInstall.get(t) != nil {
+		platformUpdateFixtureAfterInstall.get(t)(t, s, lease.installationID)
 	}
 	var planRaw string
 	var revision, policy, format int64
@@ -124,10 +123,12 @@ func platformManagedUpdateProjectionFixtureWith(t *testing.T, pg bool, mutate fu
 }
 
 func TestPlatformManagedUpdateProjectionBindsSourceAndRuntimeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateProjectionBindsSourceAndRuntime(t, false)
 }
 
 func TestPlatformManagedUpdateProjectionBindsSourceAndRuntimePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateProjectionBindsSourceAndRuntime(t, true)
 }
 
@@ -157,10 +158,12 @@ func testPlatformManagedUpdateProjectionBindsSourceAndRuntime(t *testing.T, pg b
 }
 
 func TestPlatformManagedUpdateProjectionRefusesChangedSourceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateProjectionRefusesChangedSource(t, false)
 }
 
 func TestPlatformManagedUpdateProjectionRefusesChangedSourcePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateProjectionRefusesChangedSource(t, true)
 }
 
@@ -212,6 +215,7 @@ func testPlatformManagedUpdateProjectionRefusesChangedSource(t *testing.T, pg bo
 }
 
 func TestPlatformManagedUpdateReviewRejectsMissingOpaqueRuntime(t *testing.T) {
+	t.Parallel()
 	s, session, _ := platformManagedAccessFixture(t, false)
 	if _, err := s.createPlatformManagedUpdateReview(
 		context.Background(), session, platformFixtureID(901),
@@ -231,6 +235,7 @@ func TestPlatformManagedUpdateReviewRejectsMissingOpaqueRuntime(t *testing.T) {
 }
 
 func TestManagedRestoreRootResolvesUpdateRuntime(t *testing.T) {
+	t.Parallel()
 	s, lease, _ := platformUpdateRecoveryRestoreFixture(t, false)
 	target, err := platformManagedTargetForOperation(
 		s.st.poolExec(), lease.id)
@@ -247,12 +252,12 @@ func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, plat
 }
 
 // lastPlatformUpdateFixture is the review fixture the most recent update operation fixture was built from.
-var lastPlatformUpdateFixture platformManagedUpdateReviewFixture
+var lastPlatformUpdateFixture testScoped[platformManagedUpdateReviewFixture]
 
 func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) (*Server, platformOperationLease) {
 	t.Helper()
 	fixture := platformManagedUpdateProjectionFixtureWith(t, pg, mutate)
-	lastPlatformUpdateFixture = fixture
+	lastPlatformUpdateFixture.set(t, fixture)
 	return fixture.server, platformInsertManagedUpdateOperation(t, fixture, platformFixtureID(6110), platformFixtureID(6111), "")
 }
 
@@ -324,10 +329,12 @@ func platformInsertManagedUpdateOperation(t *testing.T, fixture platformManagedU
 }
 
 func TestPlatformManagedUpdateQueueClaimsExactAdmissionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQueueClaimsExactAdmission(t, false)
 }
 
 func TestPlatformManagedUpdateQueueClaimsExactAdmissionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQueueClaimsExactAdmission(t, true)
 }
 
@@ -381,10 +388,12 @@ func TestPlatformManagedUpdateQueueIdleClaimLogsNothing(t *testing.T) {
 }
 
 func TestPlatformManagedUpdateQueueRefusesChangedAdmissionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQueueRefusesChangedAdmission(t, false)
 }
 
 func TestPlatformManagedUpdateQueueRefusesChangedAdmissionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQueueRefusesChangedAdmission(t, true)
 }
 
@@ -436,6 +445,7 @@ func testPlatformManagedUpdateQueueRefusesChangedAdmission(t *testing.T, pg bool
 }
 
 func TestPlatformManagedUpdateSchedulerClaimsBeforeRemoval(t *testing.T) {
+	t.Parallel()
 	s, operation := platformManagedUpdateOperationFixture(t, false)
 	worker := platformFixtureID(6121)
 	scheduler, err := newPlatformWritableInstallScheduler(
@@ -489,10 +499,12 @@ func platformManagedUpdateQuiesceFixtureWith(t *testing.T, pg bool, mutate func(
 }
 
 func TestPlatformManagedUpdateQuiescePersistsExactStopIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQuiescePersistsExactStopIntent(t, false)
 }
 
 func TestPlatformManagedUpdateQuiescePersistsExactStopIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQuiescePersistsExactStopIntent(t, true)
 }
 
@@ -516,10 +528,12 @@ func testPlatformManagedUpdateQuiescePersistsExactStopIntent(t *testing.T, pg bo
 }
 
 func TestPlatformManagedUpdateQuiesceCommitsSnapshotStageSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQuiesceCommitsSnapshotStage(t, false)
 }
 
 func TestPlatformManagedUpdateQuiesceCommitsSnapshotStagePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateQuiesceCommitsSnapshotStage(t, true)
 }
 
@@ -573,10 +587,12 @@ func platformManagedUpdateQuiesceReceipt(intent platformManagedUpdateQuiesceInte
 }
 
 func TestPlatformManagedUpdateAdvancesCheckpointToStartSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateAdvancesCheckpointToStart(t, false)
 }
 
 func TestPlatformManagedUpdateAdvancesCheckpointToStartPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateAdvancesCheckpointToStart(t, true)
 }
 

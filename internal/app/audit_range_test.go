@@ -11,6 +11,7 @@ import (
 // The console's time range is two instants. A bare date would be read against UTC stamps, so a
 // panel eight hours east of UTC would lose the first eight hours of its first day.
 func TestAuditTimeRangeIsBetweenInstants(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	for _, at := range []string{"2026-10-30T10:00:00Z", "2026-10-30T12:00:00Z", "2026-10-30T14:00:00Z"} {
 		s.st.WriteAudit(AuditEntry{At: at, Action: AuditLogin, TargetType: "user", TargetID: at})
@@ -45,6 +46,7 @@ func TestAuditTimeRangeIsBetweenInstants(t *testing.T) {
 // Rows from before v0.4.15 are the host's local wall clock; each format is compared in its own
 // terms, as the retention predicate does.
 func TestAuditTimeRangeReadsLegacyStampsInLocalTime(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	local := time.Date(2026, 8, 1, 9, 0, 0, 0, time.Local)
 	s.st.WriteAudit(AuditEntry{At: local.Format("2006-01-02 15:04:05"), Action: AuditLogin, TargetType: "user", TargetID: "legacy"})
@@ -59,6 +61,7 @@ func TestAuditTimeRangeReadsLegacyStampsInLocalTime(t *testing.T) {
 }
 
 func TestAuditNegatedFilters(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.WriteAudit(AuditEntry{Actor: "admin", Action: AuditLogin, IP: "10.0.0.1", TargetType: "user", TargetID: "a"})
 	s.st.WriteAudit(AuditEntry{Actor: "kazuha", Action: AuditLogout, IP: "10.0.0.2", TargetType: "user", TargetID: "b"})
@@ -82,6 +85,7 @@ func TestAuditNegatedFilters(t *testing.T) {
 }
 
 func TestAuditAPIParsesTheRangeAndRefusesAMalformedOne(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 	s.st.WriteAudit(AuditEntry{At: "2026-10-30T12:00:00Z", Action: AuditLogin, TargetType: "user", TargetID: "x"})

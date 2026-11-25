@@ -36,6 +36,7 @@ type forecastMatrixSet struct {
 
 // TestForecastAccessMatrix pins record, credential and reading-stage contracts through the real mux.
 func TestForecastAccessMatrix(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
 			for _, defaultScope := range []string{scopeNone, scopeOwn} {

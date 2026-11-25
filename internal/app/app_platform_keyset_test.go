@@ -11,6 +11,7 @@ import (
 // the earlier ones behave, and a row that leaves the set (the cursor's own row included) cannot make the cursor skip
 // or repeat the others.
 func TestKeysetWindowReachesEveryCandidateWrapsAndSurvivesRemovedRows(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, _, _ := orphanedEnableFixture(t, pg)
 		all := cloneHeldStarts(t, s, operation, 19)
@@ -60,6 +61,7 @@ func TestKeysetWindowReachesEveryCandidateWrapsAndSurvivesRemovedRows(t *testing
 
 // A failing start in every position still lets the others be reached: the failures do not hold the window.
 func TestMigrationSettlementReachesEveryFailedUpdate(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f := settleAfterEnd(t, pg, orphanedScript)
 		all := cloneOperations(t, f.s, f.op, 19, `stage='migrate' AND effect_number=2`)
@@ -87,6 +89,7 @@ func TestMigrationSettlementReachesEveryFailedUpdate(t *testing.T) {
 }
 
 func TestRecoveryResumeCandidatesReachEveryResume(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f, operation, _ := unknownResumeStartFixtureFor(t, pg)
 		all := cloneOperations(t, f.s, operation, 19, `stage='start' AND effect_number=1`)

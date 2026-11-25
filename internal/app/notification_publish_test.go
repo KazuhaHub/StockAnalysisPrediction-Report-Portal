@@ -10,6 +10,7 @@ import (
 )
 
 func TestNotificationPublisherTestUsesSourceSample(t *testing.T) {
+	t.Parallel()
 	sample := notificationSample("extension.service.example.notice")
 	body, err := json.Marshal(map[string]any{"sample_type": sample.Type, "sample": json.RawMessage(sample.Payload)})
 	if err != nil {
@@ -22,6 +23,7 @@ func TestNotificationPublisherTestUsesSourceSample(t *testing.T) {
 }
 
 func TestNotificationPublisherIsNamespacedAndIdempotent(t *testing.T) {
+	t.Parallel()
 	testNotificationPublisherIsNamespacedAndIdempotent(t, batchServer(t))
 }
 
@@ -72,6 +74,7 @@ func testNotificationPublisherIsNamespacedAndIdempotent(t *testing.T, s *Server)
 }
 
 func TestNotificationPublisherQuotaDoesNotLeavePartialCapture(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.CreateToken("publisher-secret", "Example", "notify:example", ""); err != nil {
 		t.Fatal(err)
@@ -95,6 +98,7 @@ func TestNotificationPublisherQuotaDoesNotLeavePartialCapture(t *testing.T) {
 }
 
 func TestNotificationAppPublisherRechecksIssuerAndInstallation(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.appTok = newAppTokens(time.Minute)
 	if err := s.st.UpsertUser(User{Username: "admin", Role: "admin", PasswordHash: "h"}); err != nil {
@@ -128,6 +132,7 @@ func TestNotificationAppPublisherRechecksIssuerAndInstallation(t *testing.T) {
 }
 
 func TestNotificationPublisherUsesAdministratorRulesForInbox(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.CreateToken("service", "Sender", "notify:example", ""); err != nil {
 		t.Fatal(err)
@@ -162,6 +167,7 @@ func TestNotificationPublisherUsesAdministratorRulesForInbox(t *testing.T) {
 }
 
 func TestNotificationPublisherIdentityReadIsDedicatedAndReadOnly(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	for _, scope := range []string{"all", "query", "ingest", "notify:status-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
 		token := "identity-" + scope

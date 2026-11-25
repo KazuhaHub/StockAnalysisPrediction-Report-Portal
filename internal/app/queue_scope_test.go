@@ -8,6 +8,7 @@ import (
 // An administrator chooses whether the queue shows their own runs or everyone's (scope=mine); the
 // default stays everyone's. An operator is always scoped to their own, whatever they ask for.
 func TestAdminQueueScopeMine(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.run("op")

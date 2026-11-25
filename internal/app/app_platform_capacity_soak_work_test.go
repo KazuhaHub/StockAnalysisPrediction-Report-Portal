@@ -343,6 +343,7 @@ func soakFenceReason(detail string) string {
 }
 
 func TestSoakMillisSummaryIsTheNearestRankPercentile(t *testing.T) {
+	t.Parallel()
 	values := make([]int64, 100)
 	for i := range values {
 		values[i] = int64(i + 1)
@@ -360,6 +361,7 @@ func TestSoakMillisSummaryIsTheNearestRankPercentile(t *testing.T) {
 }
 
 func TestSoakTaskWindowCountsCreatedCompletedLatencyAndWhatIsOpen(t *testing.T) {
+	t.Parallel()
 	rows := []soakTaskRow{
 		{Handler: appplatform.TaskHandlerBackend, State: "succeeded", CreatedMS: 1_000, CompletedMS: 1_400, NextAttemptMS: 1_000},
 		{Handler: appplatform.TaskHandlerEvent, State: "succeeded", CreatedMS: 1_100, CompletedMS: 2_100, NextAttemptMS: 1_100},
@@ -382,6 +384,7 @@ func TestSoakTaskWindowCountsCreatedCompletedLatencyAndWhatIsOpen(t *testing.T) 
 }
 
 func TestSoakBackendFloodWindowIsTheDeltaOfTheTaskCounters(t *testing.T) {
+	t.Parallel()
 	previous := soakFloodCounters{TaskRequests: 100, TaskClasses: map[string]int64{"200": 20, "429:task_capacity": 80}, HeartbeatMS: 1_000}
 	current := soakFloodCounters{TaskRequests: 2_100, TaskClasses: map[string]int64{"200": 520, "429:task_capacity": 1_560, "429:rate_limited": 20}, HeartbeatMS: 61_000}
 	window := soakBackendFloodWindow(previous, current, true, time.UnixMilli(62_000))
@@ -395,6 +398,7 @@ func TestSoakBackendFloodWindowIsTheDeltaOfTheTaskCounters(t *testing.T) {
 
 // The anonymous half of the flood sends credentials that name a real installation with a wrong MAC; its answers are counted apart.
 func TestSoakBackendFloodWindowCountsTheForgedCredentialsApart(t *testing.T) {
+	t.Parallel()
 	previous := soakFloodCounters{TaskRequests: 100, TaskClasses: map[string]int64{"200": 20}, ForgedRequests: 10, ForgedClasses: map[string]int64{"404:app_platform_task_unavailable": 10}}
 	current := soakFloodCounters{TaskRequests: 2_100, TaskClasses: map[string]int64{"200": 520}, ForgedRequests: 510,
 		ForgedClasses: map[string]int64{"404:app_platform_task_unavailable": 480, "429:app_platform_busy": 30}, HeartbeatMS: 61_000}
@@ -408,6 +412,7 @@ func TestSoakBackendFloodWindowCountsTheForgedCredentialsApart(t *testing.T) {
 }
 
 func TestSoakForgedIdentityHeaderNamesTheSameInstallationWithAnotherLeaseAndIsNeverTheOriginal(t *testing.T) {
+	t.Parallel()
 	grant := appplatform.ServiceIdentityGrant{Format: appplatform.ServiceIdentityFormat, LeaseID: "99999999-9999-4999-8999-999999999999", AppID: "a-app",
 		InstallationID: "11111111-1111-4111-8111-111111111111", ControllerEpoch: "22222222-2222-4222-8222-222222222222", Generation: "1", PolicyRevision: "1",
 		ReleaseSHA256: strings.Repeat("a", 64), Resources: []string{"tasks.schedule"}, IssuedMS: "1", ExpiresMS: "2", Mac: strings.Repeat("b", 64)}
@@ -434,6 +439,7 @@ func TestSoakForgedIdentityHeaderNamesTheSameInstallationWithAnotherLeaseAndIsNe
 }
 
 func TestSoakBackendFloodRequestsAreTheTaskRoutesClosedBodyAndOneInFourReplaysTheSaturatingTask(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UnixMilli()
 	replays := 0
 	for sequence := int64(1); sequence <= 8; sequence++ {
@@ -465,6 +471,7 @@ func TestSoakBackendFloodRequestsAreTheTaskRoutesClosedBodyAndOneInFourReplaysTh
 // The workload tenants submit their tasks through the task route with their own identity; the window keeps what each submission answered and how
 // long it took.
 func TestSoakWorkloadSubmitWindowCountsClassesAndSummarisesLatencyAndStartsOverOnTake(t *testing.T) {
+	t.Parallel()
 	var collector soakSubmitCollector
 	for _, ms := range []int64{10, 20, 30, 40} {
 		collector.record("200", ms)
@@ -483,6 +490,7 @@ func TestSoakWorkloadSubmitWindowCountsClassesAndSummarisesLatencyAndStartsOverO
 }
 
 func TestSoakWorkloadTaskBodyIsTheRoutesClosedBodyAndNeverRepeatsAnOccurrence(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UnixMilli()
 	seen := map[string]bool{}
 	for index := 0; index < 3; index++ {
@@ -500,6 +508,7 @@ func TestSoakWorkloadTaskBodyIsTheRoutesClosedBodyAndNeverRepeatsAnOccurrence(t 
 }
 
 func TestSoakIdentityHeaderIsTheBase64URLOfTheRawIdentityTheRouteDecodes(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"format":"x","resources":["tasks.schedule"]}`)
 	header := soakIdentityHeader(raw)
 	if strings.ContainsAny(header, "+/=") {
@@ -512,6 +521,7 @@ func TestSoakIdentityHeaderIsTheBase64URLOfTheRawIdentityTheRouteDecodes(t *test
 }
 
 func TestSoakDepthSamplerKeepsTheLargestDepthSinceTheLastTakeAndTheLatestSaturatedCount(t *testing.T) {
+	t.Parallel()
 	sampler := newSoakDepthSampler()
 	sampler.observe(map[string]int{"a": 3, "s": 256}, map[string]int{"a": 2}, []string{"s"})
 	sampler.observe(map[string]int{"a": 9, "s": 255}, map[string]int{"a": 5}, []string{"s"})
@@ -527,6 +537,7 @@ func TestSoakDepthSamplerKeepsTheLargestDepthSinceTheLastTakeAndTheLatestSaturat
 }
 
 func TestSoakFenceReasonIsReadFromTheAuditDetail(t *testing.T) {
+	t.Parallel()
 	if got := soakFenceReason(`{"reason":"task_capacity"}`); got != "task_capacity" {
 		t.Fatalf("reason %q", got)
 	}
@@ -537,6 +548,7 @@ func TestSoakFenceReasonIsReadFromTheAuditDetail(t *testing.T) {
 
 // The verdict reads these field names; the Python harness and this file must agree on them.
 func TestSoakPlatformWorkEvidenceUsesTheFieldNamesTheVerdictReads(t *testing.T) {
+	t.Parallel()
 	window := soakWindow{Tasks: &soakTaskWindow{}, Events: &soakEventWindow{}, Quota: &soakQuotaWindow{SaturatedActive: map[string]int{}}, BackendFlood: &soakBackendFlood{Classes: map[string]int64{}, ForgedClasses: map[string]int64{}},
 		WorkloadSubmit: &soakWorkloadSubmit{Classes: map[string]int64{}}}
 	raw, err := json.Marshal(window)

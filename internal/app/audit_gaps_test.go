@@ -13,6 +13,7 @@ import (
 // have, and it was the one action recorded without an address: recordReportRead never took the
 // request. Every other writer goes through recordChange/recordAuth, which stamp it.
 func TestAReportReadRecordsWhereItCameFrom(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	id, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-31", RType: "投资决策", Title: "内部", MD: "x"})
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
@@ -37,6 +38,7 @@ func TestAReportReadRecordsWhereItCameFrom(t *testing.T) {
 // dropdown of Chinese phrases, and nothing fails until somebody looks. The vocabulary is the
 // source of truth, so the check belongs on this side of the boundary.
 func TestEveryAuditActionHasALabelInEveryLanguage(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("..", "..", "web", "src", "locales")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -72,6 +74,7 @@ func TestEveryAuditActionHasALabelInEveryLanguage(t *testing.T) {
 // what inputs, and under which options — otherwise the log records that a decision happened and
 // none of what was decided.
 func TestARunSubmissionRecordsWhatWasSubmitted(t *testing.T) {
+	t.Parallel()
 	detail := runSubmitDetail(runSubmitAudit{
 		TargetID:   5,
 		TargetName: "研报分析",
@@ -103,6 +106,7 @@ func TestARunSubmissionRecordsWhatWasSubmitted(t *testing.T) {
 // clamped like any other string, which stored the first 120 characters of a serialised object and
 // left a reader with half an object and no way to tell. The SHAPE is what they can use.
 func TestARunSubmissionSummarisesAStructuredInput(t *testing.T) {
+	t.Parallel()
 	detail := runSubmitDetail(runSubmitAudit{
 		Rows: []map[string]string{{
 			"symbol": "603587",
@@ -140,6 +144,7 @@ func TestARunSubmissionSummarisesAStructuredInput(t *testing.T) {
 // The summary is bounded by how many members a value has, not by how large the value was, so one
 // submission with a big nested parameter cannot outweigh a month of ordinary lines.
 func TestAStructuredInputSummaryStaysSmall(t *testing.T) {
+	t.Parallel()
 	big := `{` + strings.Repeat(`"key","value",`, 400) + `"last":"x"}`
 	// Malformed JSON is the point of the second half: a value that only LOOKS structured must still
 	// be clamped rather than mis-summarised.

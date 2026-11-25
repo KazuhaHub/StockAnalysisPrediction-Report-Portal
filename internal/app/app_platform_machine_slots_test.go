@@ -6,6 +6,7 @@ import "testing"
 // would need one is a 503 and reads nothing; requests that fail before any read are still 401; once a
 // slot is free a valid request succeeds.
 func TestMachineAuthorityReadsAreCapped(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)

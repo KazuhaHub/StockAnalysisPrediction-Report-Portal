@@ -151,6 +151,7 @@ func (f *platformCatalogueFixture) blobDigests() map[string]bool {
 // Fails if the catalogue install and the offline install of the same package are not one release with one set
 // of blobs.
 func TestCatalogueInstallOfAManagedPackageIsTheOfflineInstall(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	staged, err := f.install(context.Background())
 	if err != nil || staged.sha256 != platformDigest(f.parts.descriptor) || staged.reused {
@@ -179,6 +180,7 @@ func TestCatalogueInstallOfAManagedPackageIsTheOfflineInstall(t *testing.T) {
 
 // Fails if an interrupted download starts again from byte zero after a restart, or resumes without the validator.
 func TestCataloguePackageDownloadResumesFromThePartialAfterARestartWithRangeAndIfRange(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	f.remote.breakDivisor = 2
 	if _, err := f.install(context.Background()); err == nil {
@@ -216,6 +218,7 @@ func TestCataloguePackageDownloadResumesFromThePartialAfterARestartWithRangeAndI
 // Fails if bytes from an older version of the file are spliced onto the new one, or the install is poisoned for
 // good by a prefix that no longer matches.
 func TestCataloguePackageStartsAgainWhenTheFileChangedUpstreamSinceThePartial(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	store, _ := f.s.platformImages()
 	key := "catalogue:https://127.0.0.1/app.portalapp"
@@ -233,6 +236,7 @@ func TestCataloguePackageStartsAgainWhenTheFileChangedUpstreamSinceThePartial(t 
 
 // Fails if a package whose descriptor is not byte-equal to the catalogue's is staged, or leaves blobs behind.
 func TestCataloguePackageWithAnotherDescriptorIsRefusedAndStoresNothing(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	other := newPlatformManagedImageParts(t, "4.0.1", "other")
 	f.remote.pkg = other.packageBytes(t, nil, "")
@@ -246,6 +250,7 @@ func TestCataloguePackageWithAnotherDescriptorIsRefusedAndStoresNothing(t *testi
 
 // Fails if the package is fetched when the staging cap cannot hold it.
 func TestCataloguePackageOverTheStagingCapIsRefusedBeforeAnyDownload(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	store, _ := f.s.platformImages()
 	store.stagingCap = 1 << 20
@@ -261,6 +266,7 @@ func TestCataloguePackageOverTheStagingCapIsRefusedBeforeAnyDownload(t *testing.
 
 // Fails if a managed descriptor without a package, or a package for a static one, reaches staging.
 func TestCatalogueManagedReleaseNeedsItsPackageURL(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	f.remote.noPackageURL = true
 	if _, err := f.install(context.Background()); err == nil {
@@ -274,6 +280,7 @@ func TestCatalogueManagedReleaseNeedsItsPackageURL(t *testing.T) {
 // Fails if a complete partial (a download whose staging step was lost) is thrown away and fetched again because
 // the range request for the bytes after its end is answered 416.
 func TestCatalogueCompletePartialIsReusedWithoutDownloadingAgain(t *testing.T) {
+	t.Parallel()
 	f := newPlatformCatalogueFixture(t)
 	store, _ := f.s.platformImages()
 	key := "catalogue:https://127.0.0.1/app.portalapp"

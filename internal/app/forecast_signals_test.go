@@ -24,6 +24,7 @@ func signalDay(t *testing.T, st *Store, day string) map[string]int64 {
 }
 
 func TestForecastSignalsFlushIsIdempotent(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	var g forecastSignals
 	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
@@ -53,6 +54,7 @@ func TestForecastSignalsFlushIsIdempotent(t *testing.T) {
 }
 
 func TestForecastSignalsFailedFlushKeepsTheDelta(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	bad := newTestStore(t)
 	if err := bad.Close(); err != nil {
@@ -78,6 +80,7 @@ func TestForecastSignalsFailedFlushKeepsTheDelta(t *testing.T) {
 }
 
 func TestForecastSignalsContinueAfterARestart(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
 	var before forecastSignals
@@ -99,6 +102,7 @@ func TestForecastSignalsContinueAfterARestart(t *testing.T) {
 }
 
 func TestForecastSignalsAreKeyedByTheEventDay(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	var g forecastSignals
 	g.add(sigRequests, time.Date(2026, 10, 23, 23, 59, 59, 0, time.UTC))
@@ -117,6 +121,7 @@ func TestForecastSignalsAreKeyedByTheEventDay(t *testing.T) {
 }
 
 func TestForecastSignalsPruneOldDaysOnly(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for key, value := range map[string]string{
 		forecastSignalsKey("2026-09-01"):  `{"requests":1}`,
@@ -151,6 +156,7 @@ func TestForecastSignalsPruneOldDaysOnly(t *testing.T) {
 }
 
 func TestForecastSignalsAcceptOnlyTheClosedVocabulary(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	var g forecastSignals
 	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
@@ -175,6 +181,7 @@ func TestForecastSignalsAcceptOnlyTheClosedVocabulary(t *testing.T) {
 }
 
 func TestForecastSignalsKeepADamagedRow(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	key := forecastSignalsKey("2026-10-23")
 	var g forecastSignals
@@ -204,6 +211,7 @@ func TestForecastSignalsKeepADamagedRow(t *testing.T) {
 }
 
 func TestForecastSignalsVocabularyHasNoIdentityShapedName(t *testing.T) {
+	t.Parallel()
 	for name := range forecastSignalVocabulary {
 		if name == "" || strings.ToLower(name) != name || strings.ContainsAny(name, " \t:@/") {
 			t.Errorf("%q is not a lower-case counter name", name)
@@ -222,6 +230,7 @@ func TestForecastSignalsVocabularyHasNoIdentityShapedName(t *testing.T) {
 }
 
 func TestPostgresForecastSignalsFlush(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	now := time.Date(2077, 1, 4, 12, 0, 0, 0, time.UTC)
 	key := forecastSignalsKey("2077-01-04")

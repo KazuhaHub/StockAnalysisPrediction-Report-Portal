@@ -15,6 +15,7 @@ import (
 )
 
 func TestSessionCookieSecurityForHTTPSAndTrustedProxies(t *testing.T) {
+	t.Parallel()
 	_, trusted, err := net.ParseCIDR("10.0.0.0/8")
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +73,7 @@ func sessionTestRequest(mux *http.ServeMux, method, path, cookie, body string) *
 }
 
 func TestManagedSessionsRevokeOnlyTheirOwnerAndRejectCookieReplay(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.UpsertUser(User{Username: "bob", PasswordHash: "h", Role: "user"})
@@ -109,6 +111,7 @@ func TestManagedSessionsRevokeOnlyTheirOwnerAndRejectCookieReplay(t *testing.T) 
 }
 
 func TestBulkSessionRevocationIncludesLegacyAndPreservesCurrentExpiry(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	a := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
@@ -146,6 +149,7 @@ func TestBulkSessionRevocationIncludesLegacyAndPreservesCurrentExpiry(t *testing
 }
 
 func TestLegacyMigrationCannotResurrectAKickedSession(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	legacy := s.sign("alice")
@@ -170,6 +174,7 @@ func TestLegacyMigrationCannotResurrectAKickedSession(t *testing.T) {
 }
 
 func TestLogoutRevokesServerSessionAndIgnoresForgedCookie(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	a := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
@@ -192,6 +197,7 @@ func TestLogoutRevokesServerSessionAndIgnoresForgedCookie(t *testing.T) {
 }
 
 func TestSessionExpiryRevisionAndSweep(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	a := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
@@ -227,6 +233,7 @@ func TestSessionExpiryRevisionAndSweep(t *testing.T) {
 }
 
 func TestSessionsAndPersonalRetentionSurviveRestartAndBackup(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st, err := OpenStore("sqlite", filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
@@ -266,6 +273,7 @@ func TestSessionsAndPersonalRetentionSurviveRestartAndBackup(t *testing.T) {
 }
 
 func TestAStaleLegacyRequestCannotMigrateAfterBulkLogout(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	r := reqWith(s.sign("alice"))
@@ -280,6 +288,7 @@ func TestAStaleLegacyRequestCannotMigrateAfterBulkLogout(t *testing.T) {
 }
 
 func TestPostgresManagedSessionRevocation(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	s := tenancyServer(t)
 	s.st = st
@@ -315,6 +324,7 @@ func TestPostgresManagedSessionRevocation(t *testing.T) {
 // The synthetic one-node IPv4 MMDB maps both branches to US / Test State / Testville.
 // It exercises read-time resolution without a remote service or production database.
 func TestSessionsResolveLocationAtReadTime(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	cookie := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)

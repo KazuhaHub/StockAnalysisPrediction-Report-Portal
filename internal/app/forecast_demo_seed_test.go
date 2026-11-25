@@ -40,6 +40,7 @@ type forecastDemoCase struct {
 }
 
 func TestWriteForecastDemoDB(t *testing.T) {
+	t.Parallel()
 	if *forecastDemoOutput == "" {
 		t.Skip("set -forecast-demo-out to create the local preview")
 	}
@@ -628,6 +629,7 @@ func TestForecastDemoSeedIsDeterministic(t *testing.T) {
 }
 
 func TestForecastDemoSeedRefusesExistingOutputs(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"portal.db", "config.yaml", "portal.db-wal", "portal.db-shm"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -651,6 +653,7 @@ func TestForecastDemoSeedRefusesExistingOutputs(t *testing.T) {
 }
 
 func TestForecastDemoSeedRefusesSymlinkOutputs(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"portal.db", "config.yaml", "portal.db-wal", "portal.db-shm"} {
 		for _, dangling := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/dangling=%v", name, dangling), func(t *testing.T) {

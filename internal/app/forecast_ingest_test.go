@@ -92,6 +92,7 @@ func onlyReason(t *testing.T, errs []predError) string {
 // TestClassifyPredictionsAcceptsAValidPayload is the baseline the refusals are measured against: if
 // this fails, every other case in the file is testing the wrong thing.
 func TestClassifyPredictionsAcceptsAValidPayload(t *testing.T) {
+	t.Parallel()
 	// The pure classifier uses a fixed receipt; match its horizon rather than
 	// the wall clock used by unpinned HTTP-ingest fixtures.
 	set, claims, errs := classify(t, predWire(func(m map[string]any) {
@@ -139,6 +140,7 @@ func stringEncoded(obj json.RawMessage) json.RawMessage {
 // json.dumps(None), which a string parameter delivers as "null". It must be absent, as the object
 // parameter's null was, or every legitimate no-forecast run would raise predictions.rejected.
 func TestClassifyPredictionsStringNullIsAbsent(t *testing.T) {
+	t.Parallel()
 	set, claims, errs := classify(t, json.RawMessage(`"null"`), predTestRtype)
 	if len(errs) != 0 || len(claims) != 0 {
 		t.Fatalf("errs=%+v claims=%d, want none", errs, len(claims))
@@ -152,6 +154,7 @@ func TestClassifyPredictionsStringNullIsAbsent(t *testing.T) {
 // same object, JSON-encoded. It must land exactly as the object form would, including the stored
 // payload and its hash, or one forecast sent both ways would be two sets on one report.
 func TestClassifyPredictionsAcceptsAStringEncodedObject(t *testing.T) {
+	t.Parallel()
 	obj := predWire(func(m map[string]any) {
 		m["horizon_end"] = receipt.AddDate(1, 0, 0).Format("2006-01-02")
 	})
@@ -179,6 +182,7 @@ func TestClassifyPredictionsAcceptsAStringEncodedObject(t *testing.T) {
 // scenario probabilities from base rates updated with evidence, a null transform, and a no_trade
 // decision that still carries predictions.
 func TestClassifyPredictionsAcceptsEvidenceBasedMethods(t *testing.T) {
+	t.Parallel()
 	raw := predWire(func(m map[string]any) {
 		m["emitter"] = map[string]any{
 			"app": "1-6-4", "version": "V3.23",
@@ -224,6 +228,7 @@ func TestClassifyPredictionsAcceptsEvidenceBasedMethods(t *testing.T) {
 // TestClassifyPredictionsRefusalReasons walks every refusal reason. Each case is a payload a real
 // producer could send, and each asserts the reason — the reason is what tells a producer what to fix.
 func TestClassifyPredictionsRefusalReasons(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		raw    json.RawMessage
@@ -350,6 +355,7 @@ func TestClassifyPredictionsRefusalReasons(t *testing.T) {
 // TestClassifyPredictionsAcceptsAStopLoss: a stop below both the baseline and the entry price is
 // stored as an ordinary claim row in integer fen, with no probability and no weight.
 func TestClassifyPredictionsAcceptsAStopLoss(t *testing.T) {
+	t.Parallel()
 	set, claims, errs := classify(t, predWire(func(m map[string]any) {
 		m["horizon_end"] = receipt.AddDate(1, 0, 0).Format("2006-01-02")
 		addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "7.95"})
@@ -380,6 +386,7 @@ func TestClassifyPredictionsAcceptsAStopLoss(t *testing.T) {
 // TestClassifyPredictionsStopLossWithoutEntry: the entry price is optional, so a stop is checked
 // against the baseline alone when no entry claim was sent.
 func TestClassifyPredictionsStopLossWithoutEntry(t *testing.T) {
+	t.Parallel()
 	_, _, errs := classify(t, predWire(func(m map[string]any) {
 		m["claims"] = dropClaim(m, "entry_price")
 		addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "7.95"})
@@ -394,6 +401,7 @@ func TestClassifyPredictionsStopLossWithoutEntry(t *testing.T) {
 // a stop below an entry far below the baseline must pass as sent. (That run was no_trade, for which
 // the producer sends no stop; the levels are what this test is about.)
 func TestClassifyPredictionsAcceptsTheV317CaptureStop(t *testing.T) {
+	t.Parallel()
 	_, _, errs := classify(t, predWire(func(m map[string]any) {
 		m["baseline"].(map[string]any)["price"] = "319.49"
 		claim(m, "entry_price", func(c map[string]any) { c["price"] = "230.00" })
@@ -423,6 +431,7 @@ func dropClaim(m map[string]any, key string) []any {
 // 9999/10000/10001 rather than a float tolerance. A tolerance would be the one place a rounding
 // difference between two producers is invisible.
 func TestClassifyPredictionsScenarioSumIsExact(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		bull, base, bear string
 		ok               bool
@@ -451,6 +460,7 @@ func TestClassifyPredictionsScenarioSumIsExact(t *testing.T) {
 // TestClassifyPredictionsSizeCap: the payload is capped, and the cap keeps the bytes it can — a
 // refusal that threw the payload away would leave an operator with nothing to look at.
 func TestClassifyPredictionsSizeCap(t *testing.T) {
+	t.Parallel()
 	big := make([]byte, predPayloadMax+1)
 	copy(big, `{"schema":"predictions.v1","filler":"`)
 	for i := len(`{"schema":"predictions.v1","filler":"`); i < len(big)-2; i++ {
@@ -473,6 +483,7 @@ func TestClassifyPredictionsSizeCap(t *testing.T) {
 // TestClassifyPredictionsHorizon: the horizon is compared against the SHANGHAI date of receipt, and
 // the standard window is what decides the h12 mark.
 func TestClassifyPredictionsHorizon(t *testing.T) {
+	t.Parallel()
 	// 2026-10-17T23:30Z is already 2026-10-18 in Shanghai. A horizon of the 18th is therefore today,
 	// not the future — and this is exactly the case a UTC comparison gets wrong.
 	lateReceipt := time.Date(2026, 10, 17, 23, 30, 0, 0, time.UTC)
@@ -512,6 +523,7 @@ func TestClassifyPredictionsHorizon(t *testing.T) {
 // TestClassifyPredictionsBacktest: a run over history is stored and marked, not scored, and the
 // comparison is between INSTANTS with slack.
 func TestClassifyPredictionsBacktest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		cutoff string
@@ -545,6 +557,7 @@ func TestClassifyPredictionsBacktest(t *testing.T) {
 // nothing, and no row at all for one the ledger does not cover. This is what makes coverage
 // computable from the ledger alone.
 func TestClassifyPredictionsCoverageRows(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		raw     json.RawMessage
@@ -583,6 +596,7 @@ func TestClassifyPredictionsCoverageRows(t *testing.T) {
 // not for the report. Beijing codes have no usable daily history and B-shares are priced in another
 // currency, so a claim against either would score silently and wrongly or never resolve.
 func TestClassifyPredictionsSymbolScope(t *testing.T) {
+	t.Parallel()
 	for _, sym := range []string{"830799", "900901", "200002", ""} {
 		t.Run("symbol "+sym, func(t *testing.T) {
 			set, _, errs := classifyPredictions(predInput{
@@ -611,6 +625,7 @@ func TestClassifyPredictionsSymbolScope(t *testing.T) {
 
 // TestPredictionsSymbolIsScorable pins the scope rule itself.
 func TestPredictionsSymbolIsScorable(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		sym  string
 		want bool
@@ -632,6 +647,7 @@ func TestPredictionsSymbolIsScorable(t *testing.T) {
 // TestParseFenIsExactNotFloat: the conversion is digit arithmetic. A float would accept "8.655" and
 // then be unable to say by how much it was wrong.
 func TestParseFenIsExactNotFloat(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		want int64
@@ -665,6 +681,7 @@ func TestParseFenIsExactNotFloat(t *testing.T) {
 }
 
 func TestParseBpIsExact(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		want int32
@@ -699,6 +716,7 @@ func TestParseBpIsExact(t *testing.T) {
 // TestClassifyPredictionsIsPureAndIdempotent: the classifier must be a function of its input. It is
 // called before RegisterType, so anything it did twice would be a write nobody asked for.
 func TestClassifyPredictionsIsPureAndIdempotent(t *testing.T) {
+	t.Parallel()
 	raw := predWire(nil)
 	a, ca, ea := classify(t, raw, predTestRtype)
 	b, cb, eb := classify(t, raw, predTestRtype)
@@ -731,6 +749,7 @@ func mustJSON(t *testing.T, v any) string {
 // where its scenario prices came from. scenario_basis is a closed enum the portal stores as a COLUMN;
 // scenario_provenance is audit detail the portal stores verbatim and does not police.
 func TestClassifyPredictionsScenarioBasisAndProvenance(t *testing.T) {
+	t.Parallel()
 	t.Run("absent on an older producer's payload", func(t *testing.T) {
 		// Neither field is required: a producer that predates them keeps working. That is what makes
 		// this an additive change rather than a contract break.
@@ -822,6 +841,7 @@ func TestClassifyPredictionsScenarioBasisAndProvenance(t *testing.T) {
 // and a full instant from another, and the portal takes both. This is the change that stopped the
 // Dify node needing to truncate a field that is not its to normalise.
 func TestBaselineAsOfAcceptsAnInstant(t *testing.T) {
+	t.Parallel()
 	asOf := func(v any) string {
 		t.Helper()
 		set, _, errs := classify(t, predWire(func(m map[string]any) {
@@ -855,6 +875,7 @@ func TestBaselineAsOfAcceptsAnInstant(t *testing.T) {
 // TestBaselineAsOfRefusesNonsense pins what is still refused, so widening the field did not widen it
 // into accepting anything.
 func TestBaselineAsOfRefusesNonsense(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{"16-10-2026", "2026-13-01", "2026-10-09T15:00", "no", "2026-10-09 15:00:00"} {
 		t.Run(bad, func(t *testing.T) {
 			_, _, errs := classify(t, predWire(func(m map[string]any) {
@@ -871,6 +892,7 @@ func TestBaselineAsOfRefusesNonsense(t *testing.T) {
 // debug run stays out of the record without another portal cut. Absent means production; a declared
 // test is stored with state=test and no marks, and is never reclassified afterwards.
 func TestTestRunIsFrozenAtIngest(t *testing.T) {
+	t.Parallel()
 	run := func(mode string) json.RawMessage {
 		return predWire(func(m map[string]any) {
 			if mode != "" {
@@ -932,6 +954,7 @@ func TestTestRunIsFrozenAtIngest(t *testing.T) {
 // state being frozen at insert (design §7), so any later UPDATE of prediction_sets.state is a bug even
 // if no test has caught it yet.
 func TestNoCodePathUpdatesAPredictionState(t *testing.T) {
+	t.Parallel()
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)

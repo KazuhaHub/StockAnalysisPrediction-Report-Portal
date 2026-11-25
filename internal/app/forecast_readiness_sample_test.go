@@ -15,6 +15,7 @@ import (
 // the evidence an operator would have called broken. "No error" is not "the vendor answered"; a sample
 // is.
 func TestDryPassReadinessNeedsASample(t *testing.T) {
+	t.Parallel()
 	base := func(t *testing.T, pass passStats, sample []drySample) *Server {
 		t.Helper()
 		s := newV1Server(t)
@@ -74,6 +75,7 @@ func TestDryPassReadinessNeedsASample(t *testing.T) {
 // presses On and is refused, whatever the other five items say. Then the vendor comes back, one manual
 // dry pass produces a sample, and the same switch goes through.
 func TestReadinessRefusesTheSwitchWithoutAVendorBody(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	now := shanghai(2026, time.November, 20, 16, 0)

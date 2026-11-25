@@ -50,8 +50,14 @@ func testMigrateStageNoStepUnchanged(t *testing.T, pg bool) {
 	}
 }
 
-func TestMigrateStageNoStepUnchangedSQLite(t *testing.T)   { testMigrateStageNoStepUnchanged(t, false) }
-func TestMigrateStageNoStepUnchangedPostgres(t *testing.T) { testMigrateStageNoStepUnchanged(t, true) }
+func TestMigrateStageNoStepUnchangedSQLite(t *testing.T) {
+	t.Parallel()
+	testMigrateStageNoStepUnchanged(t, false)
+}
+func TestMigrateStageNoStepUnchangedPostgres(t *testing.T) {
+	t.Parallel()
+	testMigrateStageNoStepUnchanged(t, true)
+}
 
 func testMigrateStageSendsMigrateDataAfterRemoveCode(t *testing.T, pg bool) {
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, pg, true)
@@ -96,9 +102,11 @@ func testMigrateStageSendsMigrateDataAfterRemoveCode(t *testing.T, pg bool) {
 }
 
 func TestMigrateStageSendsMigrateDataAfterRemoveCodeSQLite(t *testing.T) {
+	t.Parallel()
 	testMigrateStageSendsMigrateDataAfterRemoveCode(t, false)
 }
 func TestMigrateStageSendsMigrateDataAfterRemoveCodePostgres(t *testing.T) {
+	t.Parallel()
 	testMigrateStageSendsMigrateDataAfterRemoveCode(t, true)
 }
 
@@ -161,15 +169,18 @@ func testMigrateKnownFailureRecoveryRequired(t *testing.T, pg bool) {
 }
 
 func TestMigrateKnownFailureRecoveryRequiredSQLite(t *testing.T) {
+	t.Parallel()
 	testMigrateKnownFailureRecoveryRequired(t, false)
 }
 func TestMigrateKnownFailureRecoveryRequiredPostgres(t *testing.T) {
+	t.Parallel()
 	testMigrateKnownFailureRecoveryRequired(t, true)
 }
 
 // An orphaned migration (the runner restarted, nothing is working on it) is never sent again: the operation
 // waits for settlement with the effect unknown.
 func TestMigrateOrphanedReadBackEndsForSettlement(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	fake.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
 		return nil, errors.New("runner killed")

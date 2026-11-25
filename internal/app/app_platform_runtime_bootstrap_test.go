@@ -6,6 +6,7 @@ import (
 )
 
 func TestPlatformRuntimeEndpointBootstrapIsExplicitAndStrict(t *testing.T) {
+	t.Parallel()
 	env := func(values map[string]string) func(string) string {
 		return func(key string) string { return values[key] }
 	}

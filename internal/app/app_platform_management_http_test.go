@@ -89,9 +89,11 @@ func testPlatformManagementInstallHTTP(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagementInstallHTTPSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagementInstallHTTP(t, false)
 }
 func TestPlatformManagementInstallHTTPPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagementInstallHTTP(t, true)
 }
 
@@ -99,6 +101,7 @@ func TestPlatformManagementInstallHTTPPostgres(t *testing.T) {
 // writable format; a managed-format plan (made by an earlier build) is refused rather than queued forever, and
 // a writable-format plan routes to the runner-backed consumer, which needs the runtime.
 func TestPlatformManagementRunnerInstallCommitRoutesByFormat(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		format, code string
 		status       int
@@ -168,6 +171,7 @@ func testPlatformRunnerInstallCommitRoute(t *testing.T, format, code string, sta
 }
 
 func TestPlatformManagementUpdateHTTP(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	mux := http.NewServeMux()
@@ -211,6 +215,7 @@ func TestPlatformManagementUpdateHTTP(t *testing.T) {
 }
 
 func TestPlatformManagementUninstallHTTPClearsPluginData(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"uninstall via management HTTP"}`)); response.Code != http.StatusOK {
@@ -324,14 +329,17 @@ func testPlatformManagementUninstallHTTPKeepsAnotherPluginTable(t *testing.T, pg
 }
 
 func TestPlatformManagementUninstallHTTPKeepsAnotherPluginTableSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagementUninstallHTTPKeepsAnotherPluginTable(t, false)
 }
 
 func TestPlatformManagementUninstallHTTPKeepsAnotherPluginTablePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagementUninstallHTTPKeepsAnotherPluginTable(t, true)
 }
 
 func TestPlatformManagementDisableHTTPPreservesPluginData(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"retain while disabled"}`)); response.Code != http.StatusOK {
@@ -373,6 +381,7 @@ func TestPlatformManagementDisableHTTPPreservesPluginData(t *testing.T) {
 }
 
 func TestPlatformManagementEnableHTTPRestoresDisabledFrontend(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, installation := platformFrontendDisabledFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -428,6 +437,7 @@ func TestPlatformManagementEnableHTTPRestoresDisabledFrontend(t *testing.T) {
 }
 
 func TestPlatformManagementUninstallReviewsManagedNamespace(t *testing.T) {
+	t.Parallel()
 	s, admin, lease := platformManagedAccessFixture(t, false)
 	installation := lease.installationID
 	mux := http.NewServeMux()
@@ -453,6 +463,7 @@ func TestPlatformManagementUninstallReviewsManagedNamespace(t *testing.T) {
 }
 
 func TestPlatformManagementRepairRequiresObservedRuntime(t *testing.T) {
+	t.Parallel()
 	s, actor, lease, _, _ := platformManagedRepairReviewFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -474,6 +485,7 @@ func TestPlatformManagementRepairRequiresObservedRuntime(t *testing.T) {
 }
 
 func TestPlatformRepairManagementResponseIsBounded(t *testing.T) {
+	t.Parallel()
 	installation := platformFixtureID(2001)
 	plan := platformManagedUpdatePlan{
 		Format:               platformManagedRepairFormat,
@@ -532,6 +544,7 @@ func TestPlatformRepairManagementResponseIsBounded(t *testing.T) {
 }
 
 func TestPlatformManagementRestoreHTTP(t *testing.T) {
+	t.Parallel()
 	s, actor, update, recoverySetID :=
 		platformManagedRestoreReviewFixture(t, false)
 	mux := http.NewServeMux()
@@ -588,6 +601,7 @@ func TestPlatformManagementRestoreHTTP(t *testing.T) {
 }
 
 func TestPlatformManagementHTTPRefusals(t *testing.T) {
+	t.Parallel()
 	s, mux, actor, release, cookie := platformManagementFixture(t, false)
 	path := "/api/admin/app-platform/plans"
 	valid := platformManagementPlanBody(t, s, release)
@@ -646,6 +660,7 @@ func TestPlatformManagementHTTPRefusals(t *testing.T) {
 }
 
 func TestPlatformManagementCommitRefusals(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"expired", "changed", "role", "native", "native_replay", "enrolment", "empty_audience"} {
 		t.Run(kind, func(t *testing.T) {
 			s, mux, actor, release, cookie := platformManagementFixture(t, false)
@@ -704,6 +719,7 @@ func TestPlatformManagementCommitRefusals(t *testing.T) {
 }
 
 func TestPlatformManagementProgressPrivacyAndPause(t *testing.T) {
+	t.Parallel()
 	s, actor, id := platformFrontendQueuedFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -744,6 +760,7 @@ func TestPlatformManagementProgressPrivacyAndPause(t *testing.T) {
 }
 
 func TestPlatformManagementHTTPVerificationBudget(t *testing.T) {
+	t.Parallel()
 	s, mux, _, release, cookie := platformManagementFixture(t, false)
 	for range 2 {
 		releaseSlot, ok := s.platformDocuments.acquire()
@@ -767,6 +784,7 @@ func TestPlatformManagementHTTPVerificationBudget(t *testing.T) {
 }
 
 func TestPlatformManagementOUReviewBinding(t *testing.T) {
+	t.Parallel()
 	s, mux, _, release, cookie := platformManagementFixture(t, false)
 	var group int64
 	if err := s.st.queryRow(`SELECT id FROM user_groups WHERE is_default=1`).Scan(&group); err != nil {
@@ -793,6 +811,7 @@ func TestPlatformManagementOUReviewBinding(t *testing.T) {
 }
 
 func TestPlatformManagementHTTPBlockedRequestCancellationPostgres(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"plan", "commit", "progress"} {
 		t.Run(kind, func(t *testing.T) {
 			s, mux, actor, release, cookie := platformManagementFixture(t, true)

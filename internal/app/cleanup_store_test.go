@@ -37,6 +37,7 @@ func countRows(t *testing.T, st *Store, table string) int64 {
 // cutoff, cascades their items, keeps the boundary row (strict <), and never touches active or
 // empty-finished_at jobs. The 'expired' inclusion is the bug DeleteFinishedJobs has.
 func TestDeleteFinishedJobsBefore(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	cutoff := agoLocal(30)
 
@@ -82,6 +83,7 @@ func TestDeleteFinishedJobsBefore(t *testing.T) {
 // A job requeued (status→queued, finished_at cleared) after a count but before the delete is NOT
 // removed: the set-based DELETE re-asserts the terminal predicate, so it no longer matches.
 func TestDeleteFinishedJobsBefore_RaceSafe(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	cutoff := agoLocal(30)
 	id := seedJob(t, st, "finished", agoLocal(40))
@@ -101,6 +103,7 @@ func TestDeleteFinishedJobsBefore_RaceSafe(t *testing.T) {
 // parseReportInstant covers the sent_at formats seen in production — zoned RFC3339 (`...Z`) and the
 // timezone-less microsecond form — plus defensive variants; date-only/empty carry no instant.
 func TestParseReportInstant(t *testing.T) {
+	t.Parallel()
 	ok := []struct{ in, wantUTC string }{
 		{"2026-07-02T18:51:21Z", "2026-07-02T18:51:21Z"},             // zoned, no fraction (v1 stamp)
 		{"2026-01-08T15:05:39.575420", "2026-01-08T15:05:39.57542Z"}, // no zone + micros → UTC (bulk of prod)
@@ -129,6 +132,7 @@ func TestParseReportInstant(t *testing.T) {
 // cutoff are eligible — covering BOTH production formats (zoned `...Z` and timezone-less microsecond).
 // Date-only / empty / unparseable sent_at (and rdate) are never used.
 func TestDeleteReportsIngestedBefore(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	// Each row needs its own identity (code+date+subtype), so the case name doubles as the
 	// subtype — same-date rows would otherwise upsert onto each other.
@@ -185,6 +189,7 @@ func TestDeleteReportsIngestedBefore(t *testing.T) {
 // The delete re-asserts sent_at: a report re-ingested (fresh sent_at) between the scan and the
 // delete is skipped, not destroyed — preserving the fail-closed guarantee across the window.
 func TestDeleteReportChunk_ReingestSkipped(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	old := time.Now().UTC().AddDate(0, 0, -800).Format(time.RFC3339)
 	fresh := time.Now().UTC().AddDate(0, 0, -1).Format(time.RFC3339)
@@ -217,6 +222,7 @@ func TestDeleteReportChunk_ReingestSkipped(t *testing.T) {
 // Expired tokens older than the cutoff are removed; not-yet-expired, recently-expired (within
 // grace), and never-expiring (empty expires_at) tokens are kept.
 func TestDeleteExpiredTokensBefore(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.CreateToken("t-40", "n", "all", agoLocal(40))                                                   // expired long ago → delete
 	st.CreateToken("t-5", "n", "all", agoLocal(5))                                                     // expired recently → keep (within grace)
@@ -241,6 +247,7 @@ func TestDeleteExpiredTokensBefore(t *testing.T) {
 // remembered as having deleted nothing — and the audit log is the one target whose rows cannot be
 // regenerated, so its history entry is the only evidence the purge happened at all.
 func TestCleanupHistoryRemembersEveryTarget(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.InsertCleanupRun(CleanupRun{RanAt: nowStr(), Trigger: "manual", OK: true,
 		BatchDeleted: 1, TokensDeleted: 2, ReportsDeleted: 3, AuditDeleted: 900}); err != nil {
@@ -257,6 +264,7 @@ func TestCleanupHistoryRemembersEveryTarget(t *testing.T) {
 
 // The audit ring buffer keeps only the most recent cleanupRunsKeep rows.
 func TestCleanupRunsRingTrim(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for i := 0; i < cleanupRunsKeep+25; i++ {
 		if _, err := st.InsertCleanupRun(CleanupRun{RanAt: nowStr(), Trigger: "manual", OK: true, BatchDeleted: int64(i)}); err != nil {
@@ -287,6 +295,7 @@ func TestCleanupRunsRingTrim(t *testing.T) {
 // of identical all-zero rows. They stay in the table — a retention log is the last thing to go
 // rewriting — but they are not what the history is for, so they are not listed.
 func TestListCleanupRunsHidesTheOldNoOpRows(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.InsertCleanupRun(CleanupRun{RanAt: nowStr(), Trigger: "scheduled", OK: true}); err != nil {
 		t.Fatalf("seed no-op: %v", err)

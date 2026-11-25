@@ -8,6 +8,7 @@ import (
 // 19. The summary tiles are the caller's own, but capacity is global for everyone: whether a new run
 // starts at once depends on the whole queue, not on the caller's share of it. Numbers only.
 func TestBatchQueueSummaryCarriesGlobalCapacityForEveryone(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.addOperator("op2")

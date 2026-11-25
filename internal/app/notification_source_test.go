@@ -12,6 +12,7 @@ import (
 )
 
 func TestNotificationFireEventCapturesBeforeNetwork(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	var calls atomic.Int32
@@ -37,6 +38,7 @@ func TestNotificationFireEventCapturesBeforeNetwork(t *testing.T) {
 }
 
 func TestNotificationForecastHasOneEventAndThreeDeliveries(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, slackHostForTest: "127.0.0.1"}
 	mail := enableEmail(s)
@@ -86,6 +88,7 @@ func TestNotificationForecastHasOneEventAndThreeDeliveries(t *testing.T) {
 }
 
 func TestNotificationForecastTestRejectsConcurrentConfigChange(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"recipients", "smtp", "slack", "round-trip"} {
 		t.Run(change, func(t *testing.T) {
 			s := newV1Server(t)

@@ -255,14 +255,17 @@ func testPlatformManagedRemovalSignsExactStopIntent(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRemovalSignsExactStopIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalSignsExactStopIntent(t, false)
 }
 
 func TestPlatformManagedRemovalSignsExactStopIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalSignsExactStopIntent(t, true)
 }
 
 func TestPlatformManagedRemovalRefusesChangedRuntimeAndReplaysPreparedStage(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixture(t, false)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {
@@ -378,9 +381,11 @@ func testPlatformManagedRemovalSettlesStopAndRemoveCode(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRemovalSettlesStopAndRemoveCodeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalSettlesStopAndRemoveCode(t, false)
 }
 func TestPlatformManagedRemovalSettlesStopAndRemoveCodePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalSettlesStopAndRemoveCode(t, true)
 }
 
@@ -449,13 +454,16 @@ func testPlatformWritableManagedRemoval(t *testing.T, pg bool) {
 }
 
 func TestPlatformWritableManagedRemovalSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableManagedRemoval(t, false)
 }
 func TestPlatformWritableManagedRemovalPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableManagedRemoval(t, true)
 }
 
 func TestPlatformManagedRemovalBindsEveryReceiptField(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixture(t, false)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {
@@ -561,13 +569,16 @@ func testPlatformManagedRemovalPreparationRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRemovalPreparationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalPreparationRefusals(t, false)
 }
 func TestPlatformManagedRemovalPreparationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalPreparationRefusals(t, true)
 }
 
 func TestPlatformManagedRemovalRefusesInvalidSettlementInput(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixture(t, false)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {
@@ -659,13 +670,16 @@ func testPlatformManagedRemovalCompletionRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRemovalCompletionRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalCompletionRollback(t, false)
 }
 func TestPlatformManagedRemovalCompletionRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalCompletionRollback(t, true)
 }
 
 func TestPlatformManagedRemovalFailureRequiresRecoveryAndDoesNotRetry(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixture(t, false)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {
@@ -689,6 +703,7 @@ func TestPlatformManagedRemovalFailureRequiresRecoveryAndDoesNotRetry(t *testing
 }
 
 func TestPlatformManagedRemovalFailureBeforePrepareStillRequiresRecovery(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixture(t, false)
 	if err := s.finishPlatformManagedUninstallForReview(context.Background(), lease); err != nil {
 		t.Fatal(err)
@@ -701,6 +716,7 @@ func TestPlatformManagedRemovalFailureBeforePrepareStillRequiresRecovery(t *test
 }
 
 func TestPlatformManagedRemovalPreparedCrashIsClaimableOnlyForRecovery(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixture(t, false)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {
@@ -775,10 +791,12 @@ func testPlatformManagedRemovalPreparesFromRestoredGeneration(t *testing.T, pg b
 }
 
 func TestPlatformManagedRemovalPreparesFromRestoredGenerationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalPreparesFromRestoredGeneration(t, false)
 }
 
 func TestPlatformManagedRemovalPreparesFromRestoredGenerationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalPreparesFromRestoredGeneration(t, true)
 }
 
@@ -831,9 +849,11 @@ func testPlatformManagedRemovalPreparesFromUpdatedGeneration(t *testing.T, pg bo
 }
 
 func TestPlatformManagedRemovalPreparesFromUpdatedGenerationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalPreparesFromUpdatedGeneration(t, false)
 }
 
 func TestPlatformManagedRemovalPreparesFromUpdatedGenerationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRemovalPreparesFromUpdatedGeneration(t, true)
 }

@@ -88,14 +88,17 @@ func testPlatformInstallationStatusReaderProjection(t *testing.T, pg bool) {
 }
 
 func TestPlatformInstallationStatusReaderProjectionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationStatusReaderProjection(t, false)
 }
 
 func TestPlatformInstallationStatusReaderProjectionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationStatusReaderProjection(t, true)
 }
 
 func TestPlatformInstallationStatusHTTPOmitsInternalIdentity(t *testing.T) {
+	t.Parallel()
 	s, mux, reader, installation, cookie := platformHTTPFixture(t)
 	platformSeedStatusAudits(t, s, installation, 1)
 	var operation, lease, actor string
@@ -151,9 +154,11 @@ func testPlatformInstallationStatusDisabledInRecovery(t *testing.T, pg bool) {
 }
 
 func TestPlatformInstallationStatusDisabledInRecoverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationStatusDisabledInRecovery(t, false)
 }
 
 func TestPlatformInstallationStatusDisabledInRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationStatusDisabledInRecovery(t, true)
 }

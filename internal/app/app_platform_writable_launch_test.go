@@ -68,8 +68,14 @@ func testPlatformWritableLaunchHTTP(t *testing.T, pg bool) {
 		t.Fatal("revoked writable app stayed visible", err)
 	}
 }
-func TestPlatformWritableLaunchHTTPSQLite(t *testing.T)   { testPlatformWritableLaunchHTTP(t, false) }
-func TestPlatformWritableLaunchHTTPPostgres(t *testing.T) { testPlatformWritableLaunchHTTP(t, true) }
+func TestPlatformWritableLaunchHTTPSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableLaunchHTTP(t, false)
+}
+func TestPlatformWritableLaunchHTTPPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableLaunchHTTP(t, true)
+}
 
 func testPlatformWritableLaunchRefusals(t *testing.T, pg bool) {
 	for _, mode := range []string{"grant", "runtime", "key", "publisher", "account", "restore", "history", "namespace", "readonly", "archive", "policy"} {
@@ -125,9 +131,11 @@ func testPlatformWritableLaunchRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableLaunchRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableLaunchRefusals(t, false)
 }
 func TestPlatformWritableLaunchRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableLaunchRefusals(t, true)
 }
 
@@ -183,10 +191,17 @@ func testPlatformWritableLaunchOU(t *testing.T, pg bool) {
 		t.Fatal("restored current OU grant not evaluated", doc.Code)
 	}
 }
-func TestPlatformWritableLaunchOUSQLite(t *testing.T)   { testPlatformWritableLaunchOU(t, false) }
-func TestPlatformWritableLaunchOUPostgres(t *testing.T) { testPlatformWritableLaunchOU(t, true) }
+func TestPlatformWritableLaunchOUSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableLaunchOU(t, false)
+}
+func TestPlatformWritableLaunchOUPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableLaunchOU(t, true)
+}
 
 func TestPlatformWritableLaunchReadBoundarySQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformWritableAccessFixture(t, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -90,7 +90,7 @@ func TestRaisedQuotaStaysAfterTheRollbackPostgres(t *testing.T) {
 func testRetryOfAnUpdateWhoseRaiseApplied(t *testing.T, pg bool) {
 	f := platformRaisedSettledFixture(t, pg)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	(&platformFakeDataRunner{fits: true}).install(t)
 	raise := &platformFakeRaiseRunner{t: t, endpoint: f.endpoint}
 	raise.install(t)
@@ -172,6 +172,7 @@ func TestRegistrationRefusesAnExtraRaiseRowPostgres(t *testing.T) {
 // The settings route's retry choice and the restore review both load for a failed update that carries a code of its
 // own: the recovery is the same, only the reason shown differs.
 func TestRecoveryReviewsAcceptTheQuotaCodes(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{"update_recovery_required", "data_quota_capacity", "data_quota_unavailable"} {
 		if !platformUpdateRecoveryCodes(code) {
 			t.Fatalf("%s is refused by the recovery reviews", code)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoginActivityReturnsOnlyTheCurrentAccountsSuccessfulLogins(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	s.st.WriteAudit(AuditEntry{Actor: "alice", Action: AuditLogin, TargetType: "user", TargetID: "alice", At: "2026-09-27T17:00:00Z", IP: "198.51.100.7", Detail: `{"method":"password"}`})
 	s.st.WriteAudit(AuditEntry{Actor: "alice", Action: AuditLogout, TargetType: "user", TargetID: "alice", At: "2026-09-27T17:01:00Z", IP: "198.51.100.7"})
@@ -52,6 +53,7 @@ func TestLoginActivityReturnsOnlyTheCurrentAccountsSuccessfulLogins(t *testing.T
 }
 
 func TestLoginActivityCapsTheRequestedPage(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	for i := 0; i < 30; i++ {
 		s.st.WriteAudit(AuditEntry{Actor: "alice", Action: AuditLogin, TargetType: "user", TargetID: "alice", At: "2026-09-27T17:00:00Z"})

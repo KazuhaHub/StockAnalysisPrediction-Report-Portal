@@ -186,7 +186,11 @@ func testPlatformCapabilityPolicyHTTP(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformCapabilityPolicyHTTPSQLite(t *testing.T) { testPlatformCapabilityPolicyHTTP(t, false) }
+func TestPlatformCapabilityPolicyHTTPSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformCapabilityPolicyHTTP(t, false)
+}
 func TestPlatformCapabilityPolicyHTTPPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPolicyHTTP(t, true)
 }

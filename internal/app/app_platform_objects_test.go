@@ -87,6 +87,7 @@ func platformPluginTableForInstallation(t *testing.T, st *Store, installation st
 }
 
 func TestPlatformObjectsCreateListGetUpdateDelete(t *testing.T) {
+	t.Parallel()
 	s, _, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	list := platformObjectCall(t, s, reader, installation, map[string]any{"binding": binding, "action": "list", "collection": "note"})
@@ -158,6 +159,7 @@ func TestPlatformObjectsCreateListGetUpdateDelete(t *testing.T) {
 }
 
 func TestPlatformObjectsCrossAccountAndBindingIsolation(t *testing.T) {
+	t.Parallel()
 	s, _, first, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, first, installation)
 	create := platformObjectCall(t, s, first, installation, platformObjectCreateBody(binding, `{"private":true}`))
@@ -221,10 +223,12 @@ func testPlatformObjectsUninstallAndAccountDeletionClearData(t *testing.T, pg bo
 }
 
 func TestPlatformObjectsUninstallAndAccountDeletionClearDataSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectsUninstallAndAccountDeletionClearData(t, false)
 }
 
 func TestPlatformObjectsUninstallAndAccountDeletionClearDataPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectsUninstallAndAccountDeletionClearData(t, true)
 }
 
@@ -262,10 +266,12 @@ func testPlatformObjectUninstallRollsBackWhenAdmissionFails(t *testing.T, pg boo
 }
 
 func TestPlatformObjectUninstallRollsBackWhenAdmissionFailsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectUninstallRollsBackWhenAdmissionFails(t, false)
 }
 
 func TestPlatformObjectUninstallRollsBackWhenAdmissionFailsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectUninstallRollsBackWhenAdmissionFails(t, true)
 }
 
@@ -319,14 +325,17 @@ func testPlatformUninstallRestoreDoesNotResurrectData(t *testing.T, pg bool) {
 }
 
 func TestPlatformUninstallRestoreDoesNotResurrectDataSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUninstallRestoreDoesNotResurrectData(t, false)
 }
 
 func TestPlatformUninstallRestoreDoesNotResurrectDataPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUninstallRestoreDoesNotResurrectData(t, true)
 }
 
 func TestPlatformFrontendUninstallSchedulerClearsPluginDataAndAccess(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"clear on uninstall"}`)); response.Code != http.StatusOK {
@@ -393,6 +402,7 @@ func TestPlatformFrontendUninstallSchedulerClearsPluginDataAndAccess(t *testing.
 }
 
 func TestPlatformFrontendUninstallRetryExhaustionRemainsUnavailable(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"failed uninstall stays denied"}`)); response.Code != http.StatusOK {
@@ -474,10 +484,12 @@ func testPlatformFrontendUninstallConcurrentClaim(t *testing.T, pg bool) {
 }
 
 func TestPlatformFrontendUninstallConcurrentClaimSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUninstallConcurrentClaim(t, false)
 }
 
 func TestPlatformFrontendUninstallConcurrentClaimPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUninstallConcurrentClaim(t, true)
 }
 
@@ -527,14 +539,17 @@ func testPlatformFrontendUninstallResumesAfterExpiredWorker(t *testing.T, pg boo
 }
 
 func TestPlatformFrontendUninstallResumesAfterExpiredWorkerSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUninstallResumesAfterExpiredWorker(t, false)
 }
 
 func TestPlatformFrontendUninstallResumesAfterExpiredWorkerPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUninstallResumesAfterExpiredWorker(t, true)
 }
 
 func TestPlatformObjectsPluginQuotaIsTransactional(t *testing.T) {
+	t.Parallel()
 	s, _, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, "abc")); response.Code != http.StatusOK {
@@ -572,10 +587,12 @@ func testPlatformObjectSchemaCounters(t *testing.T, pg bool) {
 }
 
 func TestPlatformObjectSchemaCountersSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectSchemaCounters(t, false)
 }
 
 func TestPlatformObjectSchemaCountersPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectSchemaCounters(t, true)
 }
 
@@ -682,22 +699,27 @@ func testPlatformObjectLegacyDumpRestoreMigratesRows(t *testing.T, pg bool) {
 }
 
 func TestPlatformObjectLegacyDumpRestoreMigratesRowsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectLegacyDumpRestoreMigratesRows(t, false)
 }
 
 func TestPlatformObjectLegacyDumpRestoreMigratesRowsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectLegacyDumpRestoreMigratesRows(t, true)
 }
 
 func TestPlatformObjectPluginTableMigrationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectPluginTableMigration(t, false)
 }
 
 func TestPlatformObjectPluginTableMigrationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformObjectPluginTableMigration(t, true)
 }
 
 func TestPlatformPluginStorageUsesOneTablePerApp(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	e := st.poolExec()
 	platformSeedPublisher(t, e, "plugins")
@@ -834,14 +856,17 @@ func testPlatformPluginUninstallClearsOnlyItsOwnData(t *testing.T, pg bool) {
 }
 
 func TestPlatformPluginUninstallClearsOnlyItsOwnDataSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPluginUninstallClearsOnlyItsOwnData(t, false)
 }
 
 func TestPlatformPluginUninstallClearsOnlyItsOwnDataPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPluginUninstallClearsOnlyItsOwnData(t, true)
 }
 
 func TestPlatformLastPluginUninstallRacesFreshInstallPostgres(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	e := st.poolExec()
 	platformSeedPublisher(t, e, "plugins")
@@ -944,6 +969,7 @@ func TestPlatformLastPluginUninstallRacesFreshInstallPostgres(t *testing.T) {
 }
 
 func TestPlatformObjectBackupAndOlderDumpRestore(t *testing.T) {
+	t.Parallel()
 	s, _, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"backup"}`)); response.Code != http.StatusOK {
@@ -977,6 +1003,7 @@ func TestPlatformObjectBackupAndOlderDumpRestore(t *testing.T) {
 }
 
 func TestPlatformObjectsPostgres(t *testing.T) {
+	t.Parallel()
 	s, _, reader, installation := platformObjectsFixturePG(t, true)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	created := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"postgres"}`))

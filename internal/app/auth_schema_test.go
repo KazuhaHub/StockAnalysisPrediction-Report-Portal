@@ -8,6 +8,7 @@ import (
 // declared once in baseSchemaStmts, which is now also the acceptance contract for an existing
 // database: an older one is refused rather than reconciled (ADR 0034).
 func TestAuthSchemaBaseline(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 
 	cols := []struct{ table, col string }{

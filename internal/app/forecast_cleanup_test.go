@@ -33,6 +33,7 @@ func seedFinishedPredictionSet(t *testing.T, st *Store, resolvedAt string) int64
 // TestCleanupPredictionPredicateNeverTouchesALiveReport is the first structural guarantee: a set whose
 // report still exists is not eligible, whatever its marks say and however old it is.
 func TestCleanupPredictionPredicateNeverTouchesALiveReport(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2020-01-01")
 	setID := seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-live")
@@ -61,6 +62,7 @@ func TestCleanupPredictionPredicateNeverTouchesALiveReport(t *testing.T) {
 // with any non-terminal mark is not eligible. This is what stops a retention pass from shortening the
 // record on exactly the sets whose answers are still coming.
 func TestCleanupPredictionPredicateNeverTouchesAnUnsettledSet(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	setID := seedPredictionSet(t, st, sql.NullInt64{}, "sha-pending")
 	if _, err := st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status, resolved_at)
@@ -88,6 +90,7 @@ func TestCleanupPredictionPredicateNeverTouchesAnUnsettledSet(t *testing.T) {
 // TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet is the positive case, and it is
 // deliberately narrow: every set in the month is orphaned AND fully terminal AND older than the cutoff.
 func TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	setID := seedFinishedPredictionSet(t, st, old)
@@ -128,6 +131,7 @@ func TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet(t *testing.T) {
 // month would move that month's n and every metric on it while the page kept the same label, breaking
 // the immutability a mature cell is cited for.
 func TestCleanupPredictionsNeverDeletesPartOfAMonth(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 
@@ -164,6 +168,7 @@ func TestCleanupPredictionsNeverDeletesPartOfAMonth(t *testing.T) {
 // COALESCE to a constant they would be deleted the moment their report was purged. Their own made_on
 // is the age that makes both cases right.
 func TestCleanupPredictionsAgesSetsWithNoMarks(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	cutoff := time.Now().UTC().AddDate(0, 0, -predDefaultPredictionsDays)
 
@@ -194,6 +199,7 @@ func TestCleanupPredictionsAgesSetsWithNoMarks(t *testing.T) {
 // stamps resolved_at, so a set whose every mark landed that way ages out normally rather than being
 // stuck un-scored for ever.
 func TestCleanupPredictionsRefusedFinalCountsAsSettled(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	setID := seedPredictionSet(t, st, sql.NullInt64{}, "sha-refused")
@@ -210,6 +216,7 @@ func TestCleanupPredictionsRefusedFinalCountsAsSettled(t *testing.T) {
 // TestCleanupPredictionsPurgeMarkerIsWhatMakesItVisible: without the marker a purged month reads as a
 // month in which nothing was ever predicted.
 func TestCleanupPredictionsPurgeMarkerIsWhatMakesItVisible(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	seedFinishedPredictionSet(t, s.st, old)
@@ -234,6 +241,7 @@ func TestCleanupPredictionsPurgeMarkerIsWhatMakesItVisible(t *testing.T) {
 // TestCleanupPredictionPredicateRespectsTheCutoff: terminal and orphaned is not enough — the newest
 // resolved_at must be older than the cutoff. A set settled yesterday is inside a three-year window.
 func TestCleanupPredictionPredicateRespectsTheCutoff(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	recent := time.Now().UTC().AddDate(0, 0, -10).Format(time.RFC3339)
 	seedFinishedPredictionSet(t, st, recent)
@@ -248,6 +256,7 @@ func TestCleanupPredictionPredicateRespectsTheCutoff(t *testing.T) {
 // below its floor. The floor's job is narrow — it stops "set the days to 0 and empty the ledger in
 // one pass" — but it has to hold on read, not only on save, or editing meta bypasses it.
 func TestCleanupPredictionsFloorIsClampedOnRead(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.st.SetSetting("cleanup_predictions_days", "1")
 	if got := s.cleanupConfigLoad().PredictionsDays; got != minPredictionsRetentionDays {
@@ -258,6 +267,7 @@ func TestCleanupPredictionsFloorIsClampedOnRead(t *testing.T) {
 // TestCleanupPredictionsShipsDisabled: nothing starts deleting on upgrade. Every other target ships
 // off for this reason, and this one deletes something that cannot be rebuilt at all.
 func TestCleanupPredictionsShipsDisabled(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	c := s.cleanupConfigLoad()
 	if c.PredictionsEnabled {
@@ -271,6 +281,7 @@ func TestCleanupPredictionsShipsDisabled(t *testing.T) {
 // TestCleanupPredictionsSaveRefusesBelowFloor: refused, not silently clamped. A retention an admin
 // typed and did not get is a record they think is kept at one number and is kept at another.
 func TestCleanupPredictionsSaveRefusesBelowFloor(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	code, out := call(t, s.apiCleanupConfigSave, `{"predictions_days":100}`, "admin")
 	if code == 200 {
@@ -286,6 +297,7 @@ func TestCleanupPredictionsSaveRefusesBelowFloor(t *testing.T) {
 
 // TestCleanupPredictionsConfigRoundTrips: the switch and the days survive a save and a reload.
 func TestCleanupPredictionsConfigRoundTrips(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	if code, _ := call(t, s.apiCleanupConfigSave, `{"predictions_enabled":true,"predictions_days":500}`, "admin"); code != 200 {
 		t.Fatalf("save → %d", code)
@@ -299,6 +311,7 @@ func TestCleanupPredictionsConfigRoundTrips(t *testing.T) {
 // TestCleanupPredictionsDryRunWritesNothing: a preview counts and changes nothing — no rows, no
 // cleanup_runs row, no last-result blob.
 func TestCleanupPredictionsDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	seedFinishedPredictionSet(t, s.st, old)
@@ -324,6 +337,7 @@ func TestCleanupPredictionsDryRunWritesNothing(t *testing.T) {
 // predictions_deleted is part of that filter, the pass is recorded and then never shown — the history
 // silently omits exactly the passes this target exists to make auditable.
 func TestCleanupPredictionsOnlyPassAppearsInHistory(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	seedFinishedPredictionSet(t, s.st, old)
@@ -348,6 +362,7 @@ func TestCleanupPredictionsOnlyPassAppearsInHistory(t *testing.T) {
 // TestCleanupRunRoundTripCarriesPredictions: the column survives insert and read, which is where a
 // column-count mismatch in the INSERT would surface as a scan error rather than a wrong number.
 func TestCleanupRunRoundTripCarriesPredictions(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.InsertCleanupRun(CleanupRun{RanAt: nowStr(), Trigger: "manual", OK: true, PredictionsDeleted: 7}); err != nil {
 		t.Fatalf("InsertCleanupRun: %v", err)
@@ -365,6 +380,7 @@ func TestCleanupRunRoundTripCarriesPredictions(t *testing.T) {
 // be declared in baseSchemaStmts() — that shape is the acceptance contract and adding to it would
 // refuse every existing database. It is a step instead, and an older dump must still load.
 func TestMigration0004AddsCleanupRunsColumn(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "pre-cleanup-pred.db")
 	// backToTheBaseline already winds back this step's tables and its cleanup_runs column.
 	backToTheBaseline(t, path)
@@ -383,6 +399,7 @@ func TestMigration0004AddsCleanupRunsColumn(t *testing.T) {
 // a month whose every set is orphaned, terminal and old is purged whole, and a month holding anything
 // still live or still unsettled is left alone.
 func TestPostgresCleanupPredictionsPredicate(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets", "prediction_claims", "prediction_marks", "prediction_purges")
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	cutoff := time.Now().UTC().AddDate(0, 0, -predDefaultPredictionsDays)

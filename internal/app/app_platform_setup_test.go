@@ -43,6 +43,7 @@ func activatePlatformTestSetupBinding(
 }
 
 func TestPlatformRequiredSetupBindingControlsRunnablePhase(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_installations
 		SET app_id='scheduled-digest',phase='setup_required'
@@ -122,6 +123,7 @@ func TestPlatformRequiredSetupBindingControlsRunnablePhase(t *testing.T) {
 }
 
 func TestPlatformSetupOnlyBindingDoesNotRequireNetworkAuthority(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_installations
 		SET app_id='scheduled-digest',phase='setup_required'
@@ -147,6 +149,7 @@ func TestPlatformSetupOnlyBindingDoesNotRequireNetworkAuthority(t *testing.T) {
 }
 
 func TestPlatformTaskAdmissionRefusesMissingBusinessSetup(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixtureForApp(
 		t, "scheduled-digest")
 	now, err := platformDatabaseNow(s.st.poolExec())

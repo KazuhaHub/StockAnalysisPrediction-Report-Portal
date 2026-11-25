@@ -68,8 +68,8 @@ func testPlatformWriterIntent(t *testing.T, pg bool) {
 		t.Fatal("rejected proof mutated storage")
 	}
 }
-func TestPlatformWriterIntentSQLite(t *testing.T)   { testPlatformWriterIntent(t, false) }
-func TestPlatformWriterIntentPostgres(t *testing.T) { testPlatformWriterIntent(t, true) }
+func TestPlatformWriterIntentSQLite(t *testing.T)   { t.Parallel(); testPlatformWriterIntent(t, false) }
+func TestPlatformWriterIntentPostgres(t *testing.T) { t.Parallel(); testPlatformWriterIntent(t, true) }
 func testPlatformWriterRefusals(t *testing.T, pg bool) {
 	for _, mode := range []string{"runtime", "key", "trust", "publisher_key", "sponsor", "pause", "lease", "fence", "epoch", "namespace", "namespace_created", "source_created", "source", "resource", "effect", "partial", "extra", "capability"} {
 		t.Run(mode, func(t *testing.T) {
@@ -131,9 +131,16 @@ func testPlatformWriterRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformWriterRefusalsSQLite(t *testing.T)   { testPlatformWriterRefusals(t, false) }
-func TestPlatformWriterRefusalsPostgres(t *testing.T) { testPlatformWriterRefusals(t, true) }
+func TestPlatformWriterRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWriterRefusals(t, false)
+}
+func TestPlatformWriterRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWriterRefusals(t, true)
+}
 func TestWritableReviewCannotUseReadonlyRuntime(t *testing.T) {
+	t.Parallel()
 	s, session, release := platformInstallFixture(t, false)
 	if _, err := s.createPlatformWritableInstallReview(context.Background(), session, release.sha256, 1, nil, platformRuntimeEndpoint{}); err == nil {
 		t.Fatal("zero runtime minted writable review")
@@ -174,5 +181,11 @@ func testPlatformWriterClockSkew(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformWriterIntentClockSkewSQLite(t *testing.T)   { testPlatformWriterClockSkew(t, false) }
-func TestPlatformWriterIntentClockSkewPostgres(t *testing.T) { testPlatformWriterClockSkew(t, true) }
+func TestPlatformWriterIntentClockSkewSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWriterClockSkew(t, false)
+}
+func TestPlatformWriterIntentClockSkewPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWriterClockSkew(t, true)
+}

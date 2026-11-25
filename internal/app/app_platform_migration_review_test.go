@@ -71,9 +71,11 @@ func testManagedUpdateReviewBindsMigrationStep(t *testing.T, pg bool) {
 }
 
 func TestManagedUpdateReviewBindsMigrationStepSQLite(t *testing.T) {
+	t.Parallel()
 	testManagedUpdateReviewBindsMigrationStep(t, false)
 }
 func TestManagedUpdateReviewBindsMigrationStepPostgres(t *testing.T) {
+	t.Parallel()
 	testManagedUpdateReviewBindsMigrationStep(t, true)
 }
 
@@ -110,8 +112,10 @@ func testManagedUpdateReviewRefusesSchemaWithoutStep(t *testing.T, pg bool) {
 }
 
 func TestManagedUpdateReviewRefusesSchemaWithoutStepSQLite(t *testing.T) {
+	t.Parallel()
 	testManagedUpdateReviewRefusesSchemaWithoutStep(t, false)
 }
 func TestManagedUpdateReviewRefusesSchemaWithoutStepPostgres(t *testing.T) {
+	t.Parallel()
 	testManagedUpdateReviewRefusesSchemaWithoutStep(t, true)
 }

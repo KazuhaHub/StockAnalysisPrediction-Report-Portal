@@ -148,11 +148,15 @@ func testPlatformProxyPinsHTTP(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformProxyPinsHTTP(t *testing.T)         { testPlatformProxyPinsHTTP(t, false) }
-func TestPlatformProxyPinsHTTPPostgres(t *testing.T) { runOnPostgres(t, testPlatformProxyPinsHTTP) }
+func TestPlatformProxyPinsHTTP(t *testing.T) { t.Parallel(); testPlatformProxyPinsHTTP(t, false) }
+func TestPlatformProxyPinsHTTPPostgres(t *testing.T) {
+	t.Parallel()
+	runOnPostgres(t, testPlatformProxyPinsHTTP)
+}
 
 // The view of the policy keeps hosts-only policies as before: an empty pin list, not a missing member.
 func TestPlatformProxyViewOfAHostsOnlyGrantHasNoPins(t *testing.T) {
+	t.Parallel()
 	p := platformProxyHTTPEnv(t, false)
 	platformProxySeedGrant(t, p.s, p.installation, []string{"qt.gtimg.cn"}, appplatform.ProxyDailyBytesMax)
 	w := p.do("GET", p.root(), "", "", nil)

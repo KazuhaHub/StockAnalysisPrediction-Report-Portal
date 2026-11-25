@@ -59,6 +59,7 @@ func measureJobsPayload(t *testing.T, s *Server) int {
 }
 
 func TestQueueListStaysSmallEnoughToPollEveryThreeSeconds(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	seedQueueForPayload(t, s)
 
@@ -78,6 +79,7 @@ func TestQueueListStaysSmallEnoughToPollEveryThreeSeconds(t *testing.T) {
 // The preview the console shows is bounded; what the server sends must be bounded by the same
 // promise, or the bound is only a rendering trick over a payload that was already paid for.
 func TestQueueListSendsAPreviewOfInputsNotTheWholePrompt(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	seedQueueForPayload(t, s)
 
@@ -105,6 +107,7 @@ func TestQueueListSendsAPreviewOfInputsNotTheWholePrompt(t *testing.T) {
 // Bounding the preview would have quietly broken the console's search, which matched against the
 // inputs it had been sent. So the search moved to the server, where it still sees them whole.
 func TestQueueSearchReachesWhatThePreviewNoLongerCarries(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	tgt := seedTarget(t, s.st)
 	// The needle sits far past the preview budget — the case a client-side filter would now miss.
@@ -141,6 +144,7 @@ func TestQueueSearchReachesWhatThePreviewNoLongerCarries(t *testing.T) {
 // queue must cost an empty 304 — no body on the wire, and no parse, setState or re-render at the
 // other end.
 func TestAnUnchangedQueueAnswersNotModified(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	seedQueueForPayload(t, s)
 

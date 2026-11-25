@@ -14,6 +14,7 @@ const canonicalMarketURL = "https://raw.githubusercontent.com/KazuhaHub/StockAna
 const previousMarketURL = "https://raw.githubusercontent.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/main/apps/index.json"
 
 func TestAppMarketDefaultMovesWithoutRewritingOverridesOrInstalledApps(t *testing.T) {
+	t.Parallel()
 	for _, configured := range []string{"", previousMarketURL, "https://custom.example.test/catalogue.json"} {
 		t.Run(configured, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "portal.db")
@@ -55,6 +56,7 @@ func TestAppMarketDefaultMovesWithoutRewritingOverridesOrInstalledApps(t *testin
 }
 
 func TestUnavailableAppMarketPreservesInstalledApps(t *testing.T) {
+	t.Parallel()
 	market := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
 	defer market.Close()
 	s := appMarketServer(t)
@@ -77,6 +79,7 @@ func TestUnavailableAppMarketPreservesInstalledApps(t *testing.T) {
 
 // Explicit network acceptance uses the real canonical catalogue and immutable demo ZIP.
 func TestCanonicalAppMarketPublishedInstall(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("TEST_PUBLIC_APP_MARKET") != "1" {
 		t.Skip("set TEST_PUBLIC_APP_MARKET=1 for public catalogue acceptance")
 	}

@@ -15,6 +15,7 @@ import (
 // Fails (the migration runs) when the image is not on the host yet and cannot be put there: no start-class
 // effect may be claimed for an image the runner does not hold.
 func TestMigrateDataIsNotSentWhenTheReleaseImageCannotBeLoaded(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, images := platformImageEnsureFixture(t)
 	migration := &platformFakeMigrationRunner{t: t}
 	s.platformMigration = migration
@@ -32,6 +33,7 @@ func TestMigrateDataIsNotSentWhenTheReleaseImageCannotBeLoaded(t *testing.T) {
 
 // Fails if the migration starts before the image is present, or if the load is skipped.
 func TestMigrateDataRunsAfterTheImageIsLoaded(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, images := platformImageEnsureFixture(t)
 	migration := &platformFakeMigrationRunner{t: t}
 	s.platformMigration = migration
@@ -53,6 +55,7 @@ func TestMigrateDataRunsAfterTheImageIsLoaded(t *testing.T) {
 
 // Fails (the start is reserved) when the image of the target release is not available for the update start.
 func TestUpdateStartIsNotReservedWhenTheReleaseImageCannotBeLoaded(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, images := platformImageEnsureFixture(t)
 	migration := &platformFakeMigrationRunner{t: t}
 	s.platformMigration = migration
@@ -92,6 +95,7 @@ var readOnlyStartPaths = map[string]string{
 // the sender in the same function, or every non-test caller of the function must itself be gated. A new start
 // path is found by its sender call, so it cannot be added without the gate.
 func TestEveryStartSenderIsPrecededByTheImageGate(t *testing.T) {
+	t.Parallel()
 	fset := token.NewFileSet()
 	files, _ := filepath.Glob("*.go")
 	type fn struct {

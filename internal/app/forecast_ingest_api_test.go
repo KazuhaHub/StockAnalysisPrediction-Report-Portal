@@ -84,6 +84,7 @@ type predictionSetRow struct {
 // TestV1IngestStoresAnAcceptedSet is the end-to-end happy path: a covered report with a valid payload
 // leaves one accepted set, its claims, and one pending mark per checkpoint.
 func TestV1IngestStoresAnAcceptedSet(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	code, m := ingestPost(t, s, ingestBody(string(predWire(nil))))
 
@@ -128,6 +129,7 @@ func TestV1IngestStoresAnAcceptedSet(t *testing.T) {
 // unusable payload costs the CLAIMS, never the report. A 4xx here would destroy a finished run that
 // nothing re-runs, and the producer's only signal would be a batch failure.
 func TestV1IngestRejectionKeepsTheReport(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	bad := predWire(func(m map[string]any) {
 		claim(m, "scenario.bull", func(c map[string]any) { c["probability"] = "1.0001" })
@@ -179,6 +181,7 @@ func TestV1IngestRejectionKeepsTheReport(t *testing.T) {
 // TestV1IngestRejectionIsAuditedAndBroadcast: a rejection is the producer's bug and the report reads
 // normally, so the audit row and the event are the only ways it reaches a person.
 func TestV1IngestRejectionIsAuditedAndBroadcast(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	bad := predWire(func(m map[string]any) { m["schema"] = "predictions.v99" })
 	if code, m := ingestPost(t, s, ingestBody(string(bad))); code != http.StatusOK || m["predictions_status"] != predStateRejected {
@@ -212,6 +215,7 @@ func TestV1IngestRejectionIsAuditedAndBroadcast(t *testing.T) {
 // TestV1IngestCoverageRows: a covered report with no payload still leaves a row, an uncovered one
 // leaves none. This is what makes coverage computable from the ledger alone (ADR 0029 §9).
 func TestV1IngestCoverageRows(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		rtype   string
@@ -246,6 +250,7 @@ func TestV1IngestCoverageRows(t *testing.T) {
 // genuinely changed must get its own row. Both are properties the producer relies on: it retries on
 // timeouts it cannot distinguish from failures, and it re-emits when a number moves.
 func TestV1IngestIsIdempotentPerPayload(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	payload := string(predWire(nil))
 
@@ -279,6 +284,7 @@ func TestV1IngestIsIdempotentPerPayload(t *testing.T) {
 // TestV1IngestWithoutPredictionsNeverTouchesTheLedger: an uncovered, payload-less ingest is the case
 // that must cost nothing at all — no row, no audit, no event.
 func TestV1IngestWithoutPredictionsNeverTouchesTheLedger(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	code, m := ingestPost(t, s, ingestBody(""))
 	if code != http.StatusOK {
@@ -308,6 +314,7 @@ func TestV1IngestWithoutPredictionsNeverTouchesTheLedger(t *testing.T) {
 // payload that is refused must not have registered a report type on its way in. The check is a diff
 // against the same request without predictions.
 func TestV1IngestInvalidPayloadWritesNothingItShouldNot(t *testing.T) {
+	t.Parallel()
 	count := func(s *Server, table string) int {
 		var n int
 		if err := s.st.queryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
@@ -342,6 +349,7 @@ func TestV1IngestInvalidPayloadWritesNothingItShouldNot(t *testing.T) {
 // over, the response says so and stays 200. A 5xx would make the producer retry a run whose report
 // already exists, and a started run is never re-run.
 func TestV1IngestStoreFailureIsReportedNotRaised(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// The set cannot be written because its table is gone. Breaking the schema rather than injecting
 	// through a test-only hook keeps the failure real: the code path exercised here is exactly the
@@ -375,6 +383,7 @@ func TestV1IngestStoreFailureIsReportedNotRaised(t *testing.T) {
 // TestV1IngestBacktestIsStoredAndMarked: a run over history is recorded and listed apart, and gets no
 // marks — nothing about it is a forecast.
 func TestV1IngestBacktestIsStoredAndMarked(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	raw := predWire(func(m map[string]any) {
 		m["information_cutoff"] = "2026-06-01T00:00:00Z"
@@ -401,6 +410,7 @@ func TestV1IngestBacktestIsStoredAndMarked(t *testing.T) {
 // TestV1IngestSymbolScopeRefusesOnlyThePredictions: a Beijing code is a fine report and an unscorable
 // claim set, so the report is stored and the set is refused.
 func TestV1IngestSymbolScopeRefusesOnlyThePredictions(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	body := strings.Replace(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"830799"`, 1)
 	code, m := ingestPost(t, s, body)
@@ -432,6 +442,7 @@ func TestV1IngestSymbolScopeRefusesOnlyThePredictions(t *testing.T) {
 // filters on the column, and a value that only ever landed in the payload would make that query
 // silently see nothing.
 func TestV1IngestWritesScenarioBasisToItsColumn(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	payload := predWire(func(m map[string]any) {
 		m["scenario_basis"] = "estimated"
@@ -467,6 +478,7 @@ func TestV1IngestWritesScenarioBasisToItsColumn(t *testing.T) {
 // on the write path, not only in the classifier, so the column holds a civil date even when the
 // producer sent an instant.
 func TestV1IngestBaselineAsOfInstantIsConvertedThroughTheDatabase(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	payload := predWire(func(m map[string]any) {
 		m["baseline"].(map[string]any)["as_of"] = "2026-10-09T23:30:00Z"

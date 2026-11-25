@@ -76,6 +76,7 @@ func operationCompleted(t *testing.T, s *Server, lease platformOperationLease) b
 // The refused effect's row is closed in the same transaction that ends the operation, for every action's finisher.
 // Fails if a finisher ends the operation without settling the row, or settles it without the operation ending.
 func TestFinishersSettleTheRefusedEffectWithTheOperation(t *testing.T) {
+	t.Parallel()
 	for _, c := range refusedFinisherCases() {
 		t.Run(c.name, func(t *testing.T) {
 			s, lease := c.build(t)
@@ -94,6 +95,7 @@ func TestFinishersSettleTheRefusedEffectWithTheOperation(t *testing.T) {
 // Without the request nothing is settled, and when the operation cannot end the row stays as it was: one
 // transaction, never a settlement on its own.
 func TestFinishersSettleTheRefusedEffectOnlyWhenAskedAndOnlyWithTheOperation(t *testing.T) {
+	t.Parallel()
 	for _, c := range refusedFinisherCases() {
 		t.Run(c.name+"/not_asked", func(t *testing.T) {
 			s, lease := c.build(t)

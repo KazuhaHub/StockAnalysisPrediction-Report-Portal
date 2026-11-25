@@ -9,10 +9,12 @@ import (
 )
 
 func TestExtensionIdentityUsesCurrentOUAndRole(t *testing.T) {
+	t.Parallel()
 	testExtensionIdentityUsesCurrentOUAndRole(t, newTestStore(t))
 }
 
 func TestPostgresExtensionIdentityUsesCurrentOUAndRole(t *testing.T) {
+	t.Parallel()
 	testExtensionIdentityUsesCurrentOUAndRole(t, pgStore(t, "notification_source_cycles", "users", "user_groups"))
 }
 
@@ -70,10 +72,12 @@ func testExtensionIdentityUsesCurrentOUAndRole(t *testing.T, st *Store) {
 }
 
 func TestExtensionIdentityRevokesAccountAndBinding(t *testing.T) {
+	t.Parallel()
 	testExtensionIdentityRevokesAccountAndBinding(t, newTestStore)
 }
 
 func TestPostgresExtensionIdentityRevokesAccountAndBinding(t *testing.T) {
+	t.Parallel()
 	testExtensionIdentityRevokesAccountAndBinding(t, func(t *testing.T) *Store { return pgStore(t, "notification_source_cycles", "users", "user_groups") })
 }
 
@@ -135,10 +139,12 @@ func testExtensionIdentityRevokesAccountAndBinding(t *testing.T, makeStore func(
 }
 
 func TestExtensionIdentityFailsClosedOnInvalidAncestry(t *testing.T) {
+	t.Parallel()
 	testExtensionIdentityFailsClosedOnInvalidAncestry(t, newTestStore)
 }
 
 func TestPostgresExtensionIdentityFailsClosedOnInvalidAncestry(t *testing.T) {
+	t.Parallel()
 	testExtensionIdentityFailsClosedOnInvalidAncestry(t, func(t *testing.T) *Store { return pgStore(t, "notification_source_cycles", "users", "user_groups") })
 	st := pgStore(t, "users", "user_groups")
 	st.EnsureDefaultGroup()
@@ -182,6 +188,7 @@ func testExtensionIdentityFailsClosedOnInvalidAncestry(t *testing.T, makeStore f
 }
 
 func TestExtensionIdentityExpiryUsesPanelCivilDate(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.EnsureDefaultGroup()
 	if err := st.UpsertUser(User{Username: "viewer", PasswordHash: "hash", Role: "user"}); err != nil {

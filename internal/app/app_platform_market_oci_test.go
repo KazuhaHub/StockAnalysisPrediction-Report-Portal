@@ -174,6 +174,7 @@ func (f *platformOCIFixture) refused(t *testing.T) {
 // Fails if the anonymous token flow, the computed pull scope, or the CDN redirect breaks, or if the registry
 // token reaches the CDN host.
 func TestOCICatalogueInstallTakesAnAnonymousTokenAndKeepsItOffTheCDN(t *testing.T) {
+	t.Parallel()
 	f := newPlatformOCIFixture(t)
 	f.registry.cdnRedirect = true
 	staged, err := f.install()
@@ -194,6 +195,7 @@ func TestOCICatalogueInstallTakesAnAnonymousTokenAndKeepsItOffTheCDN(t *testing.
 
 // Fails if a same-host blob redirect loses the token the registry issued for that host.
 func TestOCICatalogueKeepsTheTokenOnASameHostRedirect(t *testing.T) {
+	t.Parallel()
 	f := newPlatformOCIFixture(t)
 	f.registry.sameHostRedirect = true
 	if _, err := f.install(); err != nil {
@@ -203,6 +205,7 @@ func TestOCICatalogueKeepsTheTokenOnASameHostRedirect(t *testing.T) {
 
 // Fails if a manifest whose bytes are not the catalogue's digest is trusted.
 func TestOCICatalogueRefusesAManifestDigestMismatch(t *testing.T) {
+	t.Parallel()
 	f := newPlatformOCIFixture(t)
 	f.registry.catalogueDigest = "sha256:" + strings.Repeat("e", 64)
 	f.refused(t)
@@ -213,6 +216,7 @@ func TestOCICatalogueRefusesAManifestDigestMismatch(t *testing.T) {
 
 // Fails if anything other than the Portal package artifact shape is downloaded.
 func TestOCICatalogueRefusesOtherArtifactShapes(t *testing.T) {
+	t.Parallel()
 	for name, edit := range map[string]func(map[string]any){
 		"artifact type": func(m map[string]any) { m["artifactType"] = "application/vnd.example.other" },
 		"layer type": func(m map[string]any) {
@@ -236,6 +240,7 @@ func TestOCICatalogueRefusesOtherArtifactShapes(t *testing.T) {
 
 // Fails if layer bytes that are not the manifest's digest, or more bytes than its size, are staged.
 func TestOCICatalogueRefusesLayerBytesThatAreNotTheManifests(t *testing.T) {
+	t.Parallel()
 	t.Run("digest", func(t *testing.T) {
 		f := newPlatformOCIFixture(t)
 		body := append([]byte(nil), f.registry.pkg...)
@@ -262,6 +267,7 @@ func TestOCICatalogueRefusesLayerBytesThatAreNotTheManifests(t *testing.T) {
 
 // Fails if a repository or token realm at a private address, or a plain-http realm, is contacted.
 func TestOCICatalogueRefusesPrivateAndInsecureEndpoints(t *testing.T) {
+	t.Parallel()
 	t.Run("private repository", func(t *testing.T) {
 		f := newPlatformOCIFixture(t)
 		f.registry.repository = "10.1.2.3/" + ociTestRepoPath
@@ -283,6 +289,7 @@ func TestOCICatalogueRefusesPrivateAndInsecureEndpoints(t *testing.T) {
 }
 
 func TestParseOCIBearerChallenge(t *testing.T) {
+	t.Parallel()
 	realm, service, ok := parseOCIBearerChallenge(`Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:a/b:pull"`)
 	if !ok || realm != "https://ghcr.io/token" || service != "ghcr.io" {
 		t.Fatal(realm, service, ok)

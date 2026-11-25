@@ -27,6 +27,7 @@ func cacheTestStore(t *testing.T) (*Store, *spyDriver) {
 }
 
 func TestStmtCachePreparesEachTextOnce(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	for i := 0; i < 20; i++ {
 		var v string
@@ -61,6 +62,7 @@ func TestStmtCachePreparesEachTextOnce(t *testing.T) {
 }
 
 func TestStmtCacheSkipsNonDataStatements(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	ddl := `CREATE TABLE cache_u(id INTEGER)`
 	if _, err := st.exec(ddl); err != nil {
@@ -72,6 +74,7 @@ func TestStmtCacheSkipsNonDataStatements(t *testing.T) {
 }
 
 func TestStmtCacheIsBounded(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	st.stmts.max = 4
 	for n := 1; n <= 30; n++ {
@@ -100,6 +103,7 @@ func TestStmtCacheIsBounded(t *testing.T) {
 }
 
 func TestStmtCacheEvictionNeverClosesAStatementInUse(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	st.stmts.max = 1
 	ctx := context.Background()
@@ -130,6 +134,7 @@ func TestStmtCacheEvictionNeverClosesAStatementInUse(t *testing.T) {
 }
 
 func TestStmtCacheSurvivesSchemaChange(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	q := `SELECT * FROM cache_t WHERE id=?`
 	cols := func() []string {
@@ -192,6 +197,7 @@ func TestStmtCacheSurvivesSchemaChange(t *testing.T) {
 }
 
 func TestStmtCacheContextCancellationLeavesNothingBroken(t *testing.T) {
+	t.Parallel()
 	st, _ := cacheTestStore(t)
 	heavy := `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<?) SELECT COUNT(*) FROM c`
 	var wg sync.WaitGroup
@@ -223,6 +229,7 @@ func TestStmtCacheContextCancellationLeavesNothingBroken(t *testing.T) {
 }
 
 func TestStmtCacheInTransactions(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	ctx := context.Background()
 	// Warm the cache outside any transaction.
@@ -302,6 +309,7 @@ func TestStmtCacheInTransactions(t *testing.T) {
 }
 
 func TestStmtCacheConcurrentCallersPrepareOnce(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	var wg sync.WaitGroup
 	for g := 0; g < 16; g++ {
@@ -324,6 +332,7 @@ func TestStmtCacheConcurrentCallersPrepareOnce(t *testing.T) {
 }
 
 func TestStoreCloseClosesEveryCachedStatement(t *testing.T) {
+	t.Parallel()
 	st, d := newSpyStore(t)
 	if _, err := st.db.Exec(`CREATE TABLE cache_t(id INTEGER PRIMARY KEY, v TEXT)`); err != nil {
 		t.Fatal(err)
@@ -351,6 +360,7 @@ func TestStoreCloseClosesEveryCachedStatement(t *testing.T) {
 }
 
 func TestStmtCacheIsBypassedOnPostgres(t *testing.T) {
+	t.Parallel()
 	if c := newStmtCache("postgres", nil); c != nil {
 		t.Fatal("PostgreSQL got a statement cache")
 	}
@@ -380,6 +390,7 @@ func TestStmtCacheIsBypassedOnPostgres(t *testing.T) {
 // the transaction that first meets it, because that transaction holds the only connection. It is
 // noted, prepared by the next pool-level call, and then every later transaction reuses it.
 func TestStmtCacheWarmsTextsFirstSeenInTransactions(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	ctx := context.Background()
 	q := `SELECT COUNT(*) FROM cache_t WHERE id<?`
@@ -414,6 +425,7 @@ func TestStmtCacheWarmsTextsFirstSeenInTransactions(t *testing.T) {
 }
 
 func TestStmtCachePendingNotesAreBounded(t *testing.T) {
+	t.Parallel()
 	st, _ := cacheTestStore(t)
 	for i := 0; i < 10*stmtPendingCap; i++ {
 		st.stmts.want(fmt.Sprintf("SELECT %d", i))
@@ -429,6 +441,7 @@ func TestStmtCachePendingNotesAreBounded(t *testing.T) {
 // Draining the notes must cost the unrelated caller at most one prepare, and a caller that is already
 // cancelled must neither lose the notes nor be what they are prepared under.
 func TestStmtCacheDrainIsOnePerCallAndSurvivesCancelledCaller(t *testing.T) {
+	t.Parallel()
 	st, d := cacheTestStore(t)
 	texts := []string{
 		`SELECT COUNT(*) FROM cache_t WHERE id<?`,

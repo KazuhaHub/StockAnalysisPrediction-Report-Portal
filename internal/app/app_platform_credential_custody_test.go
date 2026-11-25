@@ -88,8 +88,14 @@ func testPlatformCredentialCustody(t *testing.T, pg bool) {
 		t.Fatal("demoted admin created custody")
 	}
 }
-func TestPlatformCredentialCustodySQLite(t *testing.T)   { testPlatformCredentialCustody(t, false) }
-func TestPlatformCredentialCustodyPostgres(t *testing.T) { testPlatformCredentialCustody(t, true) }
+func TestPlatformCredentialCustodySQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformCredentialCustody(t, false)
+}
+func TestPlatformCredentialCustodyPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformCredentialCustody(t, true)
+}
 
 func testPlatformCredentialCustodyRefusals(t *testing.T, pg bool) {
 	s, actor := platformActorTestServer(t, pg)
@@ -141,9 +147,11 @@ func testPlatformCredentialCustodyRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialCustodyRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialCustodyRefusals(t, false)
 }
 func TestPlatformCredentialCustodyRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialCustodyRefusals(t, true)
 }
 
@@ -175,9 +183,11 @@ func testPlatformCredentialCustodyAuditRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialCustodyAuditRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialCustodyAuditRollback(t, false)
 }
 func TestPlatformCredentialCustodyAuditRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialCustodyAuditRollback(t, true)
 }
 
@@ -207,9 +217,11 @@ func testPlatformCredentialBoundChangeDenied(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialBoundChangeDeniedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialBoundChangeDenied(t, false)
 }
 func TestPlatformCredentialBoundChangeDeniedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialBoundChangeDenied(t, true)
 }
 
@@ -249,8 +261,10 @@ func testPlatformCredentialConcurrentMutation(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialConcurrentMutationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialConcurrentMutation(t, false)
 }
 func TestPlatformCredentialConcurrentMutationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialConcurrentMutation(t, true)
 }

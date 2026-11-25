@@ -30,6 +30,7 @@ func (e *appsEnv) mint(user, app string) string {
 }
 
 func TestClosingAnAppRevokesItsOutstandingTokens(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	tok, other := e.mint("rita", "alpha"), e.mint("rita", "beta")
 	if code := e.bridgeGet(tok); code != http.StatusOK {
@@ -45,6 +46,7 @@ func TestClosingAnAppRevokesItsOutstandingTokens(t *testing.T) {
 }
 
 func TestEveryBridgeCallRechecksAccessForTheTokensUser(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	tok := e.mint("rita", "alpha")
 	// The row is written behind the API's back, so nothing revoked the token: the per-request check
@@ -79,6 +81,7 @@ func TestEveryBridgeCallRechecksAccessForTheTokensUser(t *testing.T) {
 }
 
 func TestAnUnchangedOrderIsNotAudited(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	put := func(body string) {
 		t.Helper()
@@ -112,6 +115,7 @@ func TestAnUnchangedOrderIsNotAudited(t *testing.T) {
 }
 
 func TestWritesValidateTheAppInsideTheirTransaction(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	st := e.s.st
 	// Well formed, but not installed: what a concurrent uninstall leaves behind a stale check.

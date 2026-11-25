@@ -46,14 +46,17 @@ func testMachineTokenRestoreKeepsShortenedExpiry(t *testing.T, pg bool) {
 }
 
 func TestMachineTokenRestoreKeepsShortenedExpirySQLite(t *testing.T) {
+	t.Parallel()
 	testMachineTokenRestoreKeepsShortenedExpiry(t, false)
 }
 func TestMachineTokenRestoreKeepsShortenedExpiryPostgres(t *testing.T) {
+	t.Parallel()
 	testMachineTokenRestoreKeepsShortenedExpiry(t, true)
 }
 
 // An active token that has already expired authorises nothing, so losing it is not reported.
 func TestMachineTokenRestoreDoesNotCountExpiredTokensAsLost(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	platformSeedActionFixtures(t, st)
 	inst := platformFixtureID(1)
@@ -76,6 +79,7 @@ func TestMachineTokenRestoreDoesNotCountExpiredTokensAsLost(t *testing.T) {
 
 // A runner that does not answer says nothing about its support: the failure is not remembered.
 func TestMachineRunnerSupportDoesNotCacheATransportFailure(t *testing.T) {
+	t.Parallel()
 	e := platformMachineFixture(t, false)
 	endpoint := platformRuntimeEndpoint{path: "/run/fixture/control.sock", controllerUID: 1000, controllerGID: 1000}
 	var asked int
@@ -115,6 +119,7 @@ func TestMachineRunnerSupportDoesNotCacheATransportFailure(t *testing.T) {
 // Authenticated traffic is governed by the token's own limit: the per-source ceiling counts only
 // requests that did not authenticate.
 func TestMachineSourceCeilingCountsOnlyFailedAttempts(t *testing.T) {
+	t.Parallel()
 	e := platformMachineFixture(t, false)
 	if w := e.enableWith(t, []string{"bars"}, 50, 16); w.Code != 200 {
 		t.Fatal(w.Code)
@@ -146,6 +151,7 @@ func TestMachineSourceCeilingCountsOnlyFailedAttempts(t *testing.T) {
 // The expiry sweep moves on: tokens that were audited, or retired by a rotation, are not read again
 // and do not crowd out newer expiries.
 func TestMachineExpirySweepReachesEveryExpiredToken(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	platformSeedActionFixtures(t, st)
 	s := &Server{st: st}

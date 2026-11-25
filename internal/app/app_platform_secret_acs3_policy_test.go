@@ -13,6 +13,7 @@ func acs3TestPolicy(principals string, actions ...string) platformSecretBindingP
 }
 
 func TestPlatformSecretBindingPolicyACS3Canonical(t *testing.T) {
+	t.Parallel()
 	policy := acs3TestPolicy(platformPrincipalsBoth, "QueryAccountBalance@2017-12-14")
 	raw, err := canonicalPlatformSecretBindingPolicy(policy)
 	want := `{"format":"portal.secret-binding-policy/2-dev.1","operation":"acs3_hmac_sha256","network_policy_sha256":"` + acs3TestDigest + `","principals":["service","viewer"],"acs3":{"actions":[{"action":"QueryAccountBalance","version":"2017-12-14"}]}}`
@@ -48,6 +49,7 @@ func TestPlatformSecretBindingPolicyACS3Canonical(t *testing.T) {
 // A viewer-only ACS3 binding has no v1 spelling (v1 carries no action block), so it is written as v2
 // with the viewer as the only principal.
 func TestPlatformSecretBindingPolicyACS3ViewerOnly(t *testing.T) {
+	t.Parallel()
 	policy := acs3TestPolicy("", "QueryAccountBalance@2017-12-14")
 	raw, err := canonicalPlatformSecretBindingPolicy(policy)
 	if err != nil || !strings.Contains(string(raw), `"principals":["viewer"],"acs3"`) {
@@ -65,6 +67,7 @@ func TestPlatformSecretBindingPolicyACS3ViewerOnly(t *testing.T) {
 }
 
 func TestPlatformSecretBindingPolicyACS3Refusals(t *testing.T) {
+	t.Parallel()
 	var seventeen []string
 	for i := 0; i < 17; i++ {
 		seventeen = append(seventeen, fmt.Sprintf("Action%02d@2017-12-14", i))

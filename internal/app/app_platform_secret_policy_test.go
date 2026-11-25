@@ -7,6 +7,7 @@ import (
 )
 
 func TestPlatformSecretBindingPolicyCanonical(t *testing.T) {
+	t.Parallel()
 	digest := strings.Repeat("a", 64)
 	for _, operation := range []string{"http_bearer", "http_api_key"} {
 		policy := platformSecretBindingPolicy{operation: operation, networkPolicySHA256: digest}
@@ -44,6 +45,7 @@ func TestPlatformSecretBindingPolicyCanonical(t *testing.T) {
 }
 
 func TestPlatformSecretBindingPolicyRefusals(t *testing.T) {
+	t.Parallel()
 	raw, _ := canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: "http_bearer", networkPolicySHA256: strings.Repeat("a", 64)})
 	inputs := [][]byte{nil, []byte("null"), []byte("[]"), append(raw, ' '), append([]byte(" "), raw...), append(raw, []byte(`{}`)...), bytes.Repeat([]byte("x"), 8193), {255}}
 	for _, pair := range [][2]string{

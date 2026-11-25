@@ -28,6 +28,7 @@ func repByIdent(t *testing.T, st *Store, symbol, date, rtype string) *Rep {
 }
 
 func TestValidReportDate(t *testing.T) {
+	t.Parallel()
 	for _, d := range []string{"2026-07-02", "2026-01-01", "2024-12-31"} {
 		if !validReportDate(d) {
 			t.Errorf("%q should be valid", d)
@@ -51,6 +52,7 @@ func newV1Server(t *testing.T) *Server {
 
 // v1 ingest: portal-generated uid, created flag, JSON error envelope, date validation.
 func TestV1IngestContract(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 
 	do := func(body, auth string) *httptest.ResponseRecorder {
@@ -108,6 +110,7 @@ func TestV1IngestContract(t *testing.T) {
 }
 
 func TestV1IngestRejectsBlankBodiesWithoutOverwriting(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	post := func(body string) (*httptest.ResponseRecorder, map[string]any) {
 		req := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(body))
@@ -162,6 +165,7 @@ func TestV1IngestRejectsBlankBodiesWithoutOverwriting(t *testing.T) {
 // both wastes space and risks the two drifting apart. HTML is rendered on demand
 // instead (TestV1GetReportDerivesHTMLOnRead).
 func TestV1IngestDoesNotPersistDerivedHTML(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	req := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(
 		`{"symbol":"600160","date":"2026-07-02","subtype":"综合决策","body_md":"# hi"}`))
@@ -230,6 +234,7 @@ func TestV1IngestDoesNotPersistDerivedHTML(t *testing.T) {
 // company-info tool can itself return a padded name (eastmoney does) — that must come out
 // clean on the frozen row too, not just when report-portal resolves the name itself.
 func TestV1IngestCleansExplicitName(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	req := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(
 		`{"symbol":"000528","date":"2026-07-02","subtype":"综合决策","name":"柳    工","body_md":"# hi"}`))
@@ -252,6 +257,7 @@ func TestV1IngestCleansExplicitName(t *testing.T) {
 // number), and GET /api/v1/reports/{id} resolves it. The old composite uid is gone from
 // the wire entirely — there is exactly one identifier now.
 func TestV1ReportIdentityIsNumericID(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	get := func(id string) (*httptest.ResponseRecorder, map[string]any) {
 		req := httptest.NewRequest("GET", "/api/v1/reports/"+id, nil)
@@ -294,6 +300,7 @@ func TestV1ReportIdentityIsNumericID(t *testing.T) {
 // The tracking endpoint reports its parent by the same numeric report id the report
 // API speaks, as report_id.
 func TestV1TrackingReportIDIsNumeric(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	ing := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(
 		`{"symbol":"600519","date":"2026-07-01","subtype":"汇总","body_md":"# hi","tracking":[{"itype":"assumption","content":"H2 +20%"}]}`))
@@ -322,6 +329,7 @@ func TestV1TrackingReportIDIsNumeric(t *testing.T) {
 // v1GetReport still returns a rendered body_html for md-only reports even though it
 // isn't persisted — the API contract for external consumers doesn't change.
 func TestV1GetReportDerivesHTMLOnRead(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	ireq := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(
 		`{"symbol":"600160","date":"2026-07-02","subtype":"综合决策","body_md":"# hi"}`))
@@ -351,6 +359,7 @@ func TestV1GetReportDerivesHTMLOnRead(t *testing.T) {
 // kind/source/date) alone is enough — a dedup tool queries by subtype for symbol-less
 // reports (e.g. 行业分析), and requiring specifically symbol/q/run_id wrongly 400s those.
 func TestV1QueryScope(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	ingest := func(body string) {
 		req := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(body))

@@ -16,7 +16,7 @@ import (
 func platformRefusedSnapshotEnded(t *testing.T, code string) (*Server, platformOperationLease, platformManagedUpdateReviewFixture) {
 	t.Helper()
 	s, snapshot := platformSnapshotStageFixture(t, false)
-	fixture := lastPlatformUpdateFixture
+	fixture := lastPlatformUpdateFixture.get(t)
 	intent, err := s.preparePlatformCheckpoint(context.Background(), snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +40,7 @@ func platformRefusedSnapshotEnded(t *testing.T, code string) (*Server, platformO
 // the migration), so its effect and its recovery set end, the installation stops being gated by them, and the runner's
 // own failure code is what the operation reports.
 func TestPlatformRefusedSnapshotLeavesNoUnresolvedEffectAndKeepsTheRunnersCode(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{"checkpoint_unsafe", "checkpoint_too_large"} {
 		t.Run(code, func(t *testing.T) {
 			s, snapshot, _ := platformRefusedSnapshotEnded(t, code)
@@ -70,6 +71,7 @@ func TestPlatformRefusedSnapshotLeavesNoUnresolvedEffectAndKeepsTheRunnersCode(t
 // After such an ending the source generation can come back through the existing repair action: it is reviewed,
 // admitted, checkpointed and started, and the installation is enabled and ready again.
 func TestPlatformRepairBringsTheSourceBackAfterARefusedSnapshot(t *testing.T) {
+	t.Parallel()
 	s, snapshot, fixture := platformRefusedSnapshotEnded(t, "checkpoint_unsafe")
 	platformRepairBringsTheSourceBack(t, s, snapshot, fixture)
 }
@@ -134,6 +136,7 @@ func platformRepairBringsTheSourceBack(t *testing.T, s *Server, snapshot platfor
 // The attempt that sends a checkpoint is bulk work with the runner's own bound, not the short attempt: cut at 20s it
 // would abandon a walk that is still verifying, over and over.
 func TestPlatformCheckpointAttemptHasTheBulkTimeout(t *testing.T) {
+	t.Parallel()
 	for name, lease := range map[string]platformOperationLease{
 		"update snapshot": {snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionUpdate, Managed: true, Stage: appplatform.StageSnapshot}},
 		"enable snapshot": {snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionEnable, Managed: true, Stage: appplatform.StageSnapshot}},
@@ -173,8 +176,9 @@ func platformExhaustedSnapshot(t *testing.T, s *Server, snapshot platformOperati
 // as a refusal: the effect reverted, the empty recovery set deleted, the installation disabled for recovery with the
 // code checkpoint_incomplete, and repair as the way back.
 func TestPlatformSnapshotEndedOnExhaustedAttemptsIsNotADeadEnd(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
-	fixture := lastPlatformUpdateFixture
+	fixture := lastPlatformUpdateFixture.get(t)
 	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -194,6 +198,7 @@ func TestPlatformSnapshotEndedOnExhaustedAttemptsIsNotADeadEnd(t *testing.T) {
 // The runner's checkpoint codes, and the code of an update whose plan expired, reach the management and status views as
 // themselves, not as the generic failure.
 func TestPlatformCheckpointCodesReachThePublicStatus(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{"checkpoint_unsafe", "checkpoint_too_large", "checkpoint_incomplete", "plan_expired"} {
 		if got := platformPublicOperationErrorCode(code); got != code {
 			t.Fatalf("%s is shown as %q", code, got)
@@ -204,6 +209,7 @@ func TestPlatformCheckpointCodesReachThePublicStatus(t *testing.T) {
 // The system's disable is audited against the installation, with the code and the fact that it was disabled for
 // recovery.
 func TestPlatformSnapshotEndingAuditsTheDisableForRecovery(t *testing.T) {
+	t.Parallel()
 	s, snapshot, _ := platformRefusedSnapshotEnded(t, "checkpoint_unsafe")
 	var detail struct {
 		Operation string `json:"operation_id"`
@@ -222,6 +228,7 @@ func TestPlatformSnapshotEndingAuditsTheDisableForRecovery(t *testing.T) {
 // An update that retries another failed one (the installation is enabled in recovery_required) and ends at the snapshot
 // is disabled for recovery as well, never stranded enabled and in recovery with its source stopped.
 func TestPlatformRetryEndedAtTheSnapshotIsDisabledForRecovery(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 		t.Fatal(err)

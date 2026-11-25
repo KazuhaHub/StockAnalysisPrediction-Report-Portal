@@ -8,6 +8,7 @@ import (
 )
 
 func TestForecastAdmissionDeferralResumesWithoutRepeatingSuccessfulReads(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	s.st.SetSetting(setForecastAuto, forecastModeDry)
@@ -57,6 +58,7 @@ func TestForecastAdmissionDeferralResumesWithoutRepeatingSuccessfulReads(t *test
 }
 
 func TestForecastProgressInvalidatesAtSessionBoundaryAndPolicyChange(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	now := shanghai(2026, time.November, 20, 15, 29)
@@ -77,6 +79,7 @@ func TestForecastProgressInvalidatesAtSessionBoundaryAndPolicyChange(t *testing.
 }
 
 func TestForecastResumedSettlementMatchesUnthrottledPass(t *testing.T) {
+	t.Parallel()
 	reference := newV1Server(t)
 	_, expected := opsFixture(t, reference)
 	if err := expected.tick(reference); err != nil {
@@ -115,6 +118,7 @@ func TestForecastResumedSettlementMatchesUnthrottledPass(t *testing.T) {
 }
 
 func TestLedgerAdmissionDeferralDoesNotTripFailureBreaker(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("tencent", func(context.Context, string, string, string, string) (*QuoteResp, error) {
 		return nil, fmt.Errorf("transport: %w", &vendorDeferredError{Source: "tencent", Reason: "rate_limit"})
 	})}}

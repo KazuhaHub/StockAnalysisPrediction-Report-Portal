@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestSearchNewLatestCollapsesStockHistoryInSQL(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, r := range []Rep{
 		{Symbol: "600001", Date: "2026-07-01", RType: "summary", Title: "old"},

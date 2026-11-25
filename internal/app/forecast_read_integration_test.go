@@ -8,6 +8,7 @@ import (
 )
 
 func TestReadMembershipProjectionSurvivesAccessIntegration(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	report, member := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-01-06", Bench: "sh000852"}, "Current report")
 	read := func(view forecastPredictionView) []byte {
@@ -58,6 +59,7 @@ func TestReadMembershipProjectionSurvivesAccessIntegration(t *testing.T) {
 }
 
 func TestPurgedExternalReaderAliasesStillOmitVolume(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "external", scopeAll, true)
 	if _, err := s.st.exec(`INSERT INTO prediction_purges(rtype,cohort,purged_at,sets_removed) VALUES(?,?,?,?)`, predTestRtype, "2025-06", "2026-10-01T00:00:00Z", 999); err != nil {

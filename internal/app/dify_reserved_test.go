@@ -63,6 +63,7 @@ func inputNames(t *testing.T, raw any) []string {
 }
 
 func TestReservedInputsNeverReachTheRunForm(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	params := paramsWithReserved
 	srv := reservedDifyStub(t, &params)
@@ -104,6 +105,7 @@ func TestReservedInputsNeverReachTheRunForm(t *testing.T) {
 }
 
 func TestClientCannotSupplyAReservedInput(t *testing.T) {
+	t.Parallel()
 	d := difyServer(t)
 	defer d.Close()
 	s := batchServer(t)
@@ -149,6 +151,7 @@ func TestClientCannotSupplyAReservedInput(t *testing.T) {
 }
 
 func TestProbeAndRefreshRecordReservedInputs(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	params := paramsWithReserved
 	srv := reservedDifyStub(t, &params)
@@ -241,6 +244,7 @@ func p39aJSON(t *testing.T, v any) string {
 // identical user-facing list, and the preview must still say it changed — otherwise the confirm never
 // runs and the recorded names are neither written nor cleared.
 func TestReservedOnlyRefreshIsApplicable(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	params := `{"user_input_form":[{"text-input":{"variable":"symbol","required":true}}]}`
 	srv := reservedDifyStub(t, &params)
@@ -285,6 +289,7 @@ func TestReservedOnlyRefreshIsApplicable(t *testing.T) {
 }
 
 func TestRecurringTemplateStripsReservedInputs(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	seedDifyTarget(t, s, "t")
 	var targetID int64

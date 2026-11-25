@@ -213,9 +213,11 @@ func testPlatformReviewedReinstallStartsEmpty(
 }
 
 func TestPlatformReviewedReinstallStartsEmptySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformReviewedReinstallStartsEmpty(t, false)
 }
 
 func TestPlatformReviewedReinstallStartsEmptyPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformReviewedReinstallStartsEmpty(t, true)
 }

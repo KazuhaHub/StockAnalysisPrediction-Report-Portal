@@ -271,12 +271,14 @@ func testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(
 func TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(t, false)
 }
 
 func TestPlatformRunnerUnavailableLeavesPortalBusinessAvailablePostgres(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(t, true)
 }
 
@@ -326,11 +328,13 @@ func testPlatformMigrationFailureLeavesPortalBusinessAvailable(
 func TestPlatformMigrationFailureLeavesPortalBusinessAvailableSQLite(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformMigrationFailureLeavesPortalBusinessAvailable(t, false)
 }
 
 func TestPlatformMigrationFailureLeavesPortalBusinessAvailablePostgres(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformMigrationFailureLeavesPortalBusinessAvailable(t, true)
 }

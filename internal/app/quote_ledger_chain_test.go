@@ -6,6 +6,7 @@ import (
 )
 
 func TestLedgerChainFollowsOperatorOrder(t *testing.T) {
+	t.Parallel()
 	grant := func(name string, cash, kind bool, iv quoteInterval) quoteSource {
 		return quoteSource{name: name, cashDividends: cash, reportsKind: kind,
 			caps: []quoteCapability{{intervals: []quoteInterval{iv}}}}
@@ -53,6 +54,7 @@ func TestLedgerChainFollowsOperatorOrder(t *testing.T) {
 }
 
 func TestLedgerChainRetainsMarketAndCodeBoundaries(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{sources: []quoteSource{{name: "narrow", cashDividends: true, reportsKind: true,
 		caps:  []quoteCapability{{markets: func(m *quoteMarket) bool { return m.id == "sh" }, intervals: []quoteInterval{quoteIntervalSettled}}},
 		knows: func(target quoteTarget) bool { return target.Code == "601899" },

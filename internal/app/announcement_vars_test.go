@@ -10,6 +10,7 @@ import (
 // The grammar is shared with web/src/lib/announcementVars.ts; the cases below are mirrored in
 // announcementVars.test.ts so the editor and the server accept exactly the same text.
 func TestCheckAnnouncementVars(t *testing.T) {
+	t.Parallel()
 	ok := []string{
 		"",
 		"plain text with no variables",
@@ -83,6 +84,7 @@ func TestCheckAnnouncementVars(t *testing.T) {
 }
 
 func TestAnnouncementSaveRefusesBadVariable(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, body := range []string{
 		`{"title":"t","content":"down at {{time:tomorrow}}"}`,

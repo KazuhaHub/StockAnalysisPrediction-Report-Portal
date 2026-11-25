@@ -7,6 +7,7 @@ import (
 )
 
 func TestNotificationRestorePausesPreviouslyPendingWork(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	now := time.Now().UTC()
 	event := NotificationEvent{ID: "restore-event", SourceKey: "restore-source", Type: EventBatchFinished, Payload: `{}`, CreatedAt: now.UnixMilli()}
@@ -30,6 +31,7 @@ func TestNotificationRestorePausesPreviouslyPendingWork(t *testing.T) {
 }
 
 func TestNotificationSchemaIsOutsideBaselineAndBackedUp(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, name := range notificationTables {
 		if !st.tableExists(name) {
@@ -58,6 +60,7 @@ func TestNotificationSchemaIsOutsideBaselineAndBackedUp(t *testing.T) {
 }
 
 func TestNotificationAccountDeletionDoesNotTransferInbox(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "reused", PasswordHash: "h", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -88,6 +91,7 @@ func TestNotificationAccountDeletionDoesNotTransferInbox(t *testing.T) {
 }
 
 func TestNotificationCaptureAndLeaseFencing(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	now := time.Now().UTC()
 	event := NotificationEvent{ID: "event1", SourceKey: "source1", Type: EventBatchFinished, Payload: `{"job_id":42}`, CreatedAt: now.UnixMilli()}

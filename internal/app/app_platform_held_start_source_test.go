@@ -44,6 +44,7 @@ func platformRequireHeldStartSource(t *testing.T, s *Server, installation, epoch
 }
 
 func TestPlatformHeldStartSourceUpdateSourcedSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, enabled, _, runtime := platformDataActionFixture(t, false)
 	platformCompleteSyntheticDisable(t, s, actor, enabled)
 	epoch := scalar[string](t, s.st, `SELECT controller_epoch FROM app_platform_installations WHERE id=?`, enabled.installationID)
@@ -51,6 +52,7 @@ func TestPlatformHeldStartSourceUpdateSourcedSQLite(t *testing.T) {
 }
 
 func TestPlatformHeldStartSourceInstallSourcedSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformManagedRemovalStopFixtureAction(t, false, appplatform.ActionDisable)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {

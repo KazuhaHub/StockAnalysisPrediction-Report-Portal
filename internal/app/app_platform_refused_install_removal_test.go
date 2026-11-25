@@ -180,12 +180,19 @@ func testRefusedInstallIsUninstalled(t *testing.T, pg bool) {
 	}
 }
 
-func TestRefusedInstallIsUninstalledSQLite(t *testing.T)   { testRefusedInstallIsUninstalled(t, false) }
-func TestRefusedInstallIsUninstalledPostgres(t *testing.T) { testRefusedInstallIsUninstalled(t, true) }
+func TestRefusedInstallIsUninstalledSQLite(t *testing.T) {
+	t.Parallel()
+	testRefusedInstallIsUninstalled(t, false)
+}
+func TestRefusedInstallIsUninstalledPostgres(t *testing.T) {
+	t.Parallel()
+	testRefusedInstallIsUninstalled(t, true)
+}
 
 // The scheduler's own loop takes the never-started path: it passes stop and remove_code without a runner call and
 // stops at the delete-data effect. Fails if the loop still prepares a stop intent for code that never ran.
 func TestRefusedInstallRemovalLoopRunsNoStopOrRemoveCode(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	_, commit := f.uninstall(t, platformFixtureID(7110))
 	selected, err := f.s.claimNextPlatformManagedUninstall(context.Background(), platformFixtureID(7111))
@@ -206,6 +213,7 @@ func TestRefusedInstallRemovalLoopRunsNoStopOrRemoveCode(t *testing.T) {
 // refused with the existing typed error until the start is settled; settling it (to reverted) is what opens the
 // variant. The real orphan settlement does exactly that for a start the runner proves never ran.
 func TestRefusedInstallWithAnUnsettledStartIsNotRemovable(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"prepared", "unknown", "applied"} {
 		t.Run(state, func(t *testing.T) {
 			f := newRefusedInstall(t, false)
@@ -222,6 +230,7 @@ func TestRefusedInstallWithAnUnsettledStartIsNotRemovable(t *testing.T) {
 }
 
 func TestOrphanSettledInstallBecomesRemovable(t *testing.T) {
+	t.Parallel()
 	o := newOrphanFixture(t, true)
 	mustExec(t, o.s.st, `UPDATE app_platform_operation_effects SET state='unknown' WHERE effect_id=?`, o.effect)
 	if err := o.w.finishOrphan(context.Background(), o.receipt()); err != nil {
@@ -236,6 +245,7 @@ func TestOrphanSettledInstallBecomesRemovable(t *testing.T) {
 
 // Every condition of the eligibility fails closed on its own.
 func TestNeverStartedRemovalFailsClosed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, statement string }{
 		{"install_not_failed", `UPDATE app_platform_operations SET error_code=NULL WHERE action='install'`},
 		{"install_complete", `UPDATE app_platform_operations SET stage='complete',error_code=NULL WHERE action='install'`},
@@ -281,6 +291,7 @@ func TestNeverStartedRemovalFailsClosed(t *testing.T) {
 // A started install, whatever phase it is pushed into, never takes the variant, and the ordinary review carries no
 // trace of it (its JSON is the one that was reviewed before this change).
 func TestStartedInstallKeepsTheOrdinaryPath(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformWritableAccessFixture(t, false)
 	plan, err := s.createPlatformRemovalReview(actor, lease.installationID, appplatform.ActionUninstall)
 	if err != nil {
@@ -354,13 +365,16 @@ func testRefusedInstallRemovalIsCrashSafe(t *testing.T, pg bool) {
 }
 
 func TestRefusedInstallRemovalIsCrashSafeSQLite(t *testing.T) {
+	t.Parallel()
 	testRefusedInstallRemovalIsCrashSafe(t, false)
 }
 func TestRefusedInstallRemovalIsCrashSafePostgres(t *testing.T) {
+	t.Parallel()
 	testRefusedInstallRemovalIsCrashSafe(t, true)
 }
 
 func TestRefusedInstallRemovalCrashAfterThePreparedEffectFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	_, commit := f.uninstall(t, platformFixtureID(7130))
 	lease := f.claimAtStop(t, platformFixtureID(7131))
@@ -393,6 +407,7 @@ func TestRefusedInstallRemovalCrashAfterThePreparedEffectFailsClosed(t *testing.
 
 // A stray effect in a stage that has none for this variant is evidence that disagrees with the plan.
 func TestNeverStartedRemovalRefusesStrayEffects(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	_, commit := f.uninstall(t, platformFixtureID(7140))
 	lease := f.claimAtStop(t, platformFixtureID(7141))
@@ -408,6 +423,7 @@ func TestNeverStartedRemovalRefusesStrayEffects(t *testing.T) {
 // closed install no longer occupies it, the new install is admitted, and its data stage prepares a fresh namespace
 // (and so asks the runner for a fresh reservation). Fails while the failed install stays recovery_required.
 func TestRefusedInstallCanBeInstalledAgainAfterItsRemoval(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	app := scalar[string](t, f.s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, f.installation)
 	oldNamespace := scalar[string](t, f.s.st, `SELECT id FROM app_platform_data_namespaces WHERE owner_installation_id=?`, f.installation)
@@ -475,6 +491,7 @@ func (f refusedInstall) removeNeverStarted(t *testing.T, base int) {
 // removal back: the namespace is still active, the install is still recovery_required, the application is still
 // occupied (fail closed), and the same receipt converges on retry.
 func TestRefusedInstallCloseIsAtomicWithTheRemoval(t *testing.T) {
+	t.Parallel()
 	f := newRefusedInstall(t, false)
 	app := scalar[string](t, f.s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, f.installation)
 	_, commit := f.uninstall(t, platformFixtureID(7170))
@@ -513,6 +530,7 @@ func TestRefusedInstallCloseIsAtomicWithTheRemoval(t *testing.T) {
 // A started install removed through the ordinary path is unchanged: its install operation stays complete and no
 // closing is recorded.
 func TestOrdinaryRemovalDoesNotCloseTheInstall(t *testing.T) {
+	t.Parallel()
 	s, lease := platformWritableManagedRemovalStopFixture(t, false)
 	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
 	if err != nil {

@@ -119,6 +119,7 @@ func platformPrincipalEnvironment(t *testing.T, pg bool) *platformPrincipalEnv {
 // Doc 181 test 1: the listed values are byte for byte what each user and OU
 // later present at launch.
 func TestPlatformPrincipalSearchEqualsLaunchViewerValues(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		users, next := decodePlatformPrincipals(t, p.post(t, "search", map[string]any{"kind": "user"}))

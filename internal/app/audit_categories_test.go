@@ -10,6 +10,7 @@ import (
 // Every action this build writes sits in exactly one category: in none, the category filter could
 // never reach it; in two, picking either category would show it and the counts would not add up.
 func TestEveryActionBelongsToExactlyOneCategory(t *testing.T) {
+	t.Parallel()
 	seen := map[string]string{}
 	for _, c := range auditCategories {
 		if c.Key == "" || c.Key == auditCategoryOther {
@@ -36,6 +37,7 @@ func TestEveryActionBelongsToExactlyOneCategory(t *testing.T) {
 }
 
 func TestAuditAPIGroupsActionsByCategory(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 	s.st.WriteAudit(AuditEntry{Action: "legacy.retired", TargetType: "x", TargetID: "1"})
@@ -62,6 +64,7 @@ func TestAuditAPIGroupsActionsByCategory(t *testing.T) {
 }
 
 func TestAuditAPIOmitsOtherWhenEveryActionIsKnown(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 	s.recordAuth(nil, AuditReportRead, "kazuha", "1", nil)
@@ -80,6 +83,7 @@ func TestAuditAPIOmitsOtherWhenEveryActionIsKnown(t *testing.T) {
 }
 
 func TestAuditCategoryFilter(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	for _, a := range []string{AuditLogin, AuditLoginFailed, AuditReportRead, AuditExportCreate, "legacy.retired", ""} {
 		s.st.WriteAudit(AuditEntry{Action: a, TargetType: "x", TargetID: "1"})

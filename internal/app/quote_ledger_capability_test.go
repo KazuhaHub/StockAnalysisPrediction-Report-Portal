@@ -9,6 +9,7 @@ import (
 )
 
 func TestSettledRequiresAnExplicitGrant(t *testing.T) {
+	t.Parallel()
 	target := quoteAsk(t, "sh")
 	for _, iv := range []quoteInterval{"settled", "settled_shadow"} {
 		t.Run(string(iv), func(t *testing.T) {
@@ -52,6 +53,7 @@ func TestSettledRequiresAnExplicitGrant(t *testing.T) {
 }
 
 func TestLedgerFetchNeverCaches(t *testing.T) {
+	t.Parallel()
 	for _, iv := range []quoteInterval{"settled", "settled_shadow"} {
 		for _, warm := range []bool{false, true} {
 			t.Run(string(iv)+"/warm="+strconv.FormatBool(warm), func(t *testing.T) {
@@ -79,6 +81,7 @@ func TestLedgerFetchNeverCaches(t *testing.T) {
 }
 
 func TestDisplaySourceCallRefusesLedgerIntervals(t *testing.T) {
+	t.Parallel()
 	for _, iv := range []quoteInterval{quoteIntervalSettled, quoteIntervalSettledShadow} {
 		for _, shape := range []string{"count", "interval", "window"} {
 			t.Run(string(iv)+"/"+shape, func(t *testing.T) {
@@ -103,6 +106,7 @@ func TestDisplaySourceCallRefusesLedgerIntervals(t *testing.T) {
 }
 
 func TestNoPublicRangeIsSettled(t *testing.T) {
+	t.Parallel()
 	for name, spec := range quoteRanges {
 		if spec.interval == "settled" || spec.interval == "settled_shadow" {
 			t.Fatalf("public range %s exposes ledger capability", name)

@@ -86,8 +86,10 @@ func testPlatformServiceEgressSettings(t *testing.T, pg bool) {
 }
 
 func TestPlatformServiceEgressSettingsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressSettings(t, false)
 }
 func TestPlatformServiceEgressSettingsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressSettings(t, true)
 }

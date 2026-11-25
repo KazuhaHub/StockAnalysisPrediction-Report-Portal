@@ -31,6 +31,7 @@ func bundleHostFixture(t *testing.T, pg bool) (*platformBundleSource, string) {
 }
 
 func TestRecoveryBundleCommandRoundTripRestoresIntoAFreshStore(t *testing.T) {
+	t.Parallel()
 	b, journal := bundleHostFixture(t, false)
 	s := b.s
 	credentialID := platformFixtureID(7401)
@@ -137,6 +138,7 @@ func mustRetained(t *testing.T, st *Store) []platformRetainedSet {
 
 // Fails if the bundle is written from reads that are not one snapshot, or a database that moved is accepted.
 func TestRecoveryBundleRefusesADatabaseThatMovesWhileItIsWritten(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		for name, move := range map[string]func(*testing.T, *platformBundleSource){
 			"a retained set is deleted": func(t *testing.T, b *platformBundleSource) {
@@ -167,6 +169,7 @@ func TestRecoveryBundleRefusesADatabaseThatMovesWhileItIsWritten(t *testing.T) {
 // PostgreSQL only: SQLite's single connection makes a concurrent writer wait, so only PostgreSQL can show that
 // the dump, the retained sets and the releases are one snapshot. A row written after the first read is in none.
 func TestRecoveryBundleReadsEverythingInOneSnapshot(t *testing.T) {
+	t.Parallel()
 	b, journal := bundleHostFixture(t, true)
 	dir := t.TempDir()
 	_, err := b.s.writePlatformRecoveryBundle(dir, platformRecoveryBundleInput{
@@ -189,6 +192,7 @@ func TestRecoveryBundleReadsEverythingInOneSnapshot(t *testing.T) {
 }
 
 func TestRecoveryBundleCommandRefusesMissingAndTamperedCheckpoints(t *testing.T) {
+	t.Parallel()
 	t.Run("an archive is missing", func(t *testing.T) {
 		b, journal := bundleHostFixture(t, false)
 		if err := os.Remove(filepath.Join(b.hostDir, platformFixtureID(7201)+".tar")); err != nil {
@@ -262,6 +266,7 @@ func TestRecoveryBundleCommandRefusesMissingAndTamperedCheckpoints(t *testing.T)
 }
 
 func TestRecoveryBundleCommandRefusesAnUnreadableJournal(t *testing.T) {
+	t.Parallel()
 	b, _ := bundleHostFixture(t, false)
 	for name, path := range map[string]string{
 		"missing":   filepath.Join(b.hostDir, "nope.sqlite3"),
@@ -292,6 +297,7 @@ func TestRecoveryBundleCommandRefusesAnUnreadableJournal(t *testing.T) {
 
 // A bundle damaged after it was written is refused on the fresh host before any table is touched.
 func TestRecoveryBundleRestoreRefusesATamperedOrIncompleteBundle(t *testing.T) {
+	t.Parallel()
 	for name, damage := range map[string]func(t *testing.T, dir string, m platformRecoveryBundleManifest){
 		"archive tampered": func(t *testing.T, dir string, m platformRecoveryBundleManifest) {
 			rewriteBundleFile(t, filepath.Join(dir, m.Checkpoints[0].Archive.Path), []byte("tampered"))
@@ -352,6 +358,7 @@ func rewriteBundleFile(t *testing.T, path string, content []byte) {
 }
 
 func TestRecoveryBundleCommandArguments(t *testing.T) {
+	t.Parallel()
 	ok := map[string]struct {
 		args []string
 		want recoveryBundleArgs

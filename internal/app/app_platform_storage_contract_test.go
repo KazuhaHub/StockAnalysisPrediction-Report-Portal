@@ -51,6 +51,7 @@ func platformObjectRequestFixture(action string, changes map[string]any) []byte 
 }
 
 func TestPlatformObjectRequestContract(t *testing.T) {
+	t.Parallel()
 	list, err := parsePlatformObjectRequest(platformObjectRequestFixture("list", nil))
 	if err != nil || list.action != "list" || list.collection != "note" || list.limit != 20 {
 		t.Fatal("valid list request", list, err)
@@ -74,6 +75,7 @@ func TestPlatformObjectRequestContract(t *testing.T) {
 }
 
 func TestPlatformObjectRequestRejectsClosedShapes(t *testing.T) {
+	t.Parallel()
 	content := base64.StdEncoding.EncodeToString([]byte("body"))
 	list := platformObjectRequestFixture("list", nil)
 	duplicate := bytes.Replace(list, []byte(`"action":"list"`), []byte(`"action":"list","action":"get"`), 1)
@@ -111,6 +113,7 @@ func TestPlatformObjectRequestRejectsClosedShapes(t *testing.T) {
 }
 
 func TestPlatformObjectQuotaContract(t *testing.T) {
+	t.Parallel()
 	limit := platformObjectQuota{
 		global:  platformObjectUsage{MaxBytes: 100, MaxObjects: 4},
 		plugin:  platformObjectUsage{MaxBytes: 80, MaxObjects: 3},
@@ -151,6 +154,7 @@ func TestPlatformObjectQuotaContract(t *testing.T) {
 }
 
 func TestPlatformObjectAccountAndRevisionContract(t *testing.T) {
+	t.Parallel()
 	owner := platformObjectOwner{Username: "reader", AccountCreated: "100", AccountGeneration: "9007199254740993"}
 	if !samePlatformObjectOwner(owner, owner) {
 		t.Fatal("exact account identity did not match")

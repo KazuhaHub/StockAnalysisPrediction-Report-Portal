@@ -6,6 +6,7 @@ import "testing"
 // tier names and clamping numbers (docs/adr/0008, 0014). urgent and idle are the two
 // dominating lanes; both carry base 0.
 func TestParsePriority(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		base int
@@ -32,6 +33,7 @@ func TestParsePriority(t *testing.T) {
 // resolveBasePriority precedence (group model B): the primary group's priority
 // override beats the system default; an empty setup falls back to the built-in 50.
 func TestResolveBasePriority(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	srv := &Server{st: st}
 	// The primary group is a column on the user row now (ADR 0013), so the user must exist
@@ -82,6 +84,7 @@ func TestResolveBasePriority(t *testing.T) {
 // groupPriorityValid normalizes a group default to a base-number string; 加急 and
 // garbage are rejected, legacy tiers map, numbers clamp.
 func TestGroupPriorityValid(t *testing.T) {
+	t.Parallel()
 	srv := &Server{}
 	for in, want := range map[string]string{
 		"normal": "50", // legacy tier → number
@@ -101,6 +104,7 @@ func TestGroupPriorityValid(t *testing.T) {
 
 // normalizePriorityInput accepts 加急 or a clamped number, and rejects garbage.
 func TestNormalizePriorityInput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want string

@@ -33,6 +33,7 @@ func difyRunStub(t *testing.T, runStatus string, httpCode int) *httptest.Server 
 }
 
 func TestDifyProviderStatusMapping(t *testing.T) {
+	t.Parallel()
 	cases := map[string]batch.Outcome{
 		"succeeded":         batch.Ok,
 		"partial-succeeded": batch.Partial,
@@ -54,6 +55,7 @@ func TestDifyProviderStatusMapping(t *testing.T) {
 }
 
 func TestDifyPartialSucceededHasNoFailureFallback(t *testing.T) {
+	t.Parallel()
 	got := difyResultToBatch(dify.RunResult{
 		WorkflowRunID: "run-partial",
 		Status:        "partial-succeeded",
@@ -67,6 +69,7 @@ func TestDifyPartialSucceededHasNoFailureFallback(t *testing.T) {
 }
 
 func TestDifyProviderErrorClassification(t *testing.T) {
+	t.Parallel()
 	// 4xx (not 429) is permanent; 5xx is transient.
 	s4 := difyRunStub(t, "", http.StatusBadRequest)
 	defer s4.Close()
@@ -84,6 +87,7 @@ func TestDifyProviderErrorClassification(t *testing.T) {
 }
 
 func TestBuildDifyProviderAndInputs(t *testing.T) {
+	t.Parallel()
 	cfg, _ := json.Marshal(difyTargetConfig{
 		BaseURL: "https://dify.example/v1", APIKey: "app-key",
 		Inputs: []dify.Input{{Variable: "symbol", Label: "上市公司代码（交易所格式）", DisplayLabel: "上市公司代码", Description: "六位交易所代码", Type: "text-input", Required: true}},
@@ -105,6 +109,7 @@ func TestBuildDifyProviderAndInputs(t *testing.T) {
 // difyEndUser resolves the recorded end-user from the dify_end_user template:
 // the fixed default, [username] substitution, and a blank-template fallback.
 func TestDifyEndUserTemplate(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if got := s.difyEndUser("kazuha"); got != "report-portal" {
 		t.Errorf("default = %q, want report-portal", got)
@@ -121,6 +126,7 @@ func TestDifyEndUserTemplate(t *testing.T) {
 
 // The provider forwards its resolved end-user to Dify as the run's `user`.
 func TestDifyProviderSendsEndUser(t *testing.T) {
+	t.Parallel()
 	var gotUser string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -142,6 +148,7 @@ func TestDifyProviderSendsEndUser(t *testing.T) {
 // A stream that drops after the run started must NOT re-run the workflow: the
 // provider reconciles the outcome by polling the run id (the duplicate-run fix).
 func TestDifyProviderReconnectDoesNotRerun(t *testing.T) {
+	t.Parallel()
 	var runs int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -174,6 +181,7 @@ func TestDifyProviderReconnectDoesNotRerun(t *testing.T) {
 // Poll mode: the stream returns as soon as the run id is captured (no workflow_finished
 // read), then the outcome is polled. The workflow is started exactly once (no re-run).
 func TestDifyProviderPollMode(t *testing.T) {
+	t.Parallel()
 	var runs, gets int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -211,6 +219,7 @@ func TestDifyProviderPollMode(t *testing.T) {
 // retried within the deadline — the run reconciles to its real outcome and is not
 // re-run.
 func TestDifyProviderReconcileRetriesTransient(t *testing.T) {
+	t.Parallel()
 	var runs, gets int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -248,6 +257,7 @@ func TestDifyProviderReconcileRetriesTransient(t *testing.T) {
 // re-running the already-started workflow (the money bug the review caught) — an error, transient
 // or not, is the wrong signal here.
 func TestDifyProviderReconcileFailureIsUntracked(t *testing.T) {
+	t.Parallel()
 	var runs int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -279,6 +289,7 @@ func TestDifyProviderReconcileFailureIsUntracked(t *testing.T) {
 // On cancel, the provider stops the run on Dify (via the captured task id) instead
 // of leaving the workflow executing server-side.
 func TestDifyProviderStopsOnCancel(t *testing.T) {
+	t.Parallel()
 	stopCh := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -319,6 +330,7 @@ func TestDifyProviderStopsOnCancel(t *testing.T) {
 // A chat-mode target runs via /chat-messages, sending the row's query, and succeeds
 // on message_end — the same reconcile/stop machinery applies.
 func TestDifyChatProviderRunsChat(t *testing.T) {
+	t.Parallel()
 	var gotPath, gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -355,6 +367,7 @@ func TestDifyChatProviderRunsChat(t *testing.T) {
 // human-readable detail (so the run queue never shows a reasonless "失败"), naming the run
 // id to look up in the console. A real error is passed through verbatim; success has none.
 func TestDifyResultFailFallback(t *testing.T) {
+	t.Parallel()
 	got := difyResultToBatch(dify.RunResult{WorkflowRunID: "run-9", Status: "failed"})
 	if got.Status != batch.Failed {
 		t.Fatalf("status = %v, want Failed", got.Status)
@@ -373,6 +386,7 @@ func TestDifyResultFailFallback(t *testing.T) {
 // End to end: a workflow that finishes 'failed' with an empty error field comes back with a
 // synthesized, non-empty detail — the fix for a failed run showing no reason in the queue.
 func TestDifyProviderFailedEmptyErrorHasDetail(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, `data: {"event":"workflow_started","task_id":"t","workflow_run_id":"run-e","data":{}}`+"\n\n")
@@ -397,6 +411,7 @@ func TestDifyProviderFailedEmptyErrorHasDetail(t *testing.T) {
 // the workflow run (whose error field is often empty). When the workflow-run reconcile comes
 // back failed-with-no-error, the provider supplements the detail from the message-level error.
 func TestDifyChatProviderEnrichesFailFromMessage(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/chat-messages":
@@ -434,6 +449,7 @@ func TestDifyChatProviderEnrichesFailFromMessage(t *testing.T) {
 // cell). The provider turns them into the file objects Dify expects — an array for a
 // file-list input, a single object for a file input — and leaves text inputs alone.
 func TestDifyProviderConvertsFileInputs(t *testing.T) {
+	t.Parallel()
 	gotInputs := make(chan map[string]any, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -482,6 +498,7 @@ func TestDifyProviderConvertsFileInputs(t *testing.T) {
 // the input is simply absent, exactly as if the operator had not filled it in. A failed run
 // would be the wrong answer — the workflow's own required check is the gate.
 func TestDifyFileValueDropsUnusableCells(t *testing.T) {
+	t.Parallel()
 	for _, cell := range []string{"", "not json", "[]", `[""]`, `"f1"`} {
 		if v, ok := difyFileValue(dify.InputFileList, cell); ok {
 			t.Errorf("cell %q → %v, want dropped", cell, v)
@@ -497,6 +514,7 @@ func TestDifyFileValueDropsUnusableCells(t *testing.T) {
 // A cell over Dify's per-run cap is refused outright. Truncating it would ship a report that
 // silently lacks evidence it appears to cite, which is worse than a run that fails with a reason.
 func TestDifyFileValueRefusesOverCap(t *testing.T) {
+	t.Parallel()
 	ids := make([]string, 0, dify.MaxRunFiles+1)
 	for i := 0; i <= dify.MaxRunFiles; i++ {
 		ids = append(ids, fmt.Sprintf("f%d", i))
@@ -514,6 +532,7 @@ func TestDifyFileValueRefusesOverCap(t *testing.T) {
 // A select whose choices never reach the form renders as a text box, which is not the field the
 // workflow declared — so the options travel with the type.
 func TestDifyInputsJSONCarriesOptions(t *testing.T) {
+	t.Parallel()
 	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: "https://dify.example/v1", APIKey: "k", Inputs: []dify.Input{
 		{Variable: "kind", Label: "类型", Type: "select", Options: []string{"a", "b"}},
 		{Variable: "symbol", Label: "代码", Type: "text-input"},
@@ -531,6 +550,7 @@ func TestDifyInputsJSONCarriesOptions(t *testing.T) {
 // difyFileInputs indexes only the file-carrying declarations, and a workflow with none at all
 // gets no table — the existing text-only targets keep running byte-for-byte as before.
 func TestDifyFileInputsIndex(t *testing.T) {
+	t.Parallel()
 	got := difyFileInputs([]dify.Input{
 		{Variable: "symbol", Type: "text-input"},
 		{Variable: "docs", Type: dify.InputFileList},
@@ -548,6 +568,7 @@ func TestDifyFileInputsIndex(t *testing.T) {
 // The run form needs the declared type to know a file picker from a text box, so difyInputsJSON
 // carries it through verbatim.
 func TestDifyInputsJSONCarriesType(t *testing.T) {
+	t.Parallel()
 	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: "https://dify.example/v1", APIKey: "k", Inputs: []dify.Input{
 		{Variable: "symbol", Label: "代码", Type: "text-input", Required: true},
 		{Variable: "docs", Label: "附件", Type: dify.InputFileList},

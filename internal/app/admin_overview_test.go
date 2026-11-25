@@ -6,6 +6,7 @@ import (
 )
 
 func TestReportOverviewAggregatesReportsAndExcludesInternal(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, r := range []Rep{
 		{Symbol: "A", RType: "analysis", Kind: "Research", Date: "2026-10-24"},
@@ -38,6 +39,7 @@ func TestReportOverviewAggregatesReportsAndExcludesInternal(t *testing.T) {
 }
 
 func TestReportOverviewRollingPeriodsExcludeFutureDates(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for i, date := range []string{"2026-10-25", "2026-10-24", "2026-09-26", "2025-10-26", "2025-10-25", "2026-10-26"} {
 		if _, _, err := st.UpsertReport(Rep{Symbol: fmt.Sprint(i), RType: "analysis", Date: date}); err != nil {
@@ -54,6 +56,7 @@ func TestReportOverviewRollingPeriodsExcludeFutureDates(t *testing.T) {
 }
 
 func TestReportOverviewAnnualSeriesAndCategoryRanges(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for i, date := range []string{"2026-10-25", "2026-10-01", "2026-08-01", "2025-10-26", "2025-10-25", "2026-10-26"} {
 		if _, _, err := st.UpsertReport(Rep{Symbol: fmt.Sprint(i), RType: "analysis", Kind: "Research", Date: date}); err != nil {

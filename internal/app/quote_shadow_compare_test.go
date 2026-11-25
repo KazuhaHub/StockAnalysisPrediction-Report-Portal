@@ -10,6 +10,7 @@ func shadowTestBar(date string, open, high, low, close int64) QuoteBar {
 }
 
 func TestQuoteShadowComparesFenDatesAndBothAnchors(t *testing.T) {
+	t.Parallel()
 	primary := []QuoteBar{shadowTestBar("2026-10-19", 1000, 1100, 900, 1050), shadowTestBar("2026-10-20", 1050, 1200, 950, 1100)}
 	anchors := [2]string{"2026-10-19", "2026-10-20"}
 	for _, tc := range []struct {
@@ -51,6 +52,7 @@ func TestQuoteShadowComparesFenDatesAndBothAnchors(t *testing.T) {
 }
 
 func TestQuoteShadowIncludesNonAnchorOHLC(t *testing.T) {
+	t.Parallel()
 	p := []QuoteBar{shadowTestBar("2026-10-19", 1000, 1100, 900, 1000), shadowTestBar("2026-10-20", 1000, 1100, 900, 1000), shadowTestBar("2026-10-21", 1000, 1100, 900, 1000)}
 	c := append([]QuoteBar(nil), p...)
 	c[1].Close++
@@ -65,6 +67,7 @@ func TestQuoteShadowIncludesNonAnchorOHLC(t *testing.T) {
 }
 
 func TestQuoteShadowRejectsUnusableEvidence(t *testing.T) {
+	t.Parallel()
 	valid := []QuoteBar{shadowTestBar("2026-10-19", 1000, 1100, 900, 1050)}
 	anchors := [2]string{valid[0].Date, valid[0].Date}
 	for _, bad := range [][]QuoteBar{nil, {valid[0], valid[0]}, {shadowTestBar("invalid", 1000, 1100, 900, 1050)}, {shadowTestBar(valid[0].Date, 0, 1100, 900, 1050)}} {
@@ -86,6 +89,7 @@ func TestQuoteShadowRejectsUnusableEvidence(t *testing.T) {
 }
 
 func TestQuoteShadowIsDeterministicAndDoesNotMutateInputs(t *testing.T) {
+	t.Parallel()
 	p := []QuoteBar{shadowTestBar("2026-10-20", 1050, 1200, 950, 1100), shadowTestBar("2026-10-19", 1000, 1100, 900, 1050)}
 	c := append([]QuoteBar(nil), p...)
 	c[0].Open++

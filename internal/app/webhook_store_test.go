@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestWebhookCRUDAndEventMatching(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	id1, err := st.CreateWebhook("https://a.example/hook", []string{"report.ingested"}, "s1")
 	if err != nil {

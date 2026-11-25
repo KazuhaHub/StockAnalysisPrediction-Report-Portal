@@ -300,6 +300,7 @@ func (w *imageDeliveryWatcher) stop() []imageDeliveryEvent {
 // --- the parent ---
 
 func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("APP_IMAGE_DELIVERY_CANDIDATE") == "" {
 		t.Skip("explicit managed image delivery acceptance on a real runner")
 	}
@@ -776,6 +777,7 @@ func (r *imageDeliveryRunner) ReadRemoveImage(ctx context.Context, endpoint plat
 }
 
 func TestPlatformManagedImageDeliveryChild(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_IMAGE_DELIVERY_CHILD") != "1" {
 		t.Skip("isolated Portal child of the managed image delivery acceptance only")
 	}

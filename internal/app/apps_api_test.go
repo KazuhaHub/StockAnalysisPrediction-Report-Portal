@@ -47,6 +47,7 @@ func makeZip(t *testing.T, files map[string]string) []byte {
 }
 
 func TestParseAppBundle(t *testing.T) {
+	t.Parallel()
 	raw := makeZip(t, map[string]string{
 		"app.json":   `{"id":"hello","name":"Hello","icon":"😀","version":"1.0.0","entry":"index.html","scopes":["query"]}`,
 		"index.html": "<h1>hi</h1>",
@@ -74,6 +75,7 @@ func TestParseAppBundle(t *testing.T) {
 }
 
 func TestParseAppBundleRejects(t *testing.T) {
+	t.Parallel()
 	cases := map[string]map[string]string{
 		"no manifest":   {"index.html": "x"},
 		"missing entry": {"app.json": `{"id":"a","name":"A","entry":"index.html"}`},
@@ -90,6 +92,7 @@ func TestParseAppBundleRejects(t *testing.T) {
 // The token endpoint mints a bearer carrying exactly the app's declared, supported
 // scopes; /api/v1 then accepts it for those scopes (phase 2: query + ingest).
 func TestAppTokenEndpoint(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "k"}, appTok: newAppTokens(30 * 60 * 1e9)}
 	mustAddUser(t, s, "user", false)
 	if err := s.st.InstallApp(App{ID: "hello", Name: "Hello", Entry: "index.html", Scopes: []string{"query", "ingest"}}, map[string]AppFile{
@@ -151,6 +154,7 @@ func TestAppTokenEndpoint(t *testing.T) {
 // An app that declares only read access is never granted a write scope, even if a
 // buggy caller asks for ingest downstream.
 func TestAppTokenEndpointReadOnlyApp(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "k"}, appTok: newAppTokens(30 * 60 * 1e9)}
 	mustAddUser(t, s, "user", false)
 	if err := s.st.InstallApp(App{ID: "ro", Name: "RO", Entry: "index.html", Scopes: []string{"query"}}, map[string]AppFile{
@@ -180,6 +184,7 @@ func TestAppTokenEndpointReadOnlyApp(t *testing.T) {
 // install?preview=1 parses the bundle and returns its manifest (scopes) WITHOUT
 // persisting — it drives the install-time permission prompt for manual uploads.
 func TestAppInstallPreview(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "k"}}
 	raw := makeZip(t, map[string]string{
 		"app.json":   `{"id":"prev","name":"Prev","version":"1.0.0","entry":"index.html","scopes":["query","ingest"]}`,
@@ -222,6 +227,7 @@ func TestAppInstallPreview(t *testing.T) {
 
 // A missing app yields 404 from the token endpoint.
 func TestAppTokenEndpointUnknownApp(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), appTok: newAppTokens(60 * 1e9)}
 	req := httptest.NewRequest("POST", "/api/apps/nope/token", nil)
 	req.SetPathValue("id", "nope")

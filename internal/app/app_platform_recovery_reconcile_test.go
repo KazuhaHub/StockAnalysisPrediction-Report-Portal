@@ -36,6 +36,7 @@ func unknownImportFixture(t *testing.T) (*platformImportFixtureState, string) {
 // effect back from the runner: an applied receipt consumes the grant and completes the operation, so the
 // installation can be resumed.
 func TestRecoveryReconcileSettlesCompletedUnknownImport(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	effect := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=?`, operation)
 	admitted := scalar[int64](t, f.s.st, `SELECT admitted_fence FROM app_platform_operation_effects WHERE operation_id=?`, operation)
@@ -72,6 +73,7 @@ func TestRecoveryReconcileSettlesCompletedUnknownImport(t *testing.T) {
 }
 
 func TestRecoveryReconcileKeepsAnUnknownAnswer(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	f.executor.readErr = errors.New("endpoint unreachable")
 	if settled, err := f.s.reconcilePlatformRecoveryImports(context.Background(), platformRestoreEndpointFixture()); err != nil || settled != 0 {
@@ -86,6 +88,7 @@ func TestRecoveryReconcileKeepsAnUnknownAnswer(t *testing.T) {
 
 // A definite absence settles the import only once every command signed for the effect has expired.
 func TestRecoveryReconcileRevertsADefiniteAbsenceAfterExpiry(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	f.executor.absent = true
 	if settled, err := f.s.reconcilePlatformRecoveryImports(context.Background(), platformRestoreEndpointFixture()); err != nil || settled != 0 {
@@ -118,6 +121,7 @@ func TestRecoveryReconcileRevertsADefiniteAbsenceAfterExpiry(t *testing.T) {
 
 // The scheduler settles such imports by itself while the Portal is paused and it has nothing else to run.
 func TestRecoveryReconcileRunsFromTheSchedulerWhenIdle(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5620), time.Second)
 	if err != nil {
@@ -142,6 +146,7 @@ func platformOperationBlocksLaunch(t *testing.T, s *Server, operation string) bo
 // An import the runner proved it never applied is settled completely: every effect it left is reverted,
 // so the operation is failed rather than recovery_required, and it no longer blocks launch for ever.
 func TestRecoveryRevertedImportEndsFailedAndDoesNotBlockLaunch(t *testing.T) {
+	t.Parallel()
 	f, operation := unknownImportFixture(t)
 	if !platformOperationBlocksLaunch(t, f.s, operation) {
 		t.Fatal("fixture: an unsettled import does not block launch")
@@ -167,6 +172,7 @@ func TestRecoveryRevertedImportEndsFailedAndDoesNotBlockLaunch(t *testing.T) {
 // resumed, recovery ends and the publisher is trusted again. The app launches: nothing the first import
 // left behind blocks it.
 func TestRecoveryRevertedImportThenResumeLaunches(t *testing.T) {
+	t.Parallel()
 	f, first := unknownImportFixture(t)
 	f.executor.absent = true
 	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json='{"signed_until_ms":1}' WHERE operation_id=?`, first)

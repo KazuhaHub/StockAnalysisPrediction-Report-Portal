@@ -89,10 +89,12 @@ func testPlatformInstallationSettingsHTTP(t *testing.T, pg bool) {
 }
 
 func TestPlatformInstallationSettingsHTTPSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationSettingsHTTP(t, false)
 }
 
 func TestPlatformInstallationSettingsHTTPPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationSettingsHTTP(t, true)
 }
 
@@ -117,10 +119,12 @@ func testPlatformInstallationSettingsRepairEligibility(
 }
 
 func TestPlatformInstallationSettingsRepairEligibilitySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationSettingsRepairEligibility(t, false)
 }
 
 func TestPlatformInstallationSettingsRepairEligibilityPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationSettingsRepairEligibility(t, true)
 }
 
@@ -166,9 +170,11 @@ func testPlatformInstallationSettingsRecovery(
 }
 
 func TestPlatformInstallationSettingsRecoverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationSettingsRecovery(t, false)
 }
 
 func TestPlatformInstallationSettingsRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationSettingsRecovery(t, true)
 }

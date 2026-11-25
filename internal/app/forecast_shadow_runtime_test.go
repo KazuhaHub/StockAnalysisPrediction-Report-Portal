@@ -11,6 +11,7 @@ import (
 )
 
 func TestShadowNeverWritesTheLedger(t *testing.T) {
+	t.Parallel()
 	baseline := newV1Server(t)
 	_, baseEval := opsFixture(t, baseline)
 	if err := baseEval.tick(baseline); err != nil {
@@ -168,6 +169,7 @@ func TestShadowNeverWritesTheLedger(t *testing.T) {
 }
 
 func TestForecastShadowWaitingForSlotDoesNotBillSource(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.quotes.init()
 	for range cap(s.quotes.sem) {
@@ -191,6 +193,7 @@ func TestForecastShadowWaitingForSlotDoesNotBillSource(t *testing.T) {
 }
 
 func TestForecastShadowRequiresEnabledPeerAndAcceptedPrimary(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"off", "disabled_peer", "no_primary", "bad_index"} {
 		t.Run(kind, func(t *testing.T) {
 			s := newV1Server(t)

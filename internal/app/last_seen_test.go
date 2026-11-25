@@ -13,6 +13,7 @@ import (
 // distinction the column is consulted for.
 
 func TestLastSeenIsStampedByOrdinaryRequests(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "kazuha", PasswordHash: "h", Role: "user"})
 	if u := s.st.GetUser("kazuha"); u.LastSeen != "" {
@@ -33,6 +34,7 @@ func TestLastSeenIsStampedByOrdinaryRequests(t *testing.T) {
 // A write per request would be a write per page load per user. The stamp is throttled, and the
 // throttle is what makes recording activity affordable at all.
 func TestLastSeenIsThrottled(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "kazuha", PasswordHash: "h", Role: "user"})
 
@@ -57,6 +59,7 @@ func TestLastSeenIsThrottled(t *testing.T) {
 
 // Each account is throttled on its own: one busy user must not suppress everyone else's stamp.
 func TestLastSeenThrottleIsPerAccount(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	for _, n := range []string{"a", "b"} {
 		s.st.UpsertUser(User{Username: n, PasswordHash: "h", Role: "user"})
@@ -72,6 +75,7 @@ func TestLastSeenThrottleIsPerAccount(t *testing.T) {
 // The middleware is where it hooks in, so every authenticated SPA call counts rather than a list
 // of endpoints somebody has to remember to extend.
 func TestRequireUserJSONRecordsActivity(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "kazuha", PasswordHash: "h", Role: "user"})
 
@@ -90,6 +94,7 @@ func TestRequireUserJSONRecordsActivity(t *testing.T) {
 
 // An unauthenticated request has nobody to stamp, and must not create or touch anything.
 func TestRejectedRequestRecordsNothing(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "kazuha", PasswordHash: "h", Role: "user"})
 	h := s.requireUserJSON(func(w http.ResponseWriter, r *http.Request, user string) { writeJSON(w, okJSON) })

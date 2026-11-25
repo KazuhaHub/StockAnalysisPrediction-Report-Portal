@@ -14,6 +14,7 @@ import (
 // fireEvent delivers a signed payload to matching active subscribers only, and
 // records the delivery status.
 func TestFireEventDeliversToSubscribers(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 

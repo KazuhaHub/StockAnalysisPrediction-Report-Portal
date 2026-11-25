@@ -11,6 +11,7 @@ import (
 )
 
 func TestSDKBrowserArchiveDocument(t *testing.T) {
+	t.Parallel()
 	dir := os.Getenv("APP_SDK_BROWSER_BUILD_DIR")
 	if dir == "" {
 		t.Skip("explicit SDK browser build fixture only")

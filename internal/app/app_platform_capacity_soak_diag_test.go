@@ -12,6 +12,7 @@ import (
 // samples, and how a runtime histogram delta becomes a percentile. They need no Docker.
 
 func TestSoakPhaseSummarySplitsWallIntoCPUAndOffCPU(t *testing.T) {
+	t.Parallel()
 	wall := []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 30 * time.Millisecond}
 	cpu := []time.Duration{9 * time.Millisecond, 5 * time.Millisecond, 4 * time.Millisecond}
 	s := soakSummarizePhase("SearchNewLatest", wall, cpu)
@@ -32,6 +33,7 @@ func TestSoakPhaseSummarySplitsWallIntoCPUAndOffCPU(t *testing.T) {
 }
 
 func TestSoakConnectionUtilizationIsTheShareOfSamplesWithTheConnectionInUse(t *testing.T) {
+	t.Parallel()
 	if got := soakUtilization([]int{0, 1, 1, 0}, 1); got != 0.5 {
 		t.Fatalf("utilization = %v", got)
 	}
@@ -45,6 +47,7 @@ func TestSoakConnectionUtilizationIsTheShareOfSamplesWithTheConnectionInUse(t *t
 }
 
 func TestSoakMeanOccupancyIsTheAverageShareOfTheConnectionsInUse(t *testing.T) {
+	t.Parallel()
 	// A pool of ten with two connections in use for most of the time is 20% occupied, and never saturated.
 	if got := soakMeanOccupancy([]int{2, 2, 2, 2}, 10); got != 0.2 {
 		t.Fatalf("occupancy = %v", got)
@@ -61,6 +64,7 @@ func TestSoakMeanOccupancyIsTheAverageShareOfTheConnectionsInUse(t *testing.T) {
 }
 
 func TestSoakHistogramPercentileReadsOnlyWhatHappenedBetweenTwoReadings(t *testing.T) {
+	t.Parallel()
 	buckets := []float64{0, 0.001, 0.01, 0.1, math.Inf(1)}
 	before := &metrics.Float64Histogram{Buckets: buckets, Counts: []uint64{100, 0, 0, 0}}
 	after := &metrics.Float64Histogram{Buckets: buckets, Counts: []uint64{100, 90, 9, 1}}

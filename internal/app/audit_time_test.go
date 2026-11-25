@@ -16,6 +16,7 @@ import (
 // instead of being silently reinterpreted as UTC and shifted by the host's offset.
 
 func TestAuditStampsAreUTCInstants(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.recordAuth(nil, AuditLogin, "kazuha", "kazuha", nil)
 
@@ -38,6 +39,7 @@ func TestAuditStampsAreUTCInstants(t *testing.T) {
 // Retention compares lexically, which is only chronological if the format is consistent. A legacy
 // row must still be deletable, and must not be deleted EARLY because a space sorts below a T.
 func TestRetentionHandlesBothStampFormats(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	old := time.Now().Add(-100 * 24 * time.Hour)
 	recent := time.Now().Add(-1 * time.Hour)
@@ -71,6 +73,7 @@ func TestRetentionHandlesBothStampFormats(t *testing.T) {
 // Newest-first has to mean newest-first across the format change, or the console's first page shows
 // the wrong rows for as long as both formats are present.
 func TestListingOrdersAcrossTheFormatChange(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	base := time.Now().Add(-2 * time.Hour)
 	s.st.WriteAudit(AuditEntry{Action: "older.legacy", At: base.Format("2006-01-02 15:04:05")})
@@ -88,6 +91,7 @@ func TestListingOrdersAcrossTheFormatChange(t *testing.T) {
 
 // The Since filter is a civil date from the console. It has to select the same day in both formats.
 func TestSinceFilterSpansBothFormats(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	today := time.Now().UTC()
 	s.st.WriteAudit(AuditEntry{Action: "a.legacy", At: today.Format("2006-01-02 15:04:05")})

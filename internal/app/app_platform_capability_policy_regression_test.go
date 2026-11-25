@@ -30,8 +30,10 @@ func testPlatformCapabilityRemovalReviewUnchanged(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityRemovalReviewUnchangedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityRemovalReviewUnchanged(t, false)
 }
 func TestPlatformCapabilityRemovalReviewUnchangedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityRemovalReviewUnchanged(t, true)
 }

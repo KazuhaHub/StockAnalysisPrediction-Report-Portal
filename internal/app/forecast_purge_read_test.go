@@ -78,6 +78,7 @@ func TestPurgeSeparatesInflightCustomStatisticsAcrossProcesses(t *testing.T) {
 }
 
 func TestPurgedMonthBypassesCacheAcrossProcesses(t *testing.T) {
+	t.Parallel()
 	writer := routeTableServer(t)
 	path := filepath.Join(t.TempDir(), "shared.db")
 	writerStore, err := OpenStore("sqlite", path)
@@ -142,6 +143,7 @@ func TestPurgedMonthBypassesCacheAcrossProcesses(t *testing.T) {
 }
 
 func TestPurgeReadFailureNeverServesCachedStatistics(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	sampleMembers(t, s, 35, nil)
 	_ = doGroups(t, s, "/?mode=month")

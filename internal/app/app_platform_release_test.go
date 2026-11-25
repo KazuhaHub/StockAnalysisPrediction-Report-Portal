@@ -30,12 +30,12 @@ func platformSignedReleaseFixture(t *testing.T, version string) (raw, signature,
 	if _, err = file.Write([]byte("<!doctype html><title>Fixture</title>")); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range sortedFixtureNames(platformFixtureArchiveFiles) {
+	for _, name := range sortedFixtureNames(platformFixtureArchiveFiles.get(t)) {
 		extra, err := w.Create(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = extra.Write([]byte(platformFixtureArchiveFiles[name])); err != nil {
+		if _, err = extra.Write([]byte(platformFixtureArchiveFiles.get(t)[name])); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -140,10 +140,14 @@ func testPlatformStagedRelease(t *testing.T, pg bool) {
 		t.Fatal("refused validation wrote state")
 	}
 }
-func TestPlatformStagedReleaseSQLite(t *testing.T)   { testPlatformStagedRelease(t, false) }
-func TestPlatformStagedReleasePostgres(t *testing.T) { testPlatformStagedRelease(t, true) }
+func TestPlatformStagedReleaseSQLite(t *testing.T) { t.Parallel(); testPlatformStagedRelease(t, false) }
+func TestPlatformStagedReleasePostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformStagedRelease(t, true)
+}
 
 func TestPostgresPlatformReleaseExpiryAfterAuditWait(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"stage", "admission"} {
 		t.Run(mode, func(t *testing.T) {
 			s, session := platformTrustTestServer(t, true)
@@ -305,8 +309,12 @@ func testPlatformStoredReleaseRefusal(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformStoredReleaseRefusalSQLite(t *testing.T) { testPlatformStoredReleaseRefusal(t, false) }
+func TestPlatformStoredReleaseRefusalSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformStoredReleaseRefusal(t, false)
+}
 func TestPlatformStoredReleaseRefusalPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformStoredReleaseRefusal(t, true)
 }
 
@@ -339,12 +347,17 @@ func testPlatformSignedReleaseRestore(t *testing.T, pg bool) {
 		t.Fatal("restored release admitted without recovery")
 	}
 }
-func TestPlatformSignedReleaseRestoreSQLite(t *testing.T) { testPlatformSignedReleaseRestore(t, false) }
+func TestPlatformSignedReleaseRestoreSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformSignedReleaseRestore(t, false)
+}
 func TestPlatformSignedReleaseRestorePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformSignedReleaseRestore(t, true)
 }
 
 func TestPlatformReleaseStagingDatabaseFullRollsBack(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "release-full.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -415,7 +428,7 @@ func TestPlatformReleaseStagingDatabaseFullRollsBack(t *testing.T) {
 
 // platformFixtureArchiveFiles are extra files of the fixture frontend archive. A test sets it before
 // it builds a release and restores it afterwards.
-var platformFixtureArchiveFiles map[string]string
+var platformFixtureArchiveFiles testScoped[map[string]string]
 
 func sortedFixtureNames(files map[string]string) []string {
 	names := make([]string, 0, len(files))

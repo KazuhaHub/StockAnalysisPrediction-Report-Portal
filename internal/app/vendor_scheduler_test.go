@@ -12,6 +12,7 @@ import (
 )
 
 func TestVendorSchedulerReservesCapacityAndDoesNotBankIdleTokens(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	clock := time.Date(2026, 10, 26, 8, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return clock }
@@ -41,6 +42,7 @@ func TestVendorSchedulerReservesCapacityAndDoesNotBankIdleTokens(t *testing.T) {
 }
 
 func TestVendorTrafficClassifiesActualFailuresAndBoundsLatency(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
@@ -65,6 +67,7 @@ func TestVendorTrafficClassifiesActualFailuresAndBoundsLatency(t *testing.T) {
 }
 
 func TestVendorQueueDeadlineIsRecheckedAfterMutexReacquisition(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
@@ -105,6 +108,7 @@ func TestVendorQueueDeadlineIsRecheckedAfterMutexReacquisition(t *testing.T) {
 }
 
 func TestVendorSchedulerForegroundOvertakesHistoryAndCancellationRemovesWaiter(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
@@ -161,6 +165,7 @@ func waitVendorQueued(t *testing.T, s *vendorScheduler, source string, want int)
 }
 
 func TestVendorSchedulerCooldownIsSharedAndHasOnlyOneRecoveryProbe(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
@@ -198,6 +203,7 @@ type vendorSchedulerTransportFunc func(*http.Request) (*http.Response, error)
 func (f vendorSchedulerTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestVendorScheduledTransportCountsRedirectsAndGroupsSiblingHosts(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	s.policy = vendorRatePolicy{RequestsPerMinute: 60000, BackgroundPerMinute: 60000}
 	var mu sync.Mutex
@@ -235,6 +241,7 @@ func TestVendorScheduledTransportCountsRedirectsAndGroupsSiblingHosts(t *testing
 }
 
 func TestVendorSchedulerBoundsQueueAndNeverDispatchesCancelledWork(t *testing.T) {
+	t.Parallel()
 	s := newVendorScheduler()
 	s.mu.Lock()
 	state := s.sourceLocked("sina")
@@ -256,6 +263,7 @@ func TestVendorSchedulerBoundsQueueAndNeverDispatchesCancelledWork(t *testing.T)
 }
 
 func TestQuoteConcurrencyGateKeepsLiveSlotWhenHistoryAndEvaluationAreBusy(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

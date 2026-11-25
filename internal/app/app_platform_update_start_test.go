@@ -103,10 +103,10 @@ func platformUpdateStartEndpointFixture() platformRuntimeEndpoint {
 
 // platformUpdateFixtureAfterInstall runs once the update-start fixture has installed the application and before
 // the update operation exists, so a test can change the installation the way an administrator would (a proxy
-// review, say). platformUpdateFixtureTargetHook changes the manifest of the release the update goes to. Tests that
-// set them do not run in parallel and restore them.
-var platformUpdateFixtureAfterInstall func(t *testing.T, s *Server, installation string)
-var platformUpdateFixtureTargetHook func(*appplatform.Manifest)
+// review, say). platformUpdateFixtureTargetHook changes the manifest of the release the update goes to. Tests set
+// them with set, which restores them.
+var platformUpdateFixtureAfterInstall testScoped[func(t *testing.T, s *Server, installation string)]
+var platformUpdateFixtureTargetHook testScoped[func(*appplatform.Manifest)]
 
 func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt, platformManagedUpdatePlan) {
 	t.Helper()
@@ -129,8 +129,8 @@ func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Se
 		} else {
 			s, _, install = platformManagedAccessFixture(t, pg)
 		}
-		if platformUpdateFixtureAfterInstall != nil {
-			platformUpdateFixtureAfterInstall(t, s, install.installationID)
+		if platformUpdateFixtureAfterInstall.get(t) != nil {
+			platformUpdateFixtureAfterInstall.get(t)(t, s, install.installationID)
 		}
 		s, checkpointLease = platformCheckpointUpdateForInstall(t, s, install)
 	}
@@ -209,12 +209,12 @@ func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Se
 	if err != nil {
 		t.Fatal(err)
 	}
-	if platformUpdateFixtureTargetHook != nil {
+	if platformUpdateFixtureTargetHook.get(t) != nil {
 		var typed appplatform.Manifest
 		if err := json.Unmarshal(rawManifest, &typed); err != nil {
 			t.Fatal(err)
 		}
-		platformUpdateFixtureTargetHook(&typed)
+		platformUpdateFixtureTargetHook.get(t)(&typed)
 		if rawManifest, err = json.Marshal(typed); err != nil {
 			t.Fatal(err)
 		}
@@ -374,10 +374,12 @@ func testPlatformUpdateStartPreparesExactIntent(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartPreparesExactIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartPreparesExactIntent(t, false)
 }
 
 func TestPlatformUpdateStartPreparesExactIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartPreparesExactIntent(t, true)
 }
 
@@ -423,10 +425,12 @@ func testPlatformUpdateStartPersistsReservation(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartPersistsReservationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartPersistsReservation(t, false)
 }
 
 func TestPlatformUpdateStartPersistsReservationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartPersistsReservation(t, true)
 }
 
@@ -496,10 +500,12 @@ func testPlatformUpdateStartCommitsRunningReceipt(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartCommitsRunningReceiptSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartCommitsRunningReceipt(t, false)
 }
 
 func TestPlatformUpdateStartCommitsRunningReceiptPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartCommitsRunningReceipt(t, true)
 }
 
@@ -556,10 +562,12 @@ func testPlatformWritableUpdateStartPreparesProbe(t *testing.T, pg bool) {
 }
 
 func TestPlatformWritableUpdateStartPreparesProbeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableUpdateStartPreparesProbe(t, false)
 }
 
 func TestPlatformWritableUpdateStartPreparesProbePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableUpdateStartPreparesProbe(t, true)
 }
 
@@ -604,10 +612,12 @@ func testPlatformUpdateStartRunningReceiptRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRunningReceiptRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRunningReceiptRefusals(t, false)
 }
 
 func TestPlatformUpdateStartRunningReceiptRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRunningReceiptRefusals(t, true)
 }
 
@@ -636,10 +646,12 @@ func testPlatformUpdateStartRunningRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRunningRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRunningRollback(t, false)
 }
 
 func TestPlatformUpdateStartRunningRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRunningRollback(t, true)
 }
 
@@ -712,10 +724,12 @@ func testPlatformUpdateStartCommitsReadiness(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartCommitsReadinessSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartCommitsReadiness(t, false)
 }
 
 func TestPlatformUpdateStartCommitsReadinessPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartCommitsReadiness(t, true)
 }
 
@@ -1221,6 +1235,7 @@ func platformUpdateTargetRemovalObservationFixture(intent platformUpdateTargetRe
 }
 
 func TestPlatformUpdateStartRegistrationCommitSQLite(t *testing.T) {
+	t.Parallel()
 	s, lease, intent, endpoint, observation := platformUpdateStartRegistrationCommitFixture(t, false)
 	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_ou_access WHERE app_key='platform:'||CAST(? AS TEXT)`, lease.installationID)
 	next, err := s.commitPlatformUpdateStartRegistration(
@@ -1243,10 +1258,12 @@ func TestPlatformUpdateStartRegistrationCommitSQLite(t *testing.T) {
 }
 
 func TestPlatformUpdateStartBootBindsRegistrationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartBootBindsRegistration(t, false)
 }
 
 func TestPlatformUpdateStartBootBindsRegistrationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartBootBindsRegistration(t, true)
 }
 
@@ -1269,6 +1286,7 @@ func testPlatformUpdateStartBootBindsRegistration(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateLaunchAfterPolicyReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationModeReview(t, false, true, true)
 }
 
@@ -1276,6 +1294,7 @@ func TestPlatformUpdateLaunchAfterPolicyReviewSQLite(t *testing.T) {
 // active activation and its grants are lowered together, so the managed-access policy checks (which only
 // compare the three with each other) agree and only the history's own floor can refuse.
 func TestPlatformUpdateLaunchRefusesNewerRecordedPolicySQLite(t *testing.T) {
+	t.Parallel()
 	s, lease, intent, endpoint, obs := platformWritableUpdateStartRegistrationCommitFixture(t, false)
 	next, err := s.commitPlatformUpdateStartRegistration(context.Background(), lease, intent, endpoint, obs)
 	if err != nil {
@@ -1313,23 +1332,28 @@ func TestPlatformUpdateLaunchRefusesNewerRecordedPolicySQLite(t *testing.T) {
 }
 
 func TestPlatformUpdateStartActivationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationMode(t, false, false)
 	testPlatformUpdateStartActivationMode(t, false, true)
 }
 
 func TestPlatformUpdateTargetRemovalSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateTargetRemoval(t, false)
 }
 
 func TestPlatformUpdateTargetRemovalPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateTargetRemoval(t, true)
 }
 
 func TestPlatformRestoreRetryExhaustionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRetryExhaustion(t, false)
 }
 
 func TestPlatformRestoreRetryExhaustionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRetryExhaustion(t, true)
 }
 
@@ -1511,10 +1535,12 @@ func testPlatformUpdateTargetRemoval(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestoreStartRegistrationRequiresAppliedStartEffectSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartRegistrationRequiresAppliedStartEffect(t, false)
 }
 
 func TestPlatformRestoreStartRegistrationRequiresAppliedStartEffectPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartRegistrationRequiresAppliedStartEffect(t, true)
 }
 
@@ -1533,10 +1559,12 @@ func testPlatformRestoreStartRegistrationRequiresAppliedStartEffect(t *testing.T
 }
 
 func TestPlatformRestoreStartRegistrationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartRegistrationRefusals(t, false)
 }
 
 func TestPlatformRestoreStartRegistrationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartRegistrationRefusals(t, true)
 }
 
@@ -1582,10 +1610,12 @@ func testPlatformRestoreStartRegistrationRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestoreStartActivationRefusesChangedBootSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartActivationRefusesChangedBoot(t, false)
 }
 
 func TestPlatformRestoreStartActivationRefusesChangedBootPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartActivationRefusesChangedBoot(t, true)
 }
 
@@ -1635,10 +1665,12 @@ func testPlatformRestoreStartActivationRefusesChangedBoot(t *testing.T, pg bool)
 }
 
 func TestPlatformRestoreStartActivationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartActivationRollback(t, false)
 }
 
 func TestPlatformRestoreStartActivationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreStartActivationRollback(t, true)
 }
 
@@ -1694,6 +1726,7 @@ func testPlatformRestoreStartActivationRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartActivationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationMode(t, true, false)
 	testPlatformUpdateStartActivationMode(t, true, true)
 }
@@ -1879,10 +1912,12 @@ func testPlatformUpdatedNetworkGrant(t *testing.T, s *Server, lease platformOper
 }
 
 func TestPlatformUpdateStartActivationRefusesChangedBootSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationRefusesChangedBoot(t, false)
 }
 
 func TestPlatformUpdateStartActivationRefusesChangedBootPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationRefusesChangedBoot(t, true)
 }
 
@@ -1919,10 +1954,12 @@ func testPlatformUpdateStartActivationRefusesChangedBoot(t *testing.T, pg bool) 
 }
 
 func TestPlatformUpdateStartActivationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationRollback(t, false)
 }
 
 func TestPlatformUpdateStartActivationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartActivationRollback(t, true)
 }
 
@@ -1962,10 +1999,12 @@ func testPlatformUpdateStartActivationRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedUpdateRetryExhaustionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateRetryExhaustion(t, false)
 }
 
 func TestPlatformManagedUpdateRetryExhaustionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedUpdateRetryExhaustion(t, true)
 }
 
@@ -1994,6 +2033,7 @@ func testPlatformManagedUpdateRetryExhaustion(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRegistrationCommitPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationCommit(t, true)
 }
 
@@ -2044,10 +2084,12 @@ func testPlatformUpdateStartRegistrationRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRegistrationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationRefusals(t, false)
 }
 
 func TestPlatformUpdateStartRegistrationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationRefusals(t, true)
 }
 
@@ -2084,10 +2126,12 @@ func testPlatformUpdateStartRegistrationSourceRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRegistrationSourceRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationSourceRefusals(t, false)
 }
 
 func TestPlatformUpdateStartRegistrationSourceRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationSourceRefusals(t, true)
 }
 
@@ -2123,10 +2167,12 @@ func testPlatformUpdateStartRegistrationPrepareRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRegistrationPrepareRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationPrepareRollback(t, false)
 }
 
 func TestPlatformUpdateStartRegistrationPrepareRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationPrepareRollback(t, true)
 }
 
@@ -2155,10 +2201,12 @@ func testPlatformUpdateStartRegistrationCommitRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRegistrationCommitRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationCommitRollback(t, false)
 }
 
 func TestPlatformUpdateStartRegistrationCommitRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRegistrationCommitRollback(t, true)
 }
 
@@ -2190,10 +2238,12 @@ func testPlatformUpdateStartReadinessRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartReadinessRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReadinessRefusals(t, false)
 }
 
 func TestPlatformUpdateStartReadinessRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReadinessRefusals(t, true)
 }
 
@@ -2220,10 +2270,12 @@ func testPlatformUpdateStartReadinessRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartReadinessRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReadinessRollback(t, false)
 }
 
 func TestPlatformUpdateStartReadinessRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReadinessRollback(t, true)
 }
 
@@ -2260,10 +2312,12 @@ func testPlatformUpdateStartReservationRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartReservationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReservationRefusals(t, false)
 }
 
 func TestPlatformUpdateStartReservationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReservationRefusals(t, true)
 }
 
@@ -2302,10 +2356,12 @@ func testPlatformUpdateStartReservationRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartReservationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReservationRollback(t, false)
 }
 
 func TestPlatformUpdateStartReservationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartReservationRollback(t, true)
 }
 
@@ -2342,10 +2398,12 @@ func testPlatformUpdateStartRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRefusals(t, false)
 }
 
 func TestPlatformUpdateStartRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartRefusals(t, true)
 }
 
@@ -2372,14 +2430,17 @@ func testPlatformUpdateStartPrepareRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartPrepareRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartPrepareRollback(t, false)
 }
 
 func TestPlatformUpdateStartPrepareRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateStartPrepareRollback(t, true)
 }
 
 func TestPlatformUpdateStartEndpointRefusesUnverifiedRuntimeSQLite(t *testing.T) {
+	t.Parallel()
 	endpoint := platformRuntimeEndpoint{path: "/run/portal-test/missing-update-start.sock", controllerUID: 1000, controllerGID: 1001}
 	s, lease, _, _ := platformManagedUpdateStartFixture(t, false)
 	if _, err := s.reservePlatformUpdateStart(context.Background(), lease, endpoint); err == nil {
@@ -2392,6 +2453,7 @@ func TestPlatformUpdateStartEndpointRefusesUnverifiedRuntimeSQLite(t *testing.T)
 }
 
 func TestPlatformUpdateStartTargetPolicyDifference(t *testing.T) {
+	t.Parallel()
 	s, lease, _, plan := platformManagedUpdateStartFixture(t, false)
 	if plan.TargetPolicyRevision <= plan.SourcePolicyRevision {
 		t.Fatal("update-start fixture did not advance policy")

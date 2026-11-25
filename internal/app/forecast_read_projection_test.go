@@ -11,6 +11,7 @@ func projectionReadSet(cp string) []PredictionSet {
 }
 
 func TestProjectedClosureDatesKeepConservativeDeadline(t *testing.T) {
+	t.Parallel()
 	due := dateAtClose("2026-10-26")
 	lowerBound := dateAtClose("2026-10-16")
 	for _, tc := range []struct {
@@ -26,6 +27,7 @@ func TestProjectedClosureDatesKeepConservativeDeadline(t *testing.T) {
 }
 
 func TestRecordedSessionOutranksClosureProjection(t *testing.T) {
+	t.Parallel()
 	sets := projectionReadSet("d5")
 	sets[0].Marks[0].Status, sets[0].Marks[0].SessionDate = markRefused, "2026-09-25"
 	annotateReadPhases(sets, dateAtClose("2026-09-25"))
@@ -35,6 +37,7 @@ func TestRecordedSessionOutranksClosureProjection(t *testing.T) {
 }
 
 func TestPublishedCalendarOutranksClosureProjection(t *testing.T) {
+	t.Parallel()
 	sets := projectionReadSet("d5")
 	cal := map[string][]string{"sh000852": {"2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"}}
 	annotateReadPhasesWithCalendars(sets, dateAtClose("2026-09-27"), cal)
@@ -44,6 +47,7 @@ func TestPublishedCalendarOutranksClosureProjection(t *testing.T) {
 }
 
 func TestPublishedS0OutranksClosureProjection(t *testing.T) {
+	t.Parallel()
 	sets := []PredictionSet{{BenchCode: "sh000852", MadeAt: "2026-09-24T16:00:00+08:00", MadeOn: "2026-09-24", HorizonStd: true,
 		Marks: []PredictionMark{{Checkpoint: "d5", Status: markPending}}}}
 	cal := map[string][]string{"sh000852": {"2026-09-24", "2026-09-25"}}
@@ -54,6 +58,7 @@ func TestPublishedS0OutranksClosureProjection(t *testing.T) {
 }
 
 func TestReaderProjectionRetainsReceiptConsistentQualification(t *testing.T) {
+	t.Parallel()
 	for _, frozen := range []string{"2026-09-16", "2026-09-17", "2026-09-18", "2026-09-21"} {
 		sets := projectionReadSet("d5")
 		sets[0].S0Date = frozen

@@ -60,9 +60,11 @@ func platformMigrationHasPlan(t *testing.T, s *Server) bool {
 }
 
 func TestChoicesRefusedBeforeSettlementSQLite(t *testing.T) {
+	t.Parallel()
 	testChoicesRefusedBeforeSettlement(t, false)
 }
 func TestChoicesRefusedBeforeSettlementPostgres(t *testing.T) {
+	t.Parallel()
 	testChoicesRefusedBeforeSettlement(t, true)
 }
 
@@ -108,9 +110,11 @@ func testRollbackAfterSettledMigrationEvidenceOnlyRestore(t *testing.T, pg bool)
 }
 
 func TestRollbackAfterSettledMigrationEvidenceOnlyRestoreSQLite(t *testing.T) {
+	t.Parallel()
 	testRollbackAfterSettledMigrationEvidenceOnlyRestore(t, false)
 }
 func TestRollbackAfterSettledMigrationEvidenceOnlyRestorePostgres(t *testing.T) {
+	t.Parallel()
 	testRollbackAfterSettledMigrationEvidenceOnlyRestore(t, true)
 }
 
@@ -134,14 +138,17 @@ func testRetryReviewFromSettledMigration(t *testing.T, pg bool) {
 }
 
 func TestRetryReviewFromSettledMigrationSQLite(t *testing.T) {
+	t.Parallel()
 	testRetryReviewFromSettledMigration(t, false)
 }
 func TestRetryReviewFromSettledMigrationPostgres(t *testing.T) {
+	t.Parallel()
 	testRetryReviewFromSettledMigration(t, true)
 }
 
 // There is no retry inside the failed operation: it is never claimed again, however settled it is.
 func TestNoInOperationRetry(t *testing.T) {
+	t.Parallel()
 	f := settledFixture(t, false)
 	selected, err := f.s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(7100))
 	if err != nil || selected.lease.id != "" {
@@ -205,7 +212,7 @@ func driveRetryToMigrate(t *testing.T, f *settleFixture, operationID string) pla
 func testRetryCompletionResolvesFailedUpdateForLaunch(t *testing.T, pg bool) {
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, pg)
-	fx := lastPlatformUpdateFixture
+	fx := lastPlatformUpdateFixture.get(t)
 	lease := retryToMigrate(t, f, fx, platformFixtureID(7210), platformFixtureID(7211), f.op)
 	session := platformManagedFixtureSession(t, f.s)
 	if _, err := f.s.inspectPlatformLaunchAccess(session, f.lease.installationID); err == nil {
@@ -242,9 +249,11 @@ func testRetryCompletionResolvesFailedUpdateForLaunch(t *testing.T, pg bool) {
 }
 
 func TestRetryCompletionResolvesFailedUpdateForLaunchSQLite(t *testing.T) {
+	t.Parallel()
 	testRetryCompletionResolvesFailedUpdateForLaunch(t, false)
 }
 func TestRetryCompletionResolvesFailedUpdateForLaunchPostgres(t *testing.T) {
+	t.Parallel()
 	testRetryCompletionResolvesFailedUpdateForLaunch(t, true)
 }
 
@@ -253,7 +262,7 @@ func TestRetryCompletionResolvesFailedUpdateForLaunchPostgres(t *testing.T) {
 func testRetryOfRetryResolvesRoot(t *testing.T, pg bool) {
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, pg)
-	fx := lastPlatformUpdateFixture
+	fx := lastPlatformUpdateFixture.get(t)
 	second := retryToMigrate(t, f, fx, platformFixtureID(7310), platformFixtureID(7311), f.op)
 	failedScript(f.fake, f.endpoint)
 	if _, err := f.s.dispatchPlatformMigrateData(context.Background(), second, f.endpoint); !errors.Is(err, errPlatformMigrationEnded) {
@@ -303,12 +312,19 @@ func testRetryOfRetryResolvesRoot(t *testing.T, pg bool) {
 	}
 }
 
-func TestRetryOfRetryResolvesRootSQLite(t *testing.T)   { testRetryOfRetryResolvesRoot(t, false) }
-func TestRetryOfRetryResolvesRootPostgres(t *testing.T) { testRetryOfRetryResolvesRoot(t, true) }
+func TestRetryOfRetryResolvesRootSQLite(t *testing.T) {
+	t.Parallel()
+	testRetryOfRetryResolvesRoot(t, false)
+}
+func TestRetryOfRetryResolvesRootPostgres(t *testing.T) {
+	t.Parallel()
+	testRetryOfRetryResolvesRoot(t, true)
+}
 
 // The settings projection follows the settlement: settling, then settled with both choices, blocked when the
 // fence has moved, and absent for an installation with nothing to recover.
 func TestSettingsProjectsMigrationRecovery(t *testing.T) {
+	t.Parallel()
 	f := settleAfterEnd(t, false, orphanedScript)
 	session := platformManagedFixtureSession(t, f.s)
 	read := func() *platformSettingsMigrationRecovery {
@@ -348,9 +364,10 @@ func TestSettingsProjectsMigrationRecovery(t *testing.T) {
 // runner holds no row under the portal's own copy of that evidence, and admits only the removal of the update the
 // retry recovers. A retry of a retry names the update it recovers and still carries the root's removal.
 func TestRetryMigrateCommandNamesRecoveredUpdateAndRealRemoval(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, false)
-	fx := lastPlatformUpdateFixture
+	fx := lastPlatformUpdateFixture.get(t)
 	realRemoval := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate' AND effect_number=1 AND kind='remove-code'`, f.op)
 	var sent []control.MigrateDataPayload
 	answer := func(state, outcome string) {

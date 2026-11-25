@@ -13,6 +13,7 @@ import (
 )
 
 func TestQuoteOrderAuditRecordsOnlyEffectiveChanges(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	for _, body := range []string{`{"order":"tencent,sina"}`, `{"order":"sina,tencent"}`, `{"order":" SINA ,tencent,sina "}`, `{"ttlOpenSecs":45}`, `{"order":""}`} {
 		if w := quoteAdminSave(t, s, body); w.Code != 200 {
@@ -47,6 +48,7 @@ func TestQuoteOrderAuditRecordsOnlyEffectiveChanges(t *testing.T) {
 }
 
 func TestQuoteOrderTransactionSerializesBothDrivers(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertQuoteOrderTransaction(t, newTestStore(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t, "audit_log")
@@ -60,6 +62,7 @@ func TestQuoteOrderTransactionSerializesBothDrivers(t *testing.T) {
 }
 
 func TestQuoteOrderTransactionAcrossSQLiteConnections(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "orders.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -97,6 +100,7 @@ func TestQuoteOrderTransactionAcrossSQLiteConnections(t *testing.T) {
 }
 
 func TestQuoteOrderNullValueMeansShippedDefault(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.exec(`INSERT INTO meta(k,v) VALUES(?,NULL)`, setQuoteSourceOrder); err != nil {
 		t.Fatal(err)
@@ -185,6 +189,7 @@ func assertQuoteOrderTransaction(t *testing.T, st *Store, peers ...*Store) {
 }
 
 func TestQuoteOrderAuditFailureRollsBackTheOrder(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	if err := s.st.SetSetting(setQuoteSourceOrder, "sina"); err != nil {
 		t.Fatal(err)

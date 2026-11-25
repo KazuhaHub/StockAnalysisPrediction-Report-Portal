@@ -104,6 +104,7 @@ func find(ts []taskItem, kind, id string) *taskItem {
 
 // 1. Only the caller's own tasks, of both kinds.
 func TestMyTasksListsOnlyTheCallersOwnRunsAndExports(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.addOperator("op2")
@@ -126,6 +127,7 @@ func TestMyTasksListsOnlyTheCallersOwnRunsAndExports(t *testing.T) {
 
 // An export item says its format, and its size once the file exists; a run carries neither.
 func TestMyTasksExportItemsCarryFormatAndBytesRunsDoNot(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	runID := e.run("op")
@@ -160,6 +162,7 @@ func TestMyTasksExportItemsCarryFormatAndBytesRunsDoNot(t *testing.T) {
 
 // 2. A non-admin sees an export only if it is theirs AND was submitted through the reader endpoints.
 func TestMyTasksReaderSeesOnlyReaderExportsUnderTheirName(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	readerJob := e.export("rita", true, exportDone, 100)
 	stray := e.export("rita", false, exportDone, 101)
@@ -174,6 +177,7 @@ func TestMyTasksReaderSeesOnlyReaderExportsUnderTheirName(t *testing.T) {
 
 // 3. An administrator sees their own exports of either kind, and nobody else's.
 func TestMyTasksAdminSeesOwnExportsOfEitherKindButNotOthers(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	adminJob := e.export("admin", false, exportDone, 100)
 	adminReader := e.export("admin", true, exportDone, 101)
@@ -189,6 +193,7 @@ func TestMyTasksAdminSeesOwnExportsOfEitherKindButNotOthers(t *testing.T) {
 
 // 4. Download and cancel point at the endpoint family that accepts the job.
 func TestMyTasksDownloadAndCancelUrlsPerFamily(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	adminDone := e.export("admin", false, exportDone, 100)
 	adminQueued := e.export("admin", false, exportQueued, 101)
@@ -218,6 +223,7 @@ func TestMyTasksDownloadAndCancelUrlsPerFamily(t *testing.T) {
 }
 
 func TestMyTasksRunUrlsAndName(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	id := e.run("op")
@@ -232,6 +238,7 @@ func TestMyTasksRunUrlsAndName(t *testing.T) {
 
 // 5. "N tasks ahead" for runs mirrors the queue console; a scheduled run has none.
 func TestMyTasksRunAheadCountAndScheduled(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.addOperator("op2")
@@ -254,6 +261,7 @@ func TestMyTasksRunAheadCountAndScheduled(t *testing.T) {
 
 // 6. "N tasks ahead" for exports: older queued plus the running one; never later ones or other states.
 func TestMyTasksExportAheadCount(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.export("bob", true, exportRunning, 10)
 	e.export("bob", true, exportQueued, 20)
@@ -281,6 +289,7 @@ func TestMyTasksExportAheadCount(t *testing.T) {
 }
 
 func TestMyTasksRunningExportHasNoAhead(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	id := e.export("rita", true, exportRunning, 10)
 	if g := find(e.tasks("rita", ""), "export", id); g.Ahead != nil {
@@ -290,6 +299,7 @@ func TestMyTasksRunningExportHasNoAhead(t *testing.T) {
 
 // 7. Every active task is returned; limit bounds the terminal ones; active first, then newest first.
 func TestMyTasksLimitBoundsTerminalOnly(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	for i := 0; i < 6; i++ {
 		e.export("rita", true, exportDone, int64(100+i))
@@ -321,6 +331,7 @@ func TestMyTasksLimitBoundsTerminalOnly(t *testing.T) {
 
 // 8. Terminal runs carry unix-ms times and counts, and no cancel URL.
 func TestMyTasksTerminalRunsCarryTimesAndCounts(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	id := e.run("op")
@@ -335,6 +346,7 @@ func TestMyTasksTerminalRunsCarryTimesAndCounts(t *testing.T) {
 
 // 9. A user with nothing gets a valid empty list; anonymous callers are refused.
 func TestMyTasksEmptyListForAUserWithNothing(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	if ts := e.tasks("bob", ""); len(ts) != 0 {
 		t.Fatalf("%+v", ts)
@@ -346,6 +358,7 @@ func TestMyTasksEmptyListForAUserWithNothing(t *testing.T) {
 
 // 10. The run queue shows a non-admin run_batch holder only their own jobs; total counts only theirs.
 func TestBatchJobsListIsOwnOnlyForNonAdmins(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.addOperator("op2")

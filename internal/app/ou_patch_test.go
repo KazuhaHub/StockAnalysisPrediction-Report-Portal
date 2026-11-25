@@ -18,6 +18,7 @@ func patchGroup(s *Server, id int64, body string) *httptest.ResponseRecorder {
 }
 
 func TestOUPatchPreservesOtherPolicyDomains(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	id := int64(postGroup(t, s, `{"name":"Scoped policy","description":"Directory","weight":7,"allow_urgent":false,"max_queued":4,"daily_run_quota":20,"run_quota_period":"month","totp_enroll":false,"passkey_enroll":true,"require_2fa":true,"forecast_scope":"own","restricted":true}`)["id"].(float64))
 	w := patchGroup(s, id, `{"max_queued":9}`)
@@ -49,6 +50,7 @@ func TestOUPatchPreservesOtherPolicyDomains(t *testing.T) {
 }
 
 func TestOUPatchRejectsInvalidInputAtomically(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	id := int64(postGroup(t, s, `{"name":"Original","weight":8}`)["id"].(float64))
 	for _, body := range []string{`{"unknown":true}`, `{"name":"","weight":3}`, `{"max_queued":"bad"}`, `{"parent_id":999999}`, `{"forecast_scope":"bad"}`} {
@@ -67,6 +69,7 @@ func TestOUPatchRejectsInvalidInputAtomically(t *testing.T) {
 }
 
 func TestOUPatchPreservesUneditedRootNullPolicies(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	id := s.st.EnsureDefaultGroup()
 	if _, err := s.st.db.Exec(`UPDATE user_groups SET weight=NULL,max_queued=NULL,allow_urgent=NULL,daily_run_quota=NULL WHERE id=?`, id); err != nil {
@@ -82,6 +85,7 @@ func TestOUPatchPreservesUneditedRootNullPolicies(t *testing.T) {
 }
 
 func TestOUPatchDoesNotMoveALegacyRoot(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	id := int64(postGroup(t, s, `{"name":"Legacy root"}`)["id"].(float64))
 	if _, err := s.st.db.Exec(`UPDATE user_groups SET parent_id=NULL WHERE id=?`, id); err != nil {
@@ -97,6 +101,7 @@ func TestOUPatchDoesNotMoveALegacyRoot(t *testing.T) {
 }
 
 func TestOUConcurrentDomainPatchesCompose(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	id := int64(postGroup(t, s, `{"name":"Concurrent domains"}`)["id"].(float64))
 	start := make(chan struct{})

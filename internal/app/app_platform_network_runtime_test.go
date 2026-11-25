@@ -33,8 +33,10 @@ func testPlatformNetworkRuntimeNoAuthority(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformNetworkRuntimeNoAuthoritySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformNetworkRuntimeNoAuthority(t, false)
 }
 func TestPlatformNetworkRuntimeNoAuthorityPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformNetworkRuntimeNoAuthority(t, true)
 }

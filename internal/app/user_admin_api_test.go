@@ -29,6 +29,7 @@ func call(t *testing.T, h handler, body, actor string) (int, map[string]any) {
 }
 
 func TestUserAdminEnrichedFlow(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 
 	// Create a group with an urgent-unlimited override.
@@ -95,6 +96,7 @@ func TestUserAdminEnrichedFlow(t *testing.T) {
 }
 
 func TestLoginGatingAndLastLogin(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	call(t, s.apiUserAdd, `{"username":"bob","password":"pw1234567890","role":"user"}`, "admin")
 
@@ -128,6 +130,7 @@ func TestLoginGatingAndLastLogin(t *testing.T) {
 }
 
 func TestBulkActionsAndGuards(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	call(t, s.apiUserAdd, `{"username":"u1","password":"pw1234567890","role":"user"}`, "admin")
 	call(t, s.apiUserAdd, `{"username":"u2","password":"pw1234567890","role":"user"}`, "admin")

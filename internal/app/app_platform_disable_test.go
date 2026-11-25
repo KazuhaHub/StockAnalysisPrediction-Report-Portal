@@ -102,6 +102,7 @@ func testPlatformManagedDisableOfflineIsTruthful(t *testing.T, pg bool) {
 }
 
 func TestPlatformFrontendDisableSchedulerPreservesPluginData(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"retained across disable"}`)); response.Code != http.StatusOK {
@@ -172,33 +173,41 @@ func testPlatformManagedDisableSchedulerRequiresRecovery(t *testing.T, pg bool) 
 }
 
 func TestPlatformFrontendDisablePreservesDataSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendDisablePreservesData(t, false)
 }
 
 func TestPlatformFrontendDisablePreservesDataPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendDisablePreservesData(t, true)
 }
 
 func TestPlatformManagedDisableWaitsForStopEvidenceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisableWaitsForStopEvidence(t, false)
 }
 
 func TestPlatformManagedDisableWaitsForStopEvidencePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisableWaitsForStopEvidence(t, true)
 }
 
 func TestPlatformManagedDisableOfflineIsTruthfulSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisableOfflineIsTruthful(t, false)
 }
 
 func TestPlatformManagedDisableOfflineIsTruthfulPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisableOfflineIsTruthful(t, true)
 }
 
 func TestPlatformManagedDisableSchedulerRequiresRecoverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisableSchedulerRequiresRecovery(t, false)
 }
 
 func TestPlatformManagedDisableSchedulerRequiresRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedDisableSchedulerRequiresRecovery(t, true)
 }

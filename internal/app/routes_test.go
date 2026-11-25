@@ -29,6 +29,7 @@ func routeTableServer(t *testing.T) *Server {
 // routes.go and nowhere else in the package, so a new route cannot skip the table — and therefore
 // cannot skip the class it would have to declare.
 func TestNothingRegistersARouteOutsideTheTable(t *testing.T) {
+	t.Parallel()
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +58,7 @@ func TestNothingRegistersARouteOutsideTheTable(t *testing.T) {
 // TestEveryPatternIsRegisteredOnce is the table's own shape: the mux would panic on a duplicate, so
 // this is about the table agreeing with the mux rather than about finding one.
 func TestEveryPatternIsRegisteredOnce(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	if len(s.routeTable) < 150 {
@@ -82,6 +84,7 @@ func TestEveryPatternIsRegisteredOnce(t *testing.T) {
 // all and has to refuse. It walks the TABLE rather than a hand-written list, so a route added later
 // is covered the moment it is registered.
 func TestSessionRoutesRefuseAnAnonymousCaller(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -121,6 +124,7 @@ func TestSessionRoutesRefuseAnAnonymousCaller(t *testing.T) {
 // The machine surface is the one place a session is NOT accepted, and the table should say so: a
 // token opens it (or nothing does), which is what keeps the browser's cookie out of it.
 func TestTheMachineSurfaceIsNotASessionClass(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	var v1 int
@@ -140,6 +144,7 @@ func TestTheMachineSurfaceIsNotASessionClass(t *testing.T) {
 // The omnibox is the one route that takes EITHER credential, and it has to stay in the session set:
 // a browser calls it with a cookie, so a policy that skips it leaves a readable hole.
 func TestTheOmniboxIsASessionRoute(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	for _, row := range s.routeTable {

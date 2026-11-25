@@ -9,6 +9,7 @@ import (
 // The per-installation budget is spent only by requests that passed the signature check, so a flood
 // of unauthenticated requests from several sources cannot starve the real senders of an installation.
 func TestIngressUnauthenticatedFloodDoesNotSpendTheInstallationBudget(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)
@@ -40,6 +41,7 @@ func TestIngressUnauthenticatedFloodDoesNotSpendTheInstallationBudget(t *testing
 
 // A grant POST, including a no-op re-save, does not forget the nonces already seen.
 func TestIngressGrantSaveKeepsTheNonceCache(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)

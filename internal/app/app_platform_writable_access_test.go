@@ -148,8 +148,14 @@ func testPlatformWritableAccess(t *testing.T, pg bool) {
 		t.Fatal("completed writable source did not preserve current launch binding", err)
 	}
 }
-func TestPlatformWritableAccessSQLite(t *testing.T)   { testPlatformWritableAccess(t, false) }
-func TestPlatformWritableAccessPostgres(t *testing.T) { testPlatformWritableAccess(t, true) }
+func TestPlatformWritableAccessSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableAccess(t, false)
+}
+func TestPlatformWritableAccessPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableAccess(t, true)
+}
 
 func testPlatformWritableAccessRefusals(t *testing.T, pg bool) {
 	for _, mode := range []string{"pending", "candidate", "unfinished", "lease", "fence", "grant", "session", "publisher", "runtime", "policy", "namespace", "effect", "receipt", "plan", "keyring", "seed", "future"} {
@@ -208,8 +214,10 @@ func testPlatformWritableAccessRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableAccessRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableAccessRefusals(t, false)
 }
 func TestPlatformWritableAccessRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableAccessRefusals(t, true)
 }

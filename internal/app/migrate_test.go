@@ -18,6 +18,7 @@ func colNames(cols []schemaCol) []string {
 // plain columns, skips the primary-key column and table-level constraints, is paren-aware for a
 // composite key, and ignores non-table statements.
 func TestParseCreateTable(t *testing.T) {
+	t.Parallel()
 	table, cols, ok := parseCreateTable(`CREATE TABLE IF NOT EXISTS link_groups(
 		id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT DEFAULT '', mode TEXT DEFAULT 'row',
 		show_label INTEGER DEFAULT 1, icon TEXT DEFAULT '', ord INTEGER DEFAULT 0)`)
@@ -48,6 +49,7 @@ func TestParseCreateTable(t *testing.T) {
 // what has to exist, and a name the parser gets wrong is an index the boundary silently stops
 // checking — which is how an index quietly goes missing and takes a uniqueness guarantee with it.
 func TestParseIndexName(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		stmt string
 		want string

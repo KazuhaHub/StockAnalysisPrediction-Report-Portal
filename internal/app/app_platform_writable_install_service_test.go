@@ -19,6 +19,7 @@ func writableServiceTestEndpoint() platformRuntimeEndpoint {
 // Production startup starts the writable install scheduler when a trusted runner
 // endpoint is bound, next to the frontend scheduler, and joins both on shutdown.
 func TestPlatformInstallServiceStartsTheWritableSchedulerWhenAnEndpointIsBound(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	endpoint := writableServiceTestEndpoint()
 	s.platformBackendEndpoint.Store(&endpoint)
@@ -46,6 +47,7 @@ func TestPlatformInstallServiceStartsTheWritableSchedulerWhenAnEndpointIsBound(t
 }
 
 func TestPlatformInstallServiceStartsNoWritableSchedulerWithoutAnEndpoint(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	stop := s.startPlatformFrontendInstallService()
 	if s.platformInstaller.writer != nil {
@@ -59,6 +61,7 @@ func TestPlatformInstallServiceStartsNoWritableSchedulerWithoutAnEndpoint(t *tes
 // The endpoint must be bound before the schedulers start, and shutdown must run
 // the installer's stop function. Both are properties of RunServer's order.
 func TestRunServerBindsTheRunnerEndpointBeforeStartingAndStoppingTheInstaller(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("server.go")
 	if err != nil {
 		t.Fatal(err)

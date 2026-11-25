@@ -43,6 +43,7 @@ func platformLaunchFixtureWithAdmin(t *testing.T) (*Server, platformActorSession
 }
 
 func TestLayoutDisabledAfterUpdateShowsTheUpdatedRelease(t *testing.T) {
+	t.Parallel()
 	s, session, id := platformLaunchFixtureWithAdmin(t)
 	v2 := stagePlatformFixtureRelease(t, s, session, "1.0.0-beta.2")
 	mustExec(t, s.st, `UPDATE app_platform_activations SET state='retired',updated_ms=5 WHERE installation_id=?`, id)
@@ -58,6 +59,7 @@ func TestLayoutDisabledAfterUpdateShowsTheUpdatedRelease(t *testing.T) {
 }
 
 func TestLayoutDisabledAfterRollbackShowsTheRestoredRelease(t *testing.T) {
+	t.Parallel()
 	s, session, id := platformLaunchFixtureWithAdmin(t)
 	v2 := stagePlatformFixtureRelease(t, s, session, "1.0.0-beta.2")
 	var v1 string
@@ -76,6 +78,7 @@ func TestLayoutDisabledAfterRollbackShowsTheRestoredRelease(t *testing.T) {
 }
 
 func TestLayoutDisabledIgnoresAStagedCandidate(t *testing.T) {
+	t.Parallel()
 	s, session, id := platformLaunchFixtureWithAdmin(t)
 	v2 := stagePlatformFixtureRelease(t, s, session, "1.0.0-beta.2")
 	disablePlatformFixture(t, s, id)

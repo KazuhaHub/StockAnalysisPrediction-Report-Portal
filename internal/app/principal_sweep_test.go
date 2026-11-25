@@ -92,6 +92,7 @@ func principalRows(t *testing.T, s *Store, table, principal string) int {
 }
 
 func TestEveryPrincipalTableIsSweptOnDelete(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tables := principalTables(t, st)
 	if len(tables) < 4 {

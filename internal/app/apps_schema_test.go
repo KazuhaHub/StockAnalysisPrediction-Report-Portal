@@ -11,6 +11,7 @@ import (
 // Step 0014 (ADR 0048): app ordering and per-OU app access.
 
 func TestMigration0014AddsExactlyTheTwoApprovedTables(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "m14.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -62,6 +63,7 @@ func TestMigration0014AddsExactlyTheTwoApprovedTables(t *testing.T) {
 }
 
 func TestMigration0014RefusesADatabaseMissingItsTables(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "m14-missing.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -118,6 +120,7 @@ func withoutSections(t *testing.T, dump []byte, tables, steps []string) []byte {
 }
 
 func TestMigration0014OlderDumpRestoresWithEmptyTables(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	tables := append(migration0014().tables, migration0015().tables...)
 	tables = append(tables, migration0016().tables...)
@@ -155,6 +158,7 @@ func TestMigration0014OlderDumpRestoresWithEmptyTables(t *testing.T) {
 }
 
 func TestBackupRoundTripCarriesAppOrderAndAccess(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	ou := seedOU(t, src, 0, nil)
 	if _, err := src.exec(`INSERT INTO app_order(app_key,position) VALUES('builtin:quotes',1),('hello',2)`); err != nil {
@@ -181,6 +185,7 @@ func TestBackupRoundTripCarriesAppOrderAndAccess(t *testing.T) {
 }
 
 func TestPostgresAppLayoutStore(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "app_ou_access", "app_order")
 	defer func() {
 		st.exec(`DELETE FROM app_ou_access`)

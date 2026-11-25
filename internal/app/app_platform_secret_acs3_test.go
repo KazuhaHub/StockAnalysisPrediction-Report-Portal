@@ -138,8 +138,14 @@ func testPlatformACS3BindingReview(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformACS3BindingReviewSQLite(t *testing.T)   { testPlatformACS3BindingReview(t, false) }
-func TestPlatformACS3BindingReviewPostgres(t *testing.T) { testPlatformACS3BindingReview(t, true) }
+func TestPlatformACS3BindingReviewSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformACS3BindingReview(t, false)
+}
+func TestPlatformACS3BindingReviewPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformACS3BindingReview(t, true)
+}
 
 // signPlatformACS3 is the one place the secret meets the request. The fixture clock and nonce make the
 // result comparable with an independent computation.
@@ -258,5 +264,11 @@ func testPlatformACS3NoTokenSigns(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformACS3NoTokenSignsSQLite(t *testing.T)   { testPlatformACS3NoTokenSigns(t, false) }
-func TestPlatformACS3NoTokenSignsPostgres(t *testing.T) { testPlatformACS3NoTokenSigns(t, true) }
+func TestPlatformACS3NoTokenSignsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformACS3NoTokenSigns(t, false)
+}
+func TestPlatformACS3NoTokenSignsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformACS3NoTokenSigns(t, true)
+}

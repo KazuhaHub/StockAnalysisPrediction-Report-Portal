@@ -24,12 +24,11 @@ var platformServiceCredentialResources = []string{"network.http", "notifications
 // viewer-only binding every binding was before doc 176).
 func platformServiceCredentialFixture(t *testing.T, pg bool, principals string) (*Server, platformActorSession, string, platformCredentialMetadata) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		m.Capabilities.Required = []string{"background.run", "network.http", "notifications.publish", "secrets.use"}
 		m.Capabilities.Optional = nil
-	}
-	platformFixtureNetworkTarget = true
-	t.Cleanup(func() { platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false })
+	})
+	platformFixtureNetworkTarget.set(t, true)
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=?`, lease.installationID)
 	credential, err := s.changePlatformCredential(actor, platformCredentialChange{kind: "create", label: "Upstream fixture", value: []byte(platformServiceCredentialValue)})
@@ -74,7 +73,8 @@ func testPlatformServiceIdentitySecretsUseOnlyWhenGranted(t *testing.T, pg bool)
 	if _, _, err := plain.issuePlatformServiceIdentity(context.Background(), plainInstallation, platformFixtureID(7710), []string{"network.http", "secrets.use"}, time.Minute); err == nil {
 		t.Fatal("secrets.use issued without a grant")
 	}
-	platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false
+	platformFixtureManifestHook.set(t, nil)
+	platformFixtureNetworkTarget.set(t, false)
 	s, _, installation, _ := platformServiceCredentialFixture(t, pg, platformPrincipalsServiceOnly)
 	ctx := context.Background()
 	raw, grant, err := s.issuePlatformServiceIdentity(ctx, installation, platformFixtureID(7711), []string{"secrets.use", "network.http"}, time.Minute)
@@ -273,15 +273,19 @@ func testPlatformServiceEgressCheckBindsTheCallsCredential(t *testing.T, pg bool
 }
 
 func TestPlatformServiceIdentitySecretsUseOnlyWhenGrantedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceIdentitySecretsUseOnlyWhenGranted(t, false)
 }
 func TestPlatformServiceIdentitySecretsUseOnlyWhenGrantedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceIdentitySecretsUseOnlyWhenGranted(t, true)
 }
 func TestPlatformServiceEgressSecretsUseOnlyWithNetworkSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressSecretsUseOnlyWithNetwork(t, false)
 }
 func TestPlatformServiceEgressSecretsUseOnlyWithNetworkPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressSecretsUseOnlyWithNetwork(t, true)
 }
 func TestPlatformServiceEgressCredentialPlacedForServiceBindingSQLite(t *testing.T) {
@@ -297,14 +301,18 @@ func TestPlatformServiceEgressCredentialDeniedBeforeDecryptPostgres(t *testing.T
 	testPlatformServiceEgressCredentialDeniedBeforeDecrypt(t, true)
 }
 func TestPlatformServiceEgressCredentialRefusedAfterChangeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCredentialRefusedAfterChange(t, false)
 }
 func TestPlatformServiceEgressCredentialRefusedAfterChangePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCredentialRefusedAfterChange(t, true)
 }
 func TestPlatformServiceEgressCheckBindsTheCallsCredentialSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCheckBindsTheCallsCredential(t, false)
 }
 func TestPlatformServiceEgressCheckBindsTheCallsCredentialPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCheckBindsTheCallsCredential(t, true)
 }

@@ -6,6 +6,7 @@ import "testing"
 // pipelines plus 未分类), with the two legacy remaps: 事件监测→重组决策 and 其他→未分类.
 // (runKind's mapping is covered by TestRunKindMapsEveryCategory.)
 func TestFoldKindCollapsesToBuckets(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"重组决策":    "重组决策",
 		"投资决策":    "投资决策",
@@ -28,6 +29,7 @@ func TestFoldKindCollapsesToBuckets(t *testing.T) {
 // RecomputeKinds re-derives stored kinds: legacy rows from their subtype, Dify rows
 // by folding their explicit kind; unchanged rows are left alone.
 func TestRecomputeKinds(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	ins := "INSERT INTO reports(id,symbol,rtype,rdate,kind,source,sent_at) VALUES(?,?,?,?,?,?,?)"
 	st.exec(ins, 1, "600000", "舆情分析", "2026-01-01", "事件监测", "legacy", "2026-01-01") // → 重组决策

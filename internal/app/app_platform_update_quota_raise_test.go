@@ -197,9 +197,11 @@ func testUpdateWithoutRaiseIsUnchanged(t *testing.T, pg bool) {
 }
 
 func TestUpdateWithoutRaiseIsUnchangedSQLite(t *testing.T) {
+	t.Parallel()
 	testUpdateWithoutRaiseIsUnchanged(t, false)
 }
 func TestUpdateWithoutRaiseIsUnchangedPostgres(t *testing.T) {
+	t.Parallel()
 	testUpdateWithoutRaiseIsUnchanged(t, true)
 }
 
@@ -266,7 +268,7 @@ func testUpdateRaisesTheQuotaWithoutAMigration(t *testing.T, pg bool) {
 	// The next update review starts from the new value, and a reviewed raise sees it as the current one and refuses
 	// to lower it.
 	var projection platformUpdateProjection
-	f := lastPlatformUpdateFixture
+	f := lastPlatformUpdateFixture.get(t)
 	projection, err = platformBuildManagedUpdateProjection(s.st.poolExec(), installation, f.source, f.revision, f.policy, f.format,
 		platformActorFacts{authorityFingerprint: f.sourcePlan.ActorAuthority}, platformActorControl{epoch: f.activeEpoch, nowMS: 1}, f.target, f.release)
 	if err == nil && projection.DataQuota != nil && projection.DataQuota.CurrentBytes != platformRaisedBytes {
@@ -712,6 +714,7 @@ func TestUpdateRaiseLeaseReclaimPostgres(t *testing.T) { testUpdateRaiseLeaseRec
 // prepared with, and the runner refuses a raise above the volume's. The raise names the prepare-data receipt and
 // carries that receipt's fence.
 func TestUpdateRaiseFactsCarryTheVolumeFenceNotTheSourceFenceSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, enabled, _, runtime := platformDataActionFixture(t, false)
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {

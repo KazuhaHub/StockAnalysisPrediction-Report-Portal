@@ -13,6 +13,7 @@ import (
 )
 
 func TestFallbackModesTier1(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, value := range []string{`"on"`, `"wrong"`, `null`, `true`, `1`, `{}`} {
 		recorder := saveForecastSettings(t, s, `{"mode":"dry","alert_email_to":"new@example.com","fallback":`+value+`}`)
@@ -55,6 +56,7 @@ func TestFallbackModesTier1(t *testing.T) {
 }
 
 func TestForecastFallbackAuditFailureRollsBackMode(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if _, err := s.st.exec(`DROP TABLE audit_log`); err != nil {
 		t.Fatal(err)
@@ -69,6 +71,7 @@ func TestForecastFallbackAuditFailureRollsBackMode(t *testing.T) {
 }
 
 func TestForecastFallbackTransactionSerializesBothDrivers(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertFallbackTransitionChain(t, newTestStore(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t, "audit_log")
@@ -85,6 +88,7 @@ func TestForecastFallbackTransactionSerializesBothDrivers(t *testing.T) {
 }
 
 func TestForecastFallbackTransactionAcrossSQLiteConnections(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "fallback.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -100,6 +104,7 @@ func TestForecastFallbackTransactionAcrossSQLiteConnections(t *testing.T) {
 }
 
 func TestForecastFallbackWaitsForTransientSQLiteWriter(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "locked-fallback.db")
 	owner, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -146,6 +151,7 @@ func TestForecastFallbackWaitsForTransientSQLiteWriter(t *testing.T) {
 }
 
 func TestForecastFallbackRetryStopsAtCallerDeadline(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cancelled-fallback.db")
 	owner, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -179,6 +185,7 @@ func TestForecastFallbackRetryStopsAtCallerDeadline(t *testing.T) {
 }
 
 func TestForecastFallbackOmittedFieldAndNullStoredValue(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.saveForecastFallback(context.Background(), "shadow", AuditEntry{Actor: "admin"}); err != nil {
 		t.Fatal(err)
@@ -250,6 +257,7 @@ func assertFallbackTransitionChain(t *testing.T, st *Store, peers ...*Store) {
 }
 
 func TestForecastFallbackStoredUnknownIsOff(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"", "on", "invalid", "OFF", "shadow", "off"} {
 		want := "off"
 		if value == "shadow" {

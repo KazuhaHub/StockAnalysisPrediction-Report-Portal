@@ -79,8 +79,14 @@ func testPlatformSecretUninstall(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformSecretUninstallSQLite(t *testing.T)   { testPlatformSecretUninstall(t, false) }
-func TestPlatformSecretUninstallPostgres(t *testing.T) { testPlatformSecretUninstall(t, true) }
+func TestPlatformSecretUninstallSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformSecretUninstall(t, false)
+}
+func TestPlatformSecretUninstallPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformSecretUninstall(t, true)
+}
 
 func testPlatformSecretUninstallStaleReview(t *testing.T, pg bool) {
 	s, actor := platformRemovalFixture(t, pg, false)
@@ -99,9 +105,11 @@ func testPlatformSecretUninstallStaleReview(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformSecretUninstallStaleReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretUninstallStaleReview(t, false)
 }
 func TestPlatformSecretUninstallStaleReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretUninstallStaleReview(t, true)
 }
 
@@ -140,8 +148,10 @@ func testPlatformSecretUninstallRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformSecretUninstallRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretUninstallRollback(t, false)
 }
 func TestPlatformSecretUninstallRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretUninstallRollback(t, true)
 }

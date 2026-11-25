@@ -23,6 +23,7 @@ func platformNetworkHTTPPayload(t *testing.T, binding platformBackendRequestBind
 	return string(raw)
 }
 func TestPlatformNetworkHTTPDecoder(t *testing.T) {
+	t.Parallel()
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: strings.Repeat("a", 64)}
 	body := bytes.Repeat([]byte{0, 255, 128, 10}, appplatform.MaxHTTPRequestBytes/4)
 	valid := platformNetworkHTTPPayload(t, binding, body)
@@ -128,11 +129,16 @@ func testPlatformNetworkHTTPAdmission(t *testing.T, pg bool) {
 		t.Fatal("revoked session reached network", w.Code)
 	}
 }
-func TestPlatformNetworkHTTPAdmissionSQLite(t *testing.T) { testPlatformNetworkHTTPAdmission(t, false) }
+func TestPlatformNetworkHTTPAdmissionSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformNetworkHTTPAdmission(t, false)
+}
 func TestPlatformNetworkHTTPAdmissionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformNetworkHTTPAdmission(t, true)
 }
 func TestPlatformNetworkHTTPEnrolment(t *testing.T) {
+	t.Parallel()
 	s, mux, _, backendPath, cookie, _ := platformBackendHTTPFixture(t, false)
 	id := scalar[int64](t, s.st, `SELECT id FROM user_groups WHERE is_default=1`)
 	if err := s.st.SetGroupRequire2FA(id, true); err != nil {
@@ -144,6 +150,7 @@ func TestPlatformNetworkHTTPEnrolment(t *testing.T) {
 }
 
 func TestPlatformNetworkStreamWriterUsesClosedNDJSONFrames(t *testing.T) {
+	t.Parallel()
 	recorder := httptest.NewRecorder()
 	writer, err := newPlatformNetworkStreamWriter(recorder)
 	if err != nil {
@@ -181,6 +188,7 @@ func TestPlatformNetworkStreamWriterUsesClosedNDJSONFrames(t *testing.T) {
 }
 
 func TestPlatformNetworkStreamAdmissionUsesIndependentBudget(t *testing.T) {
+	t.Parallel()
 	s, mux, actor, backendPath, cookie, _ := platformBackendHTTPFixture(t, false)
 	installation := strings.Split(backendPath, "/")[4]
 	path := strings.TrimSuffix(backendPath, "/backend") + "/network/stream"

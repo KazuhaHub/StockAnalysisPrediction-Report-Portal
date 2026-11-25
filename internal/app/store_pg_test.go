@@ -1,7 +1,6 @@
 package app
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +11,7 @@ import (
 // likeOp must yield the case-insensitive operator on Postgres (whose LIKE is
 // case-sensitive, unlike SQLite's) so name/keyword search keeps working there.
 func TestLikeOpPerDriver(t *testing.T) {
+	t.Parallel()
 	if op := (&Store{driver: "postgres"}).likeOp(); op != "ILIKE" {
 		t.Errorf("postgres likeOp = %q, want ILIKE", op)
 	}
@@ -25,6 +25,7 @@ func TestLikeOpPerDriver(t *testing.T) {
 // groupConcatDistinct must emit a Postgres-valid aggregate (STRING_AGG); Postgres
 // has no GROUP_CONCAT, which is the one hard breakage in ListRuns.
 func TestGroupConcatDistinctPerDriver(t *testing.T) {
+	t.Parallel()
 	if got := (&Store{driver: "postgres"}).groupConcatDistinct("rtype"); got != "STRING_AGG(DISTINCT rtype, ',' ORDER BY rtype)" {
 		t.Errorf("postgres groupConcatDistinct = %q", got)
 	}
@@ -38,10 +39,8 @@ func TestGroupConcatDistinctPerDriver(t *testing.T) {
 // service; local dev without pg just skips). This proves STRING_AGG grouping and
 // ILIKE case-insensitive search actually execute on Postgres.
 func TestPostgresQueries(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
-	}
+	t.Parallel()
+	dsn := testPostgresDSN(t)
 	st, err := OpenStore("postgres", dsn)
 	if err != nil {
 		t.Fatalf("OpenStore postgres: %v", err)
@@ -124,10 +123,7 @@ func TestPostgresQueries(t *testing.T) {
 // the tests below so each states only what it needs cleaned.
 func pgStore(t *testing.T, tables ...string) *Store {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
-	}
+	dsn := testPostgresDSN(t)
 	st, err := OpenStore("postgres", dsn)
 	if err != nil {
 		t.Fatalf("OpenStore postgres: %v", err)
@@ -153,6 +149,7 @@ func pgStore(t *testing.T, tables ...string) *Store {
 // differ between drivers are exactly the parts that would fail silently — the five-column unique
 // index and the ON CONFLICT target inferred from it.
 func TestPostgresVersionIdentity(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "reports")
 
 	base := Rep{Symbol: "600519", Date: "2026-07-28", RType: "投资决策", Title: "投资决策 600519"}
@@ -187,6 +184,7 @@ func TestPostgresVersionIdentity(t *testing.T) {
 // to three IN-lists, assembled in Go and then rewritten to $N placeholders. Argument order is the
 // thing that breaks, and it breaks into a wrong answer rather than an error.
 func TestPostgresScopedReads(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "reports", "report_viewers", "version_grants", "report_versions", "users", "user_groups")
 	root := st.EnsureDefaultGroup()
 	ou, err := st.CreateUserGroup("pg-clients", "", 0)
@@ -266,6 +264,7 @@ func TestPostgresScopedReads(t *testing.T) {
 // check reads information_schema here and sqlite_master on SQLite, so the refusal — the thing every
 // existing deployment meets first — has to be exercised on Postgres rather than assumed portable.
 func TestPostgresRejectsAnOlderShape(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	if _, err := st.exec(`ALTER TABLE cleanup_runs RENAME COLUMN bytes_reclaimed TO bytes_reclaimed_old`); err != nil {
 		t.Fatal(err)
@@ -292,6 +291,7 @@ func TestPostgresRejectsAnOlderShape(t *testing.T) {
 // differently — and both of these decide whether two accounts can share one read principal, so a
 // silent driver difference here is a disclosure, not a formatting quirk.
 func TestPostgresUsernameCaseGuards(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "report_viewers", "version_grants", "users")
 
 	if err := st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"}); err != nil {
@@ -325,6 +325,7 @@ func TestPostgresUsernameCaseGuards(t *testing.T) {
 // SQLite covers the behavior exhaustively in favorite_test.go; this catches placeholder, locking,
 // and ROW_NUMBER differences that can otherwise survive every local test.
 func TestPostgresStockFavorites(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "user_stock_favorites", "users", "reports")
 	if err := st.UpsertUser(User{Username: "favorite-pg", PasswordHash: "h", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -369,6 +370,7 @@ func TestPostgresStockFavorites(t *testing.T) {
 // report the in-flight counts, and the full candidate set must match the per-job reference. The
 // database is shared, so the test only compares rows of its own jobs and removes them afterwards.
 func TestPostgresDispatchDecision(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	const user, slug = "pg_dispatch", "pg_dispatch_plugin"
 	// Everything the test inserts is keyed by its own user, plugin slug and target, so it removes
@@ -442,6 +444,7 @@ func TestPostgresDispatchDecision(t *testing.T) {
 // test turns every set another seeds before it into a pre-live row, and a query token left behind
 // collides with the next test that creates the same one.
 func TestPgStoreStartsWithoutSettingsOrTokensLeftByEarlierTests(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	if err := st.SetSetting(setForecastPopulationFrom, "2099-01-01T00:00:00Z"); err != nil {
 		t.Fatal(err)

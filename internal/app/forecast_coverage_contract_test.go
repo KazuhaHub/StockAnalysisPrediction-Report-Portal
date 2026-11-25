@@ -7,6 +7,7 @@ import (
 )
 
 func TestCoverageOmitsRetiredRefusalButKeepsCheckpointRefusals(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, 35, func(i int, g *gsSeed) {
 		if i == 0 {

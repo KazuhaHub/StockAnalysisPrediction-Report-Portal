@@ -11,6 +11,7 @@ import "testing"
 // idx_reports_date shifted rdate lookups to idx_reports_date_time for +0.9% cost. Re-adding
 // either buys nothing and slows every write, so this test fails if one comes back.
 func TestReportFeedIndexes(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	rows, err := st.query(`SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_reports_%'`)
 	if err != nil {

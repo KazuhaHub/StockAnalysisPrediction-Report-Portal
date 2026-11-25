@@ -10,6 +10,7 @@ import (
 )
 
 func TestGzipMiddleware(t *testing.T) {
+	t.Parallel()
 	body := strings.Repeat("hello world ", 500) // compressible
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -90,6 +91,7 @@ func TestGzipMiddleware(t *testing.T) {
 // endpoint returned 500 "streaming unsupported" when this failed — and (b) NOT be gzip-encoded, since
 // compression buffers the body and defeats live token delivery.
 func TestGzipSSEStreaming(t *testing.T) {
+	t.Parallel()
 	reachedFlush := false
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fl, ok := w.(http.Flusher)
@@ -119,6 +121,7 @@ func TestGzipSSEStreaming(t *testing.T) {
 
 // A 304 (empty body) must pass through without a gzip body.
 func TestGzipSkipsEmptyBody(t *testing.T) {
+	t.Parallel()
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 	}))

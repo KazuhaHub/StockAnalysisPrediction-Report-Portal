@@ -32,6 +32,7 @@ func chatFixture(t *testing.T) (*Server, int64, int64) {
 
 // A conversation title is the first message, trimmed and clipped to 24 runes.
 func TestChatTitleClamp(t *testing.T) {
+	t.Parallel()
 	if got := chatTitle("  hello world  "); got != "hello world" {
 		t.Fatalf("chatTitle = %q", got)
 	}
@@ -45,6 +46,7 @@ func TestChatTitleClamp(t *testing.T) {
 // The chat surface lists only conversational targets; conversations are personal, so every
 // mutation is owner-scoped, and renames are trimmed.
 func TestChatTargetsAndConversationCRUD(t *testing.T) {
+	t.Parallel()
 	s, chatID, wfID := chatFixture(t)
 
 	code, out := call(t, s.apiChatTargets, ``, "admin")
@@ -132,6 +134,7 @@ func TestChatTargetsAndConversationCRUD(t *testing.T) {
 
 // difyChatClient rejects an incomplete target config before any request is made.
 func TestDifyChatClientValidation(t *testing.T) {
+	t.Parallel()
 	if _, err := difyChatClient(`{}`, 0); err == nil {
 		t.Fatal("empty config accepted")
 	}

@@ -152,6 +152,7 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 }
 
 func TestPlatformMarketTransportBounds(t *testing.T) {
+	t.Parallel()
 	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/large":
@@ -228,6 +229,7 @@ func TestPlatformMarketTransportBounds(t *testing.T) {
 }
 
 func TestPlatformMarketPartialPartRetainsBytes(t *testing.T) {
+	t.Parallel()
 	remote := httptest.NewTLSServer(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", "8")
@@ -258,9 +260,11 @@ func platformMarketTestTLS(t *testing.T, client *platformMarketClient, remote *h
 }
 
 func TestPlatformMarketVerifiedRemoteStagingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformMarketVerifiedRemoteStaging(t, false)
 }
 func TestPlatformMarketVerifiedRemoteStagingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformMarketVerifiedRemoteStaging(t, true)
 }
 
@@ -332,9 +336,11 @@ func testPlatformManagedMarketStaging(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedMarketStagingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedMarketStaging(t, false)
 }
 
 func TestPlatformManagedMarketStagingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedMarketStaging(t, true)
 }

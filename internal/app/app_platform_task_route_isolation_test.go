@@ -77,6 +77,7 @@ func (f *taskRouteFixture) legit(t *testing.T, occurrence string) (int, string) 
 // Stalled partial-body connections hold no slot, whether the caller is anonymous or holds a valid
 // credential of the very installation that then submits.
 func TestPlatformServiceTaskStalledBodiesNeverMakeABackendBusy(t *testing.T) {
+	t.Parallel()
 	f := newTaskRouteFixture(t)
 	junk := base64.RawURLEncoding.EncodeToString([]byte(`{"not":"verifiable"}`))
 	valid := base64.RawURLEncoding.EncodeToString(f.identity)
@@ -107,6 +108,7 @@ func TestPlatformServiceTaskReadDeadlineEndsAStalledBody(t *testing.T) {
 // The slots belong to one verified installation each: filling another installation's slots, or the
 // slots of an installation nobody has verified, never makes this installation's submissions busy.
 func TestPlatformServiceTaskBudgetIsScopedToOneVerifiedInstallation(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, false)
 	for _, other := range []string{"11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"} {
 		for i := 0; i < platformServiceTaskSlots; i++ {
@@ -155,6 +157,7 @@ func TestPlatformServiceTaskBudgetIsScopedToOneVerifiedInstallation(t *testing.T
 }
 
 func TestPlatformServiceTaskBudgetMapStaysBoundedAndEmptiesWhenIdle(t *testing.T) {
+	t.Parallel()
 	var b platformInstallationBudgets
 	var releases []func()
 	for i := 0; i < 1000; i++ {
@@ -180,6 +183,7 @@ func TestPlatformServiceTaskBudgetMapStaysBoundedAndEmptiesWhenIdle(t *testing.T
 
 // What a remembered refusal answers must be what the full path would answer for the same request.
 func TestPlatformServiceTaskRememberedRefusalAgreesWithTheFullPath(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		body   string
 		change string
@@ -215,6 +219,7 @@ func TestPlatformServiceTaskRememberedRefusalAgreesWithTheFullPath(t *testing.T)
 // An empty or missing body is answered the same whether or not the credential was just remembered, and
 // a credential retired in the last moments is told nothing a stranger would not be told.
 func TestPlatformServiceTaskEmptyBodyAnswerDoesNotDependOnTheMemory(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, true)
 	empty := func() int { return platformTaskHTTPWithIdentity(t, f.s, f.installation, ``, f.identity).Code }
 	f.s.platformTaskRefusals.reset()
@@ -231,6 +236,7 @@ func TestPlatformServiceTaskEmptyBodyAnswerDoesNotDependOnTheMemory(t *testing.T
 
 // The credential's own expiry is compared in the database's clock.
 func TestPlatformServiceTaskRememberedRefusalChecksCredentialExpiryInTheDatabaseClock(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, true)
 	f.submit(t, "prime:1")
 	entry, ok := f.s.platformTaskRefusals.lookup(platformTaskRefusalKey(f.identity), f.installation)

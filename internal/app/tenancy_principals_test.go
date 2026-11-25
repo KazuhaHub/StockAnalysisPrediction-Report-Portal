@@ -78,6 +78,7 @@ func (f p30Fixture) canRead(user string, reportID int64) bool {
 }
 
 func TestOnlyRestrictedOUsShare(t *testing.T) {
+	t.Parallel()
 	f := newP30Fixture(t)
 	containerReport := f.report(t, "600300", "alice", f.container)
 	tenantReport := f.report(t, "600301", "carol", f.tenant)
@@ -127,6 +128,7 @@ func TestOnlyRestrictedOUsShare(t *testing.T) {
 }
 
 func TestIngestWritesGroupPrincipalOnlyForRestrictedOUs(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	internal := seedOU(t, s.st, 0, scopeAll)
 	external := seedOU(t, s.st, 0, scopeAll)
@@ -178,6 +180,7 @@ func TestIngestWritesGroupPrincipalOnlyForRestrictedOUs(t *testing.T) {
 }
 
 func TestOUIndexErrorWritesNoGroupPrincipal(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	// A dangling chain: the OU names a parent that is not in the table.
 	if _, err := s.st.exec(`INSERT INTO user_groups(id,name,description,created_at,weight,urgent_unlimited,is_default,parent_id,restricted)
@@ -221,6 +224,7 @@ func TestOUIndexErrorWritesNoGroupPrincipal(t *testing.T) {
 // principal, so a restricted reader must keep that one principal even though unrestricted OUs are
 // no longer principals. Without this, P30 would silently break "everyone".
 func TestEveryoneAudienceStillReachesAScopedReader(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	st := s.st
 	root := st.EnsureDefaultGroup()

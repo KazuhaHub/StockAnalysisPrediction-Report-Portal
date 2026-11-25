@@ -39,6 +39,7 @@ func finishJob(t *testing.T, s *Server, id int64, outcome batch.Outcome) {
 // Plugins: the list compiles the stored manifest (so the run forms see its declared inputs), and
 // delete removes by slug.
 func TestBatchPluginListAndDelete(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.UpsertPlugin("p", "P", "1.0.0", batchTestSpec, "imported"); err != nil {
 		t.Fatal(err)
@@ -71,6 +72,7 @@ func TestBatchPluginListAndDelete(t *testing.T) {
 // Targets: drag-order persists, delete removes + audits, and the surfaces endpoint refuses an
 // empty selection (which would mean "every surface", the opposite of what the admin meant).
 func TestBatchTargetAdminHandlers(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	first := seedDifyTarget(t, s, "First")
 	second := seedDifyTarget(t, s, "Second")
@@ -126,6 +128,7 @@ func TestBatchTargetAdminHandlers(t *testing.T) {
 
 // Tickets + run quota: the run form reads its remaining balance from these two endpoints.
 func TestBatchTicketsAndRunQuotaEndpoints(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	if err := s.st.UpsertUser(User{Username: "alice", PasswordHash: "x", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -181,6 +184,7 @@ func TestBatchTicketsAndRunQuotaEndpoints(t *testing.T) {
 // Job operations: detail, per-row cancel, whole-job cancel, retry, reprioritize, clear-finished
 // and delete — each with its authorization / state guard.
 func TestBatchJobOperationHandlers(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	ownerJob := seedQueuedJob(t, s, "alice", 2)
 

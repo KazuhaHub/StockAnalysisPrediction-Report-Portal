@@ -15,6 +15,7 @@ import (
 // ---------- date semantics: after is on-or-after, before is strictly before ----------
 
 func TestExportDateOnlyAfterIsOnOrAfterAndBeforeIsStrictlyBefore(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.st.SetSetting("timezone", "UTC")
 	stamps := []string{"2026-09-30T23:59:59Z", "2026-10-01T05:00:00Z", "2026-10-02T00:00:00Z"}
@@ -46,6 +47,7 @@ func TestExportDateOnlyAfterIsOnOrAfterAndBeforeIsStrictlyBefore(t *testing.T) {
 }
 
 func TestExportDateColumnAfterIsOnOrAfter(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedReports(t, e.s.st, 3, func(i int) Rep {
 		return Rep{Symbol: fmt.Sprintf("60000%d", i), Name: "N", Date: fmt.Sprintf("2026-10-0%d", i+1), RType: predTestRtype, Kind: "K", Title: fmt.Sprintf("t%d", i), MD: "b"}
@@ -68,6 +70,7 @@ func TestExportDateColumnAfterIsOnOrAfter(t *testing.T) {
 // ---------- node bound ----------
 
 func TestExportFilterBoundsTheTotalNodeCount(t *testing.T) {
+	t.Parallel()
 	root := exportNode{Op: "and"}
 	for i := 0; i < 5000; i++ {
 		root.Items = append(root.Items, exportNode{Op: "or"})
@@ -94,6 +97,7 @@ func TestExportFilterBoundsTheTotalNodeCount(t *testing.T) {
 // ---------- audit rows are RFC 3339 UTC ----------
 
 func TestSettingsAuditRowsAreRFC3339UTC(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	ctx := context.Background()
 	if err := st.saveForecastFallback(ctx, "shadow", AuditEntry{Actor: "admin"}); err != nil {
@@ -120,6 +124,7 @@ func TestSettingsAuditRowsAreRFC3339UTC(t *testing.T) {
 // ---------- HEAD is not a download ----------
 
 func TestExportHeadRequestIsNotRecordedAsADownload(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 3, func(i int) AuditEntry {
 		return AuditEntry{At: atStamp(i), Actor: "a", Action: AuditLogin, IP: "10.0.0.1"}
@@ -158,6 +163,7 @@ func (e *exportEnv) countingVendor(prices map[string]int64) (v *quoteVendorStub,
 }
 
 func TestExportForecastsLatestModePreviewKeepsPricesForRowsFromEarlierBatches(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 2
 	prices := map[string]int64{}
@@ -179,6 +185,7 @@ func TestExportForecastsLatestModePreviewKeepsPricesForRowsFromEarlierBatches(t 
 }
 
 func TestExportForecastsCountNeverCallsTheVendorWithoutBelowEntry(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	prices := map[string]int64{}
 	for i := 0; i < 120; i++ {
@@ -211,6 +218,7 @@ func TestExportForecastsCountNeverCallsTheVendorWithoutBelowEntry(t *testing.T) 
 }
 
 func TestExportForecastsPreviewPricesOnlyTheReturnedPage(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	prices := map[string]int64{}
 	for i := 0; i < 120; i++ {
@@ -251,6 +259,7 @@ func mustFilter(t *testing.T, raw string) exportNode {
 // ---------- cancel races ----------
 
 func TestExportWorkerDoesNotFinalizeAJobCancelledAfterItsLastBatch(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 100
 	seedAudit(t, e.s.st, 200, func(i int) AuditEntry {
@@ -274,6 +283,7 @@ func TestExportWorkerDoesNotFinalizeAJobCancelledAfterItsLastBatch(t *testing.T)
 }
 
 func TestExportCancelBetweenClaimAndRegistrationIsNotLost(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 50, func(i int) AuditEntry {
 		return AuditEntry{At: atStamp(i), Actor: "a", Action: AuditReportRead, IP: "10.0.0.1"}
@@ -298,6 +308,7 @@ func TestExportCancelBetweenClaimAndRegistrationIsNotLost(t *testing.T) {
 }
 
 func TestExportCancelOfAJobClaimedMeanwhileDoesNotAnswerRunning(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := e.create(`{"source":"cleanup","format":"csv"}`)
 	e.s.exports.beforeQueuedCancel = func(id string) {
@@ -320,6 +331,7 @@ func TestExportCancelOfAJobClaimedMeanwhileDoesNotAnswerRunning(t *testing.T) {
 }
 
 func TestExportCancelOfAJobClaimedMeanwhileSignalsTheLiveWorker(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 50
 	seedAudit(t, e.s.st, 500, func(i int) AuditEntry {

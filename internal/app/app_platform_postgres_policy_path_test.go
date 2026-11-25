@@ -7,6 +7,7 @@ import (
 
 // A plan is consumed only by the installation it was made for.
 func TestPlatformPostgresConsumeRefusesAnotherInstallationPath(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, _, target := platformPostgresFixture(t, false, false)
 	plan, err := s.createPlatformPostgresPolicyReview(context.Background(), admin, platformRuntimeEndpoint{}, installation, platformPostgresRequestFor(t, s, installation, target))
 	if err != nil {

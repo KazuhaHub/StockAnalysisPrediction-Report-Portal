@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestValidateNewPassword(t *testing.T) {
+	t.Parallel()
 	for _, password := range []string{"", "123456", "short-pass"} {
 		if validateNewPassword(password) == nil {
 			t.Errorf("accepted weak password %q", password)

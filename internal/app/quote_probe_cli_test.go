@@ -103,6 +103,7 @@ func TestQuoteProbeCommandCaptureAndRecordedFixedPanelNeverOpenDatabase(t *testi
 }
 
 func TestQuoteProbeRecordRejectsManifestReplacement(t *testing.T) {
+	t.Parallel()
 	dir := probeCompareFixture(t)
 	report, err := compareQuoteProbe(dir, quoteSourceTencent, [2]string{"2026-10-19", "2026-10-20"})
 	if err != nil {
@@ -120,6 +121,7 @@ func TestQuoteProbeRecordRejectsManifestReplacement(t *testing.T) {
 type quoteProbeFailWriter struct{}
 
 func TestQuoteProbeCustomTargetsAreBoundedAndDoNotWeakenRecordedPanel(t *testing.T) {
+	t.Parallel()
 	var called []quoteProbeTarget
 	source := quoteSource{name: "stub", fetchRange: func(_ context.Context, market, code, _, _ string) (*QuoteResp, error) {
 		called = append(called, quoteProbeTarget{Market: market, Code: code})
@@ -166,6 +168,7 @@ func TestQuoteProbeCustomTargetsAreBoundedAndDoNotWeakenRecordedPanel(t *testing
 func (quoteProbeFailWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func TestQuoteProbeCommandPropagatesOutputFailure(t *testing.T) {
+	t.Parallel()
 	dir := probeCompareFixture(t)
 	err := QuoteProbeCommand(context.Background(), []string{"compare", "--in", dir, "--anchor-start", "2026-10-19", "--anchor-end", "2026-10-20"}, quoteProbeFailWriter{})
 	if !errors.Is(err, io.ErrClosedPipe) {
@@ -174,6 +177,7 @@ func TestQuoteProbeCommandPropagatesOutputFailure(t *testing.T) {
 }
 
 func TestQuoteProbeCommandRejectsBadFlagsAndPartialPanelRecord(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{nil, {"bad"}, {"capture", "--wat"}, {"capture", "extra"}, {"capture", "--suspended", "600519"}, {"compare", "--in", "missing"}} {
 		if err := QuoteProbeCommand(context.Background(), args, &bytes.Buffer{}); err == nil {
 			t.Fatalf("invalid args accepted: %v", args)
@@ -190,6 +194,7 @@ func TestQuoteProbeCommandRejectsBadFlagsAndPartialPanelRecord(t *testing.T) {
 }
 
 func TestQuoteProbeFixedPanelHasRequiredBoardsWithoutDuplicates(t *testing.T) {
+	t.Parallel()
 	panel := quoteProbeFixedPanel()
 	if len(panel) != 23 {
 		t.Fatalf("panel length %d", len(panel))

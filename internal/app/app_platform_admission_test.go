@@ -85,6 +85,7 @@ func busyBytes(route admissionRoute) (string, string) {
 // A full budget answers a signed cookie's request with the budget's own 429 and touches the database
 // not at all: no statement, no connection.
 func TestPlatformBudgetFullAnswersBeforeAnyDatabaseStatement(t *testing.T) {
+	t.Parallel()
 	for _, route := range admissionRoutes() {
 		t.Run(route.method+" "+route.path[:min(len(route.path), 48)], func(t *testing.T) {
 			s, d, mux := admissionServer(t)
@@ -115,6 +116,7 @@ func TestPlatformBudgetFullAnswersBeforeAnyDatabaseStatement(t *testing.T) {
 // Without a cookie this server signed, a full budget changes nothing: the request takes the same path
 // and gets the same answer as with a free budget.
 func TestPlatformBudgetFullDoesNotChangeUnsignedClients(t *testing.T) {
+	t.Parallel()
 	s0, _, _ := admissionServer(t)
 	good := s0.managedCookie(*s0.st.GetUser("alice"), "sid", time.Now().Add(time.Hour).Unix())
 	cases := map[string]string{
@@ -151,6 +153,7 @@ func TestPlatformBudgetFullDoesNotChangeUnsignedClients(t *testing.T) {
 // The pre-check never holds a slot, and a request that passed it can still lose the authoritative
 // acquire, which answers exactly the same 429.
 func TestPlatformBudgetPrecheckNeverHoldsASlotAndAcquireStaysAuthoritative(t *testing.T) {
+	t.Parallel()
 	s, _, _ := admissionServer(t)
 	sess := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
 	budget := &s.platformDocuments
@@ -197,6 +200,7 @@ func TestPlatformBudgetPrecheckNeverHoldsASlotAndAcquireStaysAuthoritative(t *te
 
 // Every route leaves its budget empty after refusing an unauthenticated client.
 func TestPlatformUnauthenticatedClientsNeverHoldBudgetSlots(t *testing.T) {
+	t.Parallel()
 	s, _, mux := admissionServer(t)
 	for _, route := range admissionRoutes() {
 		for _, cookie := range []string{"", "junk", "junk.junk"} {
@@ -211,6 +215,7 @@ func TestPlatformUnauthenticatedClientsNeverHoldBudgetSlots(t *testing.T) {
 // The session reads of a relay attempt run through the statement cache: each text is prepared once
 // and every later attempt reuses it, none takes the driver's direct (unprepared) path.
 func TestPlatformSessionReadsUseTheStatementCache(t *testing.T) {
+	t.Parallel()
 	s, d, _ := admissionServer(t)
 	cookie := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
 	// The route without the pre-check, against a full budget: exactly the work every refused attempt
@@ -331,6 +336,7 @@ func BenchmarkPlatformRelayFloodSmallReadP95(b *testing.B) {
 // a budget is full such a client sees the budget's 429 where a free budget would give it a 401. The
 // documented visible change of the pre-check.
 func TestPlatformBudgetFullRefusesDeadSessionsWith429AndFreeBudgetWith401(t *testing.T) {
+	t.Parallel()
 	route := admissionRoutes()[6] // the backend relay
 	cases := map[string]func(*Server, string){
 		"revoked session": func(s *Server, _ string) { mustExec(t, s.st, `UPDATE user_sessions SET revoked=1`) },

@@ -42,6 +42,7 @@ func TestIngressAuthorityReadsAreCapped(t *testing.T) {
 }
 
 func TestPublicAuthorityReadsAreCapped(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -69,6 +70,7 @@ func TestPublicAuthorityReadsAreCapped(t *testing.T) {
 
 // A request the installation budget refuses must not take a nonce-cache entry.
 func TestIngressBudgetRefusalTakesNoNonce(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)

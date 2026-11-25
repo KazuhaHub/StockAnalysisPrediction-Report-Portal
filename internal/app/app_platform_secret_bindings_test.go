@@ -133,13 +133,16 @@ func testPlatformSecretBindingLifecycle(t *testing.T, pg bool) {
 }
 
 func TestPlatformSecretBindingLifecycleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretBindingLifecycle(t, false)
 }
 func TestPlatformSecretBindingLifecyclePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretBindingLifecycle(t, true)
 }
 
 func TestPlatformSecretBindingReviewRefusesDrift(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	plan, err := s.createPlatformSecretBindingReview(admin, installation, "upstream-api", credential.ID, "http_api_key")
 	if err != nil {
@@ -163,6 +166,7 @@ func TestPlatformSecretBindingReviewRefusesDrift(t *testing.T) {
 }
 
 func TestPlatformSecretPolicyRequiresReviewedNetworkDigest(t *testing.T) {
+	t.Parallel()
 	raw, err := canonicalPlatformSecretBindingPolicy(platformSecretBindingPolicy{operation: "http_bearer", networkPolicySHA256: platformDigest([]byte("policy"))})
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +183,7 @@ func TestPlatformSecretPolicyRequiresReviewedNetworkDigest(t *testing.T) {
 }
 
 func TestPlatformSecretHeaderFixedShapes(t *testing.T) {
+	t.Parallel()
 	name, value, ok := platformSecretHeader("http_bearer", []byte("disposable"))
 	if !ok || name != "Authorization" || string(value) != "Bearer disposable" {
 		t.Fatal("bearer header", name, string(value), ok)

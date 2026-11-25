@@ -33,6 +33,7 @@ func seedProvider(t *testing.T, s *Server) SSOProvider {
 // here would make re-proving your identity weaker than signing in — the wrong way round for a
 // control whose entire job is to be harder than the session it protects.
 func TestForceSSOClosesThePasswordChannel(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	seedProvider(t, s)
 	mustAddUser(t, s, "alice", false)
@@ -50,6 +51,7 @@ func TestForceSSOClosesThePasswordChannel(t *testing.T) {
 // The exemption sso_only already carries, not a second differently-shaped one: an IdP that breaks
 // must not cost an operator the ability to sign in and fix it.
 func TestForceSSOKeepsThePasswordChannelForAnAdmin(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	seedProvider(t, s)
 	mustAddUser(t, s, "root", true)
@@ -63,6 +65,7 @@ func TestForceSSOKeepsThePasswordChannelForAnAdmin(t *testing.T) {
 // With no provider configured the mode degrades, exactly as loginMode() already degrades: refusing
 // the password channel while offering nothing in its place would strand every non-admin.
 func TestForceSSOWithoutAProviderLeavesThePasswordChannelOpen(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	mustAddUser(t, s, "alice", false)
 	s.st.SetSetting(setLoginMode, loginSSORedirect)
@@ -96,6 +99,7 @@ func mintProof(t *testing.T, s *Server, user string) string {
 // A completed round-trip is the proof, and it is spent by being read. A proof that survived its
 // first use would be a standing authorisation sitting in a browser for five minutes.
 func TestSSOProofIsSingleUse(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	mustAddUser(t, s, "alice", false)
 	tok := mintProof(t, s, "alice")
@@ -111,6 +115,7 @@ func TestSSOProofIsSingleUse(t *testing.T) {
 // Bound to a name, so a proof minted for one account cannot be spent on another — including inside
 // one browser signed into both in turn.
 func TestSSOProofIsBoundToItsAccount(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	mustAddUser(t, s, "alice", false)
 	mustAddUser(t, s, "bob", false)
@@ -124,6 +129,7 @@ func TestSSOProofIsBoundToItsAccount(t *testing.T) {
 // A row that is merely a pending flow is not a proof. Reading the purpose is what separates "we
 // asked the IdP" from "the IdP answered".
 func TestAPendingFlowRowIsNotAProof(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	mustAddUser(t, s, "alice", false)
 	tok, _ := newAuthToken()
@@ -139,6 +145,7 @@ func TestAPendingFlowRowIsNotAProof(t *testing.T) {
 
 // And the gate reads it: no header at all, yet the request goes through.
 func TestStepUpAcceptsTheSSOProofWithoutAHeader(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	mustAddUser(t, s, "alice", false)
 	tok := mintProof(t, s, "alice")

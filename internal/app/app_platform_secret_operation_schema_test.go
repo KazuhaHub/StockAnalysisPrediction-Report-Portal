@@ -95,15 +95,18 @@ func testMigration0022WidensOperationCheck(t *testing.T, pg bool) {
 }
 
 func TestMigration0022WidensOperationCheckSQLite(t *testing.T) {
+	t.Parallel()
 	testMigration0022WidensOperationCheck(t, false)
 }
 func TestMigration0022WidensOperationCheckPostgres(t *testing.T) {
+	t.Parallel()
 	testMigration0022WidensOperationCheck(t, true)
 }
 
 // The constraint names are derived from the declaration; the approved change names them, so the
 // derivation is pinned to the documented values for each driver.
 func TestMigration0022ConstraintNames(t *testing.T) {
+	t.Parallel()
 	var table platformTable
 	for _, candidate := range platformCredentialTables() {
 		if candidate.name == "secret_bindings" {
@@ -163,9 +166,11 @@ func testMigration0022VerifyRefusesAWeakenedCheck(t *testing.T, pg bool) {
 	}
 }
 func TestMigration0022VerifyRefusesAWeakenedCheckSQLite(t *testing.T) {
+	t.Parallel()
 	testMigration0022VerifyRefusesAWeakenedCheck(t, false)
 }
 func TestMigration0022VerifyRefusesAWeakenedCheckPostgres(t *testing.T) {
+	t.Parallel()
 	testMigration0022VerifyRefusesAWeakenedCheck(t, true)
 }
 
@@ -179,10 +184,14 @@ func testMigration0022Declaration(t *testing.T, pg bool) {
 		t.Fatal("0016's frozen operation list changed")
 	}
 }
-func TestMigration0022DeclarationSQLite(t *testing.T) { testMigration0022Declaration(t, false) }
+func TestMigration0022DeclarationSQLite(t *testing.T) {
+	t.Parallel()
+	testMigration0022Declaration(t, false)
+}
 
 // PostgreSQL must find the constraint it is about to replace.
 func TestSetPlatformSecretBindingOperationCheckPostgresRefusesAMissingConstraint(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	name, err := platformSecretBindingOperationCheckName()
 	if err != nil {
@@ -203,6 +212,7 @@ func TestSetPlatformSecretBindingOperationCheckPostgresRefusesAMissingConstraint
 }
 
 func TestSchemaUpgradeCLIAcceptsPre0022Database(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "pre0022.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {

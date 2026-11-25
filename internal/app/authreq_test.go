@@ -10,6 +10,7 @@ import (
 // consumable exactly once. Two concurrent callbacks carrying the same token must not both mint a
 // session, which is why consumption is a conditional DELETE rather than select-then-delete.
 func TestAuthRequestSingleUse(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	req := AuthRequest{Token: "tok-1", Kind: "oidc", Nonce: "n", Verifier: "v", Target: "/home"}
 	if err := st.CreateAuthRequest(req, time.Now().Add(10*time.Minute)); err != nil {
@@ -31,6 +32,7 @@ func TestAuthRequestSingleUse(t *testing.T) {
 // TestAuthRequestConcurrentConsumeHasOneWinner exercises the race directly rather than trusting the
 // SQL to be atomic by inspection.
 func TestAuthRequestConcurrentConsumeHasOneWinner(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.CreateAuthRequest(AuthRequest{Token: "race", Kind: "oidc"}, time.Now().Add(time.Minute))
 
@@ -61,6 +63,7 @@ func TestAuthRequestConcurrentConsumeHasOneWinner(t *testing.T) {
 // TestAuthRequestExpiry proves an expired request is not consumable — and that consuming checks
 // expiry in the same statement, so a request cannot expire between the check and the delete.
 func TestAuthRequestExpiry(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.CreateAuthRequest(AuthRequest{Token: "old", Kind: "saml"}, time.Now().Add(-time.Minute))
 	if _, ok := st.ConsumeAuthRequest("old", time.Now()); ok {
@@ -77,6 +80,7 @@ func TestAuthRequestExpiry(t *testing.T) {
 // TestAssertionReplayGate covers the SAML replay cache: the first sighting of an assertion id wins
 // and every later one is refused, atomically.
 func TestAssertionReplayGate(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	exp := time.Now().Add(5 * time.Minute)
 

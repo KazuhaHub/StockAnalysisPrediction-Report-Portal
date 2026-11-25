@@ -57,6 +57,7 @@ func expectNoEvent(t *testing.T, ch <-chan map[string]any, why string) {
 // event is the same one on purpose — a subscriber's contract is "a report arrived", and a new event
 // type would leave every existing subscriber missing hand-written reports exactly as before.
 func TestHandWrittenReportsFireTheIngestEvent(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	events := eventSink(t, s)
 
@@ -93,6 +94,7 @@ func TestHandWrittenReportsFireTheIngestEvent(t *testing.T) {
 // what an edit is. A save that rewrote nothing — an audience change — files no revision, and it
 // should not wake every subscriber either.
 func TestEditingFiresOnlyWhenTheWordsChange(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 
 	body := `{"symbol":"002594","date":"2026-09-04","subtype":"深度分析","title":"稿子",
@@ -161,6 +163,7 @@ func TestEditingFiresOnlyWhenTheWordsChange(t *testing.T) {
 // comparing this event against a later read has no way to reconcile, and one that only appears for
 // the commonest ingest of all: the one that does not mention a version.
 func TestIngestEventReportsTheStoredVersion(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	s.st.CreateToken("ingest-tok", "test", "all", "")
 	events := eventSink(t, s)

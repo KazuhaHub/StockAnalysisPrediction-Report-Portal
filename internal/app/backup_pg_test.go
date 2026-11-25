@@ -16,6 +16,7 @@ import (
 // them — and the identity sequence must end up past the restored rows, or the first report written
 // after a restore collides with one that was just loaded.
 func TestRestoreIntoPostgresKeepsIdsAndAdvancesTheSequence(t *testing.T) {
+	t.Parallel()
 	dst := pgStore(t)
 
 	// Wind the identity sequence back first. It is NOT reset by DELETE, so a previous run of this
@@ -60,6 +61,7 @@ func TestRestoreIntoPostgresKeepsIdsAndAdvancesTheSequence(t *testing.T) {
 // TestPostgresDumpRestoresIntoSQLite is the other direction, and the reason the format is one format:
 // "we outgrew SQLite" and "we want to go back to a single file" are both supported moves.
 func TestPostgresDumpRestoresIntoSQLite(t *testing.T) {
+	t.Parallel()
 	pg := pgStore(t)
 
 	seed := newTestStore(t)

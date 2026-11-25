@@ -204,10 +204,13 @@ func testPlatformActorGuards(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformActorIdentity(t *testing.T)         { testPlatformActorIdentity(t, false) }
-func TestPostgresAppPlatformActorIdentity(t *testing.T) { testPlatformActorIdentity(t, true) }
-func TestAppPlatformActorGuards(t *testing.T)           { testPlatformActorGuards(t, false) }
-func TestPostgresAppPlatformActorGuards(t *testing.T)   { testPlatformActorGuards(t, true) }
+func TestAppPlatformActorIdentity(t *testing.T) { t.Parallel(); testPlatformActorIdentity(t, false) }
+func TestPostgresAppPlatformActorIdentity(t *testing.T) {
+	t.Parallel()
+	testPlatformActorIdentity(t, true)
+}
+func TestAppPlatformActorGuards(t *testing.T)         { t.Parallel(); testPlatformActorGuards(t, false) }
+func TestPostgresAppPlatformActorGuards(t *testing.T) { t.Parallel(); testPlatformActorGuards(t, true) }
 
 func testPlatformActorAuthorityContinuity(t *testing.T, postgres bool) {
 	s, session := platformActorTestServer(t, postgres)
@@ -245,13 +248,16 @@ func testPlatformActorAuthorityContinuity(t *testing.T, postgres bool) {
 }
 
 func TestAppPlatformActorAuthorityContinuity(t *testing.T) {
+	t.Parallel()
 	testPlatformActorAuthorityContinuity(t, false)
 }
 func TestPostgresAppPlatformActorAuthorityContinuity(t *testing.T) {
+	t.Parallel()
 	testPlatformActorAuthorityContinuity(t, true)
 }
 
 func TestAppPlatformActorInitializationRollback(t *testing.T) {
+	t.Parallel()
 	s, session := platformActorTestServer(t, false)
 	if _, err := s.dek(); err != nil {
 		t.Fatal(err)

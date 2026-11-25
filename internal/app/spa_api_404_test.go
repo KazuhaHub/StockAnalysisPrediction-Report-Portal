@@ -18,6 +18,7 @@ import (
 // commit. A stale caller must be told they are gone. (The write verbs are already safe —
 // POST/DELETE/PATCH match no pattern and the mux answers 405 by itself.)
 func TestUnknownAPIPathIs404NotTheSPAShell(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 
 	// Every path the legacy removal orphaned, plus a never-existed one.
@@ -52,6 +53,7 @@ func TestUnknownAPIPathIs404NotTheSPAShell(t *testing.T) {
 // The guard must not eat the SPA's real job: deep links still render the shell, and a path
 // that merely starts with the letters "api" is not an API path.
 func TestSPADeepLinksStillServeTheShell(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 
 	for _, p := range []string{"/stock/300750", "/manage/tokens", "/apidocs", "/"} {

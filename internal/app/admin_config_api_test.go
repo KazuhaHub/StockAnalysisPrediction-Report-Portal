@@ -27,6 +27,7 @@ func callPath(t *testing.T, h handler, method, body string, path map[string]stri
 // Entry-button links: add through the handler defaults to new-tab and appends, edit is a full
 // field update, delete removes, and the admin GET lists what the store holds.
 func TestEntryLinkAdminHandlersCRUD(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 
 	if code, _ := call(t, s.apiLinkAdd, `{"label":" GitHub ","url":" https://github.com ","icon":" github "}`, "admin"); code != http.StatusOK {
@@ -89,6 +90,7 @@ func TestEntryLinkAdminHandlersCRUD(t *testing.T) {
 // Entry-button groups: an unknown display mode normalizes to the default row, show-label
 // defaults on, edits apply, and deleting a group returns its links to the top level.
 func TestEntryLinkGroupAdminHandlersCRUD(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 
 	code, out := call(t, s.apiLinkGroupAdd, `{"name":" 研报 ","mode":"drawer","icon":" bulb "}`, "admin")
@@ -133,6 +135,7 @@ func TestEntryLinkGroupAdminHandlersCRUD(t *testing.T) {
 // Report types: add infers the top-level kind when omitted, save propagates a kind change to
 // already-stored reports, delete drops the config row, and recompute re-derives from the config.
 func TestTypeAdminHandlersAddSaveDeleteRecompute(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 
 	// An unknown type infers 未分类; a 重组 keyword infers 重组决策.

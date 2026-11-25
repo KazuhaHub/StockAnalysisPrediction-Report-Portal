@@ -128,7 +128,7 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(ci_ready(jobs))
         jobs += [{'name':f'go race full ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
         self.assertFalse(ci_ready(jobs))
-        jobs += [{'name':f'go test ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
+        jobs += [{'name':f'go test ({i}/3)', 'conclusion':'success'} for i in range(1,4)]
         self.assertTrue(ci_ready(jobs))
 
     def test_ci_ready_matches_test_workflow(self):

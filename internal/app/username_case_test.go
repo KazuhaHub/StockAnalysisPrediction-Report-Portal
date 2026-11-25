@@ -30,6 +30,7 @@ func userAddReq(t *testing.T, s *Server, username, password string) int {
 // TestAdminCreateFoldsTheUsername pins the stored form. An admin who types a capital gets the
 // canonical account, so every later exact-match lookup — login included — agrees with the principal.
 func TestAdminCreateFoldsTheUsername(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if code := userAddReq(t, s, "  Alice@Corp.Example  ", "a-long-enough-password"); code != http.StatusOK {
 		t.Fatalf("create → %d", code)
@@ -45,6 +46,7 @@ func TestAdminCreateFoldsTheUsername(t *testing.T) {
 // TestCaseVariantAccountsCannotCoexist is the security property. Two accounts differing only by case
 // would collapse onto one read principal, so the namespace must refuse the second one.
 func TestCaseVariantAccountsCannotCoexist(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if code := userAddReq(t, s, "alice", "a-long-enough-password"); code != http.StatusOK {
 		t.Fatalf("first create → %d", code)
@@ -68,6 +70,7 @@ func TestCaseVariantAccountsCannotCoexist(t *testing.T) {
 // shared one principal. Refusing is the only safe answer: auto-linking would let anyone who can make
 // their IdP assert a matching UPN take over a password account.
 func TestSSOJITRefusesACaseVariantLocalAccount(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "Alice.Wang", PasswordHash: "local-password", Role: "user"})
 
@@ -94,6 +97,7 @@ func TestSSOJITRefusesACaseVariantLocalAccount(t *testing.T) {
 // TestPreexistingCaseVariantsAreReported covers the database that already has the pair — folding new
 // writes cannot retrofit an old collision, and a silent one is worse than a loud one.
 func TestPreexistingCaseVariantsAreReported(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.exec("INSERT INTO users(username,password_hash,role) VALUES(?,?,?)", "alice", "h", "user")
 	st.exec("INSERT INTO users(username,password_hash,role) VALUES(?,?,?)", "Alice", "h", "user")
@@ -113,6 +117,7 @@ func TestPreexistingCaseVariantsAreReported(t *testing.T) {
 // admin form leaves optional) would happily accept a stranger registering `alice@corp.example` —
 // two accounts on the single principal `u:alice@corp.example`.
 func TestRegistrationRefusesACaseVariant(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	s.st.SetSetting(setRegEnabled, "1")
 	s.st.SetSetting(setRegVerify, "0")
@@ -136,6 +141,7 @@ func TestRegistrationRefusesACaseVariant(t *testing.T) {
 // guard written in SQL left 'ÉLODIE' unfolded and happily created 'élodie' beside it — two accounts
 // on the one principal u:élodie. userPrincipal folds with Go, so the guard has to as well.
 func TestCaseGuardFoldsTheWayGoDoes(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.exec("INSERT INTO users(username,password_hash,role) VALUES(?,?,?)", "ÉLODIE", "h", "user")
 

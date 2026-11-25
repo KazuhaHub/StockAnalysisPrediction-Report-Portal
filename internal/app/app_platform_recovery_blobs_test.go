@@ -49,6 +49,7 @@ func sortedDigests(p platformManagedImageParts) []string {
 
 // Fails if the bundle leaves out the blobs of an active or a pinned managed release, or lists one it did not write.
 func TestRecoveryBundleCarriesTheBlobsOfEveryActiveAndPinnedManagedRelease(t *testing.T) {
+	t.Parallel()
 	b, active, pinned := bundleWithManagedReleases(t)
 	dir := t.TempDir()
 	manifest, err := b.s.writePlatformRecoveryBundle(dir, platformRecoveryBundleInput{Archives: b.archives})
@@ -81,6 +82,7 @@ func TestRecoveryBundleCarriesTheBlobsOfEveryActiveAndPinnedManagedRelease(t *te
 
 // Fails if a bundle is written that could not restore a managed release.
 func TestRecoveryBundleIsRefusedAndRemovedWhenAPinnedManagedReleaseHasLostABlob(t *testing.T) {
+	t.Parallel()
 	b, active, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	layer := active.plan.Layers[0]
@@ -103,6 +105,7 @@ func TestRecoveryBundleIsRefusedAndRemovedWhenAPinnedManagedReleaseHasLostABlob(
 
 // Fails if the receiving host accepts a blob that was damaged in transit, renamed, or a release left pending.
 func TestRecoveryBundleVerificationRefusesDamagedRenamedAndUnresolvedBlobs(t *testing.T) {
+	t.Parallel()
 	b, _, _ := bundleWithManagedReleases(t)
 	dir := t.TempDir()
 	manifest, err := b.s.writePlatformRecoveryBundle(dir, platformRecoveryBundleInput{Archives: b.archives})
@@ -144,6 +147,7 @@ func TestRecoveryBundleVerificationRefusesDamagedRenamedAndUnresolvedBlobs(t *te
 
 // Fails (places the blob) if a blob that does not hash to its name reaches the store of the new host.
 func TestRestoreOfBundleBlobsPlacesOnlyBlobsThatHashToTheirNames(t *testing.T) {
+	t.Parallel()
 	parts := newPlatformManagedImageParts(t, "5.1.0", "restore")
 	dir := t.TempDir()
 	manifest := platformRecoveryBundleManifest{}
@@ -182,6 +186,7 @@ func TestRestoreOfBundleBlobsPlacesOnlyBlobsThatHashToTheirNames(t *testing.T) {
 // Fails if a restored managed release cannot be started because its image is never loaded: after the blobs are
 // placed on a host that has an empty store, the ordinary load-image effect finds them and loads the image.
 func TestRestoredManagedReleaseIsLoadedFromThePlacedBlobsBeforeItsStart(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	store, _ := s.platformImages()
 	dir := t.TempDir()
@@ -218,6 +223,7 @@ func jsonMarshalIndent(v any) ([]byte, error) { return json.MarshalIndent(v, "",
 // need its blobs and the recovery bundle must carry them. Fails if a sweep with no grace removes them, or if the
 // pinned set is smaller than the bundle's own rule.
 func TestSweepKeepsTheBlobsOfARetiredActivationOfADisabledInstallationAndTheBundleStillWrites(t *testing.T) {
+	t.Parallel()
 	b, active, pinned := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	store.grace = 0
@@ -263,6 +269,7 @@ func TestSweepKeepsTheBlobsOfARetiredActivationOfADisabledInstallationAndTheBund
 // Fails if any error while computing the pinned set, a cancelled context included, lets the sweep run on what it
 // had so far.
 func TestSweepRemovesNothingWhenThePinnedSetCannotBeComputed(t *testing.T) {
+	t.Parallel()
 	b, active, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	store.grace = 0
@@ -323,6 +330,7 @@ func cloneOperation(t *testing.T, s *Server, from, id, release string, createdMS
 // does not recover it), is released when a later start-bearing operation completes, and a stream of failures each
 // followed by a success never grows beyond the failures since the last success.
 func TestAFailureStaysPinnedUntilALaterStartBearingOperationCompletesAndAStreamStaysBounded(t *testing.T) {
+	t.Parallel()
 	b, _, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	store.grace = 0
@@ -381,6 +389,7 @@ func TestAFailureStaysPinnedUntilALaterStartBearingOperationCompletesAndAStreamS
 
 // Fails if anything stays pinned once the installation is uninstalled.
 func TestAfterAnUninstallNothingStaysPinned(t *testing.T) {
+	t.Parallel()
 	b, _, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	store.grace = 0
@@ -404,6 +413,7 @@ func TestAfterAnUninstallNothingStaysPinned(t *testing.T) {
 // fail-closed for exactly those. Fails if the status misses the release, or if the sweep does not resume once the
 // package is uploaded again.
 func TestGlobalStorageStatusListsAnUnreadablePinnedManifestAndTheSweepResumesAfterAReupload(t *testing.T) {
+	t.Parallel()
 	b, active, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	store.grace = 0
@@ -451,6 +461,7 @@ func TestGlobalStorageStatusListsAnUnreadablePinnedManifestAndTheSweepResumesAft
 
 // Fails if a status read removes any file, or if a removal ignores that the file was replaced after it was examined.
 func TestStatusReadsNeverRemoveAndAProvenWrongRemovalSparesAReplacedFile(t *testing.T) {
+	t.Parallel()
 	b, active, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	layer := active.plan.Layers[0]

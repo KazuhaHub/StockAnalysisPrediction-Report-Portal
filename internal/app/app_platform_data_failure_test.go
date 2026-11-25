@@ -59,6 +59,7 @@ func TestPlatformDataEffectFailureRecognisesOnlyTheRunnersFailedStatusForThisCom
 // A tick whose run ends in the runner's failed answer finishes the operation at once through its failure path: the
 // command is not retried, because it answers the same failure every time.
 func TestSchedulerTickFinishesAtOnceWhenTheRunnerReportsTheDataCommandFailed(t *testing.T) {
+	t.Parallel()
 	s, _, id := platformInstallQueueFixture(t, false)
 	w := platformSchedulerFixture(t, s)
 	calls := 0

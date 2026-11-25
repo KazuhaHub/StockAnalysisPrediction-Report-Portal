@@ -21,6 +21,7 @@ func seedRunPreset(t *testing.T, srv *Server) int64 {
 }
 
 func TestRunDefaultsRoundTrip(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	targetID := seedTarget(t, srv.st)
 	presetID := seedRunPreset(t, srv)
@@ -63,6 +64,7 @@ func TestRunDefaultsRoundTrip(t *testing.T) {
 // "No default" is a choice, not an unset field: 0 has to clear a stored default rather than read
 // as "leave it alone" (which is what an omitted field means).
 func TestRunDefaultsZeroClears(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	targetID := seedTarget(t, srv.st)
 	post(t, srv.apiBatchConfigSave, fmt.Sprintf(`{"run_default_target_id":%d}`, targetID))
@@ -82,6 +84,7 @@ func TestRunDefaultsZeroClears(t *testing.T) {
 // A default naming a workflow or window that does not exist is never stored: the forms would
 // ignore it, and storing it would make the admin's Save look like it took.
 func TestRunDefaultsRejectUnknownRows(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	post(t, srv.apiBatchConfigSave, `{"run_default_target_id":404,"run_default_preset_id":404,"run_default_mode":"whenever","run_default_retries":99}`)
 
@@ -102,6 +105,7 @@ func TestRunDefaultsRejectUnknownRows(t *testing.T) {
 // Deleting the workflow or window a default points at leaves the setting dangling. It must read as
 // "no default" from then on, which is what every form will actually do with it.
 func TestRunDefaultsForgetDeletedRows(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	targetID := seedTarget(t, srv.st)
 	presetID := seedRunPreset(t, srv)
@@ -124,6 +128,7 @@ func TestRunDefaultsForgetDeletedRows(t *testing.T) {
 // A window switched off is a different case from a deleted one: the run form won't offer it, but
 // the admin who turned it off should find their choice waiting rather than silently cleared.
 func TestRunDefaultsKeepDisabledPreset(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	presetID := seedRunPreset(t, srv)
 	post(t, srv.apiBatchConfigSave, fmt.Sprintf(`{"run_default_preset_id":%d}`, presetID))
@@ -146,6 +151,7 @@ func TestRunDefaultsKeepDisabledPreset(t *testing.T) {
 // off the same getter, and an unconfigured portal reads "off": the picker says which window is
 // chosen and leaves the rule to the info button beside it.
 func TestRunShowPresetRuleRoundTrip(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 
 	cfg := post(t, srv.apiBatchConfigGet, "{}")
@@ -177,6 +183,7 @@ func TestRunShowPresetRuleRoundTrip(t *testing.T) {
 }
 
 func TestRunDefaultsOUInheritanceAndExplicitZero(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	root := s.st.EnsureDefaultGroup()
 	parent, _ := s.st.CreateUserGroup("Operations", "", 0)
@@ -209,6 +216,7 @@ func TestRunDefaultsOUInheritanceAndExplicitZero(t *testing.T) {
 }
 
 func TestRunDefaultsOUValidationAndCleanup(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	id, err := s.st.CreateUserGroup("Research", "", 0)
 	if err != nil {
@@ -242,6 +250,7 @@ func TestRunDefaultsOUValidationAndCleanup(t *testing.T) {
 }
 
 func TestRunPresetsUsesMemberOUDefaults(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	root := s.st.EnsureDefaultGroup()
 	id, err := s.st.CreateUserGroup("Research", "", 0)

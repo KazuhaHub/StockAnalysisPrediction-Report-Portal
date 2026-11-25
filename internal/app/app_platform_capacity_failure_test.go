@@ -22,6 +22,7 @@ func capacityRefusalFixture(dimension string) journal.CapacityRefusal {
 }
 
 func TestPlatformCapacityErrorCodeIsOnePerDimension(t *testing.T) {
+	t.Parallel()
 	want := map[string]string{
 		"memory": "capacity_exhausted_memory", "cpu": "capacity_exhausted_cpu", "disk": "capacity_exhausted_disk",
 		"image_store": "capacity_exhausted_image_store", "running_backends": "capacity_exhausted_running_backends",
@@ -47,6 +48,7 @@ func TestPlatformCapacityErrorCodeIsOnePerDimension(t *testing.T) {
 }
 
 func TestPlatformCapacityRefusalIsFoundThroughWrapping(t *testing.T) {
+	t.Parallel()
 	r := capacityRefusalFixture("disk")
 	wrapped := fmt.Errorf("image load: %w", &journal.CapacityRefusalError{Receipt: r})
 	got, ok := platformCapacityRefusalOf(wrapped)
@@ -62,6 +64,7 @@ func TestPlatformCapacityRefusalIsFoundThroughWrapping(t *testing.T) {
 }
 
 func TestPlatformInstallFailsWithTheCapacityDimension(t *testing.T) {
+	t.Parallel()
 	for _, dimension := range []string{"memory", "cpu", "disk", "image_store", "running_backends"} {
 		t.Run(dimension, func(t *testing.T) {
 			s, _, id := platformInstallQueueFixture(t, false)
@@ -103,6 +106,7 @@ func TestPlatformInstallFailsWithTheCapacityDimension(t *testing.T) {
 }
 
 func TestPlatformCapacityCodesReachTheManagementAndStatusViews(t *testing.T) {
+	t.Parallel()
 	for _, dimension := range []string{"memory", "cpu", "disk", "image_store", "running_backends"} {
 		code, _ := platformCapacityErrorCode(dimension)
 		if got := platformPublicOperationErrorCode(code); got != code {
@@ -120,6 +124,7 @@ func TestPlatformCapacityCodesReachTheManagementAndStatusViews(t *testing.T) {
 // A tick whose run ends in the runner's capacity refusal finishes the operation at once, with the typed code: it
 // is not retried like a transient failure. Fails if the tick drops the refusal into the retry path.
 func TestSchedulerTickFinishesAnOperationRefusedByCapacity(t *testing.T) {
+	t.Parallel()
 	s, _, id := platformInstallQueueFixture(t, false)
 	w := platformSchedulerFixture(t, s)
 	calls := 0

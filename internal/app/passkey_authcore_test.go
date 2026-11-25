@@ -174,6 +174,7 @@ func loginPasskeyOverHTTP(t *testing.T, s *Server, username string, rp virtualwe
 // state in the Service instead of in auth_requests, this would fail at the second half of each
 // pair.
 func TestPasskeyAuthcoreRegisterThenLoginAcrossRequests(t *testing.T) {
+	t.Parallel()
 	s := authcorePasskeyServer(t, "carol", "correct horse battery staple")
 	rp, auth, cred := newWebauthnDevice(s, []byte("carol"))
 
@@ -214,6 +215,7 @@ func TestPasskeyAuthcoreRegisterThenLoginAcrossRequests(t *testing.T) {
 // go.mod history), and a login is then attempted against that pre-migration-shaped row. A
 // pre-existing credential must not be silently invalidated by this migration.
 func TestPasskeyPreMigrationCredentialJSONStillAuthenticates(t *testing.T) {
+	t.Parallel()
 	s := authcorePasskeyServer(t, "dave", "another-strong-passphrase")
 	rp, auth, cred := newWebauthnDevice(s, []byte("dave"))
 	registerPasskeyOverHTTP(t, s, "dave", "another-strong-passphrase", "Security+key", rp, &auth, cred)
@@ -262,6 +264,7 @@ func TestPasskeyPreMigrationCredentialJSONStillAuthenticates(t *testing.T) {
 // successful login; passkeyCredentialStore.UpdateSignCount deliberately does not, in this one
 // case, and this test is what proves that adapter code actually behaves as its comment claims.
 func TestPasskeyCloneWarningRejectsAndDoesNotAdvanceCounter(t *testing.T) {
+	t.Parallel()
 	s := authcorePasskeyServer(t, "erin", "yet-another-passphrase")
 	rp, auth, cred := newWebauthnDevice(s, []byte("erin"))
 	registerPasskeyOverHTTP(t, s, "erin", "yet-another-passphrase", "Phone", rp, &auth, cred)
@@ -321,6 +324,7 @@ func TestPasskeyCloneWarningRejectsAndDoesNotAdvanceCounter(t *testing.T) {
 // that looks fine until the day RP adds passwordless login and discovers FindByID was never
 // actually correct.
 func TestPasskeyByCredentialIDBacksTheCredentialStoreInterface(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	s.st.AddPasskey("alice", "A", fakeCred("cred-a", 7))
 

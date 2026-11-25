@@ -5,6 +5,7 @@ import (
 )
 
 func TestNotificationConfigRevisionsAndRollback(t *testing.T) {
+	t.Parallel()
 	testNotificationConfigRevisionsAndRollback(t, newTestStore(t))
 }
 

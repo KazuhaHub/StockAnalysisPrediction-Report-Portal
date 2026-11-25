@@ -51,6 +51,7 @@ func platformNetworkStreamTargetFixture(t *testing.T) *platformManagedInstallTar
 	return &platformManagedInstallTarget{NetworkStreamPolicy: platformNetworkStreamPolicyFixture(t), NetworkProfile: platformNetworkRuntimeProfileFixture()}
 }
 func TestPlatformInstallCapabilitySelection(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)
@@ -230,8 +231,10 @@ func testPlatformInstallCapabilityRows(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallCapabilityRowsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallCapabilityRows(t, false)
 }
 func TestPlatformInstallCapabilityRowsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallCapabilityRows(t, true)
 }

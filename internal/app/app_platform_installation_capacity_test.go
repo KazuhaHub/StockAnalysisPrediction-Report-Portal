@@ -83,18 +83,24 @@ func testPlatformInstallationCapacity(t *testing.T, pg bool) {
 	})
 }
 
-func TestPlatformInstallationCapacitySQLite(t *testing.T) { testPlatformInstallationCapacity(t, false) }
+func TestPlatformInstallationCapacitySQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformInstallationCapacity(t, false)
+}
 func TestPlatformInstallationCapacityPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationCapacity(t, true)
 }
 
 func TestPlatformInstallationCapacityIsFifty(t *testing.T) {
+	t.Parallel()
 	if platformInstallationCap != 50 {
 		t.Fatalf("cap = %d", platformInstallationCap)
 	}
 }
 
 func TestPlatformInstallationCapacityMapsTo429(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	platformManagementError(w, fmt.Errorf("wrapped: %w", errPlatformInstallationCapacity))
 	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), `"installation_capacity"`) {
@@ -185,8 +191,10 @@ func testPlatformInstallationCapacityRace(t *testing.T, pg bool) {
 }
 
 func TestPlatformInstallationCapacityRaceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationCapacityRace(t, false)
 }
 func TestPlatformInstallationCapacityRacePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallationCapacityRace(t, true)
 }

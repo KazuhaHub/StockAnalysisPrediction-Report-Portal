@@ -21,6 +21,7 @@ func callID(h func(http.ResponseWriter, *http.Request, string), method string, i
 }
 
 func TestWebhookEndpoints(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 

@@ -11,6 +11,7 @@ import (
 // memo/TTL), so a rename is reflected on the very next report; a failed fetch falls back
 // to the last known name and never regresses to empty.
 func TestNamesResolve(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	n := LoadNames(t.TempDir(), st)
 	calls := 0
@@ -105,6 +106,7 @@ func TestFetchNameWithRetry(t *testing.T) {
 // Ingest freezes the as-of name onto each report row; a later rename produces a new
 // snapshot for new reports but must never rewrite earlier reports (不能改之前的).
 func TestV1IngestFreezesNameKeepsHistory(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	name := "旧名"
 	s.names.fetch = func(code string) string { return name }
@@ -142,6 +144,7 @@ func TestV1IngestFreezesNameKeepsHistory(t *testing.T) {
 // so their displayed name stops depending on the mutable stocks cache. It must never touch
 // rows that already carry a frozen name, nor invent a name where the stocks cache has none.
 func TestFreezeReportNames(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SyncStocks(map[string]string{"600100": "华资名", "600200": "有名"})
 	// A: empty name, symbol known → frozen from stocks
@@ -176,6 +179,7 @@ func TestFreezeReportNames(t *testing.T) {
 
 // An explicit name in the payload is authoritative and skips the live fetch entirely.
 func TestV1IngestExplicitNameWins(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.names.fetch = func(string) string {
 		t.Fatal("must not fetch when payload carries a name")

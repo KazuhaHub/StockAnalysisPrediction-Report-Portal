@@ -82,6 +82,7 @@ func (f *taskRefusalFixture) statements(f2 func()) []string {
 }
 
 func TestPlatformTaskQuotaRefusalIsAnsweredFromOneStatementAfterTheFirst(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, true)
 	if code, body := f.submit(t, "flood:0"); code != 429 || !strings.Contains(body, "task_capacity") {
 		t.Fatalf("first refusal: %d %s", code, body)
@@ -108,6 +109,7 @@ func TestPlatformTaskQuotaRefusalIsAnsweredFromOneStatementAfterTheFirst(t *test
 // The quota is the database's: a slot freed by completion, cancellation or expiry is used by the very
 // next submission, remembered refusal or not, and the quota is never exceeded afterwards.
 func TestPlatformTaskRememberedRefusalNeverAdmitsBeyondQuotaAndUsesFreedSlotsAtOnce(t *testing.T) {
+	t.Parallel()
 	for _, terminal := range []string{"cancelled", "succeeded", "failed"} {
 		t.Run(terminal, func(t *testing.T) {
 			f := newTaskRefusalFixture(t, true)
@@ -132,6 +134,7 @@ func TestPlatformTaskRememberedRefusalNeverAdmitsBeyondQuotaAndUsesFreedSlotsAtO
 // An occurrence that already exists replays as 200 even at the quota, and a changed body under it is
 // still a 409: the remembered refusal does not shadow either.
 func TestPlatformTaskRememberedRefusalKeepsOccurrenceReplayAndConflict(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, true)
 	f.submit(t, "flood:0")
 	w := platformTaskHTTPWithIdentity(t, f.s, f.installation,
@@ -149,6 +152,7 @@ func TestPlatformTaskRememberedRefusalKeepsOccurrenceReplayAndConflict(t *testin
 // Authority is re-read on every remembered refusal, so a change that retires the credential is seen at
 // once: disabling or removing the installation, a new policy revision, a paused restore.
 func TestPlatformTaskRememberedRefusalFollowsAuthorityChangesAtOnce(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"disabled":         `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`,
 		"phase left ready": `UPDATE app_platform_installations SET phase='quarantined' WHERE id=?`,
@@ -181,6 +185,7 @@ func TestPlatformTaskRememberedRefusalFollowsAuthorityChangesAtOnce(t *testing.T
 // The memory is process-local and never persisted: a restarted Portal verifies in full again, and a
 // different credential, installation or resource never reuses another's entry.
 func TestPlatformTaskRememberedRefusalIsPerCredentialAndLostOnRestart(t *testing.T) {
+	t.Parallel()
 	f := newTaskRefusalFixture(t, true)
 	f.submit(t, "flood:0")
 	// A restart is a zero-value cache: nothing is persisted or rebuilt.
@@ -214,6 +219,7 @@ func TestPlatformTaskRememberedRefusalIsPerCredentialAndLostOnRestart(t *testing
 }
 
 func TestPlatformTaskRefusalMemoryExpiresAfterItsTimeLimitAndIsBounded(t *testing.T) {
+	t.Parallel()
 	var c platformTaskRefusalCache
 	now := time.Unix(1_000, 0)
 	c.now = func() time.Time { return now }
@@ -252,6 +258,7 @@ func TestPlatformTaskRefusalMemoryExpiresAfterItsTimeLimitAndIsBounded(t *testin
 // Many backends submitting while tasks complete and are cancelled never push the installation past its
 // quota; run under -race.
 func TestPlatformTaskRememberedRefusalNeverExceedsQuotaUnderConcurrentCompletion(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s, installation := platformServiceIdentityFixtureWithStore(t, st)
 	f := &taskRefusalFixture{s: s, installation: installation}

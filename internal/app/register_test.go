@@ -43,6 +43,7 @@ func postPublic(t *testing.T, h http.HandlerFunc, path, body string) (int, map[s
 // TestRegistrationIsOffByDefault proves the route does not exist until an admin turns it on. A
 // portal that gains a public signup form on upgrade would be a surprise of the worst kind.
 func TestRegistrationIsOffByDefault(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	code, _ := postPublic(t, s.apiRegister, "/api/register",
 		`{"email":"a@example.com","password":"a-long-enough-password"}`)
@@ -62,6 +63,7 @@ func TestRegistrationIsOffByDefault(t *testing.T) {
 // configured, a new account is created restricted and granted nothing — it can sign in and read
 // zero reports until an admin decides otherwise.
 func TestUnplacedRegistrantSeesNothing(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	s.st.SetSetting(setRegEnabled, "1")
 	s.st.SetSetting(setRegVerify, "0") // verification is covered separately
@@ -92,6 +94,7 @@ func TestUnplacedRegistrantSeesNothing(t *testing.T) {
 // TestPlacedRegistrantJoinsTheConfiguredOU is the other half of the setting: an admin who wants
 // signups to be usable immediately names an OU, and the account inherits its grants.
 func TestPlacedRegistrantJoinsTheConfiguredOU(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ou, _ := s.st.CreateUserGroup("clients", "", 0)
@@ -120,6 +123,7 @@ func TestPlacedRegistrantJoinsTheConfiguredOU(t *testing.T) {
 // TestVerificationGatesTheAccount proves the account is unusable until the emailed link is followed
 // — otherwise anyone can create an account against someone else's address.
 func TestVerificationGatesTheAccount(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	s.st.SetSetting(setRegEnabled, "1")
 
@@ -167,6 +171,7 @@ func TestVerificationGatesTheAccount(t *testing.T) {
 // TestRegistrationValidation covers the refusals a signup form owes its users, and the one it owes
 // the operator: an address it cannot mail must not become a stranded account.
 func TestRegistrationValidation(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	s.st.SetSetting(setRegEnabled, "1")
 	s.st.SetSetting(setRegVerify, "0")
@@ -210,6 +215,7 @@ func TestRegistrationValidation(t *testing.T) {
 // TestCaptchaGatesThePublicForms proves the gate is wired to all three, refuses with the marker the
 // SPA needs, and — the part that matters — fails CLOSED when its verifier is misconfigured.
 func TestCaptchaGatesThePublicForms(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	s.st.SetSetting(setRegEnabled, "1")
 	s.st.SetSetting(setRegVerify, "0")
@@ -253,6 +259,7 @@ func TestCaptchaGatesThePublicForms(t *testing.T) {
 // on a quiet portal is never asked for a captcha, and the demand appears once a source starts
 // guessing.
 func TestCaptchaAfterFailuresStaysQuietUntilItIsNeeded(t *testing.T) {
+	t.Parallel()
 	s := regServer(t)
 	s.st.SetSetting(setCaptchaLogin, "1")
 	s.st.SetSetting(setCaptchaTrigger, triggerAfterFailure)

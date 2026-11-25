@@ -36,6 +36,7 @@ func reorderPost(t *testing.T, h func(http.ResponseWriter, *http.Request, string
 }
 
 func TestReorderingTypesCannotRecreateADeletedOne(t *testing.T) {
+	t.Parallel()
 	s := reorderFixture(t)
 	// Two types an admin configured, one of which has no reports — the kind that vanishes entirely
 	// on delete, and so the kind a stale drag can bring back.
@@ -70,6 +71,7 @@ func TestReorderingTypesCannotRecreateADeletedOne(t *testing.T) {
 // A type that reports carry but nobody configured has no row to update, so the upsert has to keep
 // creating one for it — the behaviour the guard must not break.
 func TestReorderingStillGivesADiscoveredTypeAnOrder(t *testing.T) {
+	t.Parallel()
 	s := reorderFixture(t)
 	if _, _, err := s.st.UpsertReport(Rep{
 		Symbol: "600519", Date: "2026-09-02", RType: "从未配置过的类型", Title: "t"}); err != nil {
@@ -84,6 +86,7 @@ func TestReorderingStillGivesADiscoveredTypeAnOrder(t *testing.T) {
 }
 
 func TestDraggingIntoADeletedGroupSendsButtonsToTheTopLevel(t *testing.T) {
+	t.Parallel()
 	s := reorderFixture(t)
 	gid, err := s.st.AddLinkGroup("研究", "row", true, "", 0)
 	if err != nil {
@@ -130,6 +133,7 @@ func TestDraggingIntoADeletedGroupSendsButtonsToTheTopLevel(t *testing.T) {
 
 // The ordinary drag still works: a live group keeps its buttons and both get their order.
 func TestAnOrdinaryLinkDragStillGroupsAndOrders(t *testing.T) {
+	t.Parallel()
 	s := reorderFixture(t)
 	gid, _ := s.st.AddLinkGroup("研究", "row", true, "", 0)
 	s.st.AddLink("甲", "https://a.test", "", true, 0, 0)

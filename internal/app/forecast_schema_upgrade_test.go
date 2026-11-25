@@ -14,6 +14,7 @@ import (
 // inspects it without writing and applies it with the same runner, and the dumps that carry the
 // evidence cross drivers in both directions.
 func TestPostgresPurgeOwnershipAppliesAtStartup(t *testing.T) {
+	t.Parallel()
 	dsn := pgDSN(t)
 	st := pgStore(t)
 	windBackPostgresPurgeEvidence(t, st)
@@ -62,6 +63,7 @@ func TestPostgresPurgeOwnershipAppliesAtStartup(t *testing.T) {
 // steps apply at ordinary startup in merge order, and the evidence table starts empty next to a
 // historic global marker.
 func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T) {
+	t.Parallel()
 	dsn := pgDSN(t)
 	st := pgStore(t)
 	for _, q := range []string{
@@ -117,6 +119,7 @@ func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T)
 // wound back past every step including 0010 and 0009, is carried forward by ordinary startup. Every
 // ledger row is rewritten by this one startup, so the whole ledger can be checked against list order.
 func TestPostgresBaselineDatabaseUpgradesAtNormalStartup(t *testing.T) {
+	t.Parallel()
 	dsn := pgDSN(t)
 	st := pgStore(t)
 	stmts := []string{
@@ -179,6 +182,7 @@ func windBackPostgresPurgeEvidence(t *testing.T, st *Store) {
 }
 
 func TestPostgresPurgeEvidenceCrossDriverRestore(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	owner := seedOU(t, st, 0, scopeOwn)
 	if _, err := st.exec(`INSERT INTO prediction_purge_owners(rtype,cohort,attributed_ou) VALUES(?,?,?)`, predTestRtype, "1902-01", owner); err != nil {
@@ -206,6 +210,7 @@ func TestPostgresPurgeEvidenceCrossDriverRestore(t *testing.T) {
 }
 
 func TestPostgresPurgeOwnershipRequiresValidatedCheck(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	tx, err := st.db.Begin()
 	if err != nil {
@@ -239,6 +244,7 @@ func TestPostgresPurgeOwnershipRequiresValidatedCheck(t *testing.T) {
 }
 
 func TestPurgeOwnershipRejectsMalformedShape(t *testing.T) {
+	t.Parallel()
 	for _, shape := range []string{
 		`rtype TEXT NOT NULL, cohort TEXT NOT NULL, attributed_ou BIGINT NOT NULL CHECK(attributed_ou>0)`,
 		`rtype TEXT, cohort TEXT NOT NULL, attributed_ou BIGINT NOT NULL CHECK(attributed_ou>0), PRIMARY KEY(rtype,cohort,attributed_ou)`,
@@ -391,6 +397,7 @@ func requireStepsRecordedSince(t *testing.T, st *Store, floor string, ids ...str
 // evidence table starts empty. A historic global purge marker proves nothing about OU membership,
 // so it is neither copied nor altered.
 func TestExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "at-0006.db")
 	backToStep0006(t, path)
 
@@ -442,6 +449,7 @@ func TestExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T) {
 // A database at the frozen baseline, with no ledger at all, takes the same path through every step,
 // 0010 and 0009 included.
 func TestBaselineDatabaseUpgradesAtNormalStartup(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "baseline.db")
 	backToTheBaseline(t, path)
 	backBeforeStep0010(t, path)
@@ -473,6 +481,7 @@ func TestBaselineDatabaseUpgradesAtNormalStartup(t *testing.T) {
 // The runner applies what is pending in the order the list gives, so 0010 goes in before 0009 even
 // though its id is higher.
 func TestPendingStepsApplyInListOrder(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	// A later recorded step must retain its original time when an earlier step is replayed.
 	if _, err := st.exec(`UPDATE meta SET v='2000-01-01T00:00:00Z' WHERE k IN ('mig:0007','mig:0008')`); err != nil {
@@ -517,6 +526,7 @@ func TestPendingStepsApplyInListOrder(t *testing.T) {
 }
 
 func TestStep0006FixtureHasOnlyPrefixProductsAndLedger(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "prefix-0006.db")
 	backToStep0006(t, path)
 	st, err := connectStore("sqlite", path)
@@ -544,6 +554,7 @@ func TestStep0006FixtureHasOnlyPrefixProductsAndLedger(t *testing.T) {
 
 // The startup entry point itself has no step it holds back.
 func TestRunMigrationsAppliesAnUnrecordedPurgeEvidenceStep(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.runMigrations(); err != nil {
 		t.Fatalf("a fully upgraded database: %v", err)
@@ -572,6 +583,7 @@ const counterfeitPurgeOwners = `CREATE TABLE prediction_purge_owners(rtype TEXT 
 // Startup does not trust a ledger row: a recorded step whose table lost its positive-owner check is
 // refused.
 func TestStartupRefusesARecordedButDamagedEvidenceTable(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "damaged-recorded.db")
 	mutateFile(t, path, `DROP TABLE prediction_purge_owners`, counterfeitPurgeOwners)
 	if opened, err := OpenStore("sqlite", path); err == nil {
@@ -585,6 +597,7 @@ func TestStartupRefusesARecordedButDamagedEvidenceTable(t *testing.T) {
 // A lookalike table in front of an unrecorded step is not adopted: the step's transaction verifies it
 // before recording anything, so the refusal leaves the ledger unrecorded and the table untouched.
 func TestStartupRefusesADamagedEvidenceTableWithoutRecordingTheStep(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "damaged-unrecorded.db")
 	mutateFile(t, path, `DROP TABLE prediction_purge_owners`, counterfeitPurgeOwners, `DELETE FROM meta WHERE k='mig:0009'`)
 	before := describeFile(t, path)
@@ -612,6 +625,7 @@ func TestStartupRefusesADamagedEvidenceTableWithoutRecordingTheStep(t *testing.T
 // The evidence survives a logical backup; a header that claims 0009 without its table is refused;
 // a dump written before 0009 restores with an empty table.
 func TestPurgeEvidenceBackupAndRestore(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "evidence-restore.db")
 	backToStep0006(t, path)
 	st, err := OpenStore("sqlite", path)
@@ -667,6 +681,7 @@ func TestPurgeEvidenceBackupAndRestore(t *testing.T) {
 // With no arguments the command lists what is pending and changes nothing: not the schema, not the
 // ledger, not the directory.
 func TestSchemaUpgradeInspectionListsPendingStepsReadOnly(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "inspect.db")
 	backToStep0006(t, path)
 	cfg := writeSQLiteConfig(t, path)
@@ -703,6 +718,7 @@ func TestSchemaUpgradeInspectionListsPendingStepsReadOnly(t *testing.T) {
 // --apply is the same runner as startup, run offline: it applies what is pending, verifies it, and a
 // second run finds nothing to do and rewrites nothing.
 func TestSchemaUpgradeApplyUpgradesOfflineWithTheNormalRunner(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "apply.db")
 	backToStep0006(t, path)
 	cfg := writeSQLiteConfig(t, path)
@@ -746,6 +762,7 @@ func TestSchemaUpgradeApplyUpgradesOfflineWithTheNormalRunner(t *testing.T) {
 
 // The tool only works on a database that exists; it never creates a config or a database.
 func TestSchemaUpgradeInspectionDoesNotCreateFiles(t *testing.T) {
+	t.Parallel()
 	cfg := filepath.Join(t.TempDir(), "absent.yaml")
 	if _, err := SchemaUpgradeCommand(cfg, []string{"--unexpected"}); err == nil || !strings.Contains(err.Error(), "usage:") {
 		t.Fatalf("unexpected argument was not refused: %v", err)
@@ -831,6 +848,7 @@ func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 // were still open when 0010 reached main, so each reserved step is appended after whatever has already
 // shipped. The purge evidence step (0009) therefore follows 0010.
 func TestPurgeEvidenceIsAppendedLast(t *testing.T) {
+	t.Parallel()
 	steps := newTestStore(t).migrations()
 	ids := make([]string, len(steps))
 	seen := map[string]bool{}

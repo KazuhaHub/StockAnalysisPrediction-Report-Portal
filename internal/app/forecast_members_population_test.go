@@ -10,6 +10,7 @@ import (
 const memberPopulationTarget = "/?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d5"
 
 func TestMembersAllPopulationExplainsExclusionsWithoutOutcomes(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	want := map[int64]string{}
 	for i, tc := range []struct {
@@ -69,6 +70,7 @@ func TestMembersAllPopulationExplainsExclusionsWithoutOutcomes(t *testing.T) {
 }
 
 func TestMembersRejectUnknownPopulation(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	w := httptest.NewRecorder()
 	s.apiForecastGroupMembers(w, httptest.NewRequest("GET", memberPopulationTarget+"&population=invalid", nil), "admin")
@@ -113,6 +115,7 @@ func TestMembersAllMatureExclusionsNeverCarryOutcomes(t *testing.T) {
 }
 
 func TestMembersAllExplainsNonStandardHorizon(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: "2025-06-10", HorizonStd: false})
 	target := strings.ReplaceAll(memberPopulationTarget, "checkpoint=d5", "checkpoint=h12")
@@ -126,6 +129,7 @@ func TestMembersAllExplainsNonStandardHorizon(t *testing.T) {
 }
 
 func TestMemberLinksUseReadableReportsAndCanonicalKinds(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		for _, table := range []string{"prediction_marks", "prediction_claims", "prediction_sets"} {
 			if _, err := st.exec("DELETE FROM " + table); err != nil {

@@ -184,6 +184,7 @@ func TestPlatformSchedulerIdleStepsTreatAnUnreachableRunnerAsBackoff(t *testing.
 }
 
 func TestPlatformRunnerBackoffIsBoundedExponentialWithJitter(t *testing.T) {
+	t.Parallel()
 	interval := 500 * time.Millisecond
 	h := platformRunnerHealth{down: true}
 	if (&platformRunnerHealth{}).delay(interval) != interval {
@@ -216,6 +217,7 @@ func TestPlatformRunnerBackoffIsBoundedExponentialWithJitter(t *testing.T) {
 }
 
 func TestPlatformRunnerUnreachableClassification(t *testing.T) {
+	t.Parallel()
 	if !platformRunnerUnreachable(unreachableErr()) || platformRunnerUnreachable(errRunnerVerdict) || platformRunnerUnreachable(nil) {
 		t.Fatal("classification")
 	}
@@ -263,6 +265,7 @@ func TestPlatformAttemptWithAnExhaustedBudgetIsNotAnOutage(t *testing.T) {
 // The witness belongs to one attempt's context: another goroutine's failed dial, under its own
 // context, never changes this attempt's verdict.
 func TestPlatformAttemptVerdictIgnoresAConcurrentFailedDial(t *testing.T) {
+	t.Parallel()
 	ctxA, witnessA := transport.WithUnreachableWitness(context.Background())
 	ctxB, witnessB := transport.WithUnreachableWitness(context.Background())
 	_ = ctxB
@@ -278,6 +281,7 @@ func TestPlatformAttemptVerdictIgnoresAConcurrentFailedDial(t *testing.T) {
 // A step that flattened the transport's error still reads as an outage through its own context's
 // witness, and only through its own.
 func TestPlatformRunnerDownReadsTheContextWitness(t *testing.T) {
+	t.Parallel()
 	flattened := errors.New("stage evidence mismatch")
 	ctx, witness := transport.WithUnreachableWitness(context.Background())
 	if platformRunnerDown(ctx, flattened) {

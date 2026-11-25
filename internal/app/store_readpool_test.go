@@ -54,6 +54,7 @@ func holdWriter(tb testing.TB, st *Store) (release func()) {
 }
 
 func TestReadPoolIsOpenForAFileBackedSQLiteStore(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	if readDBOf(st) == nil {
 		t.Fatal("a file-backed SQLite store must carry a read pool")
@@ -74,6 +75,7 @@ func TestReadPoolIsOpenForAFileBackedSQLiteStore(t *testing.T) {
 }
 
 func TestReadPoolIsAbsentWhereItCannotWork(t *testing.T) {
+	t.Parallel()
 	mem := newTestStore(t) // in-memory: every connection would be a different database
 	if readDBOf(mem) != nil {
 		t.Fatal("an in-memory store must not carry a read pool")
@@ -88,6 +90,7 @@ func TestReadPoolIsAbsentWhereItCannotWork(t *testing.T) {
 }
 
 func TestReadsProceedWhileAWriteTransactionIsHeld(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	if err := st.SetSetting("readpool:probe", "before"); err != nil {
 		t.Fatal(err)
@@ -146,6 +149,7 @@ func TestReadsProceedWhileAWriteTransactionIsHeld(t *testing.T) {
 }
 
 func TestAWriteIsVisibleToTheNextReadPoolQuery(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	for i := 0; i < 300; i++ {
 		want := strings.Repeat("x", i%7) + string(rune('a'+i%26))
@@ -176,6 +180,7 @@ func TestAWriteIsVisibleToTheNextReadPoolQuery(t *testing.T) {
 }
 
 func TestReadPoolRejectsWrites(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	for name, run := range map[string]func() error{
 		"raw pool": func() error {
@@ -210,6 +215,7 @@ func TestReadPoolRejectsWrites(t *testing.T) {
 }
 
 func TestReadSnapshotRunsOnTheReadPoolWhileTheWriterIsHeld(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	if _, _, err := st.UpsertReport(Rep{Symbol: "600000", Date: "2026-11-01", RType: "t", Title: "T", MD: "b"}); err != nil {
 		t.Fatal(err)
@@ -236,6 +242,7 @@ func TestReadSnapshotRunsOnTheReadPoolWhileTheWriterIsHeld(t *testing.T) {
 }
 
 func TestReadPoolSourceDerivation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   string
 		ok   bool
@@ -298,6 +305,7 @@ func TestReadPoolSourceDerivation(t *testing.T) {
 }
 
 func TestStoreWithoutWALFallsBackToTheWriter(t *testing.T) {
+	t.Parallel()
 	// A source that pins another journal mode (operator choice, or a filesystem that cannot do WAL)
 	// gets no read pool rather than readers that would block the writer.
 	st, err := OpenStore("sqlite", "file:"+filepath.Join(t.TempDir(), "p.db")+"?_pragma=journal_mode(DELETE)")
@@ -316,6 +324,7 @@ func TestStoreWithoutWALFallsBackToTheWriter(t *testing.T) {
 }
 
 func TestClosingTheStoreClosesTheReadPoolAndLeavesNoWAL(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "portal.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -343,10 +352,8 @@ func TestClosingTheStoreClosesTheReadPoolAndLeavesNoWAL(t *testing.T) {
 }
 
 func TestPostgresStoreHasNoReadPool(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
-	}
+	t.Parallel()
+	dsn := testPostgresDSN(t)
 	// connectStore, not OpenStore: the question is the pool, which OpenStore leaves to openReadPool,
 	// and the test needs no migrated schema (a shared test database may not allow one) beyond the
 	// tables it reads.
@@ -420,6 +427,9 @@ func readLatencies(tb testing.TB, st *Store, hold, period time.Duration, reads i
 // TestReadsAreNotSerializedBehindTheWriter shows the effect the pool exists for: with the writer
 // connection held a third of the time, reads on the single connection wait for it, and reads on the
 // read pool do not. The bound is loose (a factor, not a figure) so a slow CI host does not flake it.
+//
+// Not parallel: it compares two latency distributions, and other tests competing for the CPU move the
+// read pool's p95 without moving the single connection's baseline.
 func TestReadsAreNotSerializedBehindTheWriter(t *testing.T) {
 	const hold, period = 10 * time.Millisecond, 30 * time.Millisecond
 	pooled := openFileStore(t)
@@ -462,6 +472,7 @@ func BenchmarkSQLiteReadBehindWriter(b *testing.B) {
 // check, the home page, the stock page, the report body and the dispatch decision) while the writer
 // connection is held, and fails if any of them waits for it.
 func TestNamedReadPathsDoNotWaitForTheWriter(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	s.names = LoadNames(t.TempDir(), st)
@@ -540,6 +551,7 @@ func TestNamedReadPathsDoNotWaitForTheWriter(t *testing.T) {
 // TestStockAndHomePagesAnswerOnAFileBackedStore runs the two pages end to end on a store with a read
 // pool, so the routed reads are exercised through the real handlers and not only through the helpers.
 func TestStockAndHomePagesAnswerOnAFileBackedStore(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	s.names = LoadNames(t.TempDir(), st)
@@ -571,6 +583,7 @@ func TestStockAndHomePagesAnswerOnAFileBackedStore(t *testing.T) {
 }
 
 func TestBusyTimeoutIsNotAddedWhenTheOperatorSetsOne(t *testing.T) {
+	t.Parallel()
 	for _, src := range []string{
 		"p.db?_pragma=busy_timeout(7)",
 		"p.db?_busy_timeout=7",
@@ -595,6 +608,7 @@ func TestBusyTimeoutIsNotAddedWhenTheOperatorSetsOne(t *testing.T) {
 // ---------- filesystem ----------
 
 func TestNetworkAndFuseFilesystemsAreUnsafeForWAL(t *testing.T) {
+	t.Parallel()
 	for magic, want := range map[uint32]struct {
 		name   string
 		unsafe bool
@@ -655,6 +669,7 @@ func TestNoWALAndNoReadPoolWhenTheFilesystemCannotBeIdentified(t *testing.T) {
 }
 
 func TestTheRealFilesystemDetectionIdentifiesALocalDirectory(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("filesystem identification is implemented on Linux and macOS")
 	}
@@ -787,6 +802,7 @@ func TestTheWALMaintenanceRunsOnATickerAndStopsWithTheStore(t *testing.T) {
 // ---------- concurrency and failure ----------
 
 func TestClosingTheReadPoolUnderLiveReadersIsRaceFreeAndNeverPanics(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	if err := st.SetSetting("k", "v"); err != nil {
 		t.Fatal(err)
@@ -834,6 +850,7 @@ func TestClosingTheReadPoolUnderLiveReadersIsRaceFreeAndNeverPanics(t *testing.T
 }
 
 func TestAReadPoolFailureIsRetriedOnTheWriterNotReturnedAsADefault(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	if err := st.SetSetting("notification_dispatch_paused", "1"); err != nil {
 		t.Fatal(err)
@@ -856,6 +873,7 @@ func TestAReadPoolFailureIsRetriedOnTheWriterNotReturnedAsADefault(t *testing.T)
 // ---------- state ----------
 
 func TestPoolStateReportsTheReadPool(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	_ = st.GetSetting("x", "")
 	state := st.PoolState()
@@ -875,6 +893,7 @@ func TestPoolStateReportsTheReadPool(t *testing.T) {
 }
 
 func TestStorageUsageEndpointReportsThePoolState(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	rec := httptest.NewRecorder()
@@ -964,6 +983,7 @@ func TestAFileNotInWALIsLeftAloneOnAnUnsafeFilesystem(t *testing.T) {
 // ---------- fallback counter ----------
 
 func TestReadPoolFallbacksAreCountedAndReported(t *testing.T) {
+	t.Parallel()
 	st := openFileStore(t)
 	if got := st.PoolState().ReadFallbacks; got != 0 {
 		t.Fatalf("fresh store: %d fallbacks", got)

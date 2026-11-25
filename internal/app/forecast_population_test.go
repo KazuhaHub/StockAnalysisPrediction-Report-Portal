@@ -27,6 +27,7 @@ func cst(y int, mo time.Month, d, h, mi int) time.Time {
 // production shape (earliest set Sunday 2026-10-18 evening CST) gives Monday 2026-10-19 15:00 CST =
 // 07:00Z; a report received before a weekday's close can be cut at that day's close.
 func TestPopulationBoundIsTheFirstWeekdayCloseAfterTheEarliestSet(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		at   time.Time
@@ -51,6 +52,7 @@ func TestPopulationBoundIsTheFirstWeekdayCloseAfterTheEarliestSet(t *testing.T) 
 // TestLedgerStartIsBoundedWriteOnceAndAudited walks the whole save: the refusals, the success, the
 // audit row, and the coverage effect.
 func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// Use a set far enough in the past that every instant below is behind the wall clock: the
 	// too-late case must not depend on when the suite runs. Sunday 2020-01-05 21:00 CST has the bound
@@ -121,6 +123,7 @@ func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 // the boundary would erase settled work, so the save is refused. The test settles a full cohort so the
 // cell is genuinely mature, which is what `firstCohortMature` reuses the statistics engine to decide.
 func TestLedgerStartRefusedWhenTheFirstCohortIsMature(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// Thirty members in one month, all accepted with a matched baseline and a resolved d5, so d5 is
 	// mature. The earliest receipt is Sunday 2020-06-07. Six-digit codes: these go through the real
@@ -156,6 +159,7 @@ func TestLedgerStartRefusedWhenTheFirstCohortIsMature(t *testing.T) {
 // request, not the last field checked. This exercises the STORE refusal (409), not a parse error, so
 // the ordering fix is what it proves.
 func TestRefusedPopulationWriteLeavesTheBenchUnchanged(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
 	// Set the ledger start once, so a second save is refused by the write-once gate.
@@ -179,6 +183,7 @@ func TestRefusedPopulationWriteLeavesTheBenchUnchanged(t *testing.T) {
 // TestPopulationGETExposesSetterAndInstant: the settings GET reports who set the ledger start and
 // when (from the audit row), and flags a damaged key rather than handing back an untrusted instant.
 func TestPopulationGETExposesSetterAndInstant(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
 	if rec := func() *httptest.ResponseRecorder {
@@ -239,6 +244,7 @@ func TestPopulationGETExposesSetterAndInstant(t *testing.T) {
 // TestEmptyStoredLedgerStartStillHoldsWriteOnce: a present-but-empty key is still set, so a save is
 // refused and the UI is not offered a form whose save would always fail.
 func TestEmptyStoredLedgerStartStillHoldsWriteOnce(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if _, err := s.st.exec(`INSERT INTO meta(k,v) VALUES(?,'')`, setForecastPopulationFrom); err != nil {
 		t.Fatal(err)
@@ -255,6 +261,7 @@ func TestEmptyStoredLedgerStartStillHoldsWriteOnce(t *testing.T) {
 // TestPreLiveSetsNeverCountOrDuplicate: a set before the boundary is pre-live — counted in pre_live,
 // absent from every other bucket, and unable to make a later real set a duplicate (plan B4).
 func TestPreLiveSetsNeverCountOrDuplicate(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// The early set, same symbol as the later one, before the boundary.
 	earlyID := seedAcceptedSetAt(t, s, "600160", "2026-10-18")
@@ -298,6 +305,7 @@ func TestPreLiveSetsNeverCountOrDuplicate(t *testing.T) {
 // so a pooled call inside the save's transaction would deadlock. The 2-second deadline turns that
 // deadlock into a failure rather than a hang.
 func TestLedgerStartSaveNeverCallsThePoolInsideTheTransaction(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
 
@@ -326,6 +334,7 @@ func TestLedgerStartSaveNeverCallsThePoolInsideTheTransaction(t *testing.T) {
 // TestRestoreRulesForForecastKeys pins the restore rules (§3.3) for the write-once ledger start. A
 // later PR adds its own rows here.
 func TestRestoreRulesForForecastKeys(t *testing.T) {
+	t.Parallel()
 	// A dump taken BEFORE the key was set: restoring it into a database that has the key carries the
 	// live value forward rather than dropping it.
 	src := newTestStore(t)
@@ -520,6 +529,7 @@ func TestRestoreRulesForForecastKeys(t *testing.T) {
 // A restore that cannot read the live reading stage must not guess the default: the failed read
 // counts as off, so the stage can only come out lower, never higher, than it was.
 func TestRestorePriorTreatsAnUnreadableReaderStageAsOff(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.SetSetting(setForecastReader, "full"); err != nil {
 		t.Fatal(err)
@@ -599,6 +609,7 @@ func dropMetaRow(t *testing.T, dump []byte, key string) []byte {
 // TestCountedSetIDSkipsPreLive: the report page's counted_set_id must not point at a set the
 // statistics do not count, so a pre-live set is skipped and an empty result is 0.
 func TestCountedSetIDSkipsPreLive(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	earlyReport, earlySet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2020-06-07", Bench: "sh000852"}, "Before start")
 	lateReport, lateSet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2020-07-07", Bench: "sh000852"}, "After start")
@@ -645,6 +656,7 @@ func seedTestSet(t *testing.T, s *Server, symbol, date string) int64 {
 // TestTestSetsHaveTheirOwnBucket: coverage adds up exactly with test sets present, and a test set
 // never becomes a symbol's member or a duplicate (plan §4.6).
 func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedTestSet(t, s, "600160", "2026-10-17")
 	seedTestSet(t, s, "600160", "2026-10-18") // same symbol: if it counted, it would be a duplicate
@@ -673,6 +685,7 @@ func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
 // TestRestoreCapsModeWhenGatesAreEmpty pins P9's restore rows (§3.3): the ephemeral keys are reset,
 // the mode is never stronger than the weaker database, and it never comes back as 1 with no gate.
 func TestRestoreCapsModeWhenGatesAreEmpty(t *testing.T) {
+	t.Parallel()
 	restoreInto := func(t *testing.T, dumpMode, liveMode string) (*Store, []AuditEntry) {
 		t.Helper()
 		src := newTestStore(t)

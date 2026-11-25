@@ -12,6 +12,7 @@ import (
 // against the reloaded list — not as a server fault, and never as a silent partial save.
 
 func TestUnifiedOUGrantWriteConflictIsNotAServerError(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityGroup})
@@ -43,6 +44,7 @@ func TestUnifiedOUGrantWriteConflictIsNotAServerError(t *testing.T) {
 // Sweeping a deleted OU must also clear the grants it was named by, so a writer racing the delete
 // cannot resurrect the name on a report the deletion already pruned.
 func TestUnifiedOUDeleteSweepsEveryGrantTable(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	root := st.EnsureDefaultGroup()

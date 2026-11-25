@@ -15,6 +15,7 @@ func quotaPtr(n int) *int { return &n }
 // restricts the whole subtree), and daily_run_quota inherits unless overridden. Internal users in
 // the (unrestricted) Default/root resolve to restricted=false with no quota — unchanged behavior.
 func TestEffectiveGroupSettingsOuTree(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	root := st.EnsureDefaultGroup()
 
@@ -96,6 +97,7 @@ func putGroup(s *Server, id int64, body string) *httptest.ResponseRecorder {
 }
 
 func TestOUParentIsSettableThroughTheAPI(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	root := s.st.EnsureDefaultGroup()
 
@@ -135,6 +137,7 @@ func TestOUParentIsSettableThroughTheAPI(t *testing.T) {
 // survives a cycle (it caps and dedupes), so this is not a hang — but an OU that is its own ancestor
 // resolves settings from a ring, which no admin can reason about.
 func TestOUParentRefusesACycle(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	root := s.st.DefaultGroupID()
 	a := int64(postGroup(t, s, `{"name":"A"}`)["id"].(float64))
@@ -159,6 +162,7 @@ func TestOUParentRefusesACycle(t *testing.T) {
 // TestOUParentOmittedLeavesItAlone proves a save that says nothing about the parent does not
 // silently orphan the OU — every existing caller of this endpoint omits the field.
 func TestOUParentOmittedLeavesItAlone(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	root := s.st.EnsureDefaultGroup()
 	g := int64(postGroup(t, s, `{"name":"X","parent_id":`+itoa(root)+`}`)["id"].(float64))

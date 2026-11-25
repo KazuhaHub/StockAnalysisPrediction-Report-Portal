@@ -19,6 +19,7 @@ import (
 )
 
 func TestPlatformRuntimeEndpointAcceptance(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_RUNTIME_CONFIRM_ACCEPTANCE") != "1" {
 		t.Skip("explicit disposable root Linux endpoint acceptance")
 	}
@@ -152,6 +153,7 @@ func TestPlatformRuntimeEndpointAcceptance(t *testing.T) {
 	t.Log("non-root Portal registration -> explicit root journal enrollment -> authenticated nonce probe -> transactional binding confirmation passed")
 }
 func TestPlatformRuntimeEndpointChild(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_RUNTIME_CONFIRM_CHILD") != "1" {
 		t.Skip("isolated Portal subprocess only")
 	}

@@ -110,12 +110,11 @@ func platformPostgresGrant(t *testing.T, s *Server, admin platformActorSession, 
 // credential holding the monitor role and an active service binding named orders-probe.
 func platformPostgresFixture(t *testing.T, pg, bind bool) (*Server, platformActorSession, string, *platformPostgresState, appplatform.PostgresTarget) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		m.Capabilities.Required = []string{"background.run", "network.http", "notifications.publish", "secrets.use"}
 		m.Capabilities.Optional = []string{"network.postgres"}
-	}
-	platformFixtureNetworkTarget = true
-	t.Cleanup(func() { platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false })
+	})
+	platformFixtureNetworkTarget.set(t, true)
 	s, admin, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability<>'network.postgres'`, lease.installationID)
 	state := &platformPostgresState{supported: true}
@@ -241,9 +240,11 @@ func plan0(t *testing.T, plan func(platformPostgresRequest) (platformPostgresPol
 }
 
 func TestPlatformPostgresPolicyReviewPairSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresPolicyReviewPair(t, false)
 }
 func TestPlatformPostgresPolicyReviewPairPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresPolicyReviewPair(t, true)
 }
 
@@ -350,9 +351,11 @@ func (s *Server) withPlatformTestExec(t *testing.T, f func(migExec) error) error
 }
 
 func TestPlatformPostgresBindingReviewAndUseSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresBindingReviewAndUse(t, false)
 }
 func TestPlatformPostgresBindingReviewAndUsePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresBindingReviewAndUse(t, true)
 }
 
@@ -533,14 +536,17 @@ func testPlatformPostgresGrantWithdrawalClosesTheSession(t *testing.T, pg bool) 
 }
 
 func TestPlatformPostgresGrantWithdrawalClosesTheSessionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresGrantWithdrawalClosesTheSession(t, false)
 }
 func TestPlatformPostgresGrantWithdrawalClosesTheSessionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresGrantWithdrawalClosesTheSession(t, true)
 }
 
 // The call keeps neither the username nor the password once it has been sent.
 func TestPlatformServiceEgressPostgresCallKeepsNoRole(t *testing.T) {
+	t.Parallel()
 	command := control.PostgresProbeCommand{Format: control.PostgresProbeCommandFormat, PolicyRaw: []byte("{}"), Username: []byte(platformPostgresUsername), Password: []byte(platformPostgresPassword)}
 	raw, err := marshalPlatformServiceEgressPostgres(command)
 	if err != nil {

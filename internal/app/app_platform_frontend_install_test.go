@@ -46,10 +46,17 @@ func testPlatformFrontendInstall(t *testing.T, pg bool) {
 		t.Fatal("frontend-only document unavailable", err)
 	}
 }
-func TestPlatformFrontendInstallSQLite(t *testing.T)   { testPlatformFrontendInstall(t, false) }
-func TestPlatformFrontendInstallPostgres(t *testing.T) { testPlatformFrontendInstall(t, true) }
+func TestPlatformFrontendInstallSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformFrontendInstall(t, false)
+}
+func TestPlatformFrontendInstallPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformFrontendInstall(t, true)
+}
 
 func TestPlatformFrontendStorageInstallSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, release := platformInstallFixture(t, false)
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.2")
 	var manifest appplatform.Manifest
@@ -141,9 +148,16 @@ func testPlatformFrontendScheduler(t *testing.T, pg bool) {
 		t.Fatal("no-data worker touched native storage")
 	}
 }
-func TestPlatformFrontendSchedulerSQLite(t *testing.T)   { testPlatformFrontendScheduler(t, false) }
-func TestPlatformFrontendSchedulerPostgres(t *testing.T) { testPlatformFrontendScheduler(t, true) }
+func TestPlatformFrontendSchedulerSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformFrontendScheduler(t, false)
+}
+func TestPlatformFrontendSchedulerPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformFrontendScheduler(t, true)
+}
 func TestPlatformFrontendServiceSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, id := platformFrontendQueuedFixture(t, false)
 	w, err := newPlatformInstallScheduler(s, platformRuntimeEndpoint{}, platformFixtureID(954), 50*time.Millisecond)
 	if err != nil {
@@ -246,13 +260,16 @@ func testPlatformFrontendProofRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformFrontendProofRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendProofRefusals(t, false)
 }
 func TestPlatformFrontendProofRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendProofRefusals(t, true)
 }
 
 func TestPlatformFrontendDefaultNoImplicitAdminSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, release := platformInstallFixture(t, false)
 	review, err := s.createPlatformInstallReview(actor, release.sha256, 1)
 	if err != nil {
@@ -282,6 +299,7 @@ func TestPlatformFrontendDefaultNoImplicitAdminSQLite(t *testing.T) {
 }
 
 func TestPlatformFrontendHTTPWithoutRunnerSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, id := platformFrontendQueuedFixture(t, false)
 	selected, err := s.claimNextPlatformFrontendInstall(context.Background(), platformFixtureID(960))
 	if err != nil {
@@ -315,6 +333,7 @@ func TestPlatformFrontendHTTPWithoutRunnerSQLite(t *testing.T) {
 	}
 }
 func TestPlatformFrontendDoesNotBecomeNativeSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, _ := platformFrontendQueuedFixture(t, false)
 	native, err := s.claimNextPlatformStaticInstall(context.Background(), platformFixtureID(961))
 	if err != nil || native.lease.id != "" {
@@ -340,6 +359,7 @@ func TestPlatformFrontendDoesNotBecomeNativeSQLite(t *testing.T) {
 	}
 }
 func TestPlatformFrontendRequiredStorageReviewSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, _ := platformInstallFixture(t, false)
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.2")
 	var m appplatform.Manifest
@@ -403,9 +423,11 @@ func testPlatformFrontendRecoveryWithoutResources(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformFrontendRecoverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendRecoveryWithoutResources(t, false)
 }
 func TestPlatformFrontendRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendRecoveryWithoutResources(t, true)
 }
 func testPlatformFrontendActivationRollback(t *testing.T, pg bool) {
@@ -456,12 +478,15 @@ func testPlatformFrontendActivationRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformFrontendActivationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendActivationRollback(t, false)
 }
 func TestPlatformFrontendActivationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendActivationRollback(t, true)
 }
 func TestPlatformFrontendIgnoresUnusableRuntimeSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, _ := platformFrontendQueuedFixture(t, false)
 	if _, err := s.preparePlatformRuntimeBinding(actor, platformFixtureID(400)); err != nil {
 		t.Fatal(err)

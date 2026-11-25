@@ -10,6 +10,7 @@ import (
 )
 
 func TestForecastShadowShippedSinaGrantNeverAdmitsAWriter(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{sources: defaultQuoteSources()}
 	for _, market := range []string{"sh", "sz", "bj", "hk", "us"} {
 		target := quoteAsk(t, market)
@@ -41,6 +42,7 @@ func TestForecastShadowShippedSinaGrantNeverAdmitsAWriter(t *testing.T) {
 // The actual shipped range adapter runs through the pass's private transport budget. Only its
 // underlying transport is replaced with captured bytes; no process-wide client or ledger is changed.
 func TestForecastShadowShippedSinaUsesBoundedRangeAndPersistsEvidence(t *testing.T) {
+	t.Parallel()
 	for _, mismatch := range []bool{false, true} {
 		t.Run(map[bool]string{false: "match", true: "mismatch"}[mismatch], func(t *testing.T) {
 			s := newV1Server(t)
@@ -110,6 +112,7 @@ func TestForecastShadowShippedSinaUsesBoundedRangeAndPersistsEvidence(t *testing
 }
 
 func TestForecastShadowRechecksControlsBetweenSamples(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"fallback_off", "remove_peer", "remove_primary", "incomplete_pass"} {
 		t.Run(change, func(t *testing.T) {
 			s := newV1Server(t)

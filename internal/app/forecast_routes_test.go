@@ -12,6 +12,7 @@ import (
 )
 
 func TestForecastReaderRoutesServeAllowedSessions(t *testing.T) {
+	t.Parallel()
 	for _, scope := range []string{scopeAll, scopeOwn} {
 		t.Run(scope, func(t *testing.T) {
 			s := newV1Server(t)
@@ -79,6 +80,7 @@ func forecastGatedRows(t *testing.T, s *Server) []routeRow {
 }
 
 func TestForecastRoutesAreSessionRoutesBehindTheWall(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	for _, row := range s.routeTable {
@@ -98,6 +100,7 @@ func TestForecastRoutesAreSessionRoutesBehindTheWall(t *testing.T) {
 }
 
 func TestForecastGatedRoutesDenyANoneUser(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	s := env.s
 	mux := http.NewServeMux()
@@ -125,6 +128,7 @@ func TestForecastGatedRoutesDenyANoneUser(t *testing.T) {
 }
 
 func TestForecastStatsNotReachableByBearer(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.appTok = newAppTokens(time.Minute)
 	bridge := s.appTok.mint([]string{"query"}, time.Now())

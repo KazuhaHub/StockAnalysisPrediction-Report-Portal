@@ -32,6 +32,7 @@ func samlPostResponse(acsURL, xmlDoc string) *http.Request {
 // TestSAMLSubjectRejectsTransient proves a NameID that changes on every login is refused as an
 // account key — linking to it would mint a new account per sign-in.
 func TestSAMLSubjectRejectsTransient(t *testing.T) {
+	t.Parallel()
 	mk := func(format, value string) *saml.Assertion {
 		return &saml.Assertion{NameID: value, NameIDFormat: format}
 	}
@@ -63,6 +64,7 @@ func TestSAMLSubjectRejectsTransient(t *testing.T) {
 // validation, and these tests have no signing harness — every other rejection they exercise
 // (assertion count, weak algorithm, encrypted assertion, Destination) happens before it.
 func TestSAMLClaimsFlattensAttributes(t *testing.T) {
+	t.Parallel()
 	a := &saml.Assertion{Attributes: map[string][]string{
 		// authcore indexes one <Attribute> under BOTH its Name and FriendlyName when they differ —
 		// this is what that looks like once ValidateResponse has already built the Assertion.
@@ -88,6 +90,7 @@ func TestSAMLClaimsFlattensAttributes(t *testing.T) {
 // comment in saml_replay.go for why per-IdP scoping is what keeps this migration from repeating the
 // audit package's tenancy failure.
 func TestSAMLReplayIsRefused(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	now := time.Now()
 	exp := now.Add(10 * time.Minute)
@@ -113,6 +116,7 @@ func TestSAMLReplayIsRefused(t *testing.T) {
 // lives in samlReplayCache.SeenOrAdd now. This reads the persisted row back — not just SeenOrAdd's
 // return value — to prove the clamp was actually applied to what got written.
 func TestSAMLReplayCacheClampsTTL(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	c := samlReplayCache{st: st, idpEntityID: "https://idp.example"}
 	now := time.Now()
@@ -133,6 +137,7 @@ func TestSAMLReplayCacheClampsTTL(t *testing.T) {
 // TestSPKeypairGeneration proves the generated SP credential is what IdPs can actually consume, and
 // that the private key round-trips through the sealed store.
 func TestSPKeypairGeneration(t *testing.T) {
+	t.Parallel()
 	keyPEM, certPEM, notAfter, err := generateSPKeypair("https://portal.example/metadata", 3*365*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +204,7 @@ func samlTestProvider(t *testing.T, s *Server) SSOProvider {
 // exported, so this needs no reflection into authcore/saml's otherwise-private Provider internals
 // — see samlConfig's doc comment in saml.go.
 func TestSAMLProviderConfigIsStrict(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	m, err := s.samlLoadMaterial(p)
@@ -218,6 +224,7 @@ func TestSAMLProviderConfigIsStrict(t *testing.T) {
 // signature is verified, so an unsigned two-Assertion document is enough to prove the wiring here
 // actually reaches that check.
 func TestSAMLProviderRejectsMultipleAssertions(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	provider, _, err := s.samlProvider(p)
@@ -247,6 +254,7 @@ func TestSAMLProviderRejectsMultipleAssertions(t *testing.T) {
 // Unspecified rather than crewjam's raw zero value — this proves that default actually reaches the
 // wire, by decoding the redirect-bound AuthnRequest back out of the URL authcore hands us.
 func TestAuthnRequestDoesNotAskForATransientNameID(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	provider, _, err := s.samlProvider(p)
@@ -273,6 +281,7 @@ func TestAuthnRequestDoesNotAskForATransientNameID(t *testing.T) {
 // TestParseIdPMetadataUnwrapsFederation proves both the bare descriptor and the federation wrapper
 // parse — crewjam models only the former, and Shibboleth/InCommon publish the latter.
 func TestParseIdPMetadataUnwrapsFederation(t *testing.T) {
+	t.Parallel()
 	const idp = `<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example">
 		<IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
 			<SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example/sso"/>
@@ -300,6 +309,7 @@ func TestParseIdPMetadataUnwrapsFederation(t *testing.T) {
 // TestSAMLRoutesAreInvisibleWhenDisabled proves a portal with SAML off is indistinguishable from
 // one that never had it.
 func TestSAMLRoutesAreInvisibleWhenDisabled(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	if _, ok := s.enabledProvider("nope", "saml"); ok {

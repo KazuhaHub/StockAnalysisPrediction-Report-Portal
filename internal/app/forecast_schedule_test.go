@@ -41,6 +41,7 @@ func evalStub(now *time.Time, index, stock []QuoteBar, indexErr, stockErr error)
 func ingestSymbol(i int) string { return fmt.Sprintf("61%04d", i) }
 
 func TestS0FollowsReceiptTimeOfDay(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 20) // Mon 19 Oct onward
 	for _, tc := range []struct {
 		name   string
@@ -70,6 +71,7 @@ func TestS0FollowsReceiptTimeOfDay(t *testing.T) {
 }
 
 func TestS0WaitsWhileTodayIsUnknown(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-19")
 	// Pin the receipt to 10:00 CST, when today's session would be the start if its bar were known.
@@ -105,6 +107,7 @@ func TestS0WaitsWhileTodayIsUnknown(t *testing.T) {
 }
 
 func TestDNIsTheNthSessionAfterS0(t *testing.T) {
+	t.Parallel()
 	// Set 6: received Sunday 2026-10-18 in the evening; d5 is 2026-10-26.
 	sessions := tradingDays("2026-10-19", 20)
 	sch := predScheduleFor("d5", shanghai(2026, time.October, 18, 21, 0), true, "", sessions)
@@ -139,6 +142,7 @@ func TestDNIsTheNthSessionAfterS0(t *testing.T) {
 }
 
 func TestMarksUseTheStoredBaseline(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16") // after the close: S0 would be Monday
 	sessions := tradingDays("2026-10-19", 7)
@@ -190,6 +194,7 @@ func TestMarksUseTheStoredBaseline(t *testing.T) {
 }
 
 func TestPlanIsAtomicPerSetBaselineFirst(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	var ids []int64
@@ -244,6 +249,7 @@ func TestPlanIsAtomicPerSetBaselineFirst(t *testing.T) {
 }
 
 func TestWaitingMarksStayPending(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-18") // Sunday 21:00 CST
 	index := barsFor(tradingDays("2026-10-19", 1), 4000)     // Monday only
@@ -284,6 +290,7 @@ func TestWaitingMarksStayPending(t *testing.T) {
 }
 
 func TestNotDueSetsCostNoFetch(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for i := 0; i < 55; i++ {
 		seedAcceptedSetAt(t, s, ingestSymbol(i), "2026-10-16")
@@ -315,6 +322,7 @@ func TestNotDueSetsCostNoFetch(t *testing.T) {
 }
 
 func TestSelectionDoesNotStarve(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// 300 sets with pending marks that are not due. They must not occupy the batch.
 	for i := 0; i < 300; i++ {
@@ -339,6 +347,7 @@ func TestSelectionDoesNotStarve(t *testing.T) {
 }
 
 func TestDueSelectionUsesTheDueIndex(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if s.st.driver != "sqlite" {
 		t.Skip("the query plan is SQLite-specific; the Postgres test covers the same shape")
@@ -364,6 +373,7 @@ func TestDueSelectionUsesTheDueIndex(t *testing.T) {
 }
 
 func TestCalendarNotYetShowingTheSessionIsNotARefusal(t *testing.T) {
+	t.Parallel()
 	if got := predNotYetShown(shanghai(2026, time.October, 19, 15, 31)); !got.Equal(shanghai(2026, time.October, 19, 15, 41)) {
 		t.Errorf("15:31 wake = %s, want +10 minutes", got.Format(time.RFC3339))
 	}
@@ -397,6 +407,7 @@ func TestCalendarNotYetShowingTheSessionIsNotARefusal(t *testing.T) {
 }
 
 func TestOutageNeverFinalises(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	index := barsFor(tradingDays("2026-10-19", 22), 4000)
@@ -434,6 +445,7 @@ func TestOutageNeverFinalises(t *testing.T) {
 }
 
 func TestCatchUpAfterDryPeriodNeverFinalisesOnFirstFailure(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	sessions := tradingDays("2026-10-19", 40)
@@ -474,6 +486,7 @@ func TestCatchUpAfterDryPeriodNeverFinalisesOnFirstFailure(t *testing.T) {
 }
 
 func TestBackoffEscalatesOnTheEvaluatorClock(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	var markID int64
@@ -512,6 +525,7 @@ func TestBackoffEscalatesOnTheEvaluatorClock(t *testing.T) {
 }
 
 func TestBaselineBecomesTerminal(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	sessions := tradingDays("2026-10-19", 12)
@@ -545,6 +559,7 @@ func TestBaselineBecomesTerminal(t *testing.T) {
 }
 
 func TestPrematureRefusalRepairRunsOnceOnTheSignature(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	var setIDs []int64
 	for i := 0; i < 4; i++ {
@@ -589,6 +604,7 @@ func TestPrematureRefusalRepairRunsOnceOnTheSignature(t *testing.T) {
 }
 
 func TestHealAndApplyNeverCallThePoolInsideATransaction(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("timing test")
 	}
@@ -622,6 +638,7 @@ func TestHealAndApplyNeverCallThePoolInsideATransaction(t *testing.T) {
 }
 
 func TestDueCountMatchesSelection(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for i := 0; i < 4; i++ {
 		seedAcceptedSetAt(t, s, ingestSymbol(i), "2026-10-16")
@@ -637,6 +654,7 @@ func TestDueCountMatchesSelection(t *testing.T) {
 }
 
 func TestSourceFailuresAreNotMarkSpecific(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{"fetch_failed", "not_index", "calendar_bad", "no_bench", "unknown_code"} {
 		if got := refusalClassOf(code); got != refusalSource {
 			t.Errorf("%s is %q, want source", code, got)
@@ -650,6 +668,7 @@ func TestSourceFailuresAreNotMarkSpecific(t *testing.T) {
 }
 
 func TestFinalityNeedsSessionsAsWellAsAttempts(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	sessions := tradingDays("2026-10-19", 40)
@@ -697,6 +716,7 @@ func TestFinalityNeedsSessionsAsWellAsAttempts(t *testing.T) {
 }
 
 func TestHealDoesNotMatchANewBaselineRefusal(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	index := barsFor(tradingDays("2026-10-19", 12), 4000)
@@ -721,6 +741,7 @@ func TestHealDoesNotMatchANewBaselineRefusal(t *testing.T) {
 }
 
 func TestUnknownCheckpointTerminalises(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	if _, err := s.st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status, bench_code)

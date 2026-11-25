@@ -57,6 +57,7 @@ func listReports(t *testing.T, s *Server, params url.Values, token string) (*htt
 // The precise dedup probe: symbol+date+subtype → total tells the Dify node whether a
 // report for that exact identity already exists (skip) or not (generate).
 func TestV1DedupProbeBySymbolDateSubtype(t *testing.T) {
+	t.Parallel()
 	s := seedDedupServer(t)
 
 	cases := []struct {
@@ -93,6 +94,7 @@ func TestV1DedupProbeBySymbolDateSubtype(t *testing.T) {
 // rtype is an accepted alias for subtype on the read path, so the Dify node may send
 // either; both must select the same identity.
 func TestV1DedupProbeRTypeAlias(t *testing.T) {
+	t.Parallel()
 	s := seedDedupServer(t)
 	rec, m := listReports(t, s, url.Values{"symbol": {"600160"}, "date": {"2026-07-02"}, "rtype": {"汇总"}}, "tok-query")
 	if rec.Code != http.StatusOK || m["total"].(float64) != 1 {
@@ -103,6 +105,7 @@ func TestV1DedupProbeRTypeAlias(t *testing.T) {
 // Reads must accept a query-scoped token and reject an ingest-scoped one — the query
 // node has to use a read-only token, never the ingest token.
 func TestV1DedupProbeScopeEnforced(t *testing.T) {
+	t.Parallel()
 	s := seedDedupServer(t)
 	base := url.Values{"symbol": {"600160"}, "date": {"2026-07-02"}, "subtype": {"汇总"}}
 
@@ -121,6 +124,7 @@ func TestV1DedupProbeScopeEnforced(t *testing.T) {
 // and "which subtypes exist overall?" but NOT the date×subtype cross — the node must
 // fall back to the list probe for exact-identity dedup.
 func TestV1ManifestProbe(t *testing.T) {
+	t.Parallel()
 	s := seedDedupServer(t)
 	req := httptest.NewRequest("GET", "/api/v1/reports/manifest?symbol=600160", nil)
 	req.Header.Set("Authorization", "Bearer tok-query")

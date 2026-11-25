@@ -15,6 +15,7 @@ import "testing"
 // onto an existing account.
 
 func TestOneIdentityPerAccount(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
@@ -53,6 +54,7 @@ func TestOneIdentityPerAccount(t *testing.T) {
 // external identity. Without it, whoever logged in second would quietly take the link, and the
 // first account would be locked out of SSO with nothing recorded.
 func TestIdentityIsNotSharedBetweenAccounts(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
@@ -77,6 +79,7 @@ func TestIdentityIsNotSharedBetweenAccounts(t *testing.T) {
 // person. A provider slug alone is not the key: repointing a provider at a new IdP would otherwise
 // hand an existing account to whoever holds that subject there.
 func TestIdentityKeyIncludesTheIssuer(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})

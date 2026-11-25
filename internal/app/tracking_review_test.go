@@ -37,6 +37,7 @@ func trackingFixture(t *testing.T) (*Server, int64, int64) {
 }
 
 func TestListTrackingSpansSymbols(t *testing.T) {
+	t.Parallel()
 	s, _, _ := trackingFixture(t)
 
 	all, total := s.st.ListTracking(TrackingFilter{}, nil)
@@ -68,6 +69,7 @@ func TestListTrackingSpansSymbols(t *testing.T) {
 // The security property: tracking rows carry no owner of their own, so visibility has to come from
 // the report they belong to — the same rule as every other read path (ADR 0024).
 func TestListTrackingIsScopedToWhatTheViewerMayRead(t *testing.T) {
+	t.Parallel()
 	s, _, external := trackingFixture(t)
 	st := s.st
 	st.UpsertUser(User{Username: "client@corp.example", PasswordHash: "h", Role: "user"})
@@ -98,6 +100,7 @@ func TestListTrackingIsScopedToWhatTheViewerMayRead(t *testing.T) {
 
 // Reviewing is the whole point: an item must be markable, and the change must stick.
 func TestReviewingAnItemRecordsTheOutcome(t *testing.T) {
+	t.Parallel()
 	s, _, _ := trackingFixture(t)
 	rows, _ := s.st.ListTracking(TrackingFilter{Q: "白酒动销回暖"}, nil)
 	if len(rows) != 1 {
@@ -124,6 +127,7 @@ func TestReviewingAnItemRecordsTheOutcome(t *testing.T) {
 //
 // So an item whose text is unchanged keeps its outcome, and only genuinely new text arrives pending.
 func TestARerunKeepsWhatAHumanDecided(t *testing.T) {
+	t.Parallel()
 	s, internal, _ := trackingFixture(t)
 	rows, _ := s.st.ListTracking(TrackingFilter{Q: "白酒动销回暖"}, nil)
 	s.st.UpdateTrackingStatus(rows[0].ID, "confirmed", "三季报兑现")
@@ -160,6 +164,7 @@ func TestARerunKeepsWhatAHumanDecided(t *testing.T) {
 // pending — the safe direction. Silently carrying "confirmed" onto a changed claim would be worse
 // than losing the review.
 func TestARerunDoesNotCarryAReviewOntoChangedText(t *testing.T) {
+	t.Parallel()
 	s, internal, _ := trackingFixture(t)
 	rows, _ := s.st.ListTracking(TrackingFilter{Q: "白酒动销回暖"}, nil)
 	s.st.UpdateTrackingStatus(rows[0].ID, "confirmed", "兑现")

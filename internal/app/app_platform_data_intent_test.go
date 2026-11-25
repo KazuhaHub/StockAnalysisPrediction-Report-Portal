@@ -61,8 +61,8 @@ func testPlatformDataIntent(t *testing.T, pg bool) {
 		t.Fatal("missing or duplicate intent audit")
 	}
 }
-func TestPlatformDataIntentSQLite(t *testing.T)   { testPlatformDataIntent(t, false) }
-func TestPlatformDataIntentPostgres(t *testing.T) { testPlatformDataIntent(t, true) }
+func TestPlatformDataIntentSQLite(t *testing.T)   { t.Parallel(); testPlatformDataIntent(t, false) }
+func TestPlatformDataIntentPostgres(t *testing.T) { t.Parallel(); testPlatformDataIntent(t, true) }
 
 func testPlatformDataIntentRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"disabled_runtime", "bad_key", "namespace", "effect", "sponsor", "paused", "lease", "takeover"} {
@@ -105,9 +105,16 @@ func testPlatformDataIntentRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformDataIntentRefusalsSQLite(t *testing.T)   { testPlatformDataIntentRefusals(t, false) }
-func TestPlatformDataIntentRefusalsPostgres(t *testing.T) { testPlatformDataIntentRefusals(t, true) }
+func TestPlatformDataIntentRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformDataIntentRefusals(t, false)
+}
+func TestPlatformDataIntentRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformDataIntentRefusals(t, true)
+}
 func TestPlatformDataIntentFailureAtomicSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformDataIntentFixture(t, false)
 	mustExec(t, s.st, `CREATE TRIGGER fixture_intent_failure BEFORE INSERT ON app_platform_operation_effects BEGIN SELECT RAISE(ABORT,'fixture intent failure');END`)
 	result, err := s.preparePlatformInstallData(context.Background(), lease)
@@ -119,6 +126,7 @@ func TestPlatformDataIntentFailureAtomicSQLite(t *testing.T) {
 	}
 }
 func TestPlatformDataContextDatabaseWaitSQLite(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"intent", "receipt"} {
 		t.Run(phase, func(t *testing.T) {
 			s, _, lease := platformDataIntentFixture(t, false)

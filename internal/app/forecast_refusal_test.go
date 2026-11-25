@@ -74,6 +74,7 @@ func forecastRefusalCases() []refusalCase {
 }
 
 func TestForecastRefusalsAreCountedByReason(t *testing.T) {
+	t.Parallel()
 	for _, tc := range forecastRefusalCases() {
 		t.Run(tc.reason, func(t *testing.T) {
 			s := tokenServer(t)

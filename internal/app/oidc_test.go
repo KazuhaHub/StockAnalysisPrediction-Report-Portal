@@ -175,6 +175,7 @@ func callback(s *Server, slug, state, code string, ck *http.Cookie) *httptest.Re
 // TestOIDCStartIssuesBoundRequest locks the start leg: PKCE S256, a nonce, and a state that is
 // bound to a browser cookie — so a callback cannot be forged into someone else's session.
 func TestOIDCStartIssuesBoundRequest(t *testing.T) {
+	t.Parallel()
 	s, op := oidcFixture(t)
 	loc, ck := start(t, s, op, "acme")
 
@@ -201,6 +202,7 @@ func TestOIDCStartIssuesBoundRequest(t *testing.T) {
 
 // TestOIDCCallbackHappyPath proves a well-formed callback provisions and signs the user in.
 func TestOIDCCallbackHappyPath(t *testing.T) {
+	t.Parallel()
 	s, op := oidcFixture(t)
 	loc, ck := start(t, s, op, "acme")
 	rec := callback(s, "acme", loc.Query().Get("state"), "code-1", ck)
@@ -232,6 +234,7 @@ func TestOIDCCallbackHappyPath(t *testing.T) {
 
 // TestOIDCCallbackRejections is the must-fail-closed matrix. Each case breaks exactly one thing.
 func TestOIDCCallbackRejections(t *testing.T) {
+	t.Parallel()
 	t.Run("state missing", func(t *testing.T) {
 		s, op := oidcFixture(t)
 		_, ck := start(t, s, op, "acme")
@@ -327,6 +330,7 @@ func TestOIDCCallbackRejections(t *testing.T) {
 // TestOIDCReturnPathMustBeRelative proves the post-login landing spot cannot be turned into an
 // open redirect, including the protocol-relative and backslash forms browsers normalise oddly.
 func TestOIDCReturnPathMustBeRelative(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{"https://evil.example/x", "//evil.example/x", "/\\evil.example", "http:/evil"} {
 		if got := safeReturnPath(bad); got != "/" {
 			t.Errorf("safeReturnPath(%q) = %q, want / (open-redirect guard)", bad, got)
@@ -343,6 +347,7 @@ func TestOIDCReturnPathMustBeRelative(t *testing.T) {
 // reachable every time: the document is cached on first use, and a later sign-in still works when
 // discovery has gone away. Without this, a slow or briefly-down IdP takes sign-in with it.
 func TestOIDCDiscoveryIsCached(t *testing.T) {
+	t.Parallel()
 	s, op := oidcFixture(t)
 	loc, ck := start(t, s, op, "acme")
 	if rec := callback(s, "acme", loc.Query().Get("state"), "c", ck); refused(rec) {

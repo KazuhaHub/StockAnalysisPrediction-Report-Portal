@@ -48,8 +48,14 @@ func testPlatformInstallQueueClaim(t *testing.T, pg bool) {
 		t.Fatal("side-effect-free expired install did not resume", err)
 	}
 }
-func TestPlatformInstallQueueClaimSQLite(t *testing.T)   { testPlatformInstallQueueClaim(t, false) }
-func TestPlatformInstallQueueClaimPostgres(t *testing.T) { testPlatformInstallQueueClaim(t, true) }
+func TestPlatformInstallQueueClaimSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformInstallQueueClaim(t, false)
+}
+func TestPlatformInstallQueueClaimPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformInstallQueueClaim(t, true)
+}
 func testPlatformInstallQueueRecovery(t *testing.T, pg bool) {
 	s, _, lease := platformDataIntentFixture(t, pg)
 	intent, err := s.preparePlatformInstallData(context.Background(), lease)
@@ -71,8 +77,12 @@ func testPlatformInstallQueueRecovery(t *testing.T, pg bool) {
 		t.Fatal("review did not settle worker authority")
 	}
 }
-func TestPlatformInstallQueueRecoverySQLite(t *testing.T) { testPlatformInstallQueueRecovery(t, false) }
+func TestPlatformInstallQueueRecoverySQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformInstallQueueRecovery(t, false)
+}
 func TestPlatformInstallQueueRecoveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallQueueRecovery(t, true)
 }
 
@@ -121,8 +131,12 @@ func testPlatformInstallQueueRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformInstallQueueRefusalsSQLite(t *testing.T) { testPlatformInstallQueueRefusals(t, false) }
+func TestPlatformInstallQueueRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformInstallQueueRefusals(t, false)
+}
 func TestPlatformInstallQueueRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallQueueRefusals(t, true)
 }
 
@@ -157,9 +171,11 @@ func testPlatformInstallQueueConcurrent(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallQueueConcurrentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallQueueConcurrent(t, false)
 }
 func TestPlatformInstallQueueConcurrentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallQueueConcurrent(t, true)
 }
 
@@ -209,8 +225,10 @@ func testPlatformInstallQueueRecoveryBoundaries(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallQueueRecoveryBoundariesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallQueueRecoveryBoundaries(t, false)
 }
 func TestPlatformInstallQueueRecoveryBoundariesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallQueueRecoveryBoundaries(t, true)
 }

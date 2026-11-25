@@ -100,6 +100,7 @@ func recordStore(t *testing.T, dialect string) (*Store, *recordDriver) {
 // sends "?" to PostgreSQL ("syntax error at end of input"); one that does it twice cannot be told
 // apart from once on text, so each entry point is also checked for the exact result.
 func TestExecutorEntryPointsRewritePlaceholdersOnce(t *testing.T) {
+	t.Parallel()
 	for _, dialect := range []string{"postgres", "sqlite"} {
 		checkEntryPointsRewrite(t, dialect)
 	}

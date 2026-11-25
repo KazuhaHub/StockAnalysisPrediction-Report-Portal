@@ -64,6 +64,7 @@ func satisfyForecastReadiness(t *testing.T, s *Server) {
 // TestOffStepDoesExactlyOneRead: "off" must mean off, not quiet. The counting observer sees one meta
 // read and the test store's write counter stays at zero.
 func TestOffStepDoesExactlyOneRead(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeOff); err != nil {
 		t.Fatal(err)
@@ -154,6 +155,7 @@ func forecastChecksum(t *testing.T, s *Server) string {
 // TestDryRunWritesNothing: the ledger is untouched, and the sample names the vendor that would have
 // answered.
 func TestDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeDry); err != nil {
@@ -182,6 +184,7 @@ func TestDryRunWritesNothing(t *testing.T) {
 
 // TestHealthzForecastIsStatusOnly: 200 or 503, and exactly one key either way.
 func TestHealthzForecastIsStatusOnly(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, tc := range []struct {
 		name string
@@ -221,6 +224,7 @@ func TestHealthzForecastIsStatusOnly(t *testing.T) {
 
 // The source-policy gate is appended without changing the first five item keys.
 func TestReadinessIncludesLedgerChainItem(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	items := s.forecastReadiness(time.Now())
 	if len(items) != 6 {
@@ -237,6 +241,7 @@ func TestReadinessIncludesLedgerChainItem(t *testing.T) {
 // TestModeOneRequiresReadiness: every item gates the switch, and each failure is named. The
 // dry_pass case with a mode-1 heartbeat is the one a naive "errors == 0" check misses.
 func TestModeOneRequiresReadiness(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		disable func(t *testing.T, s *Server)
@@ -300,6 +305,7 @@ func TestModeOneRequiresReadiness(t *testing.T) {
 // TestModeOneWithoutGateWritesNothingForThatBenchmark: a set frozen with an unchecked code is planned
 // and listed; a checked code is written.
 func TestModeOneWithoutGateWritesNothingForThatBenchmark(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
@@ -339,6 +345,7 @@ func TestModeOneWithoutGateWritesNothingForThatBenchmark(t *testing.T) {
 
 // TestWatchdogDetectsStalledEvaluator: one event when on and stale, nothing at all when off.
 func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeOff); err != nil {
 		t.Fatal(err)
@@ -396,6 +403,7 @@ func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
 // in-population sets would leave the list empty at the switch, and every pre-live set would then be
 // planned and never written.
 func TestReadinessGateCoversPreLiveBenchCodes(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID, e := opsFixture(t, s) // accepted, non-terminal marks, frozen with the default sh000852
 	// Move the ACTIVE benchmark away from the frozen one, so the union is actually exercised: with
@@ -462,6 +470,7 @@ func TestReadinessGateCoversPreLiveBenchCodes(t *testing.T) {
 
 // TestGateCodesAreNeverVacuous: with no accepted set at all, the active benchmark is still listed.
 func TestGateCodesAreNeverVacuous(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	codes, err := s.st.ForecastGateCodes()
 	if err != nil {
@@ -474,6 +483,7 @@ func TestGateCodesAreNeverVacuous(t *testing.T) {
 
 // TestEvaluateNowRespectsModeAndSingleFlight: 409 when off, 409 while a pass holds the guard.
 func TestEvaluateNowRespectsModeAndSingleFlight(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeOff); err != nil {
 		t.Fatal(err)
@@ -500,6 +510,7 @@ func TestEvaluateNowRespectsModeAndSingleFlight(t *testing.T) {
 // recovery this pins belongs to the ticker that actually runs a pass, and a dry mode assertion here
 // would only prove the skip.
 func TestPanicDoesNotKillTheLoop(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
 		t.Fatal(err)
@@ -523,6 +534,7 @@ func TestPanicDoesNotKillTheLoop(t *testing.T) {
 // TestPanicDoesNotKillTheWatchdog: the same property for the independent goroutine, driven through
 // the wrapper the loop uses.
 func TestPanicDoesNotKillTheWatchdog(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	panics := 0
 	s.st.onSettingRead = func(string) {
@@ -560,6 +572,7 @@ func TestWatchdogRunsWhileCleanupIsSlow(t *testing.T) {
 // a closed reason code and the benchmark codes it names, never from the English detail. A passing
 // item carries no reason.
 func TestReadinessFailuresCarryAReasonCode(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	byKey := func() map[string]readinessItem {
 		out := map[string]readinessItem{}
@@ -615,6 +628,7 @@ func TestReadinessFailuresCarryAReasonCode(t *testing.T) {
 // can send (each goes through readinessItem.fail), the TypeScript union the page types it with, and a
 // wording in every locale. A code missing from either would reach the reader as a raw key.
 func TestReadinessReasonsAreTranslated(t *testing.T) {
+	t.Parallel()
 	src, err := os.ReadFile("forecast_ops.go")
 	if err != nil {
 		t.Fatal(err)

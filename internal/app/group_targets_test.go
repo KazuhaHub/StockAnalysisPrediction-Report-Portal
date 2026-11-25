@@ -37,6 +37,7 @@ func ouFixture(t *testing.T) (*Server, int64, int64, int64, int64) {
 // TestGroupTargetsCRUD locks the allow-list store: rows round-trip per OU with their surface
 // subset, and replacing an OU's list is atomic.
 func TestGroupTargetsCRUD(t *testing.T) {
+	t.Parallel()
 	s, org, _, tgtA, tgtB := ouFixture(t)
 	st := s.st
 
@@ -74,6 +75,7 @@ func TestGroupTargetsCRUD(t *testing.T) {
 // inherits the nearest ancestor OU's allow-list, and is bounded by the surface subset; internal users
 // and admins are unaffected.
 func TestRunAllowedResolvesUpTheOuTree(t *testing.T) {
+	t.Parallel()
 	s, org, team, tgtA, tgtB := ouFixture(t)
 	st := s.st
 
@@ -112,6 +114,7 @@ func TestRunAllowedResolvesUpTheOuTree(t *testing.T) {
 // the gate that defeats a crafted request for a workflow the UI never offered — and that a granted
 // target on a non-granted surface is refused too.
 func TestApiBatchJobCreateEnforcesAllowList(t *testing.T) {
+	t.Parallel()
 	s, org, _, tgtA, tgtB := ouFixture(t)
 	st := s.st
 	st.SetGroupTargets(org, []GroupTarget{{TargetID: tgtA, Surfaces: "run"}})
@@ -140,6 +143,7 @@ func TestApiBatchJobCreateEnforcesAllowList(t *testing.T) {
 // TestApiBatchTargetsFiltersForRestricted proves the run form is only offered what the submit gate
 // would accept: a restricted OU sees just its allow-listed targets, with surfaces intersected.
 func TestApiBatchTargetsFiltersForRestricted(t *testing.T) {
+	t.Parallel()
 	s, org, _, tgtA, _ := ouFixture(t)
 	s.st.SetGroupTargets(org, []GroupTarget{{TargetID: tgtA, Surfaces: "run"}})
 

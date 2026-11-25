@@ -56,8 +56,14 @@ func testPlatformCredentialRestore(t *testing.T, pg bool) {
 		}
 	})
 }
-func TestPlatformCredentialRestoreSQLite(t *testing.T)   { testPlatformCredentialRestore(t, false) }
-func TestPlatformCredentialRestorePostgres(t *testing.T) { testPlatformCredentialRestore(t, true) }
+func TestPlatformCredentialRestoreSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformCredentialRestore(t, false)
+}
+func TestPlatformCredentialRestorePostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformCredentialRestore(t, true)
+}
 
 func testPlatformCredentialOlderBackup(t *testing.T, pg bool) {
 	st := platformTestStore(t, pg)
@@ -81,9 +87,11 @@ func testPlatformCredentialOlderBackup(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialOlderBackupSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialOlderBackup(t, false)
 }
 func TestPlatformCredentialOlderBackupPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialOlderBackup(t, true)
 }
 
@@ -105,9 +113,11 @@ func testPlatformCredentialMissingFloorRecord(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialMissingFloorRecordSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialMissingFloorRecord(t, false)
 }
 func TestPlatformCredentialMissingFloorRecordPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialMissingFloorRecord(t, true)
 }
 

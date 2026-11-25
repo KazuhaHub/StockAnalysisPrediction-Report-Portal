@@ -57,15 +57,18 @@ func testMachineTokenRestore(t *testing.T, pg bool) {
 }
 
 func TestMachineTokenRestoreKeepsRevocationFloorSQLite(t *testing.T) {
+	t.Parallel()
 	testMachineTokenRestore(t, false)
 }
 func TestMachineTokenRestoreKeepsRevocationFloorPostgres(t *testing.T) {
+	t.Parallel()
 	testMachineTokenRestore(t, true)
 }
 
 // A revoked token whose installation is not in the backup has nothing to attach to: it is skipped,
 // and the restore is not refused for it.
 func TestMachineTokenRestoreSkipsAFloorWithoutItsInstallation(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	backup := dumpOf(t, src)
 	st := newTestStore(t)

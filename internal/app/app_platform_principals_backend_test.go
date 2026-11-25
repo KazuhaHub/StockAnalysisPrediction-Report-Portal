@@ -13,9 +13,9 @@ import (
 // not the static one. The directory must answer through it the same way: off until an administrator
 // enables the optional grant, the same principals the viewer later presents, and immediate withdrawal.
 func TestPlatformPrincipalDirectoryServesABackendApp(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
-		platformManagedFixtureOptional = []string{"principals.read"}
-		t.Cleanup(func() { platformManagedFixtureOptional = nil })
+		platformManagedFixtureOptional.set(t, []string{"principals.read"})
 		s, actor, lease := platformWritableAccessFixture(t, pg)
 		mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
 		t.Cleanup(func() {

@@ -16,6 +16,7 @@ import (
 // This measures the split on a stock shaped like a real one, because the answer decides the design:
 // a heavy skeleton would mean the endpoint has to be cut in two before anything can be prefetched.
 func TestReadingPayloadIsMostlyTheReportItself(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.names = LoadNames(t.TempDir(), s.st) // the handler resolves the company name through it
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
@@ -74,6 +75,7 @@ func TestReadingPayloadIsMostlyTheReportItself(t *testing.T) {
 // build all stay green while every tooltip silently disappears, because the client falls back to
 // no-tooltip when `title` is undefined.
 func TestTypeStripsCarryTheReportEachTabOpens(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.names = LoadNames(t.TempDir(), s.st)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})

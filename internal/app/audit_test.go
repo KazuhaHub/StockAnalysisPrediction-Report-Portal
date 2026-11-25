@@ -20,6 +20,7 @@ import (
 // users.group_id would answer "which OU are they in NOW", which is not what an audit line means.
 
 func TestAuditRecordsWhoDidWhatToWhich(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.WriteAudit(AuditEntry{Actor: "alice", ActorOU: 7, Action: "report.read",
@@ -54,6 +55,7 @@ func TestAuditRecordsWhoDidWhatToWhich(t *testing.T) {
 // A machine caller has no username; the line must still be recorded rather than dropped, or an
 // ingest token becomes the way to act unobserved.
 func TestAuditRecordsMachineActors(t *testing.T) {
+	t.Parallel()
 	st := tenancyServer(t).st
 	st.WriteAudit(AuditEntry{Actor: "", Action: "report.ingest", TargetType: "report", TargetID: "9"})
 	rows, total := st.ListAudit(AuditFilter{})
@@ -68,6 +70,7 @@ func TestAuditRecordsMachineActors(t *testing.T) {
 // Retention is the storage-cleanup subsystem's Target D, so "never delete" is simply the target
 // being off — no new concept, and no way for a hand-edited setting to half-apply it.
 func TestAuditRetentionDeletesOnlyWhatIsOldEnough(t *testing.T) {
+	t.Parallel()
 	st := tenancyServer(t).st
 	old := time.Now().Add(-100 * 24 * time.Hour).Format("2006-01-02 15:04:05")
 	st.WriteAudit(AuditEntry{Actor: "a", Action: "report.read", TargetType: "report", TargetID: "1"})
@@ -88,6 +91,7 @@ func TestAuditRetentionDeletesOnlyWhatIsOldEnough(t *testing.T) {
 
 // A search over the detail, because "what happened to this client" is asked in words, not ids.
 func TestAuditSearchesTheDetail(t *testing.T) {
+	t.Parallel()
 	st := tenancyServer(t).st
 	st.WriteAudit(AuditEntry{Actor: "admin", Action: "grant.change", TargetType: "version",
 		TargetID: "对外版", Detail: `{"added":["u:client@corp.example"]}`})
@@ -101,6 +105,7 @@ func TestAuditSearchesTheDetail(t *testing.T) {
 
 // Paging, because this is the one table expected to grow without bound.
 func TestAuditPages(t *testing.T) {
+	t.Parallel()
 	st := tenancyServer(t).st
 	for i := 0; i < 25; i++ {
 		st.WriteAudit(AuditEntry{Actor: "a", Action: "report.read", TargetType: "report",
@@ -116,6 +121,7 @@ func TestAuditPages(t *testing.T) {
 // rather than the store, because a hook that exists but is never reached logs nothing.
 
 func TestReadingAReportIsRecorded(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	id, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-31", RType: "投资决策",
 		Title: "内部", MD: "x"})
@@ -151,6 +157,7 @@ func TestReadingAReportIsRecorded(t *testing.T) {
 // side B is normally one the reader never opened. A log that answers "who read this report" while
 // that path exists answers it wrongly, which is worse than not answering.
 func TestComparingTwoReportsIsRecordedAsReadingBoth(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	a, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-06-30", RType: "投资决策", Title: "六月", MD: "# 估值\n目标价 48 元\n"})
 	b, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-31", RType: "投资决策", Title: "七月", MD: "# 估值\n目标价 55 元\n"})
@@ -190,6 +197,7 @@ func TestComparingTwoReportsIsRecordedAsReadingBoth(t *testing.T) {
 }
 
 func TestChangingAGrantIsRecordedWithBothSides(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})
 	s.st.SetVersionGrants("对外版", []string{"u:old@corp.example"})
@@ -220,6 +228,7 @@ func TestChangingAGrantIsRecordedWithBothSides(t *testing.T) {
 // grant list, which meant flipping 对外版 from owner-only to everyone produced an audit row whose
 // detail was "before == after" — a line that reads as "nothing changed" about the change itself.
 func TestChangingAVersionsVisibilityIsRecorded(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: "h", Role: "admin"})
@@ -243,6 +252,7 @@ func TestChangingAVersionsVisibilityIsRecorded(t *testing.T) {
 }
 
 func TestAuditIsAdminOnly(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "worker", PasswordHash: "h", Role: "user"})
 	s.st.WriteAudit(AuditEntry{Actor: "worker", Action: AuditReportRead, TargetType: "report", TargetID: "1"})
@@ -259,6 +269,7 @@ func TestAuditIsAdminOnly(t *testing.T) {
 }
 
 func TestAuditSnapshotsTokenName(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	r := httptest.NewRequest("POST", "/api/v1/reports", nil)
 	r.Header.Set("Authorization", "Bearer tok-all")
@@ -283,6 +294,7 @@ func TestAuditSnapshotsTokenName(t *testing.T) {
 }
 
 func TestAuditTokenDetailFallbacks(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, tc := range []struct{ name, raw, actor string }{
 		{"unknown key", "invalid", ""},

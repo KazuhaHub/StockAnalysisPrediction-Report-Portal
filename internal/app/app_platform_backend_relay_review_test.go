@@ -65,6 +65,7 @@ func TestPlatformUpdateStartRegistrationClosesBuiltKeyWhenCompletionFails(t *tes
 }
 
 func TestPlatformUpdateStartRegistrationRowErrorsKeepTheirType(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UnixMilli()
 	start := platformUpdateStartIntent{activationObserved: now - 1}
 	lease := platformOperationLease{}
@@ -80,6 +81,7 @@ func TestPlatformUpdateStartRegistrationRowErrorsKeepTheirType(t *testing.T) {
 }
 
 func TestPlatformDataCommandRowErrorsKeepTheirType(t *testing.T) {
+	t.Parallel()
 	missing := platformDataCommandRows{plan: "not json", targetErr: sql.ErrNoRows}
 	if _, err := platformDataCommandFromRows(missing, platformManagedSource{}, platformRuntimeRegistration{}, "", ""); !errors.Is(err, errAppPlatformStageEvidence) {
 		t.Fatalf("an invalid plan was reported as %v", err)
@@ -96,6 +98,7 @@ func TestPlatformDataCommandRowErrorsKeepTheirType(t *testing.T) {
 // A release that fails verification is refused as such, never as whatever a later read would say,
 // and a callback that opens secrets is never reached for it.
 func TestPlatformBackendReadRefusesUnverifiedReleaseFirst(t *testing.T) {
+	t.Parallel()
 	for _, also := range []string{"", "history"} {
 		t.Run("also-"+also, func(t *testing.T) {
 			s, actor, lease := platformWritableAccessFixture(t, false)

@@ -18,6 +18,7 @@ import (
 // Recovery must answer without waiting for SMTP, even when the address exists.
 // Comparing bodies also protects the response from becoming an account oracle.
 func TestNotificationBaselineRecoveryDoesNotWaitForMail(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.UpsertUser(User{Username: "recipient", PasswordHash: "hash", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -67,6 +68,7 @@ func TestNotificationBaselineRecoveryDoesNotWaitForMail(t *testing.T) {
 }
 
 func TestNotificationBaselineCompletionIntentIsSingleUse(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.UpsertUser(User{Username: "recipient", PasswordHash: "hash", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -105,6 +107,7 @@ func TestNotificationBaselineCompletionIntentIsSingleUse(t *testing.T) {
 
 // A shared event envelope must never be inserted into the legacy receiver body.
 func TestNotificationBaselineRawWebhookWireContract(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	const body = `{"id":9007199254740993,"title":"A < B & C","created":false}`

@@ -8,6 +8,7 @@ import (
 
 // EffectiveGroupSettings layers permissive baseline < Default group < primary group.
 func TestGroupGovernanceResolution(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	mkUser(t, st, "u", "user")
 	def := st.DefaultGroupID()
@@ -41,6 +42,7 @@ func TestGroupGovernanceResolution(t *testing.T) {
 }
 
 func TestParseRunWindow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		a, b int
@@ -63,6 +65,7 @@ func TestParseRunWindow(t *testing.T) {
 }
 
 func TestActiveJobCount(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if st.ActiveJobCount("u") != 0 {
 		t.Fatal("no jobs → 0")
@@ -78,6 +81,7 @@ func TestActiveJobCount(t *testing.T) {
 // The run window is evaluated at an explicit (effective run) hour, not submit time, and
 // handles midnight-wrapping windows.
 func TestRunWindowOpenAt(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	s.st.UpsertUser(User{Username: "u", PasswordHash: "x", Role: "user"})
 	def := s.st.DefaultGroupID()
@@ -112,6 +116,7 @@ func TestRunWindowOpenAt(t *testing.T) {
 
 // A group that disallows urgent downgrades an urgent submit even with the lane enabled.
 func TestUrgentAllowedGroupDisallow(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "x"}}
 	s.st.SetSetting("batch_urgent_enabled", "1")
 	s.st.UpsertUser(User{Username: "u", PasswordHash: "x", Role: "user"})

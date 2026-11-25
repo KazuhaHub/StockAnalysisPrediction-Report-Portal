@@ -29,6 +29,7 @@ func accountServer(t *testing.T) *Server {
 // it the UI would have to guess: offering a password change to a federated account, or a 2FA
 // enrolment to someone who already has one, is a dead end the user only discovers on submit.
 func TestMeReportsSecurityState(t *testing.T) {
+	t.Parallel()
 	s := accountServer(t)
 	me := func() map[string]any {
 		var out map[string]any
@@ -63,6 +64,7 @@ func TestMeReportsSecurityState(t *testing.T) {
 // IS the step-up here — it is the credential being replaced, so proving it is both necessary and
 // sufficient, and it is what every other product asks for.
 func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
+	t.Parallel()
 	s := accountServer(t)
 	change := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -92,6 +94,7 @@ func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 // be holding. A change that left a stolen cookie working would be theatre: the user believes they
 // have locked the intruder out, and they have not.
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
+	t.Parallel()
 	s := accountServer(t)
 	stolen := s.signUser(*s.st.GetUser("alice"))
 	if name, _ := s.verify(stolen); name != "alice" {
@@ -121,6 +124,7 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 // whose credentials the IdP owns — the SSO login path would refuse it, so it would be a password
 // that cannot be used.
 func TestChangePasswordRefusesFederatedAccounts(t *testing.T) {
+	t.Parallel()
 	s := accountServer(t)
 	s.st.SetUserSource("alice", "jit", "acme")
 	rec := httptest.NewRecorder()
@@ -134,6 +138,7 @@ func TestChangePasswordRefusesFederatedAccounts(t *testing.T) {
 // TestChangePasswordIsThrottled proves the endpoint is not a lockout-free oracle for the current
 // password, which is exactly what the login form refuses to be.
 func TestChangePasswordIsThrottled(t *testing.T) {
+	t.Parallel()
 	s := accountServer(t)
 	body := `{"current":"guess","new":"a-brand-new-passphrase"}`
 	for i := 0; i < 12; i++ {

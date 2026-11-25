@@ -30,6 +30,7 @@ func admitTaskFixture(t *testing.T, s *Server, installation, occurrence, handler
 }
 
 func TestPlatformTaskWorkerExecutesAfterBrowserIndependentClaim(t *testing.T) {
+	t.Parallel()
 	for _, postgres := range []bool{false, true} {
 		name := "sqlite"
 		if postgres {
@@ -80,6 +81,7 @@ func TestPlatformTaskWorkerExecutesAfterBrowserIndependentClaim(t *testing.T) {
 func TestPlatformTaskFailureLeavesPortalBusinessAvailableSQLite(
 	t *testing.T,
 ) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "task-failure-availability",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":"failure"}`))
@@ -127,6 +129,7 @@ func testPlatformTaskDigestResult(task platformTaskLease) ([]byte, error) {
 }
 
 func TestPlatformTaskConditionalClaimHasOneWinner(t *testing.T) {
+	t.Parallel()
 	for _, postgres := range []bool{false, true} {
 		name := "sqlite"
 		if postgres {
@@ -169,6 +172,7 @@ func TestPlatformTaskConditionalClaimHasOneWinner(t *testing.T) {
 }
 
 func TestPlatformTaskAuthorityRevocationWithholdsResult(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "revoked-before-result",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":true}`))
@@ -196,6 +200,7 @@ func TestPlatformTaskAuthorityRevocationWithholdsResult(t *testing.T) {
 }
 
 func TestPlatformTaskRetryIsBoundedAndNotImmediate(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "retry-once",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":true}`))
@@ -222,6 +227,7 @@ func TestPlatformTaskRetryIsBoundedAndNotImmediate(t *testing.T) {
 }
 
 func TestPlatformTaskUncertaintyNeverReleasesResultOrRetries(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "lost-confirmation",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":true}`))
@@ -298,10 +304,12 @@ func testPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(t *testing.T, p
 }
 
 func TestPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetriesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(t, false)
 }
 
 func TestPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetriesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(t, true)
 }
 
@@ -323,14 +331,17 @@ func testPlatformTaskClaimCommitsAuthorityLossWithoutWork(t *testing.T, postgres
 }
 
 func TestPlatformTaskClaimCommitsAuthorityLossWithoutWorkSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTaskClaimCommitsAuthorityLossWithoutWork(t, false)
 }
 
 func TestPlatformTaskClaimCommitsAuthorityLossWithoutWorkPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTaskClaimCommitsAuthorityLossWithoutWork(t, true)
 }
 
 func TestPlatformTaskAdmissionIsIdempotentAndImmutable(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {
@@ -362,6 +373,7 @@ func TestPlatformTaskAdmissionIsIdempotentAndImmutable(t *testing.T) {
 }
 
 func TestPlatformTaskLifecycleInvalidationSeparatesUnexecutedAndInFlight(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	admitTaskFixture(t, s, installation, "lifecycle-running",
 		appplatform.TaskHandlerBackend, []byte(`{"fixture":"running"}`))
@@ -390,6 +402,7 @@ func TestPlatformTaskLifecycleInvalidationSeparatesUnexecutedAndInFlight(t *test
 }
 
 func TestPlatformBackendTaskFailsClosedWithoutRunnerEndpoint(t *testing.T) {
+	t.Parallel()
 	s, _ := platformServiceIdentityFixture(t)
 	result := s.runPlatformBackendTask(
 		context.Background(),
@@ -402,6 +415,7 @@ func TestPlatformBackendTaskFailsClosedWithoutRunnerEndpoint(t *testing.T) {
 }
 
 func TestPlatformBackendTaskRechecksServiceIdentityBeforeNativeDispatch(t *testing.T) {
+	t.Parallel()
 	s, _ := platformServiceIdentityFixture(t)
 	endpoint := platformRuntimeEndpoint{
 		path: "/tmp/not-reached.sock", controllerUID: 1000, controllerGID: 1001,

@@ -101,15 +101,18 @@ func testStartedFailedInstallIsUninstalled(t *testing.T, pg bool) {
 }
 
 func TestStartedFailedInstallIsUninstalledSQLite(t *testing.T) {
+	t.Parallel()
 	testStartedFailedInstallIsUninstalled(t, false)
 }
 func TestStartedFailedInstallIsUninstalledPostgres(t *testing.T) {
+	t.Parallel()
 	testStartedFailedInstallIsUninstalled(t, true)
 }
 
 // The scheduler's loop must take the ordinary stop path for a started install: it prepares a stop intent (and so
 // would send the runner command) instead of skipping to delete-data.
 func TestStartedFailedInstallRemovalLoopStopsTheCandidate(t *testing.T) {
+	t.Parallel()
 	f := newStartedFailedInstall(t, false)
 	_, commit := f.uninstall(t, platformFixtureID(7410))
 	selected, err := f.s.claimNextPlatformManagedUninstall(context.Background(), platformFixtureID(7411))
@@ -130,6 +133,7 @@ func TestStartedFailedInstallRemovalLoopStopsTheCandidate(t *testing.T) {
 }
 
 func TestStartedFailedInstallEvidenceFailsClosed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, statement string }{
 		{"start_prepared", `UPDATE app_platform_operation_effects SET state='prepared' WHERE kind='start-candidate'`},
 		{"start_unknown", `UPDATE app_platform_operation_effects SET state='unknown' WHERE kind='start-candidate'`},
@@ -172,6 +176,7 @@ func TestStartedFailedInstallEvidenceFailsClosed(t *testing.T) {
 
 // A start that changes after review is refused at the stop stage by the same evidence comparison.
 func TestStartedFailedInstallRemovalRefusesAStartChangedAfterReview(t *testing.T) {
+	t.Parallel()
 	f := newStartedFailedInstall(t, false)
 	f.uninstall(t, platformFixtureID(7440))
 	lease := f.claimAtStop(t, platformFixtureID(7441))
@@ -185,6 +190,7 @@ func TestStartedFailedInstallRemovalRefusesAStartChangedAfterReview(t *testing.T
 }
 
 func TestStartedFailedInstallCanBeInstalledAgainAfterItsRemoval(t *testing.T) {
+	t.Parallel()
 	f := newStartedFailedInstall(t, false)
 	app := scalar[string](t, f.s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, f.installation)
 	if err := platformNoPriorInstall(migExec{s: f.s.st, ex: f.s.st.db}, app); err == nil {

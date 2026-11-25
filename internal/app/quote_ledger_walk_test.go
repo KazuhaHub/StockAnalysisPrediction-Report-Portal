@@ -16,6 +16,7 @@ func ledgerWalkSource(name string, fetch quoteRangeFetchFunc) quoteSource {
 }
 
 func TestLedgerWalkRefusesBeforeCallingSources(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	src := ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
 		calls++
@@ -39,6 +40,7 @@ func TestLedgerWalkRefusesBeforeCallingSources(t *testing.T) {
 }
 
 func TestLedgerWalkBreakerAndHealthAreSeparate(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	failure := errors.New("transport failure")
 	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
@@ -64,6 +66,7 @@ func TestLedgerWalkBreakerAndHealthAreSeparate(t *testing.T) {
 }
 
 func TestLedgerWalkTypedRefusalsAndCancellationDoNotBlameVendor(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []error{&ledgerRefusal{Code: "not_index"}, fmt.Errorf("wrapped: %w", &ledgerRefusal{Code: "not_index"}), context.Canceled} {
 		calls := 0
 		ctx, cancel := context.WithCancel(context.Background())
@@ -92,6 +95,7 @@ func TestLedgerWalkTypedRefusalsAndCancellationDoNotBlameVendor(t *testing.T) {
 }
 
 func TestLedgerWalkCancellationWhileWaitingForSlot(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
 		t.Fatal("cancelled slot waiter called the vendor")
 		return nil, nil
@@ -114,6 +118,7 @@ func TestLedgerWalkCancellationWhileWaitingForSlot(t *testing.T) {
 }
 
 func TestLedgerWalkCancellationBehindPassGateKeepsPassUsable(t *testing.T) {
+	t.Parallel()
 	tick := &ledgerTick{}
 	release, err := tick.acquire(context.Background())
 	if err != nil {
@@ -148,6 +153,7 @@ func TestLedgerWalkCancellationBehindPassGateKeepsPassUsable(t *testing.T) {
 }
 
 func TestLedgerWalkConcurrentPassHasOnlyThreeFailures(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	failure := errors.New("transport failure")
 	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
@@ -173,6 +179,7 @@ func TestLedgerWalkConcurrentPassHasOnlyThreeFailures(t *testing.T) {
 }
 
 func TestLedgerWalkPreservesFirstRefusalAndNeverCaches(t *testing.T) {
+	t.Parallel()
 	first := &ledgerRefusal{Code: "not_index"}
 	calls := 0
 	c := &quoteCache{sources: []quoteSource{
@@ -205,6 +212,7 @@ func TestLedgerWalkPreservesFirstRefusalAndNeverCaches(t *testing.T) {
 }
 
 func TestLedgerWalkHoldsOneSlotAcrossTheChain(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{}
 	c.init()
 	for i := 0; i < quoteUpstreamConcurrency-1; i++ {
@@ -240,6 +248,7 @@ func TestLedgerWalkHoldsOneSlotAcrossTheChain(t *testing.T) {
 }
 
 func TestLedgerWalkRejectsNilResponseAndDoesNotAdmitEvidenceFreeFallback(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	c := &quoteCache{sources: []quoteSource{
 		ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) { return nil, nil }),

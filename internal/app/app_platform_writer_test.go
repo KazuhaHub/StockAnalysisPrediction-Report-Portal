@@ -13,6 +13,7 @@ import (
 )
 
 func TestPlatformNotificationWriterFixtureStages(t *testing.T) {
+	t.Parallel()
 	s, session := platformTrustTestServer(t, false)
 	platformRegisterTestPublisher(t, s, session)
 	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")

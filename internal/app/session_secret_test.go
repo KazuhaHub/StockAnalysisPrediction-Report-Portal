@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestValidateSessionSecret(t *testing.T) {
+	t.Parallel()
 	for _, secret := range []string{"", "short", "replace-with-a-long-random-string"} {
 		if err := validateSessionSecret(secret); err == nil {
 			t.Errorf("validateSessionSecret(%q) = nil, want error", secret)

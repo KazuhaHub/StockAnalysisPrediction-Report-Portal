@@ -577,6 +577,7 @@ func buildGoldenMembers(t *testing.T, s *Server, spec goldenFixtureSpec) goldenM
 // TestForecastGoldenCells pins computeForecastCell for every group x checkpoint, with slices and
 // coverage, byte for byte. Every later release keeps this file identical.
 func TestForecastGoldenCells(t *testing.T) {
+	t.Parallel()
 	spec := goldenFixtureSpecFor()
 	_, sets := buildGoldenServer(t, spec)
 
@@ -586,6 +587,7 @@ func TestForecastGoldenCells(t *testing.T) {
 
 // TestForecastGoldenMembers pins the members response of every mature cell.
 func TestForecastGoldenMembers(t *testing.T) {
+	t.Parallel()
 	spec := goldenFixtureSpecFor()
 	s, _ := buildGoldenServer(t, spec)
 	goldenCompare(t, "golden_members.json", goldenJSON(t, buildGoldenMembers(t, s, spec)))

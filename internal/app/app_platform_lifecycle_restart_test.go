@@ -206,6 +206,7 @@ func platformLifecycleRestartTakeover(
 }
 
 func TestPlatformLifecycleRestartMatrixSQLite(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "lifecycle-restart.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -236,6 +237,7 @@ func TestPlatformLifecycleRestartMatrixSQLite(t *testing.T) {
 }
 
 func TestPlatformLifecycleRestartMatrixPostgres(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	platformLifecycleRestartSeedControl(t, st)
 	for _, tc := range platformLifecycleRestartCases {
@@ -253,6 +255,7 @@ func TestPlatformLifecycleRestartMatrixPostgres(t *testing.T) {
 }
 
 func TestPlatformLifecycleRestartMatrixCoverage(t *testing.T) {
+	t.Parallel()
 	cases := make(map[string]bool)
 	for _, tc := range platformLifecycleRestartCases {
 		cases[string(tc.stage)] = true

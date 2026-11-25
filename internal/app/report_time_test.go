@@ -13,6 +13,7 @@ import (
 // timestamp (never the old date-only fallback), a valid client-supplied instant is
 // honored (e.g. Dify passing /api/v1/now's utc), and an invalid one is replaced.
 func TestV1IngestStampsRealTime(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t) // tok-all
 
 	ingest := func(body string) {
@@ -58,6 +59,7 @@ func TestV1IngestStampsRealTime(t *testing.T) {
 
 // Same-day reports order by the real instant (UTC ISO8601 sorts chronologically).
 func TestSameDayOrderingByInstant(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	// Distinct subtypes: same code+date+subtype is now ONE report, so the two rows
 	// under test have to differ somewhere in the identity tuple.
@@ -81,6 +83,7 @@ func TestSameDayOrderingByInstant(t *testing.T) {
 
 // The instant is exposed as `time` on v1 report responses (list path shown).
 func TestV1ReportResponsesIncludeTime(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	ireq := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(
 		`{"symbol":"600160","date":"2026-07-02","subtype":"综合决策","body_md":"x"}`))

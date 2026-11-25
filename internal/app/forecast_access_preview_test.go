@@ -11,6 +11,7 @@ import (
 )
 
 func TestForecastAccessOverviewExcludesExpiredAccounts(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.st.SetSetting("timezone", "Pacific/Kiritimati")
 	today := s.panelToday()
@@ -41,6 +42,7 @@ func TestForecastAccessOverviewExcludesExpiredAccounts(t *testing.T) {
 }
 
 func TestPostgresForecastAccessOverviewUsesActiveAccounts(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	s := &Server{st: st}
 	id := seedOU(t, st, 0, scopeOwn)
@@ -86,6 +88,7 @@ func TestPostgresForecastAccessOverviewUsesActiveAccounts(t *testing.T) {
 }
 
 func TestForecastAccessPreviewMatchesRealAccess(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	def := s.st.DefaultGroupID()
 	root := seedOU(t, s.st, 0, scopeAll)
@@ -157,6 +160,7 @@ func TestForecastAccessPreviewMatchesRealAccess(t *testing.T) {
 }
 
 func TestForecastAccessPreviewRejectsInvalidQuery(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	for _, query := range []string{"?ou=1", "?scope=all", "?ou=0&scope=all", "?ou=abc&scope=all", "?ou=999999&scope=all", "?ou=1&scope=everyone", "?ou=1&scope=", "?ou=1&ou=2&scope=all"} {
 		w := httptest.NewRecorder()
@@ -181,6 +185,7 @@ func TestForecastAccessPreviewRejectsInvalidQuery(t *testing.T) {
 }
 
 func TestForecastAccessOverviewRefusesUnavailableStore(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	if err := s.st.db.Close(); err != nil {
 		t.Fatal(err)

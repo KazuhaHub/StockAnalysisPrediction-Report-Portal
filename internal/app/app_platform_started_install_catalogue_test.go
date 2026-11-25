@@ -10,6 +10,7 @@ import (
 // The console must be able to reach the uninstall: the release listing marks the failed install's own release as
 // uninstallable with its installation id, and the uninstall review carries that release so the console accepts it.
 func TestStartedFailedInstallIsOfferedForUninstallInTheCatalogue(t *testing.T) {
+	t.Parallel()
 	f := newStartedFailedInstall(t, false)
 	release := scalar[string](t, f.s.st, `SELECT target_release_sha256 FROM app_platform_review_plans WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, f.install)
 	mux := http.NewServeMux()

@@ -74,13 +74,16 @@ func testPlatformFrontendServiceOwnership(t *testing.T, pg bool) {
 }
 
 func TestPlatformFrontendServiceOwnershipSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendServiceOwnership(t, false)
 }
 func TestPlatformFrontendServiceOwnershipPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendServiceOwnership(t, true)
 }
 
 func TestPlatformFrontendServiceNewAdmissionSQLite(t *testing.T) {
+	t.Parallel()
 	s, actor, release := platformInstallFixture(t, false)
 	platformStartFrontendService(t, s)
 	platformAwaitFrontendService(t, s, "idle")
@@ -102,6 +105,7 @@ func TestPlatformFrontendServiceNewAdmissionSQLite(t *testing.T) {
 }
 
 func TestPlatformFrontendServiceBoundariesSQLite(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"pristine", "restore_paused", "native"} {
 		t.Run(kind, func(t *testing.T) {
 			var s *Server
@@ -132,6 +136,7 @@ func TestPlatformFrontendServiceBoundariesSQLite(t *testing.T) {
 }
 
 func TestPlatformFrontendServiceContainsPanic(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	w, err := newPlatformInstallScheduler(s, platformRuntimeEndpoint{}, platformFixtureID(960), 50*time.Millisecond)
 	if err != nil {

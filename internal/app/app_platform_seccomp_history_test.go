@@ -29,6 +29,7 @@ func platformWriterReceiptWithSeccomp(t *testing.T, r journal.DataWriterReceipt,
 // The writer receipt of an install made under the previous profile stays readable as history, so a running app
 // launches and answers requests; the install in progress still requires the current profile.
 func TestPlatformWriterReceiptSeccompModes(t *testing.T) {
+	t.Parallel()
 	_, lease, writer := platformWritableStartFixture(t, false)
 	now := time.Now().UnixMilli()
 	for name, tc := range map[string]struct {

@@ -45,9 +45,8 @@ func testMachineBlock() *appplatform.Machine {
 // answers through a recording hook (the runner path is covered separately).
 func platformMachineFixture(t *testing.T, pg bool) *platformMachineEnv {
 	t.Helper()
-	platformManagedFixtureOptional = []string{"machine.read"}
-	platformManagedFixtureMachine = testMachineBlock()
-	t.Cleanup(func() { platformManagedFixtureOptional, platformManagedFixtureMachine = nil, nil })
+	platformManagedFixtureOptional.set(t, []string{"machine.read"})
+	platformManagedFixtureMachine.set(t, testMachineBlock())
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
 	t.Cleanup(func() { mustExec(t, s.st, `DELETE FROM audit_log WHERE action LIKE 'app_platform.machine_%'`) })
@@ -165,6 +164,7 @@ func (e *platformMachineEnv) data(token, route, query, remote string) *httptest.
 const machineUnauthorized = `{"code":"unauthorized"}`
 
 func TestMachineReadIsOffUntilGrantedAndTokensAreShownOnce(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		// Not the single page, and nothing to authenticate with.
@@ -227,6 +227,7 @@ func TestMachineReadIsOffUntilGrantedAndTokensAreShownOnce(t *testing.T) {
 }
 
 func TestMachineTokenCreationRules(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		if w := e.enableWith(t, []string{"bars", "margin"}, 5, 4); w.Code != 200 {
@@ -277,6 +278,7 @@ func TestMachineTokenCreationRules(t *testing.T) {
 
 // Every way of failing to authenticate is the same answer, and none of them reaches the backend.
 func TestMachineAuthenticationFailuresAreUniform(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -358,6 +360,7 @@ func TestMachineAuthenticationFailuresAreUniform(t *testing.T) {
 }
 
 func TestMachineRoutesRoutePermissionAndPolicyShrink(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -409,6 +412,7 @@ func TestMachineRoutesRoutePermissionAndPolicyShrink(t *testing.T) {
 }
 
 func TestMachineSourceCIDRs(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -430,6 +434,7 @@ func TestMachineSourceCIDRs(t *testing.T) {
 }
 
 func TestMachineLimits(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		if w := e.enableWith(t, []string{"bars", "extra", "margin"}, 4, 16); w.Code != 200 {
@@ -473,6 +478,7 @@ func TestMachineLimits(t *testing.T) {
 }
 
 func TestMachineInstallationConcurrencyIsBounded(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		if w := e.enableWith(t, []string{"bars", "extra", "margin"}, 50, 2); w.Code != 200 {
@@ -515,6 +521,7 @@ func TestMachineInstallationConcurrencyIsBounded(t *testing.T) {
 }
 
 func TestMachineBackendAnswersAreMappedAndNothingElsePassesThrough(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -574,6 +581,7 @@ func TestMachineBackendAnswersAreMappedAndNothingElsePassesThrough(t *testing.T)
 }
 
 func TestMachineRoutesAreGetOnlyWithNoCORS(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -608,6 +616,7 @@ func TestMachineRoutesAreGetOnlyWithNoCORS(t *testing.T) {
 
 // What stops a token takes effect on the next request, in the same second, with no backend call.
 func TestMachineRevocationExpiryDisableAndPauseAreImmediate(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -681,6 +690,7 @@ func TestMachineRevocationExpiryDisableAndPauseAreImmediate(t *testing.T) {
 }
 
 func TestMachineRotation(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -739,6 +749,7 @@ func TestMachineRotation(t *testing.T) {
 }
 
 func TestMachineAuditSourceSummaryAndLastUse(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -792,6 +803,7 @@ func TestMachineAuditSourceSummaryAndLastUse(t *testing.T) {
 // binds the digest of a machine token that names the client and never the secret, the app's verifier
 // accepts it for exactly this request, and no other kind of token verifies as it (or it as them).
 func TestMachineRequestSignsAnAssertionTheRunnerAndAppAccept(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -878,6 +890,7 @@ func TestMachineRequestSignsAnAssertionTheRunnerAndAppAccept(t *testing.T) {
 }
 
 func TestMachineOpenAPIDocument(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -954,6 +967,7 @@ func TestMachineOpenAPIDocument(t *testing.T) {
 // AUTH-05 stays as it was and gains refusals for the new audience (doc 183 section 9, item 3): a
 // machine token is no viewer, no extension credential and no api token, and the reverse.
 func TestMachineTokenIsRefusedWhereViewersAreServed(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.enable(t)
@@ -1006,6 +1020,7 @@ func TestMachineTokenIsRefusedWhereViewersAreServed(t *testing.T) {
 // The machine class is its own registration: never a session route, never the cookie-admitting
 // bearer class, and only these patterns.
 func TestMachineRoutesAreTheirOwnAuthClass(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

@@ -7,6 +7,7 @@ import (
 )
 
 func TestVendorRatePolicyAdminValidationAndRuntimeWiring(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	defer publicVendorScheduler.configure(nil)
 	bad := quoteAdminSave(t, s, `{"ttlOpenSecs":120,"ratePolicies":{"tencent":{"requestsPerMinute":30,"backgroundPerMinute":30}}}`)
@@ -42,6 +43,7 @@ func TestVendorRatePolicyAdminValidationAndRuntimeWiring(t *testing.T) {
 }
 
 func TestVendorPolicyReadRejectsCorruptOrUnsafeValues(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	for _, raw := range []string{`broken`, `{"tencent":{"requestsPerMinute":0,"backgroundPerMinute":0}}`, `{"tencent":{"requestsPerMinute":1000000,"backgroundPerMinute":1}}`} {
 		s.st.SetSetting(setQuoteVendorRates, raw)

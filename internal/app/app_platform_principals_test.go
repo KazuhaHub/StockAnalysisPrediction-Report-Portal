@@ -47,6 +47,7 @@ func platformPrincipalsFixtureAdmin(t *testing.T, pg bool) (*Server, platformAct
 }
 
 func TestPlatformPrincipalsReadDoesNotBlockStaticLaunch(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, reader, id := platformPrincipalsFixture(t, pg)
 		platformGrantLaunchUser(t, s, reader, id)

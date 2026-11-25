@@ -8,6 +8,7 @@ import (
 )
 
 func TestApiAdminTypesKeepsUncategorizedGroupLast(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "test-secret"}}
 	s.st.UpsertTypeConfig("daily", "每日金股", "", 0, false)
 	s.st.UpsertTypeConfig("uncategorized", "未分类", "", 0, false)
@@ -32,6 +33,7 @@ func TestApiAdminTypesKeepsUncategorizedGroupLast(t *testing.T) {
 // report data is left untouched (a type still backed by reports reappears as an
 // unconfigured / discovered entry).
 func TestRestoreDefaultTypesWipesToFirstRunDefaults(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "test-secret"}}
 	seedDefaultTypes(s.st) // establish the shipped baseline, as first-run bootstrap does
 

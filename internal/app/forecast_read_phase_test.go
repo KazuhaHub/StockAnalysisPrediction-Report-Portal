@@ -11,6 +11,7 @@ import (
 )
 
 func TestReadCalendarConcurrentPublication(t *testing.T) {
+	t.Parallel()
 	e := &forecastEvaluator{}
 	var wg sync.WaitGroup
 	for worker := 0; worker < 8; worker++ {
@@ -35,6 +36,7 @@ func TestReadCalendarConcurrentPublication(t *testing.T) {
 }
 
 func TestNotBeforeIsALowerBound(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("testdata/forecast_exchange_closures_2023_2026.json")
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +125,7 @@ func TestNotBeforeIsALowerBound(t *testing.T) {
 }
 
 func TestReadUsesPublishedCompletedCalendarWithoutFetching(t *testing.T) {
+	t.Parallel()
 	sets := func() []PredictionSet {
 		return []PredictionSet{{BenchCode: "sh000852", MadeAt: "2026-10-18T13:00:00Z", MadeOn: "2026-10-18", S0Date: "2026-10-19", HorizonStd: true,
 			Marks: []PredictionMark{{Checkpoint: "d5", Status: markPending}}}}
@@ -158,6 +161,7 @@ func TestReadUsesPublishedCompletedCalendarWithoutFetching(t *testing.T) {
 }
 
 func TestEvaluatorPublishesOnlyValidatedCompletedCalendar(t *testing.T) {
+	t.Parallel()
 	now := shanghai(2026, time.October, 26, 14, 0)
 	dates := tradingDays("2026-10-16", 10)
 	index := barsFor(dates, 4000)
@@ -184,6 +188,7 @@ func TestEvaluatorPublishesOnlyValidatedCompletedCalendar(t *testing.T) {
 }
 
 func TestReadPhaseBoundaries(t *testing.T) {
+	t.Parallel()
 	due := dateAtClose("2026-10-26")
 	for _, tc := range []struct {
 		name, session, status, want string
@@ -214,6 +219,7 @@ func TestReadPhaseBoundaries(t *testing.T) {
 }
 
 func TestReadPhaseAnnotationClearsPreviousDerivedValues(t *testing.T) {
+	t.Parallel()
 	sets := []PredictionSet{{MadeAt: "2026-10-18T13:00:00Z", MadeOn: "2026-10-18", S0Date: "2026-10-19", HorizonStd: true,
 		Marks: []PredictionMark{{Checkpoint: "d5", Status: markResolved, Phase: "waiting", NotBefore: "2099-01-01"}}}}
 	annotateReadPhases(sets, time.Now())
@@ -223,6 +229,7 @@ func TestReadPhaseAnnotationClearsPreviousDerivedValues(t *testing.T) {
 }
 
 func TestReadTerminalPhasesDoNotRequireReceiptTiming(t *testing.T) {
+	t.Parallel()
 	sets := []PredictionSet{{MadeAt: "invalid", MadeOn: "invalid", Marks: []PredictionMark{
 		{Checkpoint: "d5", Status: markResolved, Phase: predPhaseWaiting, NotBefore: "2099-01-01", Expected: true},
 		{Checkpoint: "d20", Status: markRefusedFinal, Phase: predPhaseRetrying, NotBefore: "2099-01-01", Expected: true},

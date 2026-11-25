@@ -26,6 +26,7 @@ import (
 // tuple the second ingest silently OVERWRITES the first — publishing the external version would
 // destroy the internal one.
 func TestVersionSeparatesReportsThatWouldHaveCollided(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	ingest := func(version, body string) int64 {
 		id, _, err := s.st.UpsertReport(Rep{
@@ -62,6 +63,7 @@ func TestVersionSeparatesReportsThatWouldHaveCollided(t *testing.T) {
 // that cost 626 reports in v0.3.0. A producer that never heard of versions keeps overwriting in
 // place, as it does today.
 func TestVersionlessIngestIsStable(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	base := Rep{Symbol: "600519", Date: "2026-07-28", RType: "投资决策", Title: "T"}
 	first := base
@@ -93,6 +95,7 @@ func TestVersionlessIngestIsStable(t *testing.T) {
 // strings invented by whichever workflow ran, and that the default cannot be removed out from under
 // the reports resolving to it.
 func TestVersionRegistryIsAdminManaged(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if def := s.st.DefaultVersion(); def == "" {
 		t.Fatal("a default version must exist on a fresh database, or a version-less ingest has nowhere to land")
@@ -122,6 +125,7 @@ func TestVersionRegistryIsAdminManaged(t *testing.T) {
 // about disclosure starts closed. The failure direction of a forgotten setting has to be "too few
 // people see it".
 func TestNewVersionDefaultsToTheNarrowestVisibility(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if err := s.st.SaveVersion(ReportVersion{Name: "客户版", Ord: 2}); err != nil {
 		t.Fatal(err)
@@ -138,6 +142,7 @@ func TestNewVersionDefaultsToTheNarrowestVisibility(t *testing.T) {
 // written form it just generated. Omitting it stays exactly what it means today — the default
 // version — so every existing workflow keeps working untouched.
 func TestV1IngestAcceptsVersion(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	post := func(body string) map[string]any {
 		req := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(body))

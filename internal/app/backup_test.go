@@ -55,6 +55,7 @@ func scalar[T any](t *testing.T, st *Store, q string, args ...any) T {
 // empty one and every value comes back as itself — the big id intact rather than rounded through a
 // float, the unicode unmangled, the binary still binary, and NULL still NULL rather than "".
 func TestBackupRestoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	// Restore deliberately pauses operational dispatch. Start this losslessness
@@ -117,6 +118,7 @@ func stripHeader(dump []byte) []byte {
 // the whole file — that is what makes it useful as a "can this backup be read?" check — while
 // leaving the target exactly as it was, including the rows it would have deleted.
 func TestRestoreDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	dump := dumpOf(t, src)
@@ -154,6 +156,7 @@ func TestRestoreDryRunWritesNothing(t *testing.T) {
 // TestRestoreReplacesEverything proves a restore is a replacement rather than a merge: a row the
 // target has and the dump does not must be gone, or the result is a database that never existed.
 func TestRestoreReplacesEverything(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	dump := dumpOf(t, src)
@@ -182,6 +185,7 @@ func TestRestoreReplacesEverything(t *testing.T) {
 // written by a NEWER build, carrying a table or column this one has no schema for. Dropping it
 // silently is the failure mode that matters, so both must be hard errors that name the thing.
 func TestRestoreRefusesWhatItCannotStore(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	dump := string(dumpOf(t, src))
@@ -216,6 +220,7 @@ func TestRestoreRefusesWhatItCannotStore(t *testing.T) {
 // TestRestoreRejectsForeignFiles keeps the command from half-loading something that is not a dump —
 // a truncated download, or the wrong file entirely.
 func TestRestoreRejectsForeignFiles(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{
 		``,
 		`{"hello":"world"}`,
@@ -233,6 +238,7 @@ func TestRestoreRejectsForeignFiles(t *testing.T) {
 // loaded with the missing columns left at their defaults. Failing here rather than after the
 // destructive step is the point: the release that wrote the dump is the one that has to load it.
 func TestRestoreRefusesADumpFromAnOlderShape(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	dump := string(dumpOf(t, src))
@@ -259,6 +265,7 @@ func TestRestoreRefusesADumpFromAnOlderShape(t *testing.T) {
 // schema that the dump never visits. The list comes from the schema itself, so this stays true as
 // tables are added — but only as long as nobody replaces that with a hand-kept list.
 func TestBackupCoversEveryTable(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	dumped := map[string]bool{}
 	for _, line := range strings.Split(string(dumpOf(t, st)), "\n") {
@@ -344,6 +351,7 @@ func mustMarshal(t *testing.T, v any) string {
 // it was, because the alternative is a database holding the first third of someone else's data with
 // its own already deleted.
 func TestTruncatedRestoreLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	full := string(dumpOf(t, src))
@@ -381,6 +389,7 @@ func TestTruncatedRestoreLeavesNothingBehind(t *testing.T) {
 // "successfully" and only broke on the NEXT boot, which is a delayed failure after a destructive
 // operation, in the worst possible order.
 func TestRestoreRefusesAnotherSchemaGeneration(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	dump := string(dumpOf(t, src))
@@ -426,6 +435,7 @@ func TestRestoreRefusesAnotherSchemaGeneration(t *testing.T) {
 // dump without it was not written by any release of this feature and there is nothing to check it
 // against. Accepting it was the permissive branch that existed for legacy dumps.
 func TestRestoreRefusesADumpWithoutTheGenerationField(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	seedForBackup(t, src)
 	dump := strings.Replace(string(dumpOf(t, src)), `"schema_version":2,`, "", 1)
@@ -450,6 +460,7 @@ func TestRestoreRefusesADumpWithoutTheGenerationField(t *testing.T) {
 // already had — which is exactly the shape of a nightly script writing to the same path forever, so
 // the guarantee held for the first run and no other.
 func TestBackupFileIsNotReadableByOthers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfg, []byte("secret_key: \"0123456789abcdef0123456789abcdef\"\n"+

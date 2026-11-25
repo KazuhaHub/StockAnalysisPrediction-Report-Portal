@@ -9,6 +9,7 @@ import (
 )
 
 func TestPlatformSecretBindingPrincipalsHTTP(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

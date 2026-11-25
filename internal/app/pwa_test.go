@@ -9,6 +9,7 @@ import (
 // The default PWA icon must be a real 512x512 PNG (browsers reject an SVG advertised at
 // fixed pixel sizes, which is why the app was not installable).
 func TestDefaultPWAIconIsPNG(t *testing.T) {
+	t.Parallel()
 	b := defaultPWAIconPNG()
 	if len(b) == 0 {
 		t.Fatal("empty icon")
@@ -25,6 +26,7 @@ func TestDefaultPWAIconIsPNG(t *testing.T) {
 // The manifest advertises raster icons at the 192/512 sizes browsers require, and an SVG
 // only as a scalable "any" icon.
 func TestPWAIconEntries(t *testing.T) {
+	t.Parallel()
 	raster := pwaIconEntries("/site-assets/logo.png", "image/png")
 	has192, has512 := false, false
 	for _, e := range raster {

@@ -70,6 +70,7 @@ func enrol(t *testing.T, s *Server, user string) (secret string, recovery []stri
 // TestTOTPEnrolmentIsConfirmBeforeEnable proves a mistyped enrolment cannot lock the account:
 // 2FA only comes into force once a correct code has been proven.
 func TestTOTPEnrolmentIsConfirmBeforeEnable(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	rec := postStepUp(t, s.apiTOTPSetup, "alice", `{}`)
 	if rec.Code != http.StatusOK {
@@ -103,6 +104,7 @@ func TestTOTPEnrolmentIsConfirmBeforeEnable(t *testing.T) {
 // TestTOTPCodeCannotBeReplayed proves a code is burned once used — a shoulder-surfed code is not
 // reusable inside the ~30s window it stays arithmetically valid.
 func TestTOTPCodeCannotBeReplayed(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	secret, _ := enrol(t, s, "alice")
 	// Enrolment consumed the current step, so use the next one — which also proves the ±1 skew
@@ -128,6 +130,7 @@ func TestTOTPCodeCannotBeReplayed(t *testing.T) {
 // TestLoginRequiresSecondFactor proves the password alone no longer produces a session once 2FA is
 // on, and that the pending token is single-use.
 func TestLoginRequiresSecondFactor(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	secret, _ := enrol(t, s, "alice")
 
@@ -193,6 +196,7 @@ func TestLoginRequiresSecondFactor(t *testing.T) {
 
 // TestRecoveryCodeIsSingleUse proves a recovery code signs the user in exactly once.
 func TestRecoveryCodeIsSingleUse(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	_, codes := enrol(t, s, "alice")
 	if !s.consumeRecoveryCode("alice", codes[0]) {
@@ -212,6 +216,7 @@ func TestRecoveryCodeIsSingleUse(t *testing.T) {
 // TestTOTPUnavailableForFederatedAccounts proves we do not layer our own second factor onto an
 // account whose factors the IdP already owns.
 func TestTOTPUnavailableForFederatedAccounts(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	s.st.SetUserSource("alice", "jit", "acme")
 	if rec := postStepUp(t, s.apiTOTPSetup, "alice", `{}`); rec.Code == http.StatusOK {
@@ -222,6 +227,7 @@ func TestTOTPUnavailableForFederatedAccounts(t *testing.T) {
 // TestTOTPDisableNeedsAFactor proves turning 2FA off is a step-up action: a live session alone is
 // not enough, so a stolen cookie cannot quietly remove the second factor.
 func TestTOTPDisableNeedsAFactor(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	secret, codes := enrol(t, s, "alice")
 	if rec := postAs(t, s.apiTOTPDisable, "alice", `{"code":""}`); rec.Code == http.StatusOK {

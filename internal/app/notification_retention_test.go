@@ -6,6 +6,7 @@ import (
 )
 
 func TestNotificationRetentionPreservesLiveAndUncertainEvidence(t *testing.T) {
+	t.Parallel()
 	testNotificationRetentionPreservesLiveAndUncertainEvidence(t, newTestStore(t))
 }
 
@@ -70,6 +71,7 @@ func testNotificationRetentionPreservesLiveAndUncertainEvidence(t *testing.T, st
 }
 
 func TestNotificationRetentionKeepsReplayFamilyAndInboxBody(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "reader", Role: "user", PasswordHash: "h"}); err != nil {
 		t.Fatal(err)

@@ -25,6 +25,7 @@ func seedReadableMembershipReport(t *testing.T, s *Server, g gsSeed, title strin
 }
 
 func TestReadSetSelectionSurvivesRevisionLimit(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertReadSelectionBeyondLimit(t, newV1Server(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "prediction_purges", "reports")
@@ -88,6 +89,7 @@ func assertReadSelectionBeyondLimit(t *testing.T, s *Server) {
 }
 
 func TestSelectedPredictionLookupCannotCrossReports(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	g := gsSeed{Symbol: "600001", MadeOn: "2026-01-05", Bench: "sh000852"}
 	readable, _ := seedReadableMembershipReport(t, s, g, "Readable")
@@ -110,6 +112,7 @@ func TestSelectedPredictionLookupCannotCrossReports(t *testing.T) {
 }
 
 func TestMembershipLoadErrorOmitsMetadataButKeepsReport(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-01-05", Bench: "sh000852"}, "Decision")
 	if err := s.st.SetSetting(setForecastPopulationFrom, "damaged-instant"); err != nil {
@@ -125,6 +128,7 @@ func TestMembershipLoadErrorOmitsMetadataButKeepsReport(t *testing.T) {
 }
 
 func TestReadUpsideBPTruncatesWithoutOverflow(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		terminal, base int64
 		want           *int64
@@ -154,6 +158,7 @@ func readSemanticReport(t *testing.T, s *Server, reportID int64, sc *ownerScope)
 }
 
 func TestMembershipOnReadEqualsGroupStatistics(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		if st.driver == "postgres" {
 			// This suite's Postgres database is shared sequentially; unrelated ledger fixtures
@@ -209,6 +214,7 @@ func TestMembershipOnReadEqualsGroupStatistics(t *testing.T) {
 }
 
 func TestDisplayAndCountedSetIDs(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	g := gsSeed{Symbol: "600001", MadeOn: "2026-01-05", Bench: "sh000852"}
 	report, first := seedReadableMembershipReport(t, s, g, "Decision")
@@ -238,6 +244,7 @@ func TestDisplayAndCountedSetIDs(t *testing.T) {
 }
 
 func TestRestrictedViewerGetsNoMembership(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	g := gsSeed{Symbol: "600001", MadeOn: "2026-01-06", Bench: "sh000852"}
 	report, _ := seedReadableMembershipReport(t, s, g, "Readable decision")

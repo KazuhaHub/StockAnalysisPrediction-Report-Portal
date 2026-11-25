@@ -217,18 +217,33 @@ func testPlatformRemovalConcurrentCommit(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformRemovalReviewFlow(t *testing.T)          { testPlatformRemovalReviewFlow(t, false) }
-func TestPostgresAppPlatformRemovalReviewFlow(t *testing.T)  { testPlatformRemovalReviewFlow(t, true) }
-func TestAppPlatformRemovalStaleReview(t *testing.T)         { testPlatformRemovalStaleReview(t, false) }
-func TestPostgresAppPlatformRemovalStaleReview(t *testing.T) { testPlatformRemovalStaleReview(t, true) }
+func TestAppPlatformRemovalReviewFlow(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalReviewFlow(t, false)
+}
+func TestPostgresAppPlatformRemovalReviewFlow(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalReviewFlow(t, true)
+}
+func TestAppPlatformRemovalStaleReview(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalStaleReview(t, false)
+}
+func TestPostgresAppPlatformRemovalStaleReview(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalStaleReview(t, true)
+}
 func TestAppPlatformRemovalConcurrentCommit(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalConcurrentCommit(t, false)
 }
 func TestPostgresAppPlatformRemovalConcurrentCommit(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalConcurrentCommit(t, true)
 }
 
 func TestAppPlatformRemovalCommitRollsBackDenial(t *testing.T) {
+	t.Parallel()
 	s, session := platformRemovalFixture(t, false, false)
 	plan, err := s.createPlatformRemovalReview(session, platformFixtureID(1), appplatform.ActionUninstall)
 	if err != nil {
@@ -245,6 +260,7 @@ func TestAppPlatformRemovalCommitRollsBackDenial(t *testing.T) {
 }
 
 func TestPostgresAppPlatformRemovalExpiryWhileWaitingForLock(t *testing.T) {
+	t.Parallel()
 	s, session := platformRemovalFixture(t, true, false)
 	plan, err := s.createPlatformRemovalReview(session, platformFixtureID(1), appplatform.ActionUninstall)
 	if err != nil {

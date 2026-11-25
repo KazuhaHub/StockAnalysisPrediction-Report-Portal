@@ -8,6 +8,7 @@ import (
 )
 
 func TestPlatformReadinessRefusesUnstartedCandidate(t *testing.T) {
+	t.Parallel()
 	s, lease := platformCandidateIntentFixture(t, false)
 	if _, err := s.preparePlatformCandidateProbe(context.Background(), lease); err == nil {
 		t.Fatal("unstarted candidate became readiness")

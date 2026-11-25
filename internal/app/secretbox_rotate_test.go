@@ -35,6 +35,7 @@ func sealedUnder(t *testing.T, key string) (*Store, string, string) {
 // the ONE keyring row, leaves the data key itself untouched, and so keeps every already-sealed
 // secret readable — no re-encryption, no re-entering.
 func TestRotateSecretKeyRewrapsKeyring(t *testing.T) {
+	t.Parallel()
 	st, oidc, saml := sealedUnder(t, rotOldKey)
 	_, wrappedBefore, _ := st.Keyring()
 	saltBefore, _, _ := st.Keyring()
@@ -63,6 +64,7 @@ func TestRotateSecretKeyRewrapsKeyring(t *testing.T) {
 // once one boot has run with secret_key_previous set, the NEXT boot opens the keyring with the new
 // key alone — which is what lets an operator delete secret_key_previous from the config.
 func TestRotationPersistsForTheNextBoot(t *testing.T) {
+	t.Parallel()
 	st, oidc, _ := sealedUnder(t, rotOldKey)
 
 	rewrap := &Server{st: st, cfg: &config.Config{SecretKey: rotNewKey, SecretKeyPrevious: rotOldKey}}
@@ -87,6 +89,7 @@ func TestRotationPersistsForTheNextBoot(t *testing.T) {
 // orphaning the stored secrets — and the error must name both ways out, because at that point no
 // admin page can help (saving a secret needs the very key that will not open).
 func TestRotationWithoutPreviousKeyIsRefusedAndNamesTheRemedies(t *testing.T) {
+	t.Parallel()
 	st, oidc, _ := sealedUnder(t, rotOldKey)
 	saltBefore, wrappedBefore, _ := st.Keyring()
 
@@ -116,6 +119,7 @@ func TestRotationWithoutPreviousKeyIsRefusedAndNamesTheRemedies(t *testing.T) {
 // the config: a mistyped or unrelated previous key must fail, and must not overwrite the keyring
 // with something derived from it.
 func TestRotationWithTheWrongPreviousKeyIsRefused(t *testing.T) {
+	t.Parallel()
 	st, oidc, _ := sealedUnder(t, rotOldKey)
 	saltBefore, wrappedBefore, _ := st.Keyring()
 
@@ -138,6 +142,7 @@ func TestRotationWithTheWrongPreviousKeyIsRefused(t *testing.T) {
 // successful rotation: secret_key_previous still set, but the keyring already opens under the current
 // key. That must be a no-op (with a warning in the log), never a re-wrap back to the old key.
 func TestPreviousKeyIsHarmlessWhenNotNeeded(t *testing.T) {
+	t.Parallel()
 	st, oidc, _ := sealedUnder(t, rotOldKey)
 	_, wrappedBefore, _ := st.Keyring()
 
@@ -154,6 +159,7 @@ func TestPreviousKeyIsHarmlessWhenNotNeeded(t *testing.T) {
 // sealed BEFORE the rotation and one sealed AFTER it must both open under the same server, which can
 // only be true if the data key survived the re-wrap unchanged.
 func TestRotationLeavesTheDataKeyUnchanged(t *testing.T) {
+	t.Parallel()
 	st, oidc, _ := sealedUnder(t, rotOldKey)
 
 	s := &Server{st: st, cfg: &config.Config{SecretKey: rotNewKey, SecretKeyPrevious: rotOldKey}}

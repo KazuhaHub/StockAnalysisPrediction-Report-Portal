@@ -162,14 +162,17 @@ func testPlatformOfflineMarketHTTP(t *testing.T, pg bool) {
 }
 
 func TestPlatformOfflineMarketHTTPSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformOfflineMarketHTTP(t, false)
 }
 
 func TestPlatformOfflineMarketHTTPPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformOfflineMarketHTTP(t, true)
 }
 
 func TestPlatformOfflineMarketHTTPRefusals(t *testing.T) {
+	t.Parallel()
 	s, actor := platformTrustTestServer(t, false)
 	platformRegisterTestPublisher(t, s, actor)
 	mux := http.NewServeMux()

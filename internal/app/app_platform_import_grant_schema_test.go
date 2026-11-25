@@ -125,9 +125,11 @@ func testMigration0021RelaxesActionCheck(t *testing.T, pg bool) {
 }
 
 func TestMigration0021RelaxesActionCheckSQLite(t *testing.T) {
+	t.Parallel()
 	testMigration0021RelaxesActionCheck(t, false)
 }
 func TestMigration0021RelaxesActionCheckPostgres(t *testing.T) {
+	t.Parallel()
 	testMigration0021RelaxesActionCheck(t, true)
 }
 
@@ -160,14 +162,17 @@ func testMigration0021VerifyOnUpgradedAndFresh(t *testing.T, pg bool) {
 }
 
 func TestMigration0021VerifyOnUpgradedAndFreshSQLite(t *testing.T) {
+	t.Parallel()
 	testMigration0021VerifyOnUpgradedAndFresh(t, false)
 }
 func TestMigration0021VerifyOnUpgradedAndFreshPostgres(t *testing.T) {
+	t.Parallel()
 	testMigration0021VerifyOnUpgradedAndFresh(t, true)
 }
 
 // A widened check that admits more than restore_import is a weakened contract, not an upgrade.
 func TestMigration0021VerifyRefusesAWeakenedActionCheck(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tx, err := st.db.Begin()
 	if err != nil {
@@ -188,6 +193,7 @@ func TestMigration0021VerifyRefusesAWeakenedActionCheck(t *testing.T) {
 }
 
 func TestMigration0021ImportGrantConstraints(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tx, err := st.db.Begin()
 	if err != nil {
@@ -230,6 +236,7 @@ func TestMigration0021ImportGrantConstraints(t *testing.T) {
 }
 
 func TestSchemaUpgradeCLIAcceptsPre0021Database(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "pre0021.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -271,6 +278,7 @@ func TestSchemaUpgradeCLIAcceptsPre0021Database(t *testing.T) {
 // PostgreSQL must find the constraint it is about to replace. A missing one means the table is not the
 // shape this step expects, and re-adding a constraint over it would hide that.
 func TestSetPlatformActionChecksPostgresRefusesAMissingConstraint(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	name, err := platformActionCheckName("review_plans")
 	if err != nil {

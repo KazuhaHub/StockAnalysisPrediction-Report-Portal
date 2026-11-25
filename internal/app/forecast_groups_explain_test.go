@@ -9,6 +9,7 @@ import (
 )
 
 func TestNonMatureCellsCarryPendingReasons(t *testing.T) {
+	t.Parallel()
 	row := func(id int64, made, s0, status, session string) *groupSet {
 		return &groupSet{ID: id, MadeOn: made, MadeAt: made + "T16:00:00+08:00", S0Date: s0, HorizonStd: true,
 			Marks: map[string]PredictionMark{"d5": {Checkpoint: "d5", Status: status, SessionDate: session}}}
@@ -76,6 +77,7 @@ func explainFrozenCellState(members, pending []*groupSet, cp, end, today string)
 }
 
 func TestPendingReasonsDoNotChangeState(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(1701))
 	seen := map[string]int{}
 	for fixture := 0; fixture < 500; fixture++ {
@@ -117,6 +119,7 @@ func TestPendingReasonsDoNotChangeState(t *testing.T) {
 }
 
 func TestExternalAllGetsNoExplainVolume(t *testing.T) {
+	t.Parallel()
 	flag := true
 	resp := forecastGroupsResponse{Groups: []forecastGroup{{Cells: map[string]*forecastCell{
 		"d5":  {State: "mature", PendingReasons: map[string]int{predPhaseResolved: 32}, FailedCapExceeded: &flag, NotBefore: "2026-10-26", Expected: true},
@@ -159,6 +162,7 @@ func TestExternalAllGetsNoExplainVolume(t *testing.T) {
 }
 
 func TestPendingReasonsAccountForUnreadableDates(t *testing.T) {
+	t.Parallel()
 	sets := []*groupSet{{MadeAt: "broken", MadeOn: "broken", Marks: map[string]PredictionMark{"d5": {Checkpoint: "d5", Status: markPending}}}}
 	got := forecastCellWithPendingReasons(&forecastCell{State: "pending"}, sets, nil, "d5", time.Now(), nil)
 	if got.PendingReasons["unknown"] != 1 || got.NotBefore != "" {
@@ -167,6 +171,7 @@ func TestPendingReasonsAccountForUnreadableDates(t *testing.T) {
 }
 
 func TestPendingReasonsUseFrozenS0FromBothStores(t *testing.T) {
+	t.Parallel()
 	check := func(t *testing.T, s *Server) {
 		t.Helper()
 		id := seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-10-18", S0Fen: ip(10000), Marks: map[string]gsMark{"d5": {Status: markPending}}})
@@ -190,6 +195,7 @@ func TestPendingReasonsUseFrozenS0FromBothStores(t *testing.T) {
 }
 
 func TestPendingReasonsH12OnlyStandardHorizons(t *testing.T) {
+	t.Parallel()
 	standard := &groupSet{MadeOn: "2026-10-18", MadeAt: "2026-10-18T16:00:00+08:00", S0Date: "2026-10-19", HorizonStd: true,
 		Marks: map[string]PredictionMark{"h12": {Checkpoint: "h12", Status: markPending}}}
 	nonstandard := &groupSet{MadeOn: standard.MadeOn, MadeAt: standard.MadeAt, S0Date: standard.S0Date,
@@ -205,6 +211,7 @@ func TestPendingReasonsH12OnlyStandardHorizons(t *testing.T) {
 }
 
 func TestPendingReasonsUseClassifiedRoutePopulation(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	sampleMembers(t, s, 35, nil)
 	seedGroupSet(t, s, gsSeed{Symbol: symbolFor(0), MadeOn: "2025-06-11", S0Fen: ip(10000)})

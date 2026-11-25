@@ -8,6 +8,7 @@ import (
 )
 
 func TestPostgresAppPlatformFailedRestoreKeepsIdentityFloor(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	// Begin from a healthy sequence, independently of prior failed-restore
 	// fixtures. The failure under test happens only after this setup.

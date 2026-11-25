@@ -20,6 +20,7 @@ func (e *ouCountingExec) QueryRow(q string, args ...any) *sql.Row {
 }
 
 func TestUnifiedOUSnapshotReadsAreIndependentOfDepth(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	root := st.EnsureDefaultGroup()
 	parent := root
@@ -60,6 +61,7 @@ func TestUnifiedOUSnapshotReadsAreIndependentOfDepth(t *testing.T) {
 }
 
 func TestUnifiedOUSnapshotResolvesTypedPolicies(t *testing.T) {
+	t.Parallel()
 	s, org, team, _, _ := ouFixture(t)
 	st := s.st
 	if _, err := st.exec(`UPDATE user_groups SET max_queued=3,totp_enroll=1 WHERE is_default=1`); err != nil {
@@ -91,6 +93,7 @@ func TestUnifiedOUSnapshotResolvesTypedPolicies(t *testing.T) {
 }
 
 func TestUnifiedOUSecurityRejectsTruncatedChain(t *testing.T) {
+	t.Parallel()
 	s, org, team, _, _ := ouFixture(t)
 	if err := s.st.SetGroupParent(org, team); err != nil {
 		t.Fatal(err)

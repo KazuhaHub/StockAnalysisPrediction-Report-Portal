@@ -24,6 +24,7 @@ import (
 // the one worth copying.
 
 func TestRedactKeepsTheHostAndDropsTheKey(t *testing.T) {
+	t.Parallel()
 	raw := "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=SUPER_SECRET&suffix=tar.gz"
 	got := redactURL(raw)
 	if strings.Contains(got, "SUPER_SECRET") || strings.Contains(got, "license_key") {
@@ -42,6 +43,7 @@ func TestRedactKeepsTheHostAndDropsTheKey(t *testing.T) {
 // net/http returns *url.Error, whose Error() prints the whole URL. Wrapping one without rebuilding
 // it puts the key straight into the log line.
 func TestRedactURLErrRebuildsAUrlError(t *testing.T) {
+	t.Parallel()
 	raw := "https://download.maxmind.com/app/geoip_download?license_key=SUPER_SECRET"
 	err := redactURLErr(raw, &url.Error{Op: "Get", URL: raw, Err: errors.New("i/o timeout")})
 	if strings.Contains(err.Error(), "SUPER_SECRET") {
@@ -54,6 +56,7 @@ func TestRedactURLErrRebuildsAUrlError(t *testing.T) {
 
 // And the whole download path: every error an admin can trigger must be safe to show.
 func TestDownloadErrorsNeverCarryTheKey(t *testing.T) {
+	t.Parallel()
 	const key = "SUPER_SECRET_KEY"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A vendor's rejection page routinely echoes the key back; only the STATUS may be used.
@@ -80,6 +83,7 @@ func TestDownloadErrorsNeverCarryTheKey(t *testing.T) {
 // exactly "Invalid license key" — that one sentence is the whole diagnosis, and dropping it leaves
 // an admin staring at "401 Unauthorized" with nothing to act on.
 func TestDownloadErrorCarriesTheVendorsExplanation(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte("Invalid license key"))
@@ -101,6 +105,7 @@ func TestDownloadErrorCarriesTheVendorsExplanation(t *testing.T) {
 // so blunt that it eats it. Everything else in the query is treated as a credential — a custom
 // source can name its parameters anything, so the safe default is to keep only what we emit.
 func TestVendorMessageKeepsTheEditionAndDropsTheKey(t *testing.T) {
+	t.Parallel()
 	raw := "https://x/db?edition_id=GeoLite2-City&license_key=SUPER_SECRET_KEY"
 	msg := vendorMessage(raw, strings.NewReader("no subscription for GeoLite2-City with license_key=SUPER_SECRET_KEY"))
 	if strings.Contains(msg, "SUPER_SECRET_KEY") {
@@ -114,6 +119,7 @@ func TestVendorMessageKeepsTheEditionAndDropsTheKey(t *testing.T) {
 // An HTML error page is noise rather than an explanation, and it is where a credential is most
 // likely to be quoted back inside markup the query-value scrub would not necessarily catch.
 func TestVendorMessageIgnoresAnHTMLErrorPage(t *testing.T) {
+	t.Parallel()
 	if msg := vendorMessage("https://x/db", strings.NewReader("<html><body>403 Forbidden</body></html>")); msg != "" {
 		t.Errorf("an HTML page was shown as the vendor's message: %q", msg)
 	}
@@ -124,6 +130,7 @@ func TestVendorMessageIgnoresAnHTMLErrorPage(t *testing.T) {
 // says one thing: this one is about unwrapping, the next about refusing to install rubbish.
 
 func TestExtractsABareDatabase(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	if err := extractMMDB(strings.NewReader("raw-database-bytes"), "https://x/y.mmdb?token=T", &out); err != nil {
 		t.Fatalf("extract: %v", err)
@@ -135,6 +142,7 @@ func TestExtractsABareDatabase(t *testing.T) {
 
 // MaxMind ships a .tar.gz with the database nested in a dated directory.
 func TestExtractsFromTheMaxMindTarball(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	src := bytes.NewReader(tarGZ(t, map[string]string{
 		"GeoLite2-City_20260801/COPYRIGHT.txt":      "(c)",
@@ -151,6 +159,7 @@ func TestExtractsFromTheMaxMindTarball(t *testing.T) {
 // DB-IP gzips the database directly, with no tar around it. Told apart by the tar magic in the
 // DECOMPRESSED stream, not by the file extension, which a redirect can make a liar of.
 func TestExtractsFromAPlainGzip(t *testing.T) {
+	t.Parallel()
 	var gzbuf bytes.Buffer
 	zw := gzip.NewWriter(&gzbuf)
 	zw.Write([]byte("dbip-database-bytes"))
@@ -166,6 +175,7 @@ func TestExtractsFromAPlainGzip(t *testing.T) {
 }
 
 func TestExtractRejectsAnArchiveWithNoDatabase(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	src := bytes.NewReader(tarGZ(t, map[string]string{"README.txt": "nothing here"}))
 	err := extractMMDB(src, "https://x?license_key=SECRET", &out)
@@ -181,6 +191,7 @@ func TestExtractRejectsAnArchiveWithNoDatabase(t *testing.T) {
 // with a 200 must not replace a database that works. Validation happens on the temp file, before
 // the swap.
 func TestRubbishNeverReplacesTheLiveDatabase(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("<html>upstream had a bad day</html>"))
 	}))
@@ -215,6 +226,7 @@ func TestRubbishNeverReplacesTheLiveDatabase(t *testing.T) {
 // Every selectable source must be handled by candidateURLs. The two drifting apart would give an
 // admin a source that saves and then fails only at download time.
 func TestEverySourceIsHandled(t *testing.T) {
+	t.Parallel()
 	for _, src := range geoSources {
 		if !validGeoSource(src) {
 			t.Errorf("%q is offered but not valid", src)
@@ -238,6 +250,7 @@ func TestEverySourceIsHandled(t *testing.T) {
 
 // A vendor that needs a credential must say so rather than fetching without one and failing oddly.
 func TestSourcesThatNeedACredentialSaySo(t *testing.T) {
+	t.Parallel()
 	for _, src := range []string{"maxmind", "ipinfo"} {
 		if _, _, err := candidateURLs(src, "", "", ""); err == nil {
 			t.Errorf("%s built a URL with no credential", src)
@@ -257,6 +270,7 @@ func TestSourcesThatNeedACredentialSaySo(t *testing.T) {
 // AddDate(0,-1,0) normalises the 31st back into the same month, which would make the DB-IP
 // fallback identical to the URL that just failed.
 func TestPreviousMonthIsAlwaysADifferentMonth(t *testing.T) {
+	t.Parallel()
 	for _, d := range []string{"2026-03-31", "2026-05-31", "2026-01-31", "2026-03-01"} {
 		at, _ := time.Parse("2006-01-02", d)
 		if prev := prevMonthOf(at); prev.Month() == at.Month() {
@@ -267,6 +281,7 @@ func TestPreviousMonthIsAlwaysADifferentMonth(t *testing.T) {
 
 // A second click must not start a second download onto the same temp file.
 func TestASecondUpdateIsRefusedWhileOneRuns(t *testing.T) {
+	t.Parallel()
 	u := newTestUpdater(t)
 	u.st.SetSetting(setGeoSource, "custom")
 	u.st.SetSetting(setGeoURL, "https://example.invalid/db.mmdb")
@@ -282,6 +297,7 @@ func TestASecondUpdateIsRefusedWhileOneRuns(t *testing.T) {
 }
 
 func TestStartRefusesWithNoURLConfigured(t *testing.T) {
+	t.Parallel()
 	u := newTestUpdater(t)
 	if err := u.Start(); err == nil {
 		t.Fatal("started an update with no source")
@@ -335,6 +351,7 @@ func tarGZ(t *testing.T, files map[string]string) []byte {
 // nothing: the picker showed "." and the fallback only worked by accident, because a stat of the
 // geoip directory itself happens to be a directory and gets skipped.
 func TestSavingAutomaticStoresTheEmptyPick(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.geo = newGeoService(t.TempDir())
 	s.geo.st = s.st

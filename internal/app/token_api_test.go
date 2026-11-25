@@ -8,6 +8,7 @@ import (
 )
 
 func TestTokenCreateReturnsSecretOnceAndListReturnsPrefix(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	created := httptest.NewRecorder()
 	s.apiTokenAdd(created, httptest.NewRequest("POST", "/api/admin/tokens", strings.NewReader(`{"name":"ci","scope":"query"}`)), "admin")
@@ -41,6 +42,7 @@ func TestTokenCreateReturnsSecretOnceAndListReturnsPrefix(t *testing.T) {
 }
 
 func TestTokenCreateRejectsUnknownScope(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	w := httptest.NewRecorder()
 	s.apiTokenAdd(w, httptest.NewRequest("POST", "/api/admin/tokens", strings.NewReader(`{"scope":"admin"}`)), "admin")

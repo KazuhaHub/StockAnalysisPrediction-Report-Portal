@@ -11,6 +11,7 @@ import (
 )
 
 func TestProjectionMatchesKnownCalendars(t *testing.T) {
+	t.Parallel()
 	made := shanghai(2026, 9, 17, 16, 0)
 	for cp, want := range map[string]string{"d5": "2026-09-28", "d20": "2026-10-26", "d60": "2026-12-21"} {
 		sch, expected := predReadProjection(cp, made, true, "")
@@ -26,6 +27,7 @@ func TestProjectionMatchesKnownCalendars(t *testing.T) {
 }
 
 func TestProjectionRespectsReceiptCloseAndHolidayStarts(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ receipt, s0, d5 string }{
 		{"2026-09-17T14:59:59+08:00", "2026-09-17", "2026-09-24"},
 		{"2026-09-17T15:00:00+08:00", "2026-09-18", "2026-09-28"},
@@ -49,6 +51,7 @@ func TestProjectionRespectsReceiptCloseAndHolidayStarts(t *testing.T) {
 }
 
 func TestMissingYearDegradesToOnOrAfter(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ made, cp, frozen string }{
 		{"2027-01-04T08:00:00+08:00", "d5", ""},
 		{"2026-12-28T16:00:00+08:00", "d20", ""},
@@ -73,6 +76,7 @@ func TestMissingYearDegradesToOnOrAfter(t *testing.T) {
 }
 
 func TestReadProjectionQualifiesDatesWithoutChangingEvaluatorWake(t *testing.T) {
+	t.Parallel()
 	sets := []PredictionSet{{MadeAt: "2026-09-17T16:00:00+08:00", MadeOn: "2026-09-17", HorizonStd: true,
 		Marks: []PredictionMark{{Checkpoint: "d20", Status: markPending}, {Checkpoint: "h12", Status: markPending}}}}
 	wake := predWakeAt(forecastWorkSet{MadeAt: sets[0].MadeAt, MadeOn: sets[0].MadeOn}, "d20")
@@ -94,6 +98,7 @@ func TestReadProjectionQualifiesDatesWithoutChangingEvaluatorWake(t *testing.T) 
 }
 
 func TestSettlementNeverReadsTheTable(t *testing.T) {
+	t.Parallel()
 	files, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)

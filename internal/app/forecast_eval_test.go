@@ -76,6 +76,7 @@ func barsFor(dates []string, close int64) []QuoteBar {
 // A float here would be a threshold comparison that resolves differently on different platforms, in
 // the one table whose whole purpose is being citable.
 func TestBpFromRatioIsExact(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		to, from int64
 		want     int32
@@ -102,6 +103,7 @@ func TestBpFromRatioIsExact(t *testing.T) {
 // TestDailyLimitFollowsTheBoard: the backstop for an unreported 送转 depends on knowing what a legal
 // one-day move is, and the answer differs by board.
 func TestDailyLimitFollowsTheBoard(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		symbol string
 		want   int64
@@ -124,6 +126,7 @@ func TestDailyLimitFollowsTheBoard(t *testing.T) {
 // A limit-down day is a real move and must not be excluded as a corporate action; a gap larger than
 // the limit cannot be trading and must be.
 func TestBeyondDailyLimitNeverFlagsALegalMove(t *testing.T) {
+	t.Parallel()
 	bars := []QuoteBar{
 		bar("2026-10-20", 1000, 1000, 1010, 990),
 		bar("2026-10-21", 1000, 900, 1005, 898), // exactly -10%: a limit-down day
@@ -144,6 +147,7 @@ func TestBeyondDailyLimitNeverFlagsALegalMove(t *testing.T) {
 // TestCorporateActionFromTheDividendElement: the vendor names cash dividends outright, and that is
 // the primary signal. No qfq fetch is involved.
 func TestCorporateActionFromTheDividendElement(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-01", 20)
 	bars := barsFor(dates, 1000)
 	from, to := dates[2], dates[10]
@@ -170,6 +174,7 @@ func TestCorporateActionFromTheDividendElement(t *testing.T) {
 // Tencent serves today's bar during trading, and a resolved mark is never revisited, so believing
 // that bar would freeze a live price into the record.
 func TestCompletedSessionsExcludesAnUnfinishedBar(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 6)
 	cal := forecastSeries{Bars: append(barsFor(dates, 4000), bar("2026-11-02", 4000, 4000, 4010, 3990))}
 	today := dates[5]
@@ -197,6 +202,7 @@ func TestCompletedSessionsExcludesAnUnfinishedBar(t *testing.T) {
 // TestSettleMarkHandlesAHalt: a halted stock resolves on its last traded close and is FLAGGED, not
 // refused. A refusal that can never resolve is what hollows out a cohort without showing it.
 func TestSettleMarkHandlesAHalt(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-20", 30)
 	stock := barsFor(dates[:8], 1000) // stops trading after dates[7]
 	index := barsFor(dates, 4000)
@@ -226,6 +232,7 @@ func TestSettleMarkHandlesAHalt(t *testing.T) {
 // TestSettleMarkNeverLooksBeforeBaseDate: a bar printed before the report existed is not this report's
 // outcome, and the fill window starts at the same boundary for the same reason.
 func TestSettleMarkNeverLooksBeforeBaseDate(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-20", 30)
 	// A big move BEFORE the report's base date, then a flat stretch after it.
 	stock := barsFor(dates, 1000)
@@ -250,6 +257,7 @@ func TestSettleMarkNeverLooksBeforeBaseDate(t *testing.T) {
 // TestSettleMarkMeasuresAgainstTheBenchmark: the excess return is what the metrics use, and it is the
 // stock's return minus the index's over the SAME window.
 func TestSettleMarkMeasuresAgainstTheBenchmark(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-20", 10)
 	stock := barsFor(dates, 1100) // +10%
 	stock[0].Close = 1000         // the anchor is the S0 close the set stored
@@ -274,6 +282,7 @@ func TestSettleMarkMeasuresAgainstTheBenchmark(t *testing.T) {
 // TestResolveStartBarUsesTheReceiptTimeOfDay: S0 follows the 15:00 rule, and the base date is the
 // first session the stock actually traded on.
 func TestResolveStartBarUsesTheReceiptTimeOfDay(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 10)
 	stock := barsFor(dates, 1000)
 	madeAt := shanghai(2026, time.October, 19, 10, 0) // before the close on the first session
@@ -312,6 +321,7 @@ func TestResolveStartBarUsesTheReceiptTimeOfDay(t *testing.T) {
 // write — not "quiet". A loop that checked the setting after touching the store would still cost a
 // query per minute on every install.
 func TestEvaluatorDoesNothingWhenOff(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastAuto, "0"); err != nil {
 		t.Fatal(err)
@@ -348,6 +358,7 @@ func TestEvaluatorDoesNothingWhenOff(t *testing.T) {
 // TestResolvedMarkIsTerminal: the guard is the whole immutability promise. A second pass — an
 // overlapping tick, a restart, a retry — must not be able to rewrite a conclusion.
 func TestResolvedMarkIsTerminal(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-10-17")
 	var markID int64
@@ -387,6 +398,7 @@ func TestResolvedMarkIsTerminal(t *testing.T) {
 // TestBaselineIsWrittenOnce: the starting point of a set's whole return series must not move, so the
 // write is guarded on base_check rather than unconditional.
 func TestBaselineIsWrittenOnce(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-10-17")
 	dates := tradingDays("2026-10-19", 5)
@@ -417,6 +429,7 @@ func TestBaselineIsWrittenOnce(t *testing.T) {
 // TestRefusalFinalityIsPerV26: a mark-specific failure is an attempt and can become final; a source
 // failure leaves attempts unchanged and never counts toward finality.
 func TestRefusalFinalityIsPerV26(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-10-17")
 	var markID int64
@@ -463,6 +476,7 @@ func TestRefusalFinalityIsPerV26(t *testing.T) {
 
 // TestForecastSettingsRoundTrip: a switch with no writer is a constant with a misleading name.
 func TestForecastSettingsRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	satisfyForecastReadiness(t, s)
 
@@ -610,6 +624,7 @@ func seedAcceptedSetAt(t *testing.T, s *Server, symbol, date string) int64 {
 // sign of `from`, so a version that used it directly is off by one basis point on every exact tie
 // below zero — a small number, in the one table whose whole point is that its numbers are exact.
 func TestBpFromRatioRoundsHalfAwayFromZeroOnBothSides(t *testing.T) {
+	t.Parallel()
 	// 5000 * t = -x.5 exactly, for x from 1 to 9: every one of these is a tie.
 	for _, tc := range []struct{ to, from, want int64 }{
 		{9999, 10000, -1},  // -0.01% exactly, rounds to -1
@@ -628,6 +643,7 @@ func TestBpFromRatioRoundsHalfAwayFromZeroOnBothSides(t *testing.T) {
 // both series, resolve S0, settle each due mark, and write the baseline. Every rule above is pinned
 // in isolation; this one is what says they compose.
 func TestEvaluatorTickSettlesDueMarks(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastAuto, "1"); err != nil {
 		t.Fatal(err)

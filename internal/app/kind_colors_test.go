@@ -10,6 +10,7 @@ import (
 // KindColors lets an admin assign an antd Tag preset color to each report kind
 // (大类), replacing the frontend's previously-hardcoded KIND_COLORS map.
 func TestKindColorsStoreCRUD(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if got := st.KindColors(); len(got) != 0 {
 		t.Fatalf("KindColors on a fresh store = %v, want empty", got)
@@ -40,6 +41,7 @@ func TestKindColorsStoreCRUD(t *testing.T) {
 // On a fresh database, the shipped default kind→color mapping (matching the
 // portal's pipeline kinds) is seeded exactly once, mirroring seedDefaultTypes.
 func TestSeedDefaultKindColors(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	n := seedDefaultKindColors(st)
 	if n != len(defaultKindColors) {
@@ -55,6 +57,7 @@ func TestSeedDefaultKindColors(t *testing.T) {
 
 // POST /api/admin/kind-colors upserts a single kind's color.
 func TestApiKindColorSave(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "test-secret"}}
 	code, _ := call(t, s.apiKindColorSave, `{"kind":"投资决策","color":"volcano"}`, "admin")
 	if code != http.StatusOK {
@@ -74,6 +77,7 @@ func TestApiKindColorSave(t *testing.T) {
 // The Types admin page fetches groups/kinds and the configured colors from the
 // same /api/admin/types response.
 func TestApiAdminTypesIncludesColors(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "test-secret"}}
 	s.st.SetKindColor("投资决策", "volcano")
 	code, out := call(t, s.apiAdminTypes, `{}`, "admin")
@@ -92,6 +96,7 @@ func TestApiAdminTypesIncludesColors(t *testing.T) {
 // The home feed also returns kindColors so the browser can color each card's
 // kind Tag without a second round-trip.
 func TestApiHomeIncludesKindColors(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "test-secret"}, names: LoadNames(t.TempDir(), st)}
 	s.st.SetKindColor("深度研究", "geekblue")

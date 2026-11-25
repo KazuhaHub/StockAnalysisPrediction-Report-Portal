@@ -127,10 +127,12 @@ func testPlatformPublisherConcurrentNamespaces(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformPublisherTrustSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPublisherTrust(t, false)
 	testPlatformPublisherConcurrentNamespaces(t, false)
 }
 func TestPlatformPublisherTrustPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPublisherTrust(t, true)
 	testPlatformPublisherConcurrentNamespaces(t, true)
 }
@@ -214,10 +216,12 @@ func testPlatformTrustAtomicAudit(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformTrustRefusalSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustRefusal(t, false)
 	testPlatformTrustAtomicAudit(t, false)
 }
 func TestPlatformTrustRefusalPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustRefusal(t, true)
 	testPlatformTrustAtomicAudit(t, true)
 }
@@ -251,13 +255,16 @@ func testPlatformTrustInvalidatesReviews(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformTrustReviewInvalidationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustInvalidatesReviews(t, false)
 }
 func TestPlatformTrustReviewInvalidationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustInvalidatesReviews(t, true)
 }
 
 func TestPlatformTrustAcrossIndependentSQLiteStores(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "trust.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {

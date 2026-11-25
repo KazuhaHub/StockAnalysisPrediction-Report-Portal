@@ -79,6 +79,7 @@ func testPlatformPublisherManagementHTTP(t *testing.T, pg bool) {
 }
 
 func TestPlatformPublisherInitializeRefusesOrphanedTrust(t *testing.T) {
+	t.Parallel()
 	s, mux, _, _, cookie := platformManagementFixture(t, false)
 	mustExec(t, s.st, `DELETE FROM meta WHERE k IN ('app_platform_actor_seed','app_platform_controller_epoch','app_platform_restore_paused')`)
 	got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/control/initialize", cookie, `{"action":"initialize"}`)
@@ -88,6 +89,7 @@ func TestPlatformPublisherInitializeRefusesOrphanedTrust(t *testing.T) {
 }
 
 func TestPlatformPublisherInitializeRefusesRetainedArtifact(t *testing.T) {
+	t.Parallel()
 	s, actor := platformActorTestServer(t, false)
 	mustExec(t, s.st, `INSERT INTO app_platform_frontend_artifacts(sha256,archive_bytes,content,created_ms) VALUES(?,1,?,1)`, strings.Repeat("a", 64), []byte{1})
 	mux := http.NewServeMux()
@@ -104,6 +106,7 @@ func TestPlatformPublisherInitializeRefusesRetainedArtifact(t *testing.T) {
 }
 
 func TestPlatformPublisherHTTPRoleAndOrigin(t *testing.T) {
+	t.Parallel()
 	s, mux, actor, _, cookie := platformManagementFixture(t, false)
 	request := httptest.NewRequest("POST", "/api/admin/app-platform/control/initialize", strings.NewReader(`{"action":"initialize"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -124,6 +127,7 @@ func TestPlatformPublisherHTTPRoleAndOrigin(t *testing.T) {
 }
 
 func TestPlatformPublisherManagementCancellationPostgres(t *testing.T) {
+	t.Parallel()
 	s, mux, _, _, cookie := platformManagementFixture(t, true)
 	for _, kind := range []string{"read", "write", "initialize"} {
 		t.Run(kind, func(t *testing.T) {
@@ -191,13 +195,16 @@ func TestPlatformPublisherManagementCancellationPostgres(t *testing.T) {
 }
 
 func TestPlatformPublisherManagementHTTPSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPublisherManagementHTTP(t, false)
 }
 func TestPlatformPublisherManagementHTTPPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPublisherManagementHTTP(t, true)
 }
 
 func TestPlatformPublisherHTTPInputRefusals(t *testing.T) {
+	t.Parallel()
 	_, mux, _, _, cookie := platformManagementFixture(t, false)
 	for _, body := range []string{
 		`{}`, `null`, `{"action":"register","action":"register"}`,

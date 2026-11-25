@@ -27,6 +27,7 @@ func settingsRoundTrip(t *testing.T, s *Server, body string) int {
 }
 
 func TestPublicURLIsAGeneralSetting(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 
 	if code := settingsRoundTrip(t, s, `{"publicUrl":"https://portal.example.com/"}`); code != http.StatusOK {
@@ -50,6 +51,7 @@ func TestPublicURLIsAGeneralSetting(t *testing.T) {
 // Saving the general settings without mentioning it must not wipe it — the field is a pointer for
 // the same reason the SMTP password is: an omitted key means "leave alone", not "clear".
 func TestPublicURLSurvivesAnUnrelatedSettingsSave(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.SetSetting("public_url", "https://portal.example.com")
 	if code := settingsRoundTrip(t, s, `{"siteTitle":"安禅AI投研"}`); code != http.StatusOK {
@@ -63,6 +65,7 @@ func TestPublicURLSurvivesAnUnrelatedSettingsSave(t *testing.T) {
 // The email page no longer owns it, but a portal upgrading has the value already stored under the
 // same key, so nothing needs re-entering.
 func TestPublicURLReadsTheExistingStoredValue(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.SetSetting("public_url", "https://old.example.org/")
 	if got := s.publicBaseURL(); got != "https://old.example.org" {

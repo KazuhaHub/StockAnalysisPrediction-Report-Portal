@@ -18,6 +18,7 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // cadenceDue is the shared daily/weekly/monthly engine (cleanup + recurring). It fires at most once
 // per matching day, gated by frequency, weekday/month-day, the time, and the last-run stamp.
 func TestCadenceDue(t *testing.T) {
+	t.Parallel()
 	loc := time.UTC
 	base := time.Date(2026, 7, 13, 3, 30, 0, 0, loc) // a Monday, 03:30
 	wd := int(base.Weekday())
@@ -56,6 +57,7 @@ func TestCadenceDue(t *testing.T) {
 
 // nextCadence resolves the next fire instant strictly after now, across wrap and month-clamp edges.
 func TestNextCadence(t *testing.T) {
+	t.Parallel()
 	loc := time.UTC
 	mon := time.Date(2026, 7, 13, 10, 0, 0, 0, loc) // Monday 10:00
 	cases := []struct {
@@ -109,6 +111,7 @@ func seedRecurring(t *testing.T, st *Store, tgt int64, owner string, task Recurr
 // A task survives a create → get → update → enable-toggle → delete round trip, and its runs are
 // recorded and removed with it.
 func TestRecurringStoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	id := seedRecurring(t, st, tgt, "alice", RecurringTask{
@@ -173,6 +176,7 @@ func okProviderServer(st *Store) *Server {
 // recurringTick fires a due task exactly once per period: it creates a job + an audit row, stamps
 // last_fired, and a second tick in the same period does not re-fire.
 func TestRecurringTickFiresStampsAndDedups(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := okProviderServer(st)
@@ -199,6 +203,7 @@ func TestRecurringTickFiresStampsAndDedups(t *testing.T) {
 
 // A disabled task is never fired by the tick.
 func TestRecurringTickSkipsDisabled(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := okProviderServer(st)
@@ -212,6 +217,7 @@ func TestRecurringTickSkipsDisabled(t *testing.T) {
 // The fire path uses the task's stored priority as-is (idle / urgent / an explicit base number) and
 // resolves a blank to the creator's group base — never spending an urgent ticket (ADR 0018 sec 4).
 func TestFireRecurringTaskPriorityResolution(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := okProviderServer(st)
@@ -239,6 +245,7 @@ func TestFireRecurringTaskPriorityResolution(t *testing.T) {
 // A task pointing at a deleted target (or with an empty template) is logged-and-skipped, not a hard
 // failure — fireRecurringTask returns 0 and creates no job.
 func TestFireRecurringTaskSkips(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := okProviderServer(st)
@@ -268,6 +275,7 @@ func seedAdminUser(t *testing.T, st *Store, name string) {
 // The create endpoint rejects bad input; a non-admin's attempt at urgent / an explicit base number is
 // coerced to normal, while an admin may pin urgent (top priority) or a base number.
 func TestApiRecurringCreateValidation(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := &Server{st: st}
@@ -322,6 +330,7 @@ func TestApiRecurringCreateValidation(t *testing.T) {
 
 // A non-admin may not touch another user's task.
 func TestApiRecurringOwnership(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	s := &Server{st: st}

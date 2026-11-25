@@ -294,6 +294,7 @@ func noBackoff(t *testing.T) {
 }
 
 func TestReclaimComputesOnlyTheImagesNothingReferences(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	for _, name := range []string{"old", "active", "previous", "restorable", "shared", "free"} {
 		f.release(t, name)
@@ -338,6 +339,7 @@ func TestReclaimComputesOnlyTheImagesNothingReferences(t *testing.T) {
 // The removed installation itself references nothing: removing an installation frees its releases, which is the
 // uninstall case of the sweep.
 func TestReclaimAfterAnUninstallFreesTheRemovedInstallationsImages(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "app")
 	f.load(t, "app")
@@ -354,6 +356,7 @@ func TestReclaimAfterAnUninstallFreesTheRemovedInstallationsImages(t *testing.T)
 // Fails if a release whose descriptor cannot be read lets anything be removed: with the references in doubt the
 // image stays.
 func TestReclaimFailsClosedWhenAReferencedReleaseCannotBeRead(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -370,6 +373,7 @@ func TestReclaimFailsClosedWhenAReferencedReleaseCannotBeRead(t *testing.T) {
 
 // A load with no verdict may be introducing any image: nothing on that runtime is removed meanwhile.
 func TestReclaimWaitsForALoadWithNoVerdict(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -386,6 +390,7 @@ func TestReclaimWaitsForALoadWithNoVerdict(t *testing.T) {
 }
 
 func TestReclaimSendsOneSignedRemovalPerImageAndNeverAgainOnceApplied(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	for _, name := range []string{"a", "b"} {
 		f.release(t, name)
@@ -434,6 +439,7 @@ func TestReclaimSendsOneSignedRemovalPerImageAndNeverAgainOnceApplied(t *testing
 
 // An image loaded again after it was removed is a target again; one removed and not reloaded is not.
 func TestReclaimTreatsAReloadAfterARemovalAsLoadedAgain(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -452,6 +458,7 @@ func TestReclaimTreatsAReloadAfterARemovalAsLoadedAgain(t *testing.T) {
 
 // A container using the image is the runner's refusal: the row ends reverted, and the same host does not resend.
 func TestReclaimRecordsTheRunnersInUseRefusalAndDoesNotResend(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -470,6 +477,7 @@ func TestReclaimRecordsTheRunnersInUseRefusalAndDoesNotResend(t *testing.T) {
 
 // A lost reply is read back under the same identity, and an unknown removal is never sent again before the read.
 func TestReclaimReadsAnUncertainExecuteBackUnderItsOwnIdentity(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -483,6 +491,7 @@ func TestReclaimReadsAnUncertainExecuteBackUnderItsOwnIdentity(t *testing.T) {
 }
 
 func TestReclaimResolvesAnUnknownRemovalOnALaterTickWithoutAWrongIdentity(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -513,6 +522,7 @@ func TestReclaimResolvesAnUnknownRemovalOnALaterTickWithoutAWrongIdentity(t *tes
 
 // An unknown removal whose image is referenced again is not completed: the Portal closes its row and sends nothing.
 func TestReclaimDoesNotCompleteAnUnknownRemovalOfAnImageReferencedAgain(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -536,6 +546,7 @@ func TestReclaimDoesNotCompleteAnUnknownRemovalOfAnImageReferencedAgain(t *testi
 // A runner that has no claim (a load of the image has no verdict there, say) leaves the row prepared: it is not
 // settled and not resent blind, and the next tick tries the removal again.
 func TestReclaimLeavesAnUnclaimedRemovalForALaterTick(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -549,6 +560,7 @@ func TestReclaimLeavesAnUnclaimedRemovalForALaterTick(t *testing.T) {
 }
 
 func TestReclaimReportsABusyRunnerAsBusy(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -563,6 +575,7 @@ func TestReclaimReportsABusyRunnerAsBusy(t *testing.T) {
 
 // An installation with a running operation hosts no removal: its fence and generation belong to that operation.
 func TestReclaimWaitsWhileTheInstallationHasARunningOperation(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -576,6 +589,7 @@ func TestReclaimWaitsWhileTheInstallationHasARunningOperation(t *testing.T) {
 // An idle tick reaches the step: an installation whose operation finished and whose image nothing references is
 // reclaimed by the scheduler with no other trigger.
 func TestSchedulerIdleTickReclaimsTheImagesNothingReferences(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "old")
 	f.load(t, "old")
@@ -591,6 +605,7 @@ func TestSchedulerIdleTickReclaimsTheImagesNothingReferences(t *testing.T) {
 
 // The scheduler's own hook runs the step with its endpoint, and tolerates a failure: it never fails a tick.
 func TestSchedulerReclaimHookSendsTheRemovalsAnOperationFreed(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "old")
 	f.load(t, "old")
@@ -612,6 +627,7 @@ func TestSchedulerReclaimHookSendsTheRemovalsAnOperationFreed(t *testing.T) {
 // and must then reclaim the images: a new ending that forgot the step would leak images. The check reads the source
 // of the scheduler, as the SQL guard tests do.
 func TestEveryOperationEndingSweepsBlobsAndThenReclaimsImages(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("app_platform_install_scheduler.go")
 	if err != nil {
 		t.Fatal(err)
@@ -629,6 +645,7 @@ func TestEveryOperationEndingSweepsBlobsAndThenReclaimsImages(t *testing.T) {
 }
 
 func TestRemoveImageKindIsInTheEffectAllowList(t *testing.T) {
+	t.Parallel()
 	if !platformEffectKindAllowed("stage", platformRemoveImageKind) {
 		t.Fatal("remove_image is not in the effect kind allow-list")
 	}

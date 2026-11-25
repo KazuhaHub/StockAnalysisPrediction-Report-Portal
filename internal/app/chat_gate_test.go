@@ -18,6 +18,7 @@ import (
 // must never wait behind a report run. It's a simple ceiling that sheds load when full.
 
 func TestChatMaxConcurrentSetting(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	// Default is 0 = unlimited, so an upgrade never silently caps a running deployment.
@@ -36,6 +37,7 @@ func TestChatMaxConcurrentSetting(t *testing.T) {
 }
 
 func TestChatGateCeilingAndRelease(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	st.SetSetting("chat_max_concurrent", "2")
@@ -65,6 +67,7 @@ func TestChatGateCeilingAndRelease(t *testing.T) {
 }
 
 func TestChatGateUnlimited(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st} // default 0 = unlimited
 	for i := 0; i < 50; i++ {
@@ -78,6 +81,7 @@ func TestChatGateUnlimited(t *testing.T) {
 }
 
 func TestAdminChatConfigAndLive(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 
@@ -117,6 +121,7 @@ func TestAdminChatConfigAndLive(t *testing.T) {
 // A stop cancels the turn's context AND best-effort tells Dify to stop the run (POST
 // /chat-messages/{task}/stop with the turn's OWN end-user), so the run stops billing.
 func TestChatStopCancelsAndCallsDify(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	stopCh := make(chan [2]string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +166,7 @@ func TestChatStopCancelsAndCallsDify(t *testing.T) {
 // A stop before any task id streamed still cancels the turn locally, with no Dify handle to
 // call StopChat with — and must not panic.
 func TestChatStopBeforeTaskIDCancelsOnly(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	ctx, cancel := context.WithCancel(context.Background())
 	turnID, _ := s.chatAcquire(&chatTurn{ConvID: 3, Cancel: cancel}) // no Client, no TaskID
@@ -178,6 +184,7 @@ func TestChatStopBeforeTaskIDCancelsOnly(t *testing.T) {
 
 // Admin stop of an unknown / already-finished turn id is a 404, not a panic.
 func TestAdminChatStopUnknownTurn(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/x", nil)
@@ -191,6 +198,7 @@ func TestAdminChatStopUnknownTurn(t *testing.T) {
 // chatStopByConv finds every in-flight turn on a conversation (owner path), and none for one
 // with nothing in flight.
 func TestChatStopByConv(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	s.chatAcquire(&chatTurn{ConvID: 7, Cancel: func() {}})
 	s.chatAcquire(&chatTurn{ConvID: 9, Cancel: func() {}})

@@ -85,8 +85,10 @@ func testPlatformSecretBindingPrincipals(t *testing.T, pg bool) {
 }
 
 func TestPlatformSecretBindingPrincipalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretBindingPrincipals(t, false)
 }
 func TestPlatformSecretBindingPrincipalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformSecretBindingPrincipals(t, true)
 }

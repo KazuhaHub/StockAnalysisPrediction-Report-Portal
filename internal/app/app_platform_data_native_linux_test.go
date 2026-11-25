@@ -1027,6 +1027,7 @@ func bindPlatformFixtureRuntime(t *testing.T, s *Server, session platformActorSe
 }
 
 func TestPlatformInstallDataEndpointChild(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_DATA_CHILD") != "1" {
 		t.Skip("isolated Portal data child only")
 	}

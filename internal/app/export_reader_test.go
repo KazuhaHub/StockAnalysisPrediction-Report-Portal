@@ -98,6 +98,7 @@ func zipNames(t *testing.T, raw []byte) []string {
 // ---------- 1. step 0013 ----------
 
 func TestReaderExportStep0013AddsExactlyTheDeclaredShape(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "m13.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -165,6 +166,7 @@ func windBackBeforeStep0013(t *testing.T, st *Store) {
 }
 
 func TestReaderExportOlderDumpRestores(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	windBackBeforeStep0013(t, src)
 	dump := dumpOf(t, src)
@@ -206,10 +208,12 @@ func assertDefaultExportPolicy(t *testing.T, st *Store) {
 }
 
 func TestReaderExportDefaultOUPolicyOnAFreshDatabase(t *testing.T) {
+	t.Parallel()
 	assertDefaultExportPolicy(t, newTestStore(t))
 }
 
 func TestReaderExportDefaultOUPolicyIsNormalisedAtBootButNeverOverwrites(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "boot13.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -240,6 +244,7 @@ func TestReaderExportDefaultOUPolicyIsNormalisedAtBootButNeverOverwrites(t *test
 // ---------- 3. inheritance ----------
 
 func TestReaderExportPolicyInheritsAndReportsItsSource(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	child := seedOU(t, e.s.st, e.ou, nil)
 	grandchild := seedOU(t, e.s.st, child, nil)
@@ -303,6 +308,7 @@ func TestReaderExportPolicyInheritsAndReportsItsSource(t *testing.T) {
 // ---------- 4. disabled ----------
 
 func TestReaderExportDisabledAnswers403(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(3, "V1")
 	e.setPolicy(e.ou, 0, 100, 1000)
@@ -324,6 +330,7 @@ func TestReaderExportDisabledAnswers403(t *testing.T) {
 }
 
 func TestReaderExportDefaultsToOffForAnOUThatNeverSetIt(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.setPolicy(e.ou, nil, nil, nil)
 	if p := e.policyOf("rita"); p["allowed"] != false || p["max_reports"] != float64(200) || p["daily_quota"] != float64(1000) {
@@ -334,6 +341,7 @@ func TestReaderExportDefaultsToOffForAnOUThatNeverSetIt(t *testing.T) {
 // ---------- 5. scope ----------
 
 func TestReaderExportNeverLeavesTheReadScope(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.addReader("ext", true)
 	e.reports(3, "pub")
@@ -413,6 +421,7 @@ func TestReaderExportNeverLeavesTheReadScope(t *testing.T) {
 }
 
 func TestReaderExportScopeIsReResolvedWhenTheWorkerStarts(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.addReader("ext", true)
 	e.reports(3, "pub")
@@ -437,6 +446,7 @@ func TestReaderExportScopeIsReResolvedWhenTheWorkerStarts(t *testing.T) {
 // ---------- 6. limits ----------
 
 func TestReaderExportLimits(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(10, "V1")
 
@@ -468,6 +478,7 @@ func TestReaderExportLimits(t *testing.T) {
 }
 
 func TestReaderExportEmptyMatchIsRefused(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	w := e.submit("rita", readerCreate)
 	if w.Code != http.StatusBadRequest || decodeBody(t, w)["error"] != "export_empty" {
@@ -476,6 +487,7 @@ func TestReaderExportEmptyMatchIsRefused(t *testing.T) {
 }
 
 func TestReaderExportInvalidFilterIsA400(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(1, "V1")
 	w := e.submit("rita", `{"source":"reports","filter":{"op":"and","items":[{"field":"nope","operator":"is","values":["x"]}]}}`)
@@ -487,6 +499,7 @@ func TestReaderExportInvalidFilterIsA400(t *testing.T) {
 // ---------- 7. concurrency ----------
 
 func TestReaderExportConcurrentSubmitsCannotBothPassTheQuota(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(6, "V1")
 	e.setPolicy(e.ou, 1, 100, 10)
@@ -531,6 +544,7 @@ func TestReaderExportConcurrentSubmitsCannotBothPassTheQuota(t *testing.T) {
 // ---------- 8. usage and refunds ----------
 
 func TestReaderExportUsageRefundsDownToWhatWasWritten(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(5, "V1")
 
@@ -562,6 +576,7 @@ func TestReaderExportUsageRefundsDownToWhatWasWritten(t *testing.T) {
 }
 
 func TestReaderExportUsageIsPerPanelDay(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(5, "V1")
 	decodeBody(t, e.submit("rita", readerCreate))
@@ -578,6 +593,7 @@ func TestReaderExportUsageIsPerPanelDay(t *testing.T) {
 // ---------- 9. cap ----------
 
 func TestReaderExportNeverExceedsTheCapItWasChargedFor(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(3, "V1")
 	job := decodeBody(t, e.submit("rita", readerCreate))
@@ -599,6 +615,7 @@ func TestReaderExportNeverExceedsTheCapItWasChargedFor(t *testing.T) {
 // ---------- 10. switched off after submit ----------
 
 func TestReaderExportSwitchedOffAfterSubmitFailsTheQueuedJob(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(3, "V1")
 	job := decodeBody(t, e.submit("rita", readerCreate))
@@ -623,6 +640,7 @@ func TestReaderExportSwitchedOffAfterSubmitFailsTheQueuedJob(t *testing.T) {
 // ---------- 11. other people's tasks ----------
 
 func TestReaderExportOtherUsersTasksAre404(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.addReader("rob", false)
 	e.reports(3, "V1")
@@ -665,6 +683,7 @@ func TestReaderExportOtherUsersTasksAre404(t *testing.T) {
 }
 
 func TestReaderCannotUseTheAdminExportRoutes(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	for _, p := range []string{"/api/admin/exports", "/api/admin/exports/policy", "/api/admin/exports/sources"} {
 		if w := e.do("rita", "GET", p, ""); w.Code != http.StatusForbidden {
@@ -679,6 +698,7 @@ func TestReaderCannotUseTheAdminExportRoutes(t *testing.T) {
 // ---------- 12. source and format ----------
 
 func TestReaderExportRefusesOtherSourcesAndFormats(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(2, "V1")
 	for name, body := range map[string]string{
@@ -720,6 +740,7 @@ func TestReaderExportRefusesOtherSourcesAndFormats(t *testing.T) {
 // ---------- 13. audit ----------
 
 func TestReaderExportAuditRowsCarryTheReaderScope(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(3, "V1")
 	job := decodeBody(t, e.submit("rita", readerCreate))
@@ -771,6 +792,7 @@ func (e *readerEnv) putPolicy(ou int64, body string) *httptest.ResponseRecorder 
 }
 
 func TestReaderExportPolicyEditRefusesInheritOnDefaultAndEnforcesBounds(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	def := e.s.st.DefaultGroupID()
 	for _, body := range []string{`{"allowed":null}`, `{"max_reports":null}`, `{"daily_quota":null}`} {
@@ -804,6 +826,7 @@ func TestReaderExportPolicyEditRefusesInheritOnDefaultAndEnforcesBounds(t *testi
 }
 
 func TestReaderExportPolicyEditIsTriStateAndAudited(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	child := seedOU(t, e.s.st, e.ou, nil)
 	e.addReader("kid", false)
@@ -866,6 +889,7 @@ func TestReaderExportPolicyEditIsTriStateAndAudited(t *testing.T) {
 // ---------- administrators ----------
 
 func TestReaderExportAdministratorsAreNotGovernedByThePolicy(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(3, "V1")
 	p := e.policyOf("admin")
@@ -905,6 +929,7 @@ func archiveIDs(t *testing.T, raw []byte) []string {
 // first under a cap would drop the oldest counted reports to make room for them, so the job is bound
 // to the ids that existed at submit.
 func TestReaderExportContainsExactlyTheReportsCountedAtSubmit(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.reports(3, "V1")
 	var want []string
@@ -938,6 +963,7 @@ func TestReaderExportContainsExactlyTheReportsCountedAtSubmit(t *testing.T) {
 
 // A username is re-registerable: a later holder must not inherit the previous one's tasks or usage.
 func TestReaderExportDeletedUsersTasksDoNotPassToTheNextHolder(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.s.wireExportCleanup()
 	e.reports(3, "V1")
@@ -973,6 +999,7 @@ func TestReaderExportDeletedUsersTasksDoNotPassToTheNextHolder(t *testing.T) {
 }
 
 func TestReaderExportRunningJobOfADeletedUserIsNotResurrected(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.s.wireExportCleanup()
 	e.s.exports.batchSize = 2
@@ -995,6 +1022,7 @@ func TestReaderExportRunningJobOfADeletedUserIsNotResurrected(t *testing.T) {
 
 // Pipeline plumbing types are not reports a reader can see anywhere else, so they are not exportable.
 func TestReaderExportExcludesInternalPlumbingTypes(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	e.addReader("ext", true)
 	var internal string
@@ -1058,6 +1086,7 @@ func TestReaderExportExcludesInternalPlumbingTypes(t *testing.T) {
 // TestPostgresReaderExport runs the parts that differ between the drivers: the step's columns, the
 // policy read, the usage sum and the per-requester lock that serialises the quota check.
 func TestPostgresReaderExport(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "export_jobs")
 	for _, c := range []string{"export_allowed", "export_max_reports", "export_daily_quota"} {
 		if !st.columnExists("user_groups", c) {
@@ -1069,7 +1098,7 @@ func TestPostgresReaderExport(t *testing.T) {
 	}
 	s := &Server{st: st}
 	ou, err := st.insertID(`INSERT INTO user_groups(name,description,created_at,weight,urgent_unlimited,is_default,export_allowed,
-		export_max_reports,export_daily_quota) VALUES(?,?,?,0,0,0,1,50,10)`, fmt.Sprintf("pg-export-%d", ouNameSeq), "", nowStr())
+		export_max_reports,export_daily_quota) VALUES(?,?,?,0,0,0,1,50,10)`, fmt.Sprintf("pg-export-%d", ouNameSeq.Add(1)), "", nowStr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1124,6 +1153,7 @@ func TestPostgresReaderExport(t *testing.T) {
 // name: an administrator deleted mid-submit can leave such a row behind, and a reader who later takes
 // the name must not reach it (it can be any source, the audit log included).
 func TestReaderExportNonReaderJobsUnderTheNameAreNotTheReaders(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	j := &exportJob{ID: strings.Repeat("a", 32), Source: "audit", Format: "csv", Params: `{"name":"x"}`,
 		RequestedBy: "rita", Status: "queued", CreatedAt: 1}
@@ -1146,6 +1176,7 @@ func TestReaderExportNonReaderJobsUnderTheNameAreNotTheReaders(t *testing.T) {
 
 // A submit whose requester was deleted after authentication inserts nothing, on both drivers.
 func TestReaderExportSubmitForADeletedRequesterInsertsNothing(t *testing.T) {
+	t.Parallel()
 	e := newReaderEnv(t)
 	j := &exportJob{ID: strings.Repeat("b", 32), Source: "reports", Format: "md_zip",
 		Params: `{"name":"x","reader":true}`, RequestedBy: "ghost", Status: "queued", CreatedAt: 1}

@@ -7,6 +7,7 @@ import (
 )
 
 func TestUpdateQuotaReviewShowsOnlyAnIncrease(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name             string
 		curBytes, curIno int64

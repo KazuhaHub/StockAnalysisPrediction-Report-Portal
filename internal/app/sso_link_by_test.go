@@ -25,6 +25,7 @@ func linkByServer(t *testing.T) *Server {
 }
 
 func TestLinkBySubjectIsStillTheDefaultAndStillRefuses(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", Provisioning: "jit"} // LinkBy unset
 	_, created, err := s.resolveSSOAccount(p, ssoIdentity{Provider: "saml", Issuer: "https://idp", Subject: "kazuha"})
@@ -37,6 +38,7 @@ func TestLinkBySubjectIsStillTheDefaultAndStillRefuses(t *testing.T) {
 }
 
 func TestLinkByUsernameAdoptsTheMatchingAccount(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByUsername}
 	name, created, err := s.resolveSSOAccount(p, ssoIdentity{Provider: "saml", Issuer: "https://idp", Subject: "Kazuha"})
@@ -56,6 +58,7 @@ func TestLinkByUsernameAdoptsTheMatchingAccount(t *testing.T) {
 }
 
 func TestLinkByEmailAdoptsOnTheProfileEmail(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByEmail, AttrEmail: "email"}
 	id := ssoIdentity{Provider: "saml", Issuer: "https://idp", Subject: "some-opaque-id",
@@ -72,6 +75,7 @@ func TestLinkByEmailAdoptsOnTheProfileEmail(t *testing.T) {
 // email has no unique index on users, so two accounts CAN share one. Picking either would be
 // authenticating someone as an account chosen by row order. Refusing is the only defensible answer.
 func TestLinkByEmailRefusesWhenTwoAccountsShareIt(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	s.st.UpsertUser(User{Username: "kazuha2", PasswordHash: "x", Role: "user"})
 	s.st.SetUserProfile("kazuha2", "Kazuha Again", "kazuha@corp.example")
@@ -91,6 +95,7 @@ func TestLinkByEmailRefusesWhenTwoAccountsShareIt(t *testing.T) {
 // An SSO login must never fall onto an account that is not this provider's to claim just because a
 // claim was empty. No email in the assertion means no email match.
 func TestLinkByEmailIgnoresAnEmptyClaim(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	s.st.UpsertUser(User{Username: "noemail", PasswordHash: "x", Role: "user"}) // email stays ""
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByEmail, AttrEmail: "email"}
@@ -102,6 +107,7 @@ func TestLinkByEmailIgnoresAnEmptyClaim(t *testing.T) {
 
 // Matching adopts; it never creates. Provisioning is a separate decision and stays off unless jit.
 func TestLinkByDoesNotProvisionWhenNothingMatches(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByUsername} // provisioning off
 	_, created, err := s.resolveSSOAccount(p, ssoIdentity{Provider: "saml", Issuer: "https://idp", Subject: "stranger"})
@@ -115,6 +121,7 @@ func TestLinkByDoesNotProvisionWhenNothingMatches(t *testing.T) {
 
 // A disabled account is not a login, however it was matched.
 func TestLinkByRefusesADisabledAccount(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	s.st.SetUserActive("kazuha", false)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByUsername}
@@ -131,6 +138,7 @@ func TestLinkByRefusesADisabledAccount(t *testing.T) {
 // Safe to name because it is decided before anything is looked up: it says nothing about whether
 // the person has an account. Every refusal that DOES depend on that stays indistinguishable.
 func TestNoEmailClaimIsReportedAsConfigurationNotAsMissingAccount(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByEmail} // AttrEmail deliberately unset
 	_, _, err := s.resolveSSOAccount(p, ssoIdentity{Provider: "saml", Issuer: "https://idp", Subject: "opaque",
@@ -145,6 +153,7 @@ func TestNoEmailClaimIsReportedAsConfigurationNotAsMissingAccount(t *testing.T) 
 
 // And everything that depends on WHO is asking stays one indistinguishable answer.
 func TestUserDependentRefusalsStayIndistinguishable(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByEmail, AttrEmail: "email"}
 
@@ -174,6 +183,7 @@ func TestUserDependentRefusalsStayIndistinguishable(t *testing.T) {
 // The sibling branch already works this way: username matching falls back to the subject when the
 // UPN claim is unmapped. Email matching not doing the same was an inconsistency, not a safeguard.
 func TestLinkByEmailFallsBackToAnEmailSubject(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByEmail} // no AttrEmail mapped
 	name, created, err := s.resolveSSOAccount(p, ssoIdentity{
@@ -188,6 +198,7 @@ func TestLinkByEmailFallsBackToAnEmailSubject(t *testing.T) {
 
 // A mapped claim still wins: the fallback is for the unmapped case, not an override.
 func TestLinkByEmailPrefersTheMappedClaimOverTheSubject(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	s.st.UpsertUser(User{Username: "other", PasswordHash: "x", Role: "user"})
 	s.st.SetUserProfile("other", "Other", "other@corp.example")
@@ -202,6 +213,7 @@ func TestLinkByEmailPrefersTheMappedClaimOverTheSubject(t *testing.T) {
 // An opaque subject is not an address, so it cannot silently become one. This is what keeps the
 // fallback from matching anything by accident.
 func TestLinkByEmailIgnoresASubjectThatIsNotAnAddress(t *testing.T) {
+	t.Parallel()
 	s := linkByServer(t)
 	p := SSOProvider{Kind: "saml", Slug: "saml", LinkBy: LinkByEmail}
 	_, _, err := s.resolveSSOAccount(p, ssoIdentity{Provider: "saml", Issuer: "https://idp",

@@ -9,6 +9,7 @@ import (
 )
 
 func TestForecastPerUserLimits(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	now := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 	a, ok := c.beginCustom("alice", "query-a", 2, now)
@@ -67,6 +68,7 @@ func TestForecastPerUserLimits(t *testing.T) {
 }
 
 func TestForecastDistinctQuerySurvivesCallerCancellation(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	lease, ok := c.beginCustom("alice", "query-a", 0, time.Now())
 	if !ok {
@@ -100,6 +102,7 @@ func TestForecastDistinctQuerySurvivesCallerCancellation(t *testing.T) {
 }
 
 func TestForecastReaderRateErrors(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "reader", scopeAll, false)
 	s.st.SetSetting(setForecastCustomPerMin, "1")

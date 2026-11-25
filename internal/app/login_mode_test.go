@@ -43,6 +43,7 @@ func doLogin(t *testing.T, s *Server, user string) int {
 }
 
 func TestLoginModeDefaultsToDual(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 	if got := s.loginMode(); got != loginDual {
@@ -54,6 +55,7 @@ func TestLoginModeDefaultsToDual(t *testing.T) {
 // the portal cannot keep with no IdP configured — auto-redirecting to nowhere would be unrecoverable
 // through the product.
 func TestLoginModeDegradesWithoutAProvider(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	for _, mode := range []string{loginDual, loginSSOFirst, loginSSORedirect} {
 		s.st.SetSetting(setLoginMode, mode)
@@ -75,6 +77,7 @@ func TestLoginModeDegradesWithoutAProvider(t *testing.T) {
 }
 
 func TestLoginModeRejectsAnUnknownStoredValue(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 	s.st.SetSetting(setLoginMode, "sso_redirekt") // a typo, or a hand-edited row
@@ -86,6 +89,7 @@ func TestLoginModeRejectsAnUnknownStoredValue(t *testing.T) {
 // TestSSOOnlyRefusesUsersButNeverAdmins is the enforcement half, and the admin exemption is the
 // break-glass: an IdP that breaks must never cost an operator the ability to sign in and fix it.
 func TestSSOOnlyRefusesUsersButNeverAdmins(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 	s.st.SetSetting(setSSOOnly, "1")
@@ -101,6 +105,7 @@ func TestSSOOnlyRefusesUsersButNeverAdmins(t *testing.T) {
 // TestSSOOnlyIsInertWithoutAProvider — refusing local passwords while offering no alternative locks
 // out every non-admin at once, so the policy only bites when there is something to fall back to.
 func TestSSOOnlyIsInertWithoutAProvider(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	s.st.SetSetting(setSSOOnly, "1")
 	if s.ssoOnlyActive() {
@@ -114,6 +119,7 @@ func TestSSOOnlyIsInertWithoutAProvider(t *testing.T) {
 // TestSSOOnlyIsIndependentOfTheMode proves the two axes really are separate: the page can show a
 // password form while the endpoint refuses it, and the reverse.
 func TestSSOOnlyIsIndependentOfTheMode(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 
@@ -135,6 +141,7 @@ func TestSSOOnlyIsIndependentOfTheMode(t *testing.T) {
 // TestAuthMethodsEndpointDrivesTheLoginPage: the page renders from resolved booleans rather than
 // re-deriving the rules, so there is one source of truth for what is offered.
 func TestAuthMethodsEndpointDrivesTheLoginPage(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 
@@ -185,6 +192,7 @@ func TestAuthMethodsEndpointDrivesTheLoginPage(t *testing.T) {
 // returns 403, with no provider button anywhere on the page. The route still existed, but nothing
 // in the product led to it.
 func TestSSOOnlyIsInertWhenThePageOffersNoSSO(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 	s.st.SetSetting(setSSOOnly, "1")
@@ -210,6 +218,7 @@ func TestSSOOnlyIsInertWhenThePageOffersNoSSO(t *testing.T) {
 // bcrypt, so the refusal is never even reached for one. An organisation whose admins are all
 // federated therefore has no browser path in at all the moment its IdP breaks.
 func TestSSOOnlyNeedsALocalAdminToFallBackOn(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 	// Make every admin federated, the way a JIT provider with an admin-granting rule ends up:
@@ -251,6 +260,7 @@ func TestSSOOnlyNeedsALocalAdminToFallBackOn(t *testing.T) {
 // password account, and sso_only then refuses exactly that at the login form. The registrant gets
 // a confirmation email, follows it, and is turned away by a portal that told them to sign up.
 func TestSSOOnlyAndSelfRegistrationAreRefusedTogether(t *testing.T) {
+	t.Parallel()
 	s := loginModeServer(t)
 	withProvider(s)
 	s.st.UpsertUser(User{Username: "root", PasswordHash: "$2a$04$abcdefghijklmnopqrstuv", Role: "admin"})

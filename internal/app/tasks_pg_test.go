@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 )
 
@@ -10,10 +9,8 @@ import (
 // Skipped unless TEST_POSTGRES_DSN is set. The database is shared, so the test only ever touches rows
 // under its own user names and removes them afterwards.
 func TestPostgresMyTasksQueries(t *testing.T) {
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
-	}
+	t.Parallel()
+	dsn := testPostgresDSN(t)
 	st, err := OpenStore("postgres", dsn)
 	if err != nil {
 		t.Fatalf("OpenStore postgres: %v", err)

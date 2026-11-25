@@ -36,6 +36,7 @@ func imageRow(t *testing.T, s *Server, operation string) (id, kind, state, recei
 
 // Fails if the load leaves no Portal row, uses another kind or stage, or keeps asking the runner once applied.
 func TestEnsureImageWritesALoadImageRowThatEndsAppliedWithTheReceiptAndIsNotSentAgain(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); err != nil {
 		t.Fatal(err)
@@ -56,6 +57,7 @@ func TestEnsureImageWritesALoadImageRowThatEndsAppliedWithTheReceiptAndIsNotSent
 // Fails if a load with no verdict leaves the row prepared or applied, which would hide it from the settlement
 // driver or claim a load that was never seen.
 func TestEnsureImageLeavesTheRowUnknownWhenTheOutcomeIsNotKnown(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.loseExecuteReplyOnce, fake.readFails = true, true
 	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)
@@ -69,6 +71,7 @@ func TestEnsureImageLeavesTheRowUnknownWhenTheOutcomeIsNotKnown(t *testing.T) {
 
 // Fails if a rejection is not recorded, or is asked of the runner again.
 func TestEnsureImageRecordsARejectionAsRevertedAndRefusesWithoutAskingAgain(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.rejectLoad = "inspect_mismatch"
 	if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); !errors.Is(err, errPlatformImageRejected) {
@@ -109,6 +112,7 @@ func giveUp(t *testing.T, s *Server, lease platformOperationLease, endpoint plat
 // later driver tick settles it under the same id, and the installation is then free. Fails if the unknown load
 // is invisible, if the driver mints a second identity, or if the installation stays blocked afterwards.
 func TestAnUnknownLoadBlocksAStartingAdmissionUntilTheDriverSettlesItUnderTheSameId(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	giveUp(t, s, lease, endpoint, fake)
 	if stage := scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id); stage != "recovery_required" {
@@ -139,6 +143,7 @@ func TestAnUnknownLoadBlocksAStartingAdmissionUntilTheDriverSettlesItUnderTheSam
 // trust quarantine and its stop can never be deferred. Fails if a start-bearing kind is admitted, or a non-start
 // kind refused.
 func TestOnlyStartBearingOperationsAreRefusedWhileALoadIsUnsettled(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	giveUp(t, s, lease, endpoint, fake)
 	for _, action := range platformStartBearingActions {
@@ -159,6 +164,7 @@ func TestOnlyStartBearingOperationsAreRefusedWhileALoadIsUnsettled(t *testing.T)
 
 // Fails if an operation kind is in neither list, in both, or the lists drift from the schema's set of actions.
 func TestEveryOperationKindIsClassifiedAsStartBearingOrNot(t *testing.T) {
+	t.Parallel()
 	kinds := []string{"install", "update", "disable", "enable", "repair", "uninstall", "delete_data", "restore", "restore_import", "set_data_quota", "import_data"}
 	for _, kind := range kinds {
 		in := 0
@@ -241,6 +247,7 @@ var computedSQLAllowList = map[string]string{
 // name as an argument in another function; a writer reached through reflection. It is a tripwire for the ordinary
 // ways of adding a writer, not a proof.
 func TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper(t *testing.T) {
+	t.Parallel()
 	forbidden := regexp.MustCompile(`insert (or \w+ )?into app_platform_operations\b|replace into app_platform_operations\b|update app_platform_operations set installation_id`)
 	fset := token.NewFileSet()
 	files := moduleGoFiles(t)
@@ -385,6 +392,7 @@ func blobFiles(t *testing.T, s *Server) []string {
 // Fails if the target of an operation holding an unsettled load loses its pin when the operation completes, so
 // that a sweep removes the blobs settlement needs.
 func TestAnUnsettledLoadKeepsItsReleaseBlobsPinnedAcrossASweepAndTheNextTickSettlesIt(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	giveUp(t, s, lease, endpoint, fake)
 	store, _ := s.platformImages()
@@ -406,6 +414,7 @@ func TestAnUnsettledLoadKeepsItsReleaseBlobsPinnedAcrossASweepAndTheNextTickSett
 // The read-back needs no blobs. Fails if settlement hashes the blobs, or fails for want of them, when the runner
 // already has the verdict.
 func TestSettlementAppliesThroughTheReadBackWhenTheBlobsAreGoneButTheImageIsOnTheHost(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.present = true
 	giveUp(t, s, lease, endpoint, fake)
@@ -526,6 +535,7 @@ func TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow(t *testing.T) {
 // reaches the caller unmasked, and the load is neither read back nor sent again. Fails if the refusal is reported
 // as an uncertain load (which would retry for ever) or leaves the effect without a verdict.
 func TestEnsureImageRecordsACapacityRefusalAsRevertedAndKeepsItTyped(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.refuseCapacity = "image_store"
 	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestClassifierPreservesMemberOrder(t *testing.T) {
+	t.Parallel()
 	sets := []*groupSet{
 		{ID: 9, Symbol: "600002", State: predStateAccepted, MadeAt: "2026-01-02T01:00:00Z", Cohort: "2026-01", BenchCode: "sh000852", DecisionQuality: predQualityNormal, BaseCheck: baseMatch},
 		{ID: 3, Symbol: "600001", State: predStateAccepted, MadeAt: "2026-01-01T01:00:00Z", Cohort: "2026-01", BenchCode: "sh000852", DecisionQuality: predQualityNormal, BaseCheck: baseMatch},
@@ -99,6 +100,7 @@ func legacyMembershipForTest(sets []*groupSet, from time.Time, bench string) (me
 }
 
 func TestClassifierMatchesLegacyStatistics(t *testing.T) {
+	t.Parallel()
 	rng := newPredRand(8675309)
 	states := []string{predStateAccepted, predStateAccepted, predStateAbsent, predStateRejected, predStateBacktest, predStateTest}
 	checks := []string{baseMatch, baseMismatch, baseCheckPending, baseRefused, baseRefusedFinal}
@@ -138,6 +140,7 @@ func TestClassifierMatchesLegacyStatistics(t *testing.T) {
 }
 
 func TestUnknownStateIsCountedNotDropped(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-01-05", State: "future-state"})
 	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-01-01", "2026-01-31", forecastPopulation{Key: "all"})
@@ -163,6 +166,7 @@ func TestUnknownStateIsCountedNotDropped(t *testing.T) {
 }
 
 func TestMembershipClassificationPrecedence(t *testing.T) {
+	t.Parallel()
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	base := groupSet{State: predStateAccepted, MadeAt: "2026-01-05T01:00:00Z", Cohort: "2026-01", BenchCode: "sh000852", DecisionQuality: predQualityNormal, BaseCheck: baseMatch}
 	var sets []*groupSet
@@ -209,6 +213,7 @@ func TestMembershipClassificationPrecedence(t *testing.T) {
 }
 
 func TestClassifierUsesEachCohortsFrozenIntent(t *testing.T) {
+	t.Parallel()
 	sets := []*groupSet{
 		{ID: 1, Symbol: "600001", State: predStateAccepted, MadeAt: "2026-10-01T01:00:00Z", Cohort: "2026-10", BenchCode: "sh000852", DecisionQuality: predQualityNormal, BaseCheck: baseMatch},
 		{ID: 2, Symbol: "600002", State: predStateAccepted, MadeAt: "2026-11-01T01:00:00Z", Cohort: "2026-11", BenchCode: "sh000906", DecisionQuality: predQualityNormal, BaseCheck: baseMatch},

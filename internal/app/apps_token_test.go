@@ -6,6 +6,7 @@ import (
 )
 
 func TestAppTokens(t *testing.T) {
+	t.Parallel()
 	at := newAppTokens(30 * time.Minute)
 	t0 := time.Unix(1_700_000_000, 0)
 
@@ -33,6 +34,7 @@ func TestAppTokens(t *testing.T) {
 // query + ingest are grantable (ADR 0003 phase 2); unsupported scopes (webhooks,
 // all) are still dropped, and duplicates are collapsed.
 func TestGrantableScopes(t *testing.T) {
+	t.Parallel()
 	g := grantableScopes([]string{"query", "ingest", "webhooks", "query"})
 	if len(g) != 2 || !contains(g, "query") || !contains(g, "ingest") {
 		t.Fatalf("grantableScopes = %v, want [query ingest]", g)

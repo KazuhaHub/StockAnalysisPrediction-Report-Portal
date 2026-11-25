@@ -14,6 +14,7 @@ import (
 )
 
 func TestForecastViewersConcurrentAndFailedRollover(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	var tracker forecastViewers
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
@@ -48,6 +49,7 @@ func TestForecastViewersConcurrentAndFailedRollover(t *testing.T) {
 }
 
 func TestPostgresForecastViewersFlush(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	now := time.Date(2077, 1, 4, 12, 0, 0, 0, time.UTC)
 	key := forecastViewerWeekKey(now)
@@ -191,6 +193,7 @@ func TestWeeklyViewersStoreNoUsernames(t *testing.T) {
 }
 
 func TestForecastViewerInvalidBaselinesDoNotOverwriteCounts(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	key := forecastViewerWeekKey(now)
@@ -222,6 +225,7 @@ func TestForecastViewerInvalidBaselinesDoNotOverwriteCounts(t *testing.T) {
 }
 
 func TestForecastViewerFlushSchedule(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	var tracker forecastViewers
 	now := time.Date(2026, 10, 22, 12, 20, 0, 0, time.UTC)
@@ -249,6 +253,7 @@ func TestForecastViewerFlushSchedule(t *testing.T) {
 }
 
 func TestForecastViewerCountsOnlySuccessfulNonAdminGroups(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	s.forecastEval.now = func() time.Time { return now }

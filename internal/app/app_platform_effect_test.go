@@ -67,8 +67,11 @@ func testPlatformEffectIdentity(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformEffectIdentity(t *testing.T)         { testPlatformEffectIdentity(t, false) }
-func TestPostgresAppPlatformEffectIdentity(t *testing.T) { testPlatformEffectIdentity(t, true) }
+func TestAppPlatformEffectIdentity(t *testing.T) { t.Parallel(); testPlatformEffectIdentity(t, false) }
+func TestPostgresAppPlatformEffectIdentity(t *testing.T) {
+	t.Parallel()
+	testPlatformEffectIdentity(t, true)
+}
 
 func testPlatformEffectConcurrentPrepare(t *testing.T, postgres bool) {
 	st := platformTestStore(t, postgres)
@@ -106,9 +109,11 @@ func testPlatformEffectConcurrentPrepare(t *testing.T, postgres bool) {
 }
 
 func TestAppPlatformEffectConcurrentPrepare(t *testing.T) {
+	t.Parallel()
 	testPlatformEffectConcurrentPrepare(t, false)
 }
 func TestPostgresAppPlatformEffectConcurrentPrepare(t *testing.T) {
+	t.Parallel()
 	testPlatformEffectConcurrentPrepare(t, true)
 }
 
@@ -140,8 +145,11 @@ func testPlatformEffectGuards(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformEffectGuards(t *testing.T)         { testPlatformEffectGuards(t, false) }
-func TestPostgresAppPlatformEffectGuards(t *testing.T) { testPlatformEffectGuards(t, true) }
+func TestAppPlatformEffectGuards(t *testing.T) { t.Parallel(); testPlatformEffectGuards(t, false) }
+func TestPostgresAppPlatformEffectGuards(t *testing.T) {
+	t.Parallel()
+	testPlatformEffectGuards(t, true)
+}
 
 func testPlatformEffectIntentRefusals(t *testing.T, postgres bool) {
 	st := platformTestStore(t, postgres)
@@ -166,12 +174,17 @@ func testPlatformEffectIntentRefusals(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformEffectIntentRefusals(t *testing.T) { testPlatformEffectIntentRefusals(t, false) }
+func TestAppPlatformEffectIntentRefusals(t *testing.T) {
+	t.Parallel()
+	testPlatformEffectIntentRefusals(t, false)
+}
 func TestPostgresAppPlatformEffectIntentRefusals(t *testing.T) {
+	t.Parallel()
 	testPlatformEffectIntentRefusals(t, true)
 }
 
 func TestAppPlatformEffectSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "effect.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -210,6 +223,7 @@ func TestAppPlatformEffectSurvivesRestart(t *testing.T) {
 }
 
 func TestPostgresAppPlatformEffectExpiryWhileWaitingForReceipt(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	lease := platformSeedEffectLease(t, st)
 	intent := platformEffectIntent{1, "stop", strings.Repeat("a", 64)}

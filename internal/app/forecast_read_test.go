@@ -54,6 +54,7 @@ func indexOf(s, sub string) int {
 // TestReportPredictionsRouteReturnsTheSets is the base case, and it also pins the ORDER: a report is
 // read in the order it was written.
 func TestReportPredictionsRouteReturnsTheSets(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	reportID, firstSet := seedLedgerFor(t, s, "600160", "2026-10-17", "# v1")
 	// A revision: same report, a changed number.
@@ -127,6 +128,7 @@ func TestReportPredictionsRouteReturnsTheSets(t *testing.T) {
 // TestReportPredictionsRouteHidesAnUnreadableReport: a report the caller cannot read answers 404.
 // An empty list would say "this report exists and predicted nothing", which is a different claim.
 func TestReportPredictionsRouteHidesAnUnreadableReport(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
 
@@ -152,6 +154,7 @@ func TestReportPredictionsRouteHidesAnUnreadableReport(t *testing.T) {
 // Once the report is gone there is nothing to scope against, so a restricted reader cannot prove
 // access — and guessing in their favour is the one direction this must never fail in.
 func TestPurgedSetIsVisibleOnlyToAnUnrestrictedCaller(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	reportID, setID := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
 
@@ -200,6 +203,7 @@ func TestPurgedSetIsVisibleOnlyToAnUnrestrictedCaller(t *testing.T) {
 // is one the caller belongs to — otherwise the column would be a second, divergent spelling of the
 // security filter, which is what ADR 0024 removed it as.
 func TestOwnerGroupIsNotAReadKey(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	reportID, setID := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
 	// Give the set a group the restricted viewer belongs to.
@@ -225,6 +229,7 @@ func TestOwnerGroupIsNotAReadKey(t *testing.T) {
 // TestQueryPredictionsRouteFiltersAndRefuses: symbol is required, dates are validated, and the
 // made_on range is inclusive on both ends.
 func TestQueryPredictionsRouteFiltersAndRefuses(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedLedgerFor(t, s, "600160", "2026-10-17", "# a")
 	seedLedgerFor(t, s, "600160", "2026-11-02", "# b")
@@ -283,6 +288,7 @@ func TestQueryPredictionsRouteFiltersAndRefuses(t *testing.T) {
 // TestQueryPredictionsRequiresAFilter: an unfiltered query would scan the ledger, and the store
 // refuses it too, so a caller that forgets cannot turn a read into a table scan.
 func TestQueryPredictionsRequiresAFilter(t *testing.T) {
+	t.Parallel()
 	var sc *ownerScope
 	s := newV1Server(t)
 	if _, err := s.st.QueryPredictionSets(PredictionFilter{}, sc); err == nil {
@@ -293,6 +299,7 @@ func TestQueryPredictionsRequiresAFilter(t *testing.T) {
 // TestBrowserRouteIsASessionRoute: the SPA's route is under the session class, so the whole-portal
 // session policy covers it — which the machine route is not, whatever its handlers admit.
 func TestBrowserRouteIsASessionRoute(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	for _, row := range s.routeTable {
@@ -309,6 +316,7 @@ func TestBrowserRouteIsASessionRoute(t *testing.T) {
 // TestReportPredictionsRouteRefusesAnUnreadableReportAtHTTPLevel, through the real handler, so the
 // 404 the store test asserts is the one a caller actually gets.
 func TestReportPredictionsRouteRefusesAnUnreadableReportAtHTTPLevel(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "someone", scopeAll, false)
 	rec := httptest.NewRecorder()
@@ -323,6 +331,7 @@ func TestReportPredictionsRouteRefusesAnUnreadableReportAtHTTPLevel(t *testing.T
 // TestSymbolRouteIsASessionRoute: the reading page's "other predictions" list is a browser read, so
 // it must sit under the session class like the per-report route, not under the machine surface.
 func TestSymbolRouteIsASessionRoute(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	s.wireRoutes(http.NewServeMux())
 	for _, row := range s.routeTable {
@@ -337,6 +346,7 @@ func TestSymbolRouteIsASessionRoute(t *testing.T) {
 }
 
 func TestSymbolPredictionsSessionRouteReturnsSets(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "someone", scopeAll, false)
 	seedLedgerFor(t, s, "600160", "2026-10-17", "# v1")
@@ -362,6 +372,7 @@ func TestSymbolPredictionsSessionRouteReturnsSets(t *testing.T) {
 // caller. Both read routes go through serveReportPredictions/serveQueryPredictions, so pinning the
 // shared implementation covers the session and v1 credential alike.
 func TestPayloadWithheldFromScopedReader(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	reportID, _ := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
 
@@ -427,6 +438,7 @@ func TestPayloadWithheldFromScopedReader(t *testing.T) {
 // TestReadPhaseNeverClaimsRetryingWithoutEvidence: elapsed lower bounds can settle or become
 // overdue without implying a failed fetch. Retrying requires a recorded due session.
 func TestReadPhaseNeverClaimsRetryingWithoutEvidence(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, setID := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
 	// One set made at 21:00 CST on 2026-10-18: S0 is Monday 2026-10-19, so d5 falls on 2026-10-26.

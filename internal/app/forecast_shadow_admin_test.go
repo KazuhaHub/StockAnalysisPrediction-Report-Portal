@@ -10,6 +10,7 @@ import (
 )
 
 func TestForecastShadowAdminDistinguishesMissingAndDamagedTelemetry(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	read := func() map[string]any {
 		t.Helper()
@@ -47,6 +48,7 @@ func TestForecastShadowAdminDistinguishesMissingAndDamagedTelemetry(t *testing.T
 }
 
 func TestForecastShadowAdminRouteRequiresAdministrator(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.UpsertUser(User{Username: "root", PasswordHash: "h", Role: "admin"})

@@ -26,6 +26,7 @@ func grantFixture(t *testing.T) (s *Server, root, parent, child int64) {
 // state is exactly when a disclosure rule must be closed, and it is exactly when the previous
 // design was open: a restricted OU with no run allow-list saw every internal report from today.
 func TestGrantsAreDefaultDeny(t *testing.T) {
+	t.Parallel()
 	s, _, _, child := grantFixture(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.SetPrimaryGroup("alice", child)
@@ -39,6 +40,7 @@ func TestGrantsAreDefaultDeny(t *testing.T) {
 // otherwise every new client sub-OU starts invisible, and the failure looks to an admin like the
 // portal is broken rather than like a missing tick box.
 func TestGrantsInheritDownTheOUTree(t *testing.T) {
+	t.Parallel()
 	s, root, parent, child := grantFixture(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.SetPrimaryGroup("alice", child)
@@ -66,6 +68,7 @@ func TestGrantsInheritDownTheOUTree(t *testing.T) {
 // TestAccountGrantsWorkWithoutAnyOU is the case the principal column exists for: an external person
 // with no OU tree set up at all.
 func TestAccountGrantsWorkWithoutAnyOU(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1})
 	s.st.UpsertUser(User{Username: "solo", PasswordHash: "h", Role: "user"})
@@ -92,6 +95,7 @@ func TestAccountGrantsWorkWithoutAnyOU(t *testing.T) {
 // now "restricted" was purely an OU property, so a portal that never built an OU tree had no way to
 // scope anybody — which is the setup an external user is most likely to arrive into first.
 func TestAccountLevelRestrictedNeedsNoOU(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "solo", PasswordHash: "h", Role: "user"})
 	if s.isRestricted("solo") {

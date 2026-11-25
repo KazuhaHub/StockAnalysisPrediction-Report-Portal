@@ -10,6 +10,7 @@ import (
 // The review shows the target origin it binds, and the optional target field
 // names the target by id.
 func TestPlatformSecretBindingTargetHTTP(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

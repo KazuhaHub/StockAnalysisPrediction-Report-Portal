@@ -6,6 +6,7 @@ import "testing"
 // (new reports only store MD), but trusts a stored HTML value when present
 // (legacy imports that have HTML and no MD).
 func TestHtmlOfDerivesFromMD(t *testing.T) {
+	t.Parallel()
 	got := htmlOf(Rep{MD: "# hi"})
 	if got != "<h1>hi</h1>\n" {
 		t.Errorf("htmlOf(md-only) = %q, want rendered heading", got)
@@ -13,6 +14,7 @@ func TestHtmlOfDerivesFromMD(t *testing.T) {
 }
 
 func TestHtmlOfPrefersStoredHTML(t *testing.T) {
+	t.Parallel()
 	got := htmlOf(Rep{MD: "# hi", HTML: "<p>legacy</p>"})
 	if got != "<p>legacy</p>" {
 		t.Errorf("htmlOf(with stored HTML) = %q, want the stored value untouched", got)
@@ -20,6 +22,7 @@ func TestHtmlOfPrefersStoredHTML(t *testing.T) {
 }
 
 func TestHtmlOfEmptyReport(t *testing.T) {
+	t.Parallel()
 	if got := htmlOf(Rep{}); got != "" {
 		t.Errorf("htmlOf(empty) = %q, want empty", got)
 	}
@@ -28,6 +31,7 @@ func TestHtmlOfEmptyReport(t *testing.T) {
 // htmlToStore governs what ingest persists: MD is authoritative, so HTML is only ever
 // stored for a true HTML-only (legacy-import) submission — sending both drops the HTML.
 func TestHtmlToStore(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ md, html, want string }{
 		{md: "# hi", html: "", want: ""},                       // md-only → nothing to store
 		{md: "", html: "<p>legacy</p>", want: "<p>legacy</p>"}, // html-only (legacy import) → kept

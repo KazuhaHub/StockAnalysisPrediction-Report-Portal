@@ -11,6 +11,7 @@ import (
 )
 
 func TestShadowHTTPBudgetIncludesRedirects(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int64
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -26,6 +27,7 @@ func TestShadowHTTPBudgetIncludesRedirects(t *testing.T) {
 }
 
 func TestShadowHTTPBudgetSharedAcrossSinaReads(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	ctx, budget := withQuoteShadowHTTPBudget(ctx)
 	for i := 0; i < forecastShadowMaxComparisons; i++ {
@@ -42,6 +44,7 @@ func TestShadowHTTPBudgetSharedAcrossSinaReads(t *testing.T) {
 }
 
 func TestShadowHTTPBudgetIsolatedAndConcurrent(t *testing.T) {
+	t.Parallel()
 	previous := vendorClient
 	var calls atomic.Int64
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(http.StatusNoContent) }))
@@ -63,6 +66,7 @@ func TestShadowHTTPBudgetIsolatedAndConcurrent(t *testing.T) {
 }
 
 func TestShadowHTTPBudgetCancelledCallIsNotAttempted(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	ctx, budget := withQuoteShadowHTTPBudget(ctx)

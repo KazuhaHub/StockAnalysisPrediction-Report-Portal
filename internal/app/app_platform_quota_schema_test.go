@@ -85,8 +85,8 @@ func testMigration0024Schema(t *testing.T, pg bool) {
 	}
 }
 
-func TestMigration0024SchemaSQLite(t *testing.T)   { testMigration0024Schema(t, false) }
-func TestMigration0024SchemaPostgres(t *testing.T) { testMigration0024Schema(t, true) }
+func TestMigration0024SchemaSQLite(t *testing.T)   { t.Parallel(); testMigration0024Schema(t, false) }
+func TestMigration0024SchemaPostgres(t *testing.T) { t.Parallel(); testMigration0024Schema(t, true) }
 
 func testMigration0024Upgrade(t *testing.T, pg bool) {
 	st := platformTestStore(t, pg)
@@ -124,8 +124,8 @@ func testMigration0024Upgrade(t *testing.T, pg bool) {
 	}
 }
 
-func TestMigration0024UpgradeSQLite(t *testing.T)   { testMigration0024Upgrade(t, false) }
-func TestMigration0024UpgradePostgres(t *testing.T) { testMigration0024Upgrade(t, true) }
+func TestMigration0024UpgradeSQLite(t *testing.T)   { t.Parallel(); testMigration0024Upgrade(t, false) }
+func TestMigration0024UpgradePostgres(t *testing.T) { t.Parallel(); testMigration0024Upgrade(t, true) }
 
 // withoutColumn removes one column from a table's section of a dump, as a dump written before the step
 // that added the column would not have it.
@@ -166,6 +166,7 @@ func withoutColumn(t *testing.T, dump []byte, table, column string) []byte {
 }
 
 func TestMigration0024IsTheLastStepAndAnOlderDumpRestoresWithDefaultInodes(t *testing.T) {
+	t.Parallel()
 	steps := newTestStore(t).migrations()
 	// 0024 is the last step that changes a shared table; 0025 only adds a table of its own (doc 191).
 	if steps[len(steps)-2].id != "0024" || steps[len(steps)-1].id != "0025" {

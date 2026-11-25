@@ -22,8 +22,10 @@ func testPlatformDataDispatchUnavailable(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformDataDispatchUnavailableSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformDataDispatchUnavailable(t, false)
 }
 func TestPlatformDataDispatchUnavailablePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformDataDispatchUnavailable(t, true)
 }

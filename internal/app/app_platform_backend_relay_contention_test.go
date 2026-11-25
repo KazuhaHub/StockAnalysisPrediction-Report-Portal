@@ -117,6 +117,7 @@ func percentile(d []time.Duration, p float64) time.Duration {
 // completed; the figures are the evidence (go test -v -run PlatformRelayConnectionContention).
 // RELAY_CONTENTION_REQUESTS scales the load.
 func TestPlatformRelayConnectionContention(t *testing.T) {
+	t.Parallel()
 	s, actor, installation := platformRelayFileStoreFixture(t)
 	requests := 6
 	if v, err := strconv.Atoi(os.Getenv("RELAY_CONTENTION_REQUESTS")); err == nil && v > 0 {

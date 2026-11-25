@@ -16,6 +16,7 @@ import (
 // These are synthetic arithmetic pairs; TestCapturedBonusIssueAdjustmentReachesSettlement uses
 // the actual shape and fen values of a real capital-reserve transfer.
 func TestQfqRatioFlagsBonusIssueUnderTheLimit(t *testing.T) {
+	t.Parallel()
 	// Deliberately exaggerated ratio change, while the raw loss remains inside the daily limit.
 	if !adjustRatioChanged(1100, 1100, 2000, 1000) {
 		t.Error("a changed ratio was not flagged")
@@ -40,6 +41,7 @@ func TestQfqRatioFlagsBonusIssueUnderTheLimit(t *testing.T) {
 }
 
 func TestAdjustRatioHandlesDegeneratePrices(t *testing.T) {
+	t.Parallel()
 	for _, tc := range [][4]int64{{0, 100, 100, 100}, {100, 0, 100, 100}, {100, 100, 0, 100}} {
 		if adjustRatioChanged(tc[0], tc[1], tc[2], tc[3]) {
 			t.Errorf("degenerate prices %v were flagged", tc)
@@ -50,6 +52,7 @@ func TestAdjustRatioHandlesDegeneratePrices(t *testing.T) {
 // TestQfqRatioIsAOneSidedSignal: the ratio check only ever ADDS a corporate-action flag. It can never
 // clear the dividend element or the limit backstop.
 func TestQfqRatioIsAOneSidedSignal(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 5)
 	raw := barsFor(dates, 1000)
 	raw[4].Close = 909 // -9.1%: inside the limit, no gap backstop
@@ -74,6 +77,7 @@ func TestQfqRatioIsAOneSidedSignal(t *testing.T) {
 
 // TestAdjustFetchOnlyForDueMarks: a tick whose marks are all ahead makes no qfq call.
 func TestAdjustFetchOnlyForDueMarks(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	dates := tradingDays("2026-10-19", 6)
@@ -121,6 +125,7 @@ func TestAdjustFetchOnlyForDueMarks(t *testing.T) {
 // TestQfqFetchFailureIsASourceFailure: a failed adjustment fetch leaves the mark waiting with its
 // attempts unchanged, never resolved on the cheaper check alone.
 func TestQfqFetchFailureIsASourceFailure(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	dates := tradingDays("2026-10-19", 8)
@@ -150,6 +155,7 @@ func TestQfqFetchFailureIsASourceFailure(t *testing.T) {
 // TestAdjustRatioIsNeverStoredOrScored: no column receives a qfq value. The adjusted map is only ever
 // compared inside settleMark; the stored prices are the unadjusted ones the body printed.
 func TestAdjustRatioIsNeverStoredOrScored(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	dates := tradingDays("2026-10-19", 8)

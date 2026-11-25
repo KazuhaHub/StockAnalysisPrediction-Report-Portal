@@ -9,6 +9,7 @@ import (
 )
 
 func TestNotificationInboxChecksAuthorityAndSnapshot(t *testing.T) {
+	t.Parallel()
 	testNotificationInboxChecksAuthorityAndSnapshot(t, batchServer(t))
 }
 
@@ -78,6 +79,7 @@ func testNotificationInboxChecksAuthorityAndSnapshot(t *testing.T, s *Server) {
 }
 
 func TestNotificationInboxRuleRevocationHidesCountAndMutation(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.st.UpsertUser(User{Username: "operator", Role: "admin", PasswordHash: "h"}); err != nil {
 		t.Fatal(err)

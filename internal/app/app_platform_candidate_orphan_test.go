@@ -101,6 +101,7 @@ func (f orphanFixture) audits(t *testing.T) int {
 // ends failed with a closed code, in one transaction, and the audit log records it. Fails if the row is left
 // unknown, the operation ends for review without the code, or the receipt is not kept.
 func TestWritableCandidateOrphanSettlesTheStartEffectAndFailsTheOperation(t *testing.T) {
+	t.Parallel()
 	f := newOrphanFixture(t, true)
 	r := f.receipt()
 	if err := f.w.finishOrphan(context.Background(), r); err != nil {
@@ -125,6 +126,7 @@ func TestWritableCandidateOrphanSettlesTheStartEffectAndFailsTheOperation(t *tes
 // The plain candidate start settles the same row the same way. Its operation is not ended here: no scheduler route
 // dispatches the plain candidate start, and the install review finisher accepts only the writable format.
 func TestPlainCandidateOrphanSettlesTheStartEffect(t *testing.T) {
+	t.Parallel()
 	f := newOrphanFixture(t, false)
 	r := f.receipt()
 	if err := f.settleInTx(r); err != nil {
@@ -139,6 +141,7 @@ func TestPlainCandidateOrphanSettlesTheStartEffect(t *testing.T) {
 
 // The scheduler turns the runner's typed error, wrapped however a stage wraps it, into that end instead of a retry.
 func TestSchedulerTickSettlesAnOrphanedStart(t *testing.T) {
+	t.Parallel()
 	f := newOrphanFixture(t, true)
 	r := f.receipt()
 	f.w.runOverride = func(context.Context, platformOperationLease) (platformInstallRun, error) {
@@ -157,6 +160,7 @@ func TestSchedulerTickSettlesAnOrphanedStart(t *testing.T) {
 
 // A replay settles exactly once and does not error: the same receipt again, in the settlement itself.
 func TestCandidateOrphanReplayIsIdempotent(t *testing.T) {
+	t.Parallel()
 	for _, writable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("writable=%v", writable), func(t *testing.T) {
 			f := newOrphanFixture(t, writable)
@@ -177,6 +181,7 @@ func TestCandidateOrphanReplayIsIdempotent(t *testing.T) {
 
 // Nothing is settled when the receipt does not name the open start effect exactly, or the lease is not current.
 func TestCandidateOrphanSettlesNothingOnAMismatch(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		mutate func(*orphanFixture, *journal.CandidateOrphanReceipt)
@@ -220,6 +225,7 @@ func TestCandidateOrphanSettlesNothingOnAMismatch(t *testing.T) {
 
 // A mismatching receipt is not a dead end: the tick treats it as the ordinary failure and retries.
 func TestSchedulerTickRetriesAnOrphanReceiptThatDoesNotMatch(t *testing.T) {
+	t.Parallel()
 	f := newOrphanFixture(t, true)
 	r := f.receipt()
 	r.EffectID = platformFixtureID(7777)
@@ -232,6 +238,7 @@ func TestSchedulerTickRetriesAnOrphanReceiptThatDoesNotMatch(t *testing.T) {
 }
 
 func TestCandidateOrphanWithAStaleLeaseSettlesNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		mutate func(*platformOperationLease)
@@ -259,6 +266,7 @@ func TestCandidateOrphanWithAStaleLeaseSettlesNothing(t *testing.T) {
 
 // If ending the operation fails after the row was settled, the row is not settled: one transaction, no audit.
 func TestCandidateOrphanSettlesNothingWhenTheOperationCannotEnd(t *testing.T) {
+	t.Parallel()
 	f := newOrphanFixture(t, true)
 	if _, err := f.s.st.db.Exec(`CREATE TRIGGER refuse_operation_end BEFORE UPDATE ON app_platform_operations WHEN NEW.completed_ms IS NOT NULL BEGIN SELECT RAISE(ABORT, 'operation cannot end'); END`); err != nil {
 		t.Fatal(err)
@@ -272,6 +280,7 @@ func TestCandidateOrphanSettlesNothingWhenTheOperationCannotEnd(t *testing.T) {
 }
 
 func TestStartNeverRanIsAPublicOperationErrorCode(t *testing.T) {
+	t.Parallel()
 	if platformPublicOperationErrorCode("start_never_ran") != "start_never_ran" || isPlatformCapacityErrorCode("start_never_ran") {
 		t.Fatal("the code is not in the public allow-list, or is mistaken for a capacity code")
 	}

@@ -125,6 +125,7 @@ func parseShapeResponse(t *testing.T, sp *crewjam.ServiceProvider, raw []byte) (
 // TestSAMLShapeFixtureIsAccepted proves the fixture is a valid signed login, so the refusals below are
 // caused by the shapes they test and not by a broken signature or clock.
 func TestSAMLShapeFixtureIsAccepted(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	raw := signedShapeResponse(t, signer, `<saml:Subject><saml:NameID>alice@example.test</saml:NameID>`+shapeConfirmation+`</saml:Subject>`+shapeConditions)
 	assertion, err := parseShapeResponse(t, sp, raw)
@@ -151,6 +152,7 @@ func requireShapeRefusal(t *testing.T, err error, reason string) {
 
 // TestSAMLSignedAssertionWithoutSubjectIsRefused: before the patch this dereferenced a nil Subject.
 func TestSAMLSignedAssertionWithoutSubjectIsRefused(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	_, err := parseShapeResponse(t, sp, signedShapeResponse(t, signer, shapeConditions))
 	requireShapeRefusal(t, err, "assertion has no Subject")
@@ -158,6 +160,7 @@ func TestSAMLSignedAssertionWithoutSubjectIsRefused(t *testing.T) {
 
 // TestSAMLSignedAssertionWithoutConditionsIsRefused: before the patch this dereferenced nil Conditions.
 func TestSAMLSignedAssertionWithoutConditionsIsRefused(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	raw := signedShapeResponse(t, signer, `<saml:Subject><saml:NameID>alice@example.test</saml:NameID>`+shapeConfirmation+`</saml:Subject>`)
 	_, err := parseShapeResponse(t, sp, raw)
@@ -167,6 +170,7 @@ func TestSAMLSignedAssertionWithoutConditionsIsRefused(t *testing.T) {
 // TestSAMLSignedConfirmationWithoutDataIsRefused: before the patch this dereferenced a nil
 // SubjectConfirmationData.
 func TestSAMLSignedConfirmationWithoutDataIsRefused(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	raw := signedShapeResponse(t, signer, `<saml:Subject><saml:NameID>alice@example.test</saml:NameID>`+
 		`<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"/></saml:Subject>`+shapeConditions)
@@ -177,6 +181,7 @@ func TestSAMLSignedConfirmationWithoutDataIsRefused(t *testing.T) {
 // TestSAMLForeignNamespaceNameIDIsNotTheSubject: before the patch a NameID in any namespace filled
 // Subject.NameID, so the portal would have keyed the account on the foreign value.
 func TestSAMLForeignNamespaceNameIDIsNotTheSubject(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	raw := signedShapeResponse(t, signer, `<saml:Subject><x:NameID xmlns:x="urn:example:foreign">mallory@example.test</x:NameID>`+
 		shapeConfirmation+`</saml:Subject>`+shapeConditions)
@@ -197,6 +202,7 @@ func TestSAMLForeignNamespaceNameIDIsNotTheSubject(t *testing.T) {
 // AttributeValue or AuthnStatement must not be read as the assertion's. This goes beyond
 // crewjam/saml#674, which bound only the subject and conditions.
 func TestSAMLForeignNamespaceStatementsAreIgnored(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	subject := `<saml:Subject><saml:NameID>alice@example.test</saml:NameID>` + shapeConfirmation + `</saml:Subject>` + shapeConditions
 	cases := map[string]string{
@@ -229,6 +235,7 @@ func TestSAMLForeignNamespaceStatementsAreIgnored(t *testing.T) {
 
 // TestSAMLNativeStatementsAreRead is the positive control for the binding above.
 func TestSAMLNativeStatementsAreRead(t *testing.T) {
+	t.Parallel()
 	sp, signer := shapeServiceProvider(t)
 	raw := signedShapeResponse(t, signer, `<saml:Subject><saml:NameID>alice@example.test</saml:NameID>`+shapeConfirmation+`</saml:Subject>`+shapeConditions+
 		`<saml:AuthnStatement AuthnInstant="2026-01-01T00:00:00Z" SessionIndex="s-1"/>`+

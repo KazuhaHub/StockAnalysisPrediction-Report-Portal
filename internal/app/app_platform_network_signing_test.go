@@ -13,6 +13,7 @@ import (
 // The foreground request may ask for a signed call (doc 177): a closed nested object, never beside
 // a plain credential. The gateway carries a name and a reviewed (action, version) only.
 func TestPlatformNetworkHTTPDecoderSigning(t *testing.T) {
+	t.Parallel()
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: strings.Repeat("a", 64)}
 	decode := func(raw string) (platformNetworkHTTPRequest, error) {
 		return readPlatformNetworkHTTPRequest(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(raw)))

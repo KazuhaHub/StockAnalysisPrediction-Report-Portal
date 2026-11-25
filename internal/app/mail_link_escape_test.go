@@ -10,6 +10,7 @@ import (
 // input, but it is still written into an HTML attribute, so a quote in it must stay inside the
 // href rather than end the attribute and inject markup into a message sent to a user.
 func TestMailLinksStayInsideTheHrefAttribute(t *testing.T) {
+	t.Parallel()
 	const hostile = `https://portal.example/"><b>x</b>`
 
 	capture := func(s *Server) *string {

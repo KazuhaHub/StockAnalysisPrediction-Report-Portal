@@ -9,6 +9,7 @@ import (
 )
 
 func TestReadingPredictionLinksCarryTheReportKind(t *testing.T) {
+	t.Parallel()
 	run := func(t *testing.T, st *Store) {
 		report := seedReport(t, st, "600519", "2026-10-20")
 		seedPredictionSet(t, st, sql.NullInt64{Int64: report, Valid: true}, "reading-link")
@@ -32,6 +33,7 @@ func TestReadingPredictionLinksCarryTheReportKind(t *testing.T) {
 }
 
 func TestReadingBoundariesMatchSettlement(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile("testdata/forecast/reading_boundaries.json")
 	if err != nil {
 		t.Fatal(err)

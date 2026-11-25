@@ -14,6 +14,7 @@ import (
 )
 
 func TestPlatformMarketHTTPAuthorityAndInput(t *testing.T) {
+	t.Parallel()
 	s, mux, actor, _, cookie := platformManagementFixture(t, false)
 	for _, endpoint := range []string{"catalogue", "stage"} {
 		path := "/api/admin/app-platform/market/" + endpoint
@@ -44,6 +45,7 @@ func TestPlatformMarketHTTPAuthorityAndInput(t *testing.T) {
 }
 
 func TestPlatformMarketFetchCancellation(t *testing.T) {
+	t.Parallel()
 	requested := make(chan struct{})
 	finished := make(chan struct{})
 	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +190,7 @@ func (h *marketCatalogueHarness) requested(path string) bool {
 }
 
 func TestPlatformMarketCatalogueGroupsApps(t *testing.T) {
+	t.Parallel()
 	h := newMarketCatalogueHarness(t)
 	for _, v := range []string{"0.1.0-beta.2", "0.1.0", "0.1.0-beta.10"} {
 		d, raw, sig := h.signed("notes-alpha", "fixture-publisher", v, "Alpha "+v)
@@ -228,6 +231,7 @@ func TestPlatformMarketCatalogueGroupsApps(t *testing.T) {
 
 // A signed descriptor that names another app, version or publisher than its catalogue entry is never shown.
 func TestPlatformMarketCatalogueDropsMismatchedIdentity(t *testing.T) {
+	t.Parallel()
 	s, _, actor, _, cookie := platformManagementFixture(t, false)
 	otherKey := platformTrustFixtureKey(8, "other-key")
 	if _, err := s.changePlatformPublisherTrust(actor, platformPublisherChange{kind: "register", publisherID: "second-publisher", enabled: true, namespaces: []appplatform.PublisherNamespace{{Kind: "prefix", Value: "other-"}}, key: &otherKey}); err != nil {
@@ -263,6 +267,7 @@ func TestPlatformMarketCatalogueDropsMismatchedIdentity(t *testing.T) {
 
 // A publisher that is registered but disabled is not trusted: no display and no request for its descriptor.
 func TestPlatformMarketCatalogueDisabledPublisherIsNotTrusted(t *testing.T) {
+	t.Parallel()
 	h := newMarketCatalogueHarness(t)
 	d, raw, sig := h.signed("notes-hotel", "fixture-publisher", "1.0.0", "Hotel")
 	h.add("fixture-publisher", "notes-hotel", "1.0.0", d, raw, sig)

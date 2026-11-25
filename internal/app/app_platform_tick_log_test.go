@@ -10,6 +10,7 @@ import (
 // A scheduler that fails the same way every tick logs that state once, and again only when it
 // changes: to another error, or back to success.
 func TestPlatformTickLogReportsChangesOnly(t *testing.T) {
+	t.Parallel()
 	var l platformTickLog
 	other := errors.New("database is locked")
 	var got []string

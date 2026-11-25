@@ -27,6 +27,7 @@ func backBeforeStep0010(t *testing.T, path string) {
 // The upgrade path, and the one production takes: values move with the column, nothing is
 // back-filled, and an existing popup keeps behaving as it did (NULL reads as dismissible).
 func TestStep0010RenamesTheBandFlagAndAddsThePopupFlag(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "pre-0010.db")
 	backBeforeStep0010(t, path)
 	mutateFile(t, path,
@@ -72,6 +73,7 @@ func TestStep0010RenamesTheBandFlagAndAddsThePopupFlag(t *testing.T) {
 
 // Once the step is recorded the old name is wrong, not merely redundant. Both directions fail closed.
 func TestARenamedBaseColumnIsCheckedUnderItsNewName(t *testing.T) {
+	t.Parallel()
 	readded := fileStore(t, "readded.db")
 	mutateFile(t, readded, `ALTER TABLE announcements ADD COLUMN dismissible INTEGER`)
 	if st, err := OpenStore("sqlite", readded); err == nil {
@@ -92,6 +94,7 @@ func TestARenamedBaseColumnIsCheckedUnderItsNewName(t *testing.T) {
 // Before the step, a database carrying BOTH names is not one any release wrote, and neither name can
 // be trusted to hold the band flag.
 func TestAPreRenameDatabaseCarryingBothNamesIsRefused(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "both.db")
 	backBeforeStep0010(t, path)
 	mutateFile(t, path, `ALTER TABLE announcements ADD COLUMN strip_dismissible INTEGER`)
@@ -104,6 +107,7 @@ func TestAPreRenameDatabaseCarryingBothNamesIsRefused(t *testing.T) {
 // The runbook's pre-upgrade backup was written with the old name. It must load, with the value
 // landing under the new one — the rename changes no data, so an older dump loses nothing.
 func TestADumpFromBeforeTheRenameLoadsUnderTheNewName(t *testing.T) {
+	t.Parallel()
 	dump := preMigrationDump(t,
 		`INSERT INTO announcements(id,title,content,dismissible) VALUES(5,'旧公告','正文',1)`)
 	dst := newTestStore(t)
@@ -122,6 +126,7 @@ func TestADumpFromBeforeTheRenameLoadsUnderTheNewName(t *testing.T) {
 // A dump that claims the step has to carry its result. Arriving with the old name instead is a
 // damaged or hand-edited backup, and loading it as an old one would be a guess.
 func TestADumpClaimingTheRenameMustCarryTheNewName(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	if _, err := src.exec(`INSERT INTO announcements(id,title,strip_dismissible,popup_dismissible) VALUES(1,'x',1,0)`); err != nil {
 		t.Fatal(err)
@@ -143,6 +148,7 @@ func TestADumpClaimingTheRenameMustCarryTheNewName(t *testing.T) {
 
 // Both flags survive a backup and restore within the new line.
 func TestBackupRoundTripKeepsBothDismissalFlags(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	if _, err := src.exec(`INSERT INTO announcements(id,title,strip_dismissible,popup_dismissible) VALUES(3,'y',1,0)`); err != nil {
 		t.Fatal(err)
@@ -165,6 +171,7 @@ func TestBackupRoundTripKeepsBothDismissalFlags(t *testing.T) {
 // drive each layer on its own.
 
 func TestTheShapeCheckEnforcesTheRenameOnItsOwn(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.checkBaseShape(true); err != nil {
 		t.Fatalf("a migrated database fails its own shape check: %v", err)
@@ -184,6 +191,7 @@ func TestTheShapeCheckEnforcesTheRenameOnItsOwn(t *testing.T) {
 }
 
 func TestTheStepVerificationEnforcesTheRenameOnItsOwn(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	steps := []migration{migration0010()}
 	if err := st.verifyMigrationProducts(st.poolExec(), steps); err != nil {
@@ -201,6 +209,7 @@ func TestTheStepVerificationEnforcesTheRenameOnItsOwn(t *testing.T) {
 // beside the old one — is a header and content that disagree, and on SQLite a duplicated column in
 // the insert would silently keep whichever came first.
 func TestAPreRenameDumpCarryingTheNewNameIsRefused(t *testing.T) {
+	t.Parallel()
 	both := preMigrationDump(t,
 		`ALTER TABLE announcements ADD COLUMN strip_dismissible INTEGER`,
 		`INSERT INTO announcements(id,title,dismissible,strip_dismissible) VALUES(7,'两个名字',1,0)`)

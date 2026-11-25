@@ -38,6 +38,7 @@ func ageFile(t *testing.T, path string, age time.Duration) {
 
 // Fails (keeps the file) if a name that is neither a digest nor a partial survives a start.
 func TestImageStoreRecoverRemovesEveryNameThatIsNotADigestOrPartial(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	good := strings.Repeat("a", 64)
 	for _, dir := range []string{store.staging, store.blobs} {
@@ -59,6 +60,7 @@ func TestImageStoreRecoverRemovesEveryNameThatIsNotADigestOrPartial(t *testing.T
 
 // Fails if a resumable download is dropped inside its window, or an abandoned one is kept past it.
 func TestImageStoreRecoverKeepsAFreshPartialAndRemovesAnOldOne(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	fresh, old := strings.Repeat("1", 64)+".partial", strings.Repeat("2", 64)+".partial"
 	os.WriteFile(filepath.Join(store.staging, fresh), []byte("half"), 0o600)
@@ -80,6 +82,7 @@ func TestImageStoreRecoverKeepsAFreshPartialAndRemovesAnOldOne(t *testing.T) {
 
 // Fails (places the blob) if bytes that do not hash to the name ever get that name.
 func TestImageStoreBlobThatDoesNotHashToItsNameIsNeverPlaced(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	blob, _ := testBlob("the real bytes")
 	if err := store.putBlob(blob, bytes.NewReader([]byte("the real byteX"))); err == nil {
@@ -99,6 +102,7 @@ func TestImageStoreBlobThatDoesNotHashToItsNameIsNeverPlaced(t *testing.T) {
 
 // Fails (returns the file) if a blob that changed on disk is used, or if it stays after being found corrupt.
 func TestImageStoreCorruptBlobIsRefusedAndDeletedOnUse(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	blob, raw := testBlob("a layer of the image")
 	if err := store.putBlob(blob, bytes.NewReader(raw)); err != nil {
@@ -125,6 +129,7 @@ func TestImageStoreCorruptBlobIsRefusedAndDeletedOnUse(t *testing.T) {
 
 // Fails if the cache evicts a package in use, a download in flight, or does not evict the oldest first.
 func TestImageStoreStagingEvictsLeastRecentlyUsedAndSparesHeldAndPartials(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	store.stagingCap = 100
 	write := func(name string, size int, age time.Duration) string {
@@ -156,6 +161,7 @@ func TestImageStoreStagingEvictsLeastRecentlyUsedAndSparesHeldAndPartials(t *tes
 
 // Fails if the blob cap lets in a blob set that does not fit, or counts a blob already stored twice.
 func TestImageStoreBlobCapRefusesWhatWouldNotFitAndCountsStoredBlobsOnce(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	a, rawA := testBlob(strings.Repeat("a", 40))
 	b, rawB := testBlob(strings.Repeat("b", 40))
@@ -178,6 +184,7 @@ func TestImageStoreBlobCapRefusesWhatWouldNotFitAndCountsStoredBlobsOnce(t *test
 // Fails if a sweep removes a pinned blob, a blob in use, or one younger than the grace period, or keeps an
 // old unpinned one.
 func TestImageStoreSweepKeepsPinnedHeldAndYoungBlobsOnly(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	names := map[string]string{}
 	for _, role := range []string{"pinned", "held", "young", "stray"} {
@@ -203,6 +210,7 @@ func TestImageStoreSweepKeepsPinnedHeldAndYoungBlobsOnly(t *testing.T) {
 
 // Fails if an upload is held in memory past its bound, or its partial survives a refusal.
 func TestImageStoreUploadStreamsToDiskAndDiscardsWhatExceedsItsBound(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	file, n, key, err := store.streamUpload(bytes.NewReader(bytes.Repeat([]byte("z"), 50)), 100)
 	if err != nil || n != 50 {
@@ -227,6 +235,7 @@ func writeFileForTest(path string, body []byte) error { return os.WriteFile(path
 
 // Fails if two concurrent reservations both pass the cap on the same free space.
 func TestImageStoreCapReservationsAreAtomicUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	store.blobCap, store.stagingCap = 100, 100
 	for _, kind := range []string{"blobs", "staging"} {
@@ -262,6 +271,7 @@ func TestImageStoreCapReservationsAreAtomicUnderConcurrency(t *testing.T) {
 
 // Fails if a released reservation keeps holding room, or an unreleased one does not.
 func TestImageStoreReleasedReservationGivesTheRoomBack(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	store.blobCap = 100
 	blob, _ := testBlob(strings.Repeat("r", 80))
@@ -282,6 +292,7 @@ func TestImageStoreReleasedReservationGivesTheRoomBack(t *testing.T) {
 
 // Fails if concurrent puts of one digest corrupt each other's partial file, leave one behind, or fail.
 func TestImageStoreConcurrentPutsOfOneDigestAllSucceedAndLeaveOneValidBlob(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	blob, raw := testBlob(strings.Repeat("shared layer ", 5000))
 	var wg sync.WaitGroup
@@ -313,6 +324,7 @@ func TestImageStoreConcurrentPutsOfOneDigestAllSucceedAndLeaveOneValidBlob(t *te
 
 // Fails if a read error deletes a good blob. The blob is made unreadable, not wrong.
 func TestImageStoreAReadErrorFailsTheAttemptAndKeepsTheBlob(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a mode 0 file")
 	}
@@ -341,6 +353,7 @@ func TestImageStoreAReadErrorFailsTheAttemptAndKeepsTheBlob(t *testing.T) {
 
 // Fails if a symbolic link in a blob's place is followed, or its target is touched.
 func TestImageStoreNeverFollowsALinkInPlaceOfABlob(t *testing.T) {
+	t.Parallel()
 	store := newTestImageStore(t)
 	blob, raw := testBlob("the real bytes of the blob")
 	outside := filepath.Join(t.TempDir(), "outside")
@@ -370,6 +383,7 @@ func TestImageStoreNeverFollowsALinkInPlaceOfABlob(t *testing.T) {
 
 // Fails if an existing store directory is left open to others, owned by another user's link, or a link.
 func TestImageStoreTightensDirectoryModesAndRefusesALinkedDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	os.MkdirAll(filepath.Join(root, "app-staging"), 0o777)
 	os.Chmod(filepath.Join(root, "app-staging"), 0o777)
@@ -389,6 +403,7 @@ func TestImageStoreTightensDirectoryModesAndRefusesALinkedDirectory(t *testing.T
 
 // Fails if blobs a staging call already wrote stay behind when a later write fails.
 func TestOfflineManagedPackageWhoseLaterBlobWriteFailsLeavesNoBlobsAndNoRelease(t *testing.T) {
+	t.Parallel()
 	h := newPlatformImageHTTP(t, true)
 	store, _ := h.s.platformImages()
 	parts := newPlatformManagedImageParts(t, "6.0.0", "midway")

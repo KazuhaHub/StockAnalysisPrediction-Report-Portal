@@ -11,6 +11,7 @@ import "testing"
 // it would sort a note to the top of someone's day for no reason.
 
 func TestDueDateFromAReviewPoint(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"2026-10-31 三季报", "2026-10-31"},
 		{"2026-10-31", "2026-10-31"},
@@ -35,6 +36,7 @@ func TestDueDateFromAReviewPoint(t *testing.T) {
 // Sorting the queue: items with a due date come first, oldest due first, and everything else
 // follows by age. An item nobody gave a date to must never outrank one that is actually due.
 func TestQueueOrdersByDueThenAge(t *testing.T) {
+	t.Parallel()
 	s, internal, _ := trackingFixture(t)
 	s.st.SetTracking(internal, "600519", []TrackingItem{
 		{IType: "assumption", Content: "无日期的老假设"},

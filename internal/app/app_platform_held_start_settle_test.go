@@ -147,6 +147,7 @@ func (c *settleScript) install(s *Server, fake *platformFakeMigrationRunner) {
 // A claimed enable start with nothing executing it is settled by the runner, once, from the idle settlement tick,
 // and its effect is closed on what the runner then reads.
 func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
@@ -235,6 +236,7 @@ func requireOperationStillInRecovery(t *testing.T, s *Server, operation string) 
 
 // Nothing is settled while the runner may still be executing the start.
 func TestSettlementTickLeavesAnEnableStartThatMayBeExecuting(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		script := &settleScript{before: held("pending"), after: held("pending")}
@@ -252,6 +254,7 @@ func TestSettlementTickLeavesAnEnableStartThatMayBeExecuting(t *testing.T) {
 
 // A window that has not passed settles nothing either: a claim may still arrive.
 func TestSettlementTickWaitsOutTheStartWindowOfAnEnable(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		mustExec(t, s.st, `UPDATE app_platform_operations SET completed_ms=completed_ms+3600000 WHERE id=?`, operation)
@@ -265,6 +268,7 @@ func TestSettlementTickWaitsOutTheStartWindowOfAnEnable(t *testing.T) {
 
 // An enable orphan the runner finds a container for is closed as applied and nothing is removed or restored.
 func TestSettlementTickClosesAnEnableStartTheRunnerFoundRunning(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		s.platformReadStartReceipt = func(_ context.Context, ep platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
@@ -286,6 +290,7 @@ func TestSettlementTickClosesAnEnableStartTheRunnerFoundRunning(t *testing.T) {
 // reconciliation: the runner is asked once, and the start it then reads as never run reverts the effect and returns
 // the installation to review.
 func TestRecoveryReconcileSettlesAnOrphanedRestoreStart(t *testing.T) {
+	t.Parallel()
 	f, operation, _ := unknownResumeStartFixture(t)
 	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
 	script.install(f.s, &platformFakeMigrationRunner{t: t})
@@ -323,6 +328,7 @@ func TestRecoveryReconcileSettlesAnOrphanedRestoreStart(t *testing.T) {
 
 // A start the runner holds as reserved (never claimed) or pending (maybe executing) is only read again.
 func TestRecoveryReconcileLeavesAReservedOrPendingRestoreStart(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"reserved", "pending"} {
 		t.Run(state, func(t *testing.T) {
 			f, operation, _ := unknownResumeStartFixture(t)
@@ -385,6 +391,7 @@ func cloneOperations(t *testing.T, s *Server, operation string, n int, effectWhe
 // Eight starts that keep failing must not keep every later one from being tried. The window rotates, so every open
 // start is reached within ceil(n/8) ticks, however the first ones behave.
 func TestHeldStartSettlementReachesEveryOpenStart(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, _, _ := orphanedEnableFixture(t, pg)
 		all := cloneHeldStarts(t, s, operation, 19)
@@ -414,6 +421,7 @@ func TestHeldStartSettlementReachesEveryOpenStart(t *testing.T) {
 
 // Through the real tick: the runner is asked about the start of every operation, not only the first eight.
 func TestHeldStartSettlementTickAsksAboutEveryStartNotOnlyTheFirstEight(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		cloneHeldStarts(t, s, operation, 11)
@@ -440,6 +448,7 @@ func TestHeldStartSettlementTickAsksAboutEveryStartNotOnlyTheFirstEight(t *testi
 // resource. It is removed bound to the reservation, exactly as an update's is, and the start is then closed as
 // never run: the resource row is not left behind for an administrator.
 func TestSettlementTickRemovesTheTargetOfAReservedEnableStart(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		var removals []string
@@ -483,6 +492,7 @@ func TestSettlementTickRemovesTheTargetOfAReservedEnableStart(t *testing.T) {
 
 // A start the runner refused for capacity never ran, whatever the signed window: the operation is closed the same way.
 func TestSettlementTickFailsAnEnableWhoseStartTheRunnerRefusedForCapacity(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, _ := orphanedEnableFixture(t, pg)
 		s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
@@ -510,6 +520,7 @@ func TestSettlementTickFailsAnEnableWhoseStartTheRunnerRefusedForCapacity(t *tes
 // A start the runner holds no row for and that recorded no reservation was never admitted, once every window has
 // passed: the operation is closed the same way.
 func TestSettlementTickFailsAnEnableWhoseStartWasNeverAdmitted(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, _ := orphanedEnableFixture(t, pg)
 		mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json='{}',observed_fence=0 WHERE operation_id=? AND stage='start' AND effect_number=1`, operation)
@@ -531,6 +542,7 @@ func TestSettlementTickFailsAnEnableWhoseStartWasNeverAdmitted(t *testing.T) {
 // The start is reverted, but another effect of the operation has no verdict: that is not proof the namespace was left
 // alone, so the operation stays in recovery for an administrator. Nothing is closed on a guess.
 func TestSettlementTickKeepsAnEnableInRecoveryWhileAnotherEffectIsUnsettled(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
 		mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
@@ -563,6 +575,7 @@ func eachPlatformDriver(t *testing.T, fn func(t *testing.T, pg bool)) {
 // Closing a reserved-only start leaves no candidate activation at the target generation, so the installation can be
 // repaired again: the second start finds the activation row it needs to open itself, instead of the stale one.
 func TestReservedOnlyCloseLeavesNoCandidateAndTheInstallationCanBeRepairedAgain(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		o := orphanedEnableState(t, pg)
 		var removals []string
@@ -599,6 +612,7 @@ func TestReservedOnlyCloseLeavesNoCandidateAndTheInstallationCanBeRepairedAgain(
 // generic recovery message: the closer gives it the typed review code. No current path reaches it (every path that
 // reverts the start drops the candidate), so the state is built by hand.
 func TestCloserGivesALeftoverCandidateTheTypedReviewCode(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, operation, _, _ := orphanedEnableFixture(t, pg)
 		mustExec(t, s.st, `UPDATE app_platform_operation_effects SET state='reverted',receipt_json=? WHERE operation_id=? AND stage='start' AND effect_number=1`, platformNeverRanReceipt, operation)

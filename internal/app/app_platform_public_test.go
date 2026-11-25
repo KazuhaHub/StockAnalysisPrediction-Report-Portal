@@ -17,7 +17,7 @@ import (
 )
 
 // platformPublicFixtureFiles replaces the fixture archive files (browser test).
-var platformPublicFixtureFiles map[string]string
+var platformPublicFixtureFiles testScoped[map[string]string]
 
 type platformPublicEnv struct {
 	s        *Server
@@ -42,15 +42,13 @@ func testPublicBlock() *appplatform.Public {
 // whose backend answers through a recording hook (the runner path is covered separately).
 func platformPublicFixture(t *testing.T, pg bool) *platformPublicEnv {
 	t.Helper()
-	platformManagedFixtureOptional = []string{"public.projection"}
-	platformManagedFixturePublic = testPublicBlock()
-	platformFixtureArchiveFiles = map[string]string{"public/index.html": "<!doctype html><title>Public</title>", "public/app.js": "console.log(1)", "private.txt": "secret"}
-	if platformPublicFixtureFiles != nil {
-		platformFixtureArchiveFiles = platformPublicFixtureFiles
+	platformManagedFixtureOptional.set(t, []string{"public.projection"})
+	platformManagedFixturePublic.set(t, testPublicBlock())
+	files := map[string]string{"public/index.html": "<!doctype html><title>Public</title>", "public/app.js": "console.log(1)", "private.txt": "secret"}
+	if replaced := platformPublicFixtureFiles.get(t); replaced != nil {
+		files = replaced
 	}
-	t.Cleanup(func() {
-		platformManagedFixtureOptional, platformManagedFixturePublic, platformFixtureArchiveFiles = nil, nil, nil
-	})
+	platformFixtureArchiveFiles.set(t, files)
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
 	t.Cleanup(func() {
@@ -175,6 +173,7 @@ func (e *platformPublicEnv) data(route, query string) *httptest.ResponseRecorder
 const publicNotFound = `{"code":"not_found"}`
 
 func TestPublicProjectionIsOffUntilGranted(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		for _, path := range []string{"/public/apps/" + e.id + "/data/status", "/public/apps/" + e.id + "/", "/public/apps/" + e.id + "/app.js", "/public/apps/00000000-0000-4000-8000-000000000000/data/status", "/public/apps/not-a-uuid/data/status"} {
@@ -199,6 +198,7 @@ func TestPublicProjectionIsOffUntilGranted(t *testing.T) {
 }
 
 func TestPublicDataResponseHeaders(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -231,6 +231,7 @@ func TestPublicDataResponseHeaders(t *testing.T) {
 }
 
 func TestPublicRoutesAreGetOnly(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -251,6 +252,7 @@ func TestPublicRoutesAreGetOnly(t *testing.T) {
 }
 
 func TestPublicQueryIsCheckedWithoutABackendCall(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -279,6 +281,7 @@ func TestPublicQueryIsCheckedWithoutABackendCall(t *testing.T) {
 }
 
 func TestPublicRequestWithASessionIsTheAnonymousRequest(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -295,6 +298,7 @@ func TestPublicRequestWithASessionIsTheAnonymousRequest(t *testing.T) {
 }
 
 func TestPublicBackendAccessCarriesNoViewerAndNeedsTheGrant(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		anon := platformActorSession{anonymousPublic: true}
@@ -349,6 +353,7 @@ func TestPublicBackendAccessCarriesNoViewerAndNeedsTheGrant(t *testing.T) {
 }
 
 func TestPublicBackendRateAndSingleFlight(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		if w := e.enableWith(t, []string{"history", "status"}, true, 600, 5); w.Code != 200 {
@@ -381,6 +386,7 @@ func TestPublicBackendRateAndSingleFlight(t *testing.T) {
 }
 
 func TestPublicIdenticalRequestsShareOneFetch(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -413,6 +419,7 @@ func TestPublicIdenticalRequestsShareOneFetch(t *testing.T) {
 }
 
 func TestPublicBackendAnswersAreBounded(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		if w := e.enableWith(t, []string{"history", "status"}, true, 600, 20); w.Code != 200 {
@@ -457,6 +464,7 @@ func TestPublicBackendAnswersAreBounded(t *testing.T) {
 }
 
 func TestPublicWithdrawalIsImmediateAndEmptiesTheCache(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -509,6 +517,7 @@ func TestPublicWithdrawalIsImmediateAndEmptiesTheCache(t *testing.T) {
 }
 
 func TestPublicRefusesWhileUnsafeAndAnswersUniformlyWhenOff(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)

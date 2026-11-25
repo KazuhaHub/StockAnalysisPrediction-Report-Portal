@@ -12,6 +12,7 @@ import (
 // longer persist a stored HTML copy. renderPDFHTML must derive it from MD on the fly so
 // export keeps working without wkhtmltopdf even being involved in this test.
 func TestRenderPDFHTMLDerivesFromMD(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	s.parseTemplates()
 
@@ -25,6 +26,7 @@ func TestRenderPDFHTMLDerivesFromMD(t *testing.T) {
 }
 
 func TestRenderPDFHTMLSanitizesStoredHTMLForLegacyReports(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	s.parseTemplates()
 
@@ -43,6 +45,7 @@ func TestRenderPDFHTMLSanitizesStoredHTMLForLegacyReports(t *testing.T) {
 }
 
 func TestRenderPDFHTMLSplicesUserScopedMermaidSVG(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	s.parseTemplates()
 	source := "flowchart LR\nA[开始] --> B[结束]"
@@ -72,6 +75,7 @@ func TestRenderPDFHTMLSplicesUserScopedMermaidSVG(t *testing.T) {
 }
 
 func TestRenderPDFHTMLMatchesMermaidCacheForIndentedFence(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	s.parseTemplates()
 	source := "flowchart LR\nA[Start] --> B[End]"
@@ -91,6 +95,7 @@ func TestRenderPDFHTMLMatchesMermaidCacheForIndentedFence(t *testing.T) {
 }
 
 func TestSanitizeMermaidSVGRejectsFetchAndExecutableContent(t *testing.T) {
+	t.Parallel()
 	bad := []string{
 		`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`,
 		`<svg xmlns="http://www.w3.org/2000/svg"><image href="http://169.254.169.254/x"/></svg>`,
@@ -110,6 +115,7 @@ func TestSanitizeMermaidSVGRejectsFetchAndExecutableContent(t *testing.T) {
 // sends "Microsoft YaHei" — a font the render container does not have. Every chart must come out
 // pinned to the same face the report body uses, or chart labels render in a fallback font.
 func TestSanitizeMermaidSVGPinsChartFontToTheContainerFont(t *testing.T) {
+	t.Parallel()
 	in := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">` +
 		`<text font-family="Microsoft YaHei, sans-serif" font-size="12">图表</text>` +
 		`<text font-family="&#34;Helvetica Neue&#34;, Arial">label</text></svg>`
@@ -146,6 +152,7 @@ func fontFamilies(list string) []string {
 // only thing holding the two stacks together, and a comment does not fail a build. A chart label and
 // the paragraph beside it resolving to different faces is exactly the bug this pins down.
 func TestPDFTemplateAndChartFontStacksAgree(t *testing.T) {
+	t.Parallel()
 	tpl, err := tplFS.ReadFile("templates/pdf.html")
 	if err != nil {
 		t.Fatalf("read pdf.html: %v", err)
@@ -183,6 +190,7 @@ func TestPDFTemplateAndChartFontStacksAgree(t *testing.T) {
 }
 
 func TestMermaidCacheAPIRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
 	body := `{"source":"flowchart LR\\nA --> B","svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><path d=\"M0 0L10 10\"/></svg>","theme":"light","version":"11.16.0"}{}`
 	req := httptest.NewRequest(http.MethodPost, "/api/mermaid-cache", strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -195,6 +203,7 @@ func TestMermaidCacheAPIRejectsTrailingJSON(t *testing.T) {
 }
 
 func TestSanitizePDFBodyDropsAllFetchCapableAttributes(t *testing.T) {
+	t.Parallel()
 	in := `<style>@import "http://internal/style"</style><a href="http://internal/a">link</a><div style="background:url(http://internal/b)">text</div><object data="http://internal/c"></object>`
 	out := sanitizePDFBody(in)
 	if strings.Contains(out, "http://") || strings.Contains(out, "style=") || strings.Contains(out, "href=") {

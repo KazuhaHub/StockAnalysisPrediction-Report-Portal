@@ -143,9 +143,11 @@ func testPlatformBackendDeliveryIntent(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformBackendDeliveryIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendDeliveryIntent(t, false)
 }
 func TestPlatformBackendDeliveryIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendDeliveryIntent(t, true)
 }
 func testPlatformBackendDeliveryRefusals(t *testing.T, pg bool) {
@@ -201,9 +203,11 @@ func testPlatformBackendDeliveryRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformBackendDeliveryRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendDeliveryRefusals(t, false)
 }
 func TestPlatformBackendDeliveryRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendDeliveryRefusals(t, true)
 }
 
@@ -236,8 +240,10 @@ func testPlatformBackendDeliveryIntentRollback(t *testing.T, pg bool) {
 	intent.registration.Close()
 }
 func TestPlatformBackendDeliveryIntentRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendDeliveryIntentRollback(t, false)
 }
 func TestPlatformBackendDeliveryIntentRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendDeliveryIntentRollback(t, true)
 }

@@ -36,6 +36,7 @@ func seedReportOnly(t *testing.T, st *Store, symbol, date, version string) int64
 // TestUnrecordedIsHiddenUntilTheLedgerStartIsSet: without a boundary there is no floor, so the store
 // reports ok=false and the page says "set the ledger start" rather than showing a number. FC.
 func TestUnrecordedIsHiddenUntilTheLedgerStartIsSet(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	seedReportOnly(t, st, "600001", "2020-01-05", "")
 	n, since, ok, err := st.countForecastUnrecorded(predTestRtype)
@@ -51,6 +52,7 @@ func TestUnrecordedIsHiddenUntilTheLedgerStartIsSet(t *testing.T) {
 // rows after the ledger start, and the count excludes pre-ledger reports, reports that have a set,
 // hand-written reports, and other report types.
 func TestUnrecordedFloorFromIngestAudit(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	from := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
 	// Pre-ledger covered reports, with audit rows before the boundary.
@@ -118,6 +120,7 @@ func seedIngestAudit(t *testing.T, st *Store, reportID int64, at time.Time) {
 // TestUnrecordedFloorReDerivedOnRestore: a dump without the floor keys still counts correctly after
 // a restore, because the floor is re-derived from the ledger start and the restored audit rows.
 func TestUnrecordedFloorReDerivedOnRestore(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	from := time.Date(2020, time.January, 6, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
@@ -152,6 +155,7 @@ func TestUnrecordedFloorReDerivedOnRestore(t *testing.T) {
 // TestStoreFailedEmitsWebhook: the second-failure branch fires predictions.store_failed exactly
 // once, with the report identity, and a successful ingest sends nothing.
 func TestStoreFailedEmitsWebhook(t *testing.T) {
+	t.Parallel()
 	if !containsStr(availableEvents(), EventPredictionsStoreFailed) {
 		t.Fatal("predictions.store_failed is not in availableEvents()")
 	}
@@ -214,6 +218,7 @@ func TestStoreFailedEmitsWebhook(t *testing.T) {
 // TestEveryWebhookEventHasALabel keeps the event registry and the webhook UI in step: the UI labels
 // each event with `webhook.event.<code>`, so an event without a label renders as a raw identifier.
 func TestEveryWebhookEventHasALabel(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join("..", "..", "web", "src", "locales")
 	entries, err := os.ReadDir(dir)
 	if err != nil {

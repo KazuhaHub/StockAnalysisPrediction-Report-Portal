@@ -155,6 +155,7 @@ func symbolFor(i int) string {
 // are the base-amd64 results. On an architecture that contracts, the test fails the moment a barrier is
 // removed, and on base amd64 it pins that the barrier changed nothing.
 func TestStatisticsAreArchitectureDeterministic(t *testing.T) {
+	t.Parallel()
 	// pearson (forecast_stats.go) — the IC path.
 	x := []float64{-467453.34799834504, 851814.5740686853, -354709.66366818256, 521846.8054312628,
 		-274953.3148886243, -124110.07143413178, -157333.47489722128, 1.8503700466309118e+06, -892838.6317734944}
@@ -179,6 +180,7 @@ func TestStatisticsAreArchitectureDeterministic(t *testing.T) {
 }
 
 func TestSpearmanAveragesTies(t *testing.T) {
+	t.Parallel()
 	x := []float64{1, 2, 2, 3}
 	y := []float64{4, 3, 2, 1}
 	got := spearman(x, y)
@@ -195,6 +197,7 @@ func TestSpearmanAveragesTies(t *testing.T) {
 }
 
 func TestPermutationPIsReproducibleAndBounded(t *testing.T) {
+	t.Parallel()
 	vals := []float64{1, 2, 3, 4, 5, 6}
 	stat := func(perm []int) float64 {
 		var s float64
@@ -226,6 +229,7 @@ func nil2identity(n int) []int {
 }
 
 func TestBHAdjustTextbook(t *testing.T) {
+	t.Parallel()
 	got := bhAdjust([]float64{0.01, 0.04, 0.03})
 	want := []float64{0.03, 0.04, 0.04}
 	for i := range want {
@@ -240,6 +244,7 @@ func TestBHAdjustTextbook(t *testing.T) {
 }
 
 func TestCellMaturityGates(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sets := sampleMembers(t, s, 30, nil)
 	members, pending, cov := forecastMembership(sets, time.Time{}, "")
@@ -299,6 +304,7 @@ func TestCellMaturityGates(t *testing.T) {
 }
 
 func TestNonMatureCellsOmitMetricKeys(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	m, p, _ := forecastMembership(sampleMembers(t, s, predMatureMinN-1, nil), time.Time{}, "")
 	cell := computeForecastCell(m, p, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18")
@@ -313,6 +319,7 @@ func TestNonMatureCellsOmitMetricKeys(t *testing.T) {
 }
 
 func TestMembershipCountsDuplicatesAndBaseline(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	base := gsSeed{MadeOn: "2025-06-10", S0Fen: ip(10000), TerminalFen: ip(11000),
 		Marks: map[string]gsMark{"d5": {Status: markResolved, RetBp: bp(100), BenchRetBp: bp(50)}}}
@@ -343,6 +350,7 @@ func TestMembershipCountsDuplicatesAndBaseline(t *testing.T) {
 }
 
 func TestMonthlyAndWholeMonthCustomAgree(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, predMatureMinN+2, nil)
 
@@ -364,6 +372,7 @@ func TestMonthlyAndWholeMonthCustomAgree(t *testing.T) {
 }
 
 func TestMatureCellsDoNotChange(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	members, pending, _ := forecastMembership(sampleMembers(t, s, predMatureMinN+2, nil), time.Time{}, "")
 	a := computeForecastCell(members, pending, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18")
@@ -376,6 +385,7 @@ func TestMatureCellsDoNotChange(t *testing.T) {
 }
 
 func TestForecastRangeRefusals(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		from, to, group, want string
 		ok                    bool
@@ -396,6 +406,7 @@ func TestForecastRangeRefusals(t *testing.T) {
 }
 
 func TestPartialWeekIsLabelledWithItsDates(t *testing.T) {
+	t.Parallel()
 	ps := forecastPeriods("week", "2026-10-07", "2026-10-12")
 	if len(ps) != 2 {
 		t.Fatalf("periods = %+v", ps)
@@ -406,6 +417,7 @@ func TestPartialWeekIsLabelledWithItsDates(t *testing.T) {
 }
 
 func TestMonthModeRefusesRange(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/admin/forecast/groups?mode=month&from=2026-01-01", nil)
@@ -416,6 +428,7 @@ func TestMonthModeRefusesRange(t *testing.T) {
 }
 
 func TestGroupsRouteRequiresManage(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.UpsertUser(User{Username: "root", PasswordHash: "h", Role: "admin"})
@@ -500,6 +513,7 @@ func BenchmarkForecastGroupsMaxBounds(b *testing.B) {
 // immutability argument: if a pending cell were cached it would never finish, and if an exploratory
 // range wrote to the memo it could poison the record.
 func TestOnlyOfficialMatureCellsAreCached(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, predMatureMinN+2, nil)
 
@@ -538,6 +552,7 @@ func doMembers(t *testing.T, s *Server, target string) forecastMembersResponse {
 }
 
 func TestGroupMembersMirrorTheCell(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, predMatureMinN+3, nil)
 	resp := doMembers(t, s, "/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d5")
@@ -602,6 +617,7 @@ func calibCell(t *testing.T, counts map[string]int) *forecastCell {
 // TestEvidenceBasedMethodsAreNeverPooledIntoCalibration: the deferred methods are scored on the other
 // metrics but leave the p_profit calibration exactly as the subjective-only cell has it.
 func TestEvidenceBasedMethodsAreNeverPooledIntoCalibration(t *testing.T) {
+	t.Parallel()
 	base := calibCell(t, map[string]int{"subjective_committee": 6})
 	if base.Calib == nil || base.CalibN == nil || *base.CalibN != 6 {
 		t.Fatalf("baseline calib = %v/%v", base.Calib, base.CalibN)

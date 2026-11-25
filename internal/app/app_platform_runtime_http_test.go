@@ -178,15 +178,18 @@ func testPlatformRuntimeEnrollmentThroughHTTP(t *testing.T, pg bool) {
 }
 
 func TestPlatformRuntimeEnrollmentThroughHTTPSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeEnrollmentThroughHTTP(t, false)
 }
 func TestPlatformRuntimeEnrollmentThroughHTTPPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeEnrollmentThroughHTTP(t, true)
 }
 
 // A restored Portal in recovery shows that state and refuses an ordinary prepare: its runtime is
 // enrolled through the replacement procedure.
 func TestPlatformRuntimeStatusInRecovery(t *testing.T) {
+	t.Parallel()
 	s, actor, h := platformRuntimeHTTPFixture(t, false)
 	if err := s.initializeAppPlatformControl(actor); err != nil {
 		t.Fatal(err)

@@ -88,12 +88,17 @@ func testConcurrentKeyringInitialization(t *testing.T, postgres bool) {
 	}
 }
 
-func TestKeyringConcurrentInitialization(t *testing.T) { testConcurrentKeyringInitialization(t, false) }
+func TestKeyringConcurrentInitialization(t *testing.T) {
+	t.Parallel()
+	testConcurrentKeyringInitialization(t, false)
+}
 func TestPostgresKeyringConcurrentInitialization(t *testing.T) {
+	t.Parallel()
 	testConcurrentKeyringInitialization(t, true)
 }
 
 func TestKeyringCreationRollsBackBothRows(t *testing.T) {
+	t.Parallel()
 	st := keyringInitializationStore(t, false)
 	mustExec(t, st, fmt.Sprintf(`CREATE TRIGGER fixture_keyring_failure BEFORE INSERT ON meta
         WHEN NEW.k='%s' BEGIN SELECT RAISE(ABORT,'fixture write failure'); END`, setKeyringDEK))
@@ -137,12 +142,17 @@ func testPartialKeyringRefused(t *testing.T, postgres bool) {
 	}
 }
 
-func TestKeyringPartialInitializationRefused(t *testing.T) { testPartialKeyringRefused(t, false) }
+func TestKeyringPartialInitializationRefused(t *testing.T) {
+	t.Parallel()
+	testPartialKeyringRefused(t, false)
+}
 func TestPostgresKeyringPartialInitializationRefused(t *testing.T) {
+	t.Parallel()
 	testPartialKeyringRefused(t, true)
 }
 
 func TestKeyringConcurrentCreatePreservesPair(t *testing.T) {
+	t.Parallel()
 	st := keyringInitializationStore(t, false)
 	var wg sync.WaitGroup
 	errors := make(chan error, 8)

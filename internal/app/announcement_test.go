@@ -98,6 +98,7 @@ func feedTitles(items []map[string]any) []string {
 // than just the five names, because the way this regresses is somebody adding a sixth field that
 // "obviously" belongs with the branding.
 func TestPublicSiteSettingsKeySetIsFrozen(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	postSettingsJSON(t, s, map[string]any{
 		"announcementEnabled": true,
@@ -126,6 +127,7 @@ func TestPublicSiteSettingsKeySetIsFrozen(t *testing.T) {
 // ---------- CRUD, ordering ----------
 
 func TestAnnouncementReorderIsWholeSetOrNothing(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	a := mustAddAnnouncement(t, s, `{"title":"一"}`)
 	b := mustAddAnnouncement(t, s, `{"title":"二"}`)
@@ -166,6 +168,7 @@ func TestAnnouncementReorderIsWholeSetOrNothing(t *testing.T) {
 // announcement's id plus a hash of its text, so ord has to be the only thing a reorder touches —
 // otherwise every drag re-fires every popup somebody had already dismissed.
 func TestReorderLeavesContentAndTimestampsAlone(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	a := mustAddAnnouncement(t, s, `{"title":"一","content":"正文"}`)
 	b := mustAddAnnouncement(t, s, `{"title":"二"}`)
@@ -190,6 +193,7 @@ func TestReorderLeavesContentAndTimestampsAlone(t *testing.T) {
 // title, body and audience the admin's browser loaded minutes ago. On a targeted row that turns a
 // convenience toggle into a silent disclosure change.
 func TestToggleTouchesOnlyTheFlag(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := mustAddAnnouncement(t, s, `{"title":"原标题","content":"原正文","display":"both"}`)
 
@@ -217,6 +221,7 @@ func TestToggleTouchesOnlyTheFlag(t *testing.T) {
 // display is the mode the reader obeys; `popup` is kept in sync so a binary rolled back across this
 // release still shows the row where it did — popup = "not strip-only".
 func TestDisplayModeAndLegacyPopupStayInSync(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 
 	// The old boolean is still accepted as an input: popup=true means "band and popup".
@@ -254,6 +259,7 @@ func TestDisplayModeAndLegacyPopupStayInSync(t *testing.T) {
 // A row written before the display column existed carries NULL; it must read as the mode its popup
 // boolean meant, without a back-fill.
 func TestLegacyRowDerivesDisplayFromPopup(t *testing.T) {
+	t.Parallel()
 	if got := displayFrom("", true); got != displayBoth {
 		t.Errorf("legacy popup=true derives %q, want %q", got, displayBoth)
 	}
@@ -267,6 +273,7 @@ func TestLegacyRowDerivesDisplayFromPopup(t *testing.T) {
 }
 
 func TestConcurrentEditIsRejectedNotMerged(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := mustAddAnnouncement(t, s, `{"title":"原标题"}`)
 	stale := s.st.GetAnnouncement(id).UpdatedAt
@@ -290,6 +297,7 @@ func TestConcurrentEditIsRejectedNotMerged(t *testing.T) {
 // ---------- reader-side filtering ----------
 
 func TestReaderFeedHonoursEnabledEmptyAndWindow(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	past := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
 	justPast := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
@@ -313,6 +321,7 @@ func TestReaderFeedHonoursEnabledEmptyAndWindow(t *testing.T) {
 // handing every reader the current values. Switching one off has to change the feed's bytes, and with
 // them the ETag: a polling tab that got a 304 for its old tag would keep drawing the close control.
 func TestReaderFeedCarriesBothDismissalFlagsAndAFlipChangesTheTag(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := mustAddAnnouncement(t, s, `{"title":"维护通知","stripDismissible":true,"popupDismissible":true}`)
 
@@ -360,6 +369,7 @@ func TestReaderFeedCarriesBothDismissalFlagsAndAFlipChangesTheTag(t *testing.T) 
 // is accepted as the band switch — as `popup` was for `display` — so a save from a stale tab does not
 // quietly lock a band the operator had just opened. The new field wins when both are sent.
 func TestLegacyDismissibleInputIsTheBandSwitch(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := mustAddAnnouncement(t, s, `{"title":"旧页面","dismissible":true}`)
 	if !s.st.GetAnnouncement(id).StripDismissible {
@@ -378,6 +388,7 @@ func TestLegacyDismissibleInputIsTheBandSwitch(t *testing.T) {
 // popup — which is what every popup did before the switch existed. The old single field is gone from
 // both payloads, so nothing can read it and guess which surface it meant.
 func TestNewAnnouncementDismissalDefaultsAndNoLegacyField(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := mustAddAnnouncement(t, s, `{"title":"默认值"}`)
 	if a := s.st.GetAnnouncement(id); a.StripDismissible || !a.PopupDismissible {
@@ -403,6 +414,7 @@ func TestNewAnnouncementDismissalDefaultsAndNoLegacyField(t *testing.T) {
 }
 
 func TestWindowRejectsAnInvertedRange(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
 	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
@@ -419,6 +431,7 @@ func TestWindowRejectsAnInvertedRange(t *testing.T) {
 // A time bound is stored as a UTC instant, never as the operator's civil string: the panel
 // timezone is a setting, and a civil string would silently change what the row means when it moves.
 func TestWindowIsStoredAsAUTCInstant(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := mustAddAnnouncement(t, s, `{"title":"维护","endsAt":"2026-09-01T22:00:00+08:00"}`)
 	if got := s.st.GetAnnouncement(id).EndsAt; got != "2026-09-01T14:00:00Z" {
@@ -429,6 +442,7 @@ func TestWindowIsStoredAsAUTCInstant(t *testing.T) {
 // ---------- targeting ----------
 
 func TestAudienceTargetingFollowsTheOUChain(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "east", false)
 	mustAddUser(t, s, "eastchild", false)
@@ -483,6 +497,7 @@ func TestAudienceTargetingFollowsTheOUChain(t *testing.T) {
 // The reader payload must not even hint that a targeted announcement exists: which OUs are being
 // addressed is the shape of the org chart.
 func TestReaderPayloadNeverCarriesAudience(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "alice", false)
 	gid, err := s.st.CreateUserGroup("华东", "", 0)
@@ -504,6 +519,7 @@ func TestReaderPayloadNeverCarriesAudience(t *testing.T) {
 }
 
 func TestTargetedAnnouncementRequiresSomebodyToSendItTo(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	rec := announcementReq(t, s, http.MethodPost, "/api/admin/announcements",
 		`{"title":"发给空气","audience":"grant","grants":[]}`)
@@ -518,6 +534,7 @@ func TestTargetedAnnouncementRequiresSomebodyToSendItTo(t *testing.T) {
 // The Default OU is on every account's chain, so granting it means "everyone" — which
 // audience=all already says, and which would quietly include every external tenant beneath it.
 func TestDefaultOUIsRejectedAsAnAudience(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	def := s.st.DefaultGroupID()
 	if def == 0 {
@@ -534,6 +551,7 @@ func TestDefaultOUIsRejectedAsAnAudience(t *testing.T) {
 // never match the lower-cased principal the read path builds, producing an announcement nobody
 // receives and nothing anywhere to say why.
 func TestUnknownPrincipalIsRefused(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, p := range []string{"g:9999", "u:ghost", "alice", ""} {
 		rec := announcementReq(t, s, http.MethodPost, "/api/admin/announcements",
@@ -545,6 +563,7 @@ func TestUnknownPrincipalIsRefused(t *testing.T) {
 }
 
 func TestPrincipalIsNormalizedOnSave(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "alice", false)
 	id := mustAddAnnouncement(t, s, `{"title":"给 Alice","audience":"grant","grants":["u:  ALICE  "]}`)
@@ -559,6 +578,7 @@ func TestPrincipalIsNormalizedOnSave(t *testing.T) {
 // An omitted grants field means "leave the audience alone". If it were a plain slice, every
 // partial save — the list page toggling something, a title fix — would silently clear it.
 func TestOmittedGrantsLeaveTheAudienceAlone(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "alice", false)
 	id := mustAddAnnouncement(t, s, `{"title":"原标题","audience":"grant","grants":["u:alice"]}`)
@@ -577,6 +597,7 @@ func TestOmittedGrantsLeaveTheAudienceAlone(t *testing.T) {
 // turns on if they end up running many announcements at once. Default-off matters: hiding something
 // somebody decided was worth interrupting people with, behind a click, is not a saving.
 func TestFoldingIsOffUntilAnOperatorAsksForIt(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddAnnouncement(t, s, `{"title":"一"}`)
 
@@ -627,6 +648,7 @@ func announcementPreview(t *testing.T, s *Server, principal string) *httptest.Re
 // admin who wrote it cannot see it, and the people who should get it do not know to expect it.
 // This endpoint is the only cheap way to tell "addressed correctly" from "addressed to nobody".
 func TestPreviewAnswersWhatAPrincipalWouldSee(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "shanghai", false)
 	parent, err := s.st.CreateUserGroup("华东", "", 0)
@@ -681,6 +703,7 @@ func TestPreviewAnswersWhatAPrincipalWouldSee(t *testing.T) {
 }
 
 func TestPreviewRefusesAPrincipalThatDoesNotResolve(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for _, p := range []string{"g:9999", "u:ghost", "alice", ""} {
 		if rec := announcementPreview(t, s, p); rec.Code != http.StatusBadRequest {
@@ -692,6 +715,7 @@ func TestPreviewRefusesAPrincipalThatDoesNotResolve(t *testing.T) {
 // ---------- the audience picker ----------
 
 func TestAdminListOffersAddressablePrincipalsButNotTheDefaultOU(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "alice", false)
 	named, err := s.st.CreateUserGroup("华东", "", 0)
@@ -730,6 +754,7 @@ func TestAdminListOffersAddressablePrincipalsButNotTheDefaultOU(t *testing.T) {
 // ---------- validation, deletion ----------
 
 func TestAnnouncementValidationRejectsBeforeWriting(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	long := func(n int) string { return strings.Repeat("界", n) }
 	for name, body := range map[string]string{
@@ -754,6 +779,7 @@ func TestAnnouncementValidationRejectsBeforeWriting(t *testing.T) {
 // ignoring an overcrowded band, and it refuses at the moment an operator most needs to broadcast.
 // The console warns instead, and the reader folds the overflow behind a counter.
 func TestAnnouncementCountIsNotCapped(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for i := 0; i < 60; i++ {
 		mustAddAnnouncement(t, s, fmt.Sprintf(`{"title":"第 %d 条"}`, i))
@@ -780,6 +806,7 @@ func groupDelete(t *testing.T, s *Server, id int64, query string) *httptest.Resp
 // the caller decides what should happen — at the API, not only in the console, so a script that
 // deletes OUs cannot take the silent path.
 func TestDeletingAnOUDemandsADecisionAboutItsAnnouncements(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	gid, err := s.st.CreateUserGroup("华东", "", 0)
 	if err != nil {
@@ -811,6 +838,7 @@ func TestDeletingAnOUDemandsADecisionAboutItsAnnouncements(t *testing.T) {
 }
 
 func TestKeepingAnOrphanedAnnouncementIsAllowedWhenAsked(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	gid, err := s.st.CreateUserGroup("华东", "", 0)
 	if err != nil {
@@ -833,6 +861,7 @@ func TestKeepingAnOrphanedAnnouncementIsAllowedWhenAsked(t *testing.T) {
 // An OU that is one of several recipients is not an orphan-maker: the announcement keeps working,
 // so there is nothing to decide and the delete goes straight through.
 func TestDeletingOneOfSeveralRecipientsNeedsNoDecision(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	a1, _ := s.st.CreateUserGroup("华东", "", 0)
 	a2, _ := s.st.CreateUserGroup("华西", "", 0)
@@ -851,6 +880,7 @@ func TestDeletingOneOfSeveralRecipientsNeedsNoDecision(t *testing.T) {
 }
 
 func TestGroupAnnouncementImpactIsReadableBeforeDeleting(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	gid, _ := s.st.CreateUserGroup("华东", "", 0)
 	other, _ := s.st.CreateUserGroup("华西", "", 0)
@@ -889,6 +919,7 @@ func TestGroupAnnouncementImpactIsReadableBeforeDeleting(t *testing.T) {
 }
 
 func TestDeleteRemovesTheGrantsToo(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "alice", false)
 	id := mustAddAnnouncement(t, s, `{"title":"x","audience":"grant","grants":["u:alice"]}`)
@@ -903,6 +934,7 @@ func TestDeleteRemovesTheGrantsToo(t *testing.T) {
 // An empty stored level reads as notice — the rule the old public endpoint used to carry, now on
 // the row instead. Written straight to the store, because the API normalizes on the way in.
 func TestAnnouncementLevelFallback(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.exec(`INSERT INTO announcements(level,title,enabled,scope,audience) VALUES('','x',1,'','')`); err != nil {
 		t.Fatalf("seed: %v", err)

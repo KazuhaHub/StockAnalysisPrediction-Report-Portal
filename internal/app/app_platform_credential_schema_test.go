@@ -60,8 +60,14 @@ func testPlatformCredentialSchema(t *testing.T, pg bool) {
 		t.Fatal("credential purge orphaned binding")
 	}
 }
-func TestPlatformCredentialSchemaSQLite(t *testing.T)   { testPlatformCredentialSchema(t, false) }
-func TestPlatformCredentialSchemaPostgres(t *testing.T) { testPlatformCredentialSchema(t, true) }
+func TestPlatformCredentialSchemaSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformCredentialSchema(t, false)
+}
+func TestPlatformCredentialSchemaPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformCredentialSchema(t, true)
+}
 
 func platformSeedCredentialRecords(t *testing.T, st *Store) {
 	t.Helper()
@@ -88,9 +94,11 @@ func testPlatformCredentialSchemaDrift(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialSchemaDriftSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialSchemaDrift(t, false)
 }
 func TestPlatformCredentialSchemaDriftPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialSchemaDrift(t, true)
 }
 
@@ -117,8 +125,10 @@ func testPlatformCredentialInstallationCascade(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCredentialInstallationCascadeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialInstallationCascade(t, false)
 }
 func TestPlatformCredentialInstallationCascadePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCredentialInstallationCascade(t, true)
 }

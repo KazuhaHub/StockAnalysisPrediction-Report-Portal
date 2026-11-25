@@ -10,6 +10,7 @@ import (
 )
 
 func TestGroupSaveForecastScope(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	id := seedOU(t, s.st, 0, scopeOwn)
 	save := func(id int64, extra string) *httptest.ResponseRecorder {
@@ -97,6 +98,7 @@ func TestGroupSaveForecastScope(t *testing.T) {
 }
 
 func TestPostgresSaveGroupForecastScope(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	id := seedOU(t, st, 0, scopeOwn)
 	defer st.exec("DELETE FROM user_groups WHERE id=?", id)
@@ -116,6 +118,7 @@ func TestPostgresSaveGroupForecastScope(t *testing.T) {
 }
 
 func TestAdminGroupForecastScopeIsServerResolved(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	parent := seedOU(t, s.st, 0, scopeAll)
 	child := seedOU(t, s.st, parent, nil)
@@ -145,6 +148,7 @@ func TestAdminGroupForecastScopeIsServerResolved(t *testing.T) {
 // groups list. Both must describe forecast access identically, or the editor would show (and save
 // over) a value the server never resolved.
 func TestAdminUsersGroupsCarryResolvedForecastScope(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	parent := seedOU(t, s.st, 0, scopeAll)
 	child := seedOU(t, s.st, parent, nil)
@@ -178,6 +182,7 @@ func TestAdminUsersGroupsCarryResolvedForecastScope(t *testing.T) {
 }
 
 func TestBadForecastScopeDoesNotPartiallySaveGroup(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	id := seedOU(t, s.st, 0, scopeOwn)
 	var oldName string
@@ -209,6 +214,7 @@ func TestBadForecastScopeDoesNotPartiallySaveGroup(t *testing.T) {
 }
 
 func TestForecastScopeInputRejectsNonStringsAndNormalizesDefault(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{`true`, `false`, `0`, `1`, `[]`, `{}`, `""`, `"ALL"`, `" all "`, `"everyone"`} {
 		if _, err := parseForecastScopeInput(json.RawMessage(raw), false); err == nil {
 			t.Errorf("accepted %s", raw)
@@ -230,6 +236,7 @@ func TestForecastScopeInputRejectsNonStringsAndNormalizesDefault(t *testing.T) {
 // That is a race to survive, not corruption to refuse: the OU is listed without forecast access, and
 // the editor hides a field the server did not resolve, so nothing is ever shown that was not read.
 func TestAdminGroupsListSurvivesAnOUCreatedBetweenTheReads(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	parent := seedOU(t, s.st, 0, scopeAll)
 	ix, err := s.st.loadOUIndex()

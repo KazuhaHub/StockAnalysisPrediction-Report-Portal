@@ -319,6 +319,7 @@ func seedUsageHistory(t testing.TB, st *Store, now time.Time) {
 // ---------- equivalence ----------
 
 func TestDispatchDecisionMatchesReference(t *testing.T) {
+	t.Parallel()
 	now := dispatchNow()
 	cases := []struct {
 		name     string
@@ -410,6 +411,7 @@ func TestDispatchDecisionMatchesReference(t *testing.T) {
 
 // admitAtLocked must start exactly the runs the reference chooses.
 func TestAdmitStartsSameRunsAsReference(t *testing.T) {
+	t.Parallel()
 	now := dispatchNow()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "30")
@@ -574,6 +576,7 @@ func checkQueuedItemWindows(t testing.TB, st *Store, jobIDs []int64, want map[in
 }
 
 func TestQueuedItemWindowsReturnsExactlyTheWindow(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	ids, want := windowFixture(t, st, seedDispatchTarget(t, st), "win")
 	checkQueuedItemWindows(t, st, ids, want)
@@ -607,6 +610,7 @@ func decisionQueries(t *testing.T, jobs int, ref bool) (queued, cands int64) {
 }
 
 func TestDispatchDecisionQueryCountIsConstant(t *testing.T) {
+	t.Parallel()
 	baseQ, baseC := decisionQueries(t, 1, false)
 	if baseQ == 0 || baseC == 0 {
 		t.Fatalf("counter saw no statements (queued=%d candidates=%d): the seam is broken", baseQ, baseC)
@@ -628,6 +632,7 @@ func TestDispatchDecisionQueryCountIsConstant(t *testing.T) {
 
 // The age-saturation setting is read once per decision, however many jobs are waiting.
 func TestDispatchDecisionReadsAgeSettingOnce(t *testing.T) {
+	t.Parallel()
 	now := dispatchNow()
 	st := newTestStore(t)
 	seedBacklog(t, st, now, mixedBacklog(50))

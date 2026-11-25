@@ -38,6 +38,7 @@ func verifyPlatformWritableFixtureOwner(encoded []byte, a control.Authority, ima
 }
 
 func TestPlatformWritableFixtureOwnership(t *testing.T) {
+	t.Parallel()
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{8}, ed25519.SeedSize))
 	a := control.Authority{DeploymentID: platformFixtureID(980), ControllerEpoch: platformFixtureID(981), ControlRevision: 1, PublicKey: key.Public().(ed25519.PublicKey)}
 	p := platformWritableFixtureOwner{"portal.fixture.writable-install-owner/1-dev.1", a.DeploymentID, a.ControllerEpoch, platformFixtureID(982), platformFixtureID(983), platformDigest([]byte("release")), "fixture@sha256:" + platformDigest([]byte("image")), 2, 1, 1000, 90000}

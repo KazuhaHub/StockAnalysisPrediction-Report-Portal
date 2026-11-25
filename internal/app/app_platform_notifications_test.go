@@ -15,6 +15,7 @@ import (
 )
 
 func TestPlatformServiceNotificationUsesCentralRulesAndOccurrence(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	issued, _, err := s.issuePlatformServiceIdentity(context.Background(), installation, platformFixtureID(5201), []string{"notifications.publish"}, time.Minute)
 	if err != nil {
@@ -78,6 +79,7 @@ func TestPlatformServiceNotificationUsesCentralRulesAndOccurrence(t *testing.T) 
 }
 
 func TestPlatformNotificationForegroundRequiresSessionAndLaunchBinding(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

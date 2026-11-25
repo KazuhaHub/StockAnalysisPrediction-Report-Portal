@@ -9,6 +9,7 @@ import (
 )
 
 func TestStockAndRunPayloadCarryPredictionSummary(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertReadingSummary(t, newV1Server(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users")
@@ -126,6 +127,7 @@ func readingSummaryResponse(t *testing.T, s *Server, user, route string, report 
 }
 
 func TestReadingSummarySelectionAndTerminalCheckpoints(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "summary-reader", scopeAll, false)
 	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
@@ -179,6 +181,7 @@ func TestReadingSummarySelectionAndTerminalCheckpoints(t *testing.T) {
 }
 
 func TestReadingSummaryLedgerFailureNeverHidesTheBody(t *testing.T) {
+	t.Parallel()
 	for _, table := range []string{"prediction_sets", "prediction_claims", "prediction_marks"} {
 		t.Run(table, func(t *testing.T) {
 			s := newV1Server(t)
@@ -201,6 +204,7 @@ func TestReadingSummaryLedgerFailureNeverHidesTheBody(t *testing.T) {
 }
 
 func TestPrefetchOmitsTheSummaryButKeepsTheTimeline(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "summary-reader", scopeAll, false)
 	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
@@ -223,6 +227,7 @@ func TestPrefetchOmitsTheSummaryButKeepsTheTimeline(t *testing.T) {
 }
 
 func TestReadingSummaryWithUnknownTimingMakesNoDatePromise(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "summary-own", scopeOwn, false)
 	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
@@ -245,6 +250,7 @@ func TestReadingSummaryWithUnknownTimingMakesNoDatePromise(t *testing.T) {
 }
 
 func TestReadingSummaryRechecksReportVisibility(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "summary-external", scopeAll, true)
 	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
@@ -264,12 +270,14 @@ func TestReadingSummaryRechecksReportVisibility(t *testing.T) {
 }
 
 func TestReadingSummaryNonstandardHorizonHasNoNextH12(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) { assertReadingSummaryH12(t, driver, false) })
 	}
 }
 
 func TestReadingSummaryStandardHorizonKeepsPendingH12(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) { assertReadingSummaryH12(t, driver, true) })
 	}
@@ -308,6 +316,7 @@ func assertReadingSummaryH12(t *testing.T, driver string, standard bool) {
 }
 
 func TestReadingSummaryTerminalMarksSurviveUnknownTiming(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) { assertReadingSummaryUnknownTiming(t, readingSummaryBoundaryServer(t, driver)) })
 	}
@@ -357,6 +366,7 @@ func assertReadingSummaryUnknownTiming(t *testing.T, s *Server) {
 }
 
 func TestReadingSummaryMatchesTheBodyAlreadySelectedForTheResponse(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "summary-reader", scopeAll, false)
 	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {

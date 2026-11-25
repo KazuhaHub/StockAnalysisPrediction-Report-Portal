@@ -46,6 +46,7 @@ func (h platformRecoveryHTTP) endRecovery(want int) {
 // A restored static frontend app has no runner and no recovery set, so the only way back is to
 // activate its restored release again on the current epoch, reviewed like every other recovery action.
 func TestRecoveryResumesAStaticFrontendThroughRoutes(t *testing.T) {
+	t.Parallel()
 	s, admin, _, installation := platformObjectsFixturePG(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_activations SET data_namespace_id=NULL,data_format=0 WHERE installation_id=?`, installation)
 	mustExec(t, s.st, `DELETE FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
@@ -75,6 +76,7 @@ func TestRecoveryResumesAStaticFrontendThroughRoutes(t *testing.T) {
 }
 
 func TestRecoveryRefusesAFrontendWhosePublisherWasNotTrusted(t *testing.T) {
+	t.Parallel()
 	s, admin, _, installation := platformObjectsFixturePG(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_activations SET data_namespace_id=NULL,data_format=0 WHERE installation_id=?`, installation)
 	mustExec(t, s.st, `DELETE FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
@@ -92,6 +94,7 @@ func TestRecoveryRefusesAFrontendWhosePublisherWasNotTrusted(t *testing.T) {
 // An installation with no way back (no recovery set, or one the administrator gives up on) is disabled
 // through the same routes, and recovery ends only once every installation is settled that way.
 func TestRecoveryDisablesRestoredInstallationsThroughRoutes(t *testing.T) {
+	t.Parallel()
 	s, actor, updateLease, _ := platformManagedRestoreReviewFixture(t, false)
 	first := updateLease.installationID
 	publisher := scalar[string](t, s.st, `SELECT id FROM app_platform_publishers`)
@@ -124,6 +127,7 @@ func TestRecoveryDisablesRestoredInstallationsThroughRoutes(t *testing.T) {
 // A resumed static frontend is an ordinary ready installation: it launches through the real route and
 // can later take a frontend update, both of which re-verify the activation it was resumed with.
 func TestRecoveryResumedFrontendLaunchesAndTakesAnUpdate(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, _ := platformUpdateFixture(t, []int{1})
 	platformSimulateRestore(t, s)
 	h := platformRecoveryActionHTTP(t, s, actor)
@@ -180,6 +184,7 @@ func TestRecoveryResumedFrontendLaunchesAndTakesAnUpdate(t *testing.T) {
 // is retired and its data is on a host that is gone), and can be uninstalled by a removal that touches
 // only the Portal: no runner is called and the old host's data is not on this one.
 func TestRecoveryDisabledManagedInstallationIsUninstalledPortalSideOnly(t *testing.T) {
+	t.Parallel()
 	s, actor, updateLease, _ := platformManagedRestoreReviewFixture(t, false)
 	installation := updateLease.installationID
 	oldRuntime := scalar[string](t, s.st, `SELECT id FROM app_platform_runtime_bindings`)
@@ -216,6 +221,7 @@ func TestRecoveryDisabledManagedInstallationIsUninstalledPortalSideOnly(t *testi
 // A portal-side uninstall retires the installation's secret bindings in the same transaction as it does
 // for an ordinary removal: a binding left usable would outlive an installation whose host is gone.
 func TestRecoveryPortalSideUninstallRevokesSecretBindings(t *testing.T) {
+	t.Parallel()
 	s, actor, updateLease, _ := platformManagedRestoreReviewFixture(t, false)
 	installation := updateLease.installationID
 	platformSimulateRestore(t, s)
