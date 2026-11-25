@@ -90,7 +90,7 @@ func (p *exportPlan) isLatest(raw []string) bool {
 func (p *exportPlan) loadNewest(ctx context.Context) error {
 	atomic.AddInt64(&p.s.exports.queries, 1)
 	rows, err := p.s.st.queryContext(ctx, "SELECT ps.symbol, ps.made_at, MAX(ps.id) FROM "+p.src.from+
-		" WHERE "+p.src.base+" AND "+p.candWhere+" GROUP BY ps.symbol, ps.made_at", p.candArgs...)
+		" WHERE "+p.baseWhere()+" AND "+p.candWhere+" GROUP BY ps.symbol, ps.made_at", p.candArgs...)
 	if err != nil {
 		return err
 	}
@@ -400,7 +400,7 @@ func forecastsSource() *exportSource {
 		},
 		TimeField: "report_date",
 		from:      "prediction_sets ps LEFT JOIN reports r ON r.id=ps.report_id LEFT JOIN stocks k ON k.code=ps.symbol",
-		base:      "ps.state = '" + predStateAccepted + "'",
+		base:      func(*Store) string { return "ps.state = '" + predStateAccepted + "'" },
 		sel: []string{"ps.id", "COALESCE(CAST(ps.report_id AS TEXT),'')", "COALESCE(ps.symbol,'')",
 			"COALESCE(NULLIF(r.name,''),k.name,'')", "COALESCE(ps.report_date,'')", "COALESCE(ps.made_at,'')",
 			"COALESCE(ps.rtype,'')", "COALESCE(ps.version,'')", "COALESCE(" + forecastStanceSQL + ",'')",

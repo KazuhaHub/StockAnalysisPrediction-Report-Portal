@@ -144,10 +144,18 @@ func (p *exportPlan) withReaderLimits(sc *ownerScope, maxID int64) {
 	}
 }
 
+// baseWhere renders the source's fixed restriction for this store's dialect ("" when it has none).
+func (p *exportPlan) baseWhere() string {
+	if p.src.base == nil {
+		return ""
+	}
+	return p.src.base(p.s.st)
+}
+
 func (p *exportPlan) fullWhere() string {
 	w := p.where
-	if p.src.base != "" {
-		w = "(" + p.src.base + ") AND " + w
+	if b := p.baseWhere(); b != "" {
+		w = "(" + b + ") AND " + w
 	}
 	return w
 }

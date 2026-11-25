@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1251,6 +1252,81 @@ func TestExportListAndActiveFilter(t *testing.T) {
 }
 
 // ---------- Postgres ----------
+
+// TestPostgresSigninsUnderLinguisticCollation runs the sign-ins source on a database whose default
+// collation is not byte order. A glibc locale such as en_US.UTF-8 (initdb's default on most Linux
+// hosts) or an ICU locale with punctuation shifted compares 'auth.login' after 'auth/', so a plain
+// range "action >= 'auth.' AND action < 'auth/'" selects nothing there. CI's Alpine image compares
+// bytes by default, which is why the throwaway database is created with an explicit ICU locale.
+func TestPostgresSigninsUnderLinguisticCollation(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || u.Scheme == "" {
+		t.Skipf("TEST_POSTGRES_DSN is not a URL; cannot derive a second database from it")
+	}
+	admin, err := OpenStore("postgres", dsn)
+	if err != nil {
+		t.Fatalf("OpenStore postgres: %v", err)
+	}
+	t.Cleanup(func() { admin.Close() })
+	name := fmt.Sprintf("portal_collation_%d", time.Now().UnixNano())
+	// ICU at database level needs PostgreSQL 15+, a server built with ICU and CREATEDB. A local
+	// server without them skips; CI has all three, so there a failure here fails rather than
+	// silently dropping the only guard for this bug.
+	if _, err := admin.exec(`CREATE DATABASE ` + name + ` TEMPLATE template0 LOCALE_PROVIDER icu ICU_LOCALE 'en-US-u-ka-shifted' LOCALE 'C'`); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatalf("cannot create an ICU-collated database: %v", err)
+		}
+		t.Skipf("cannot create an ICU-collated database: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.exec(`DROP DATABASE IF EXISTS ` + name + ` WITH (FORCE)`); err != nil {
+			t.Errorf("drop %s: %v", name, err)
+		}
+	})
+	u.Path = "/" + name
+	st, err := OpenStore("postgres", u.String())
+	if err != nil {
+		t.Fatalf("OpenStore %s: %v", name, err)
+	}
+	t.Cleanup(func() { st.Close() })
+	// The precondition itself: under this collation the naive range really does exclude the row.
+	if scalar[bool](t, st, `SELECT 'auth.login' >= 'auth.' AND 'auth.login' < 'auth/'`) {
+		t.Fatal("the database compares bytes; the test would not exercise a linguistic collation")
+	}
+
+	s := tokenServer(t)
+	s.st = st
+	s.cfg.DBPath = filepath.Join(t.TempDir(), "portal.db")
+	e := finishExportEnv(t, s)
+	seedAudit(t, st, 1, func(int) AuditEntry {
+		return AuditEntry{At: "2026-10-01T00:00:00Z", Actor: "u", Action: AuditLogin, IP: "10.0.0.1", Detail: `{"method":"password"}`}
+	})
+	seedAudit(t, st, 1, func(int) AuditEntry {
+		return AuditEntry{At: "2026-10-01T00:00:01Z", Actor: "u", Action: AuditReportRead, TargetID: "1", IP: "10.0.0.1"}
+	})
+	// A neighbour that shares the letters but not the prefix: a looser spelling (a letters-only
+	// range, a LIKE without the dot) would let it in.
+	seedAudit(t, st, 1, func(int) AuditEntry {
+		return AuditEntry{At: "2026-10-01T00:00:02Z", Actor: "u", Action: "authz.grant", IP: "10.0.0.1"}
+	})
+
+	w := e.do("admin", "POST", "/api/admin/exports/preview", `{"source":"signins","columns":["action"]}`)
+	var pv struct {
+		Total int64
+		Rows  []map[string]any
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &pv) != nil || pv.Total != 1 || len(pv.Rows) != 1 || pv.Rows[0]["action"] != AuditLogin {
+		t.Fatalf("signins preview under ICU collation: %d %s", w.Code, w.Body.String())
+	}
+	j := e.run2(`{"source":"signins","format":"csv","columns":["action"]}`)
+	if recs := parseCSV(t, e.fileOf(j)); j.Status != exportDone || len(recs) != 2 || recs[1][0] != AuditLogin {
+		t.Fatalf("signins export under ICU collation: %+v %v", j, recs)
+	}
+}
 
 // TestPostgresExport runs the export store paths on the driver production uses: the keyset cursor
 // with typed parameters (text and integer keys), every source's SQL, the LIKE prefilter and the

@@ -41,7 +41,7 @@ type exportSource struct {
 	// Query shape. Every selected expression is rendered to text by the database (COALESCEd), and the
 	// keyset cursor is (k1, id) descending: k1 may be empty, in which case id alone orders the rows.
 	from     string
-	base     string // restriction applied to every query of this source
+	base     func(st *Store) string // restriction applied to every query of this source; nil for none
 	sel      []string
 	bodyExpr string // selected last when a report body is wanted
 	k1       string
@@ -491,8 +491,14 @@ func auditSource() *exportSource {
 }
 
 func signinsSource() *exportSource {
-	// action >= 'auth.' AND action < 'auth/' is the index-friendly spelling of a prefix match
-	// ('/' is the character after '.'), and it behaves the same on both drivers.
+	// action >= 'auth.' AND action < 'auth/' is a prefix match ('/' is the byte after '.') only under
+	// byte order. SQLite's BINARY collation is byte order, so there the range stays and uses
+	// idx_audit_action_at. PostgreSQL compares with the database's collation, and a linguistic one
+	// (glibc en_US.UTF-8, ICU) ranks 'auth.login' after 'auth/', which would select nothing; the bounds
+	// are therefore compared under COLLATE "C". An index matches only its own collation, and "C" is not
+	// "default" even on a C database, so on every PostgreSQL database the count scans audit_log rather
+	// than idx_audit_action_at (about 90 ms per million rows); pages walk idx_audit_at newest-first and
+	// are not affected.
 	return &exportSource{
 		Key:     "signins",
 		Formats: []string{"csv", "jsonl"},
@@ -511,9 +517,12 @@ func signinsSource() *exportSource {
 		},
 		TimeField: "at",
 		from:      "audit_log a",
-		base:      "a.action >= 'auth.' AND a.action < 'auth/'",
-		sel:       auditSelect,
-		k1:        "a.at", id: "a.id", idInt: true,
+		base: func(st *Store) string {
+			c := st.byteOrder("a.action")
+			return c + " >= 'auth.' AND " + c + " < 'auth/'"
+		},
+		sel: auditSelect,
+		k1:  "a.at", id: "a.id", idInt: true,
 		build: func(ec *exportCtx, raw []string) exportRow {
 			row := exportRow{
 				"id": atoi64(raw[0]), "at": ec.instant(raw[1], encRFC3339), "actor": raw[2],
