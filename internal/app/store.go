@@ -380,6 +380,17 @@ func (s *Store) likeOp() string {
 	return "LIKE"
 }
 
+// byteOrder returns col compared in byte order, which a prefix range ("x." up to "x/") relies on.
+// SQLite's default BINARY collation already is; PostgreSQL uses the database collation, and a
+// linguistic one (glibc en_US.UTF-8, ICU) ignores or reorders punctuation, so the column is
+// recollated to "C". An index built under the default collation cannot serve the recollated form.
+func (s *Store) byteOrder(col string) string {
+	if s.driver == "postgres" {
+		return col + ` COLLATE "C"`
+	}
+	return col
+}
+
 // groupConcatDistinct returns a driver-specific aggregate joining the distinct
 // values of col with commas. SQLite has GROUP_CONCAT; Postgres has no such
 // function and uses STRING_AGG instead.

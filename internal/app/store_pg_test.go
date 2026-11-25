@@ -22,6 +22,17 @@ func TestLikeOpPerDriver(t *testing.T) {
 	}
 }
 
+// TestByteOrderPerDriver pins the spelling a prefix range relies on: SQLite's BINARY default is
+// already byte order, PostgreSQL's database collation may not be.
+func TestByteOrderPerDriver(t *testing.T) {
+	if got := (&Store{driver: "postgres"}).byteOrder("a.action"); got != `a.action COLLATE "C"` {
+		t.Errorf("postgres byteOrder = %q", got)
+	}
+	if got := (&Store{driver: "sqlite"}).byteOrder("a.action"); got != "a.action" {
+		t.Errorf("sqlite byteOrder = %q", got)
+	}
+}
+
 // groupConcatDistinct must emit a Postgres-valid aggregate (STRING_AGG); Postgres
 // has no GROUP_CONCAT, which is the one hard breakage in ListRuns.
 func TestGroupConcatDistinctPerDriver(t *testing.T) {
