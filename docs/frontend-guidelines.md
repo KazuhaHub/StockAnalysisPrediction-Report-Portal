@@ -45,6 +45,8 @@ When in doubt, look at how they solve it before inventing a pattern.
 - **Segmented controls fold on phones.** Below 768 px (`useNarrow`) a segmented choice of more than
   a few options becomes a small Select, and a labelled toggle becomes icon-only (name kept in
   `aria-label` and `title`), so a card header stays on one line.
+- **Segmented options never touch.** A global rule in `index.css` puts a 2 px gap between the
+  options of every segmented control, so a hovered option never merges with the selected one.
 - **Alerts never touch their neighbours.** One rule in `index.css` keeps an `Alert` 12 px from the
   content before and after it inside a generic block container: an antd card, modal, drawer, form,
   tab pane or collapse panel body, a spin wrapper, the console page body (`.rp-admin-page-body`), a
