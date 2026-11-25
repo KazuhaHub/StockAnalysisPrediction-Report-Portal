@@ -63,6 +63,7 @@ func TestPlatformDisplayViewCarriesHashNotBytes(t *testing.T) {
 }
 
 func TestPlatformIconCacheIsBounded(t *testing.T) {
+	t.Parallel()
 	c := newPlatformIconCache()
 	for i := 0; i < platformIconCacheEntries+10; i++ {
 		c.put(fmt.Sprintf("%064x", i), []byte{byte(i)})
@@ -122,6 +123,7 @@ func TestPlatformIconRoute(t *testing.T) {
 }
 
 func TestPlatformIconsSkipGzip(t *testing.T) {
+	t.Parallel()
 	if gzipEligible("/api/app-platform/icons/" + strings.Repeat("a", 64) + ".png") {
 		t.Fatal("PNG must not be compressed again")
 	}

@@ -113,6 +113,7 @@ func ev(cohort string, ou int64) string { return fmt.Sprintf("%s/%d", cohort, ou
 // by the database but lexically ordered by the test; the Postgres id sequence is shared across a
 // whole run, so such ids appear on their own, and a correct change must not turn the gate red.
 func TestEvidenceHelperAgreesWithItsExpectationAcrossDigitBoundaries(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		for _, ou := range []int64{9, 10, 99, 100} {
@@ -162,6 +163,7 @@ func queryCount(t *testing.T, st *Store, q string, args ...any) int {
 // ---------- retention ----------
 
 func TestRetentionSnapshotsOwnershipEvidenceBeforeItDeletesSets(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		a := seedOU(t, st, 0, scopeOwn)
@@ -208,6 +210,7 @@ func TestRetentionSnapshotsOwnershipEvidenceBeforeItDeletesSets(t *testing.T) {
 }
 
 func TestRetentionEvidenceAndDeletionShareOneTransaction(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		a := seedOU(t, st, 0, scopeOwn)
@@ -230,6 +233,7 @@ func TestRetentionEvidenceAndDeletionShareOneTransaction(t *testing.T) {
 // ---------- OU deletion ----------
 
 func TestDeletingAnOUCarriesPurgeEvidenceToTheParent(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		def := st.DefaultGroupID()
@@ -283,6 +287,7 @@ func TestDeletingAnOUCarriesPurgeEvidenceToTheParent(t *testing.T) {
 }
 
 func TestDeletingAnOUMovesItsSetsAndItsEvidenceTogether(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		parent := seedOU(t, st, 0, scopeOwn)
@@ -308,6 +313,7 @@ func TestDeletingAnOUMovesItsSetsAndItsEvidenceTogether(t *testing.T) {
 }
 
 func TestDeletingAnOURollsBackItsEvidenceTransferWithTheRest(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		parent := seedOU(t, st, 0, scopeOwn)
@@ -418,6 +424,7 @@ func placeReader(t *testing.T, s *Server, user string, ou int64) {
 // After a real retention pass an own reader is told about exactly the purged months its current
 // subtree owned sets in; another OU's months, and months nobody can prove, are ordinary empty months.
 func TestAnOwnReaderLearnsOnlyItsSubtreesPurgedMonthsAfterARetentionPass(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		p := seedOU(t, st, 0, scopeOwn)
@@ -477,6 +484,7 @@ func TestAnOwnReaderLearnsOnlyItsSubtreesPurgedMonthsAfterARetentionPass(t *test
 // Deleting an OU through the admin route keeps the history of its purged months with the OUs that
 // now own its sets: the parent for a child, the Default OU for a root.
 func TestDeletingAnOUKeepsItsPurgedMonthsVisibleToTheOUsThatInheritItsSets(t *testing.T) {
+	t.Parallel()
 	retentionDrivers(t, func(t *testing.T, s *Server) {
 		st := s.st
 		def := st.DefaultGroupID()
@@ -572,6 +580,7 @@ func purgedMonthsOf(resp forecastReaderGroupsResponse) []string {
 // On SQLite a pool call made while a transaction is open waits for the only connection, which the
 // transaction holds. Two seconds turns that deadlock into a failure instead of a hung test run.
 func TestPurgeEvidenceWritesNeverCallThePoolInsideATransaction(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("timing test")
 	}
@@ -716,6 +725,7 @@ func (f *serializeFixture) requireSerialized(t *testing.T, retention retentionRe
 }
 
 func TestPostgresRetentionAndOUDeletionSerializeOnTheOwnershipLock(t *testing.T) {
+	t.Parallel()
 	// Retention holds the lock, blocked on a row that only this test can release; the OU deletion
 	// arrives meanwhile. Without the lock it would read the sets, move them and delete the OU while
 	// retention's evidence is still uncommitted, and the evidence would name a deleted OU.
@@ -820,6 +830,7 @@ func holdOwnershipLock(t *testing.T, st *Store) *sql.Tx {
 // state that no longer exists, which is why the lock comes before the first read and not before the
 // first write.
 func TestPostgresRetentionReadsOnlyAfterItHasTheOwnershipLock(t *testing.T) {
+	t.Parallel()
 	st := retentionServer(t, pgStore(t, retentionTables...)).st
 	p := seedOU(t, st, 0, scopeOwn)
 	x := seedOU(t, st, 0, scopeOwn)
@@ -862,6 +873,7 @@ func TestPostgresRetentionReadsOnlyAfterItHasTheOwnershipLock(t *testing.T) {
 }
 
 func TestPostgresOUDeletionReadsOnlyAfterItHasTheOwnershipLock(t *testing.T) {
+	t.Parallel()
 	st := retentionServer(t, pgStore(t, retentionTables...)).st
 	first := seedOU(t, st, 0, scopeOwn)
 	second := seedOU(t, st, 0, scopeOwn)

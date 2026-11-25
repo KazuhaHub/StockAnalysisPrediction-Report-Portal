@@ -9,6 +9,7 @@ import (
 )
 
 func TestReleaseCatalogUsesGitHubETagAndLastSuccessfulAnswer(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
 	requests := 0
 	fail := false
@@ -57,6 +58,7 @@ func TestReleaseCatalogUsesGitHubETagAndLastSuccessfulAnswer(t *testing.T) {
 }
 
 func TestReleaseCatalogHasNoNonGitHubFallback(t *testing.T) {
+	t.Parallel()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "offline", http.StatusServiceUnavailable)
 	}))
@@ -68,6 +70,7 @@ func TestReleaseCatalogHasNoNonGitHubFallback(t *testing.T) {
 }
 
 func TestNormalizePublishedReleasesUsesOnlyPublishedGitHubMetadata(t *testing.T) {
+	t.Parallel()
 	items := normalizePublishedReleases([]githubRelease{
 		{Tag: "v2026.38.3", Name: "v2026.38.3", Body: "# v2026.38.3 — Live title", Prerelease: true},
 		{Tag: "v2026.38.2", Name: "Stable title", Body: "stable"},
@@ -83,6 +86,7 @@ func TestNormalizePublishedReleasesUsesOnlyPublishedGitHubMetadata(t *testing.T)
 }
 
 func TestReleaseCatalogKeepsOnlyTheReaderNoteInsideExplicitBoundaries(t *testing.T) {
+	t.Parallel()
 	body := `<!-- portal-notes:start -->
 # v2026.38.11 — Reader changes
 
@@ -107,6 +111,7 @@ func TestReleaseCatalogKeepsOnlyTheReaderNoteInsideExplicitBoundaries(t *testing
 }
 
 func TestReleaseCatalogTrimsOperationalSectionsFromOlderBodies(t *testing.T) {
+	t.Parallel()
 	body := `# v2026.38.10 — Reader changes
 
 - Keep this note.
@@ -130,6 +135,7 @@ sha256sum -c SHA256SUMS.txt
 }
 
 func TestReleaseCatalogDoesNotTreatOrdinaryProseAsAnOperationalBoundary(t *testing.T) {
+	t.Parallel()
 	body := "# Reader changes\n\nThe Container image label remains searchable in prose."
 	items := normalizePublishedReleases([]githubRelease{{Tag: "v2026.38.9", Body: body}})
 	if len(items) != 1 || items[0].Markdown != body {
@@ -138,6 +144,7 @@ func TestReleaseCatalogDoesNotTreatOrdinaryProseAsAnOperationalBoundary(t *testi
 }
 
 func TestReleaseCatalogDoesNotExposeGeneratedNotesWithoutAReaderNote(t *testing.T) {
+	t.Parallel()
 	items := normalizePublishedReleases([]githubRelease{{Tag: "v2026.38.8", Body: "## What's Changed\n\n* Internal pull request"}})
 	if len(items) != 1 || items[0].Markdown != "" {
 		t.Fatalf("generated notes leaked into the reader payload: %#v", items)
@@ -145,6 +152,7 @@ func TestReleaseCatalogDoesNotExposeGeneratedNotesWithoutAReaderNote(t *testing.
 }
 
 func TestVisibleHistoryChangesWhenOneReleaseIsPromoted(t *testing.T) {
+	t.Parallel()
 	items := []publishedRelease{
 		{Tag: "v2026.38.9", Maturity: "beta"},
 		{Tag: "v2026.38.8", Maturity: "beta"},

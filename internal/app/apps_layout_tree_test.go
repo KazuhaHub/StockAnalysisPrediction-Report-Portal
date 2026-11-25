@@ -13,6 +13,7 @@ import (
 // Tree-shaped revocation, the principals directory's 401, and the documented 401 (ADR 0048).
 
 func TestClosingAParentOUThatClosesAChildRevokes(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	child := seedOU(t, e.s.st, e.ou, nil)
 	mustAddUser(t, e.s, "cora", false)
@@ -30,6 +31,7 @@ func TestClosingAParentOUThatClosesAChildRevokes(t *testing.T) {
 }
 
 func TestAChildReinheritingAClosedParentRevokes(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	child := seedOU(t, e.s.st, e.ou, nil)
 	mustAddUser(t, e.s, "cora", false)
@@ -49,6 +51,7 @@ func TestAChildReinheritingAClosedParentRevokes(t *testing.T) {
 }
 
 func TestAUserWithNoGroupUnderAClosedDefaultIsClosed(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	tok := e.mint("bob", "alpha") // bob has no OU
 	e.mustSetAccess("alpha", e.s.st.DefaultGroupID(), "false")
@@ -82,6 +85,7 @@ func principalsRequest(s *Server, token string) *http.Response {
 }
 
 func TestAMissingAppTokenIsA401AtThePrincipalsDirectoryToo(t *testing.T) {
+	t.Parallel()
 	s := extensionFixture(t)
 	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
 	if w := extensionAdminCall(s, "PUT", extensionSaveBody(0, key)); w.Code != 200 {
@@ -107,6 +111,7 @@ func TestAMissingAppTokenIsA401AtThePrincipalsDirectoryToo(t *testing.T) {
 }
 
 func TestTheProxyAnswersARevokedTokenWithTheCommonUnauthorizedCode(t *testing.T) {
+	t.Parallel()
 	s := extensionFixture(t)
 	token := extensionMint(t, s, "viewer")
 	s.appTok.revokeApp("status")
@@ -117,6 +122,7 @@ func TestTheProxyAnswersARevokedTokenWithTheCommonUnauthorizedCode(t *testing.T)
 }
 
 func TestOpenAPIDocumentsTheExtensionRoutes401(t *testing.T) {
+	t.Parallel()
 	var doc struct {
 		Paths map[string]map[string]struct {
 			Responses map[string]struct {

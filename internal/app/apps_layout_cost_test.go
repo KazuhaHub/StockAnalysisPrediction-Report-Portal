@@ -13,6 +13,7 @@ import (
 // check (ADR 0048).
 
 func TestOnlyAClosingChangeRevokesTokens(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	tok := e.mint("rita", "alpha")
 	live := func(what string) {
@@ -35,6 +36,7 @@ func TestOnlyAClosingChangeRevokesTokens(t *testing.T) {
 }
 
 func TestReopeningNeverRevokes(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 	tok := e.mint("admin", "alpha") // minted while the app was still open, so it can outlive the closing
@@ -47,6 +49,7 @@ func TestReopeningNeverRevokes(t *testing.T) {
 }
 
 func TestAMissingAppTokenIsA401AtTheProxyAndAClosedAppIsA403(t *testing.T) {
+	t.Parallel()
 	s := extensionFixture(t)
 	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
 	if w := extensionAdminCall(s, "PUT", extensionSaveBody(0, key)); w.Code != 200 {
@@ -70,6 +73,7 @@ func TestAMissingAppTokenIsA401AtTheProxyAndAClosedAppIsA403(t *testing.T) {
 }
 
 func TestAppLockOrderIsSortedAndDeduplicated(t *testing.T) {
+	t.Parallel()
 	got := appLockOrder([]string{"zeta", "builtin:quotes", "alpha", "zeta"})
 	if !slices.Equal(got, []string{"alpha", "builtin:quotes", "zeta"}) {
 		t.Fatalf("lock order = %v: concurrent reorders must take row locks in one order", got)
@@ -77,6 +81,7 @@ func TestAppLockOrderIsSortedAndDeduplicated(t *testing.T) {
 }
 
 func TestADeletedUsersTokenIsClosedAtTheBridge(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	tok := e.mint("rita", "alpha")
 	if _, err := e.s.st.exec(`DELETE FROM users WHERE username='rita'`); err != nil {

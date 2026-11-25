@@ -210,6 +210,7 @@ func purgedCohorts(months []forecastPurgedMonth) []string {
 }
 
 func TestOwnReadersAreToldOnlyAboutPurgedMonthsTheirOUsOwnedSetsIn(t *testing.T) {
+	t.Parallel()
 	purgeHistoryDrivers(t, func(t *testing.T, env *purgeHistoryEnv) {
 		env.history(t)
 
@@ -378,6 +379,7 @@ func TestOwnReadersAreToldOnlyAboutPurgedMonthsTheirOUsOwnedSetsIn(t *testing.T)
 }
 
 func TestOwnReadsFailClosedWhenPurgeEvidenceStorageIsMissing(t *testing.T) {
+	t.Parallel()
 	purgeHistoryDrivers(t, func(t *testing.T, env *purgeHistoryEnv) {
 		env.history(t)
 		if _, err := env.s.st.exec(`DROP TABLE prediction_purge_owners`); err != nil {
@@ -416,6 +418,7 @@ func TestOwnReadsFailClosedWhenPurgeEvidenceStorageIsMissing(t *testing.T) {
 // what actually filters the sets, not what is disclosed. That holds for the custom range and for the
 // monthly record and its drawer, where the month is listed as an ordinary empty one.
 func TestACellCachedBeforeAnUndisclosedPurgeIsNotReusedByAnyRead(t *testing.T) {
+	t.Parallel()
 	purgeHistoryDrivers(t, func(t *testing.T, env *purgeHistoryEnv) {
 		env.sets(t, "2025-05", 35, env.a) // keeps June inside A's calendar once June's sets are gone
 		env.sets(t, "2025-06", 35, env.a)
@@ -460,6 +463,7 @@ func TestACellCachedBeforeAnUndisclosedPurgeIsNotReusedByAnyRead(t *testing.T) {
 // A set written after an undisclosed purge must not start A's calendar early either: a leading empty
 // month is the one gap a complete calendar would otherwise leave.
 func TestAnUndisclosedPurgeDoesNotMoveAnOwnReadersFirstMonth(t *testing.T) {
+	t.Parallel()
 	purgeHistoryDrivers(t, func(t *testing.T, env *purgeHistoryEnv) {
 		env.purge(t, "2025-05") // a legacy marker: no evidence for anyone
 		env.sets(t, "2025-05", 35, env.a)

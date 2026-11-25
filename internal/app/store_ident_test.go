@@ -1,7 +1,6 @@
 package app
 
 import (
-	"os"
 	"testing"
 )
 
@@ -24,10 +23,7 @@ func eachDriver(t *testing.T, fn func(t *testing.T, st *Store)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) { fn(t, newTestStore(t)) })
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("TEST_POSTGRES_DSN")
-		if dsn == "" {
-			t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres dialect check")
-		}
+		dsn := testPostgresDSN(t)
 		st, err := OpenStore("postgres", dsn)
 		if err != nil {
 			t.Fatalf("OpenStore postgres: %v", err)
@@ -64,6 +60,7 @@ func mustUpsert(t *testing.T, st *Store, r Rep) (int64, bool) {
 // Re-ingesting the same code+date+subtype+title overwrites the one row and reports the
 // same id back, so callers (tracking, webhooks, the ingest response) all agree.
 func TestUpsertReportDedupsOnIdentity(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		base := Rep{Symbol: "600519", Title: "T1", RType: "交易分析", Date: "2026-07-16", Kind: "研究", MD: "v1"}
 		id1, created1 := mustUpsert(t, st, base)
@@ -103,6 +100,7 @@ func TestUpsertReportDedupsOnIdentity(t *testing.T) {
 // destroys every report but the last — this is the v0.3.0 regression that took the portal
 // down, so it is pinned here.
 func TestUpsertReportTitleIsPartOfIdentity(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		base := Rep{Symbol: "002891", RType: "估值分析", Date: "2026-04-24", Kind: "投资决策"}
 
@@ -132,6 +130,7 @@ func TestUpsertReportTitleIsPartOfIdentity(t *testing.T) {
 
 // A different date or a different subtype is a different report, not an overwrite.
 func TestUpsertReportDistinctIdentities(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		base := Rep{Symbol: "600519", Title: "T", RType: "交易分析", Date: "2026-07-16"}
 		id1, _ := mustUpsert(t, st, base)
@@ -159,6 +158,7 @@ func TestUpsertReportDistinctIdentities(t *testing.T) {
 // kind is not part of the identity: the same code+date+subtype re-ingested under a
 // re-categorised kind must overwrite the existing row, never fork a second one.
 func TestUpsertReportKindNotPartOfIdentity(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		base := Rep{Symbol: "600519", Title: "T", RType: "交易分析", Date: "2026-07-16", Kind: "研究"}
 		id1, _ := mustUpsert(t, st, base)
@@ -178,6 +178,7 @@ func TestUpsertReportKindNotPartOfIdentity(t *testing.T) {
 // A thematic report has no stock code, so its identity falls back to the title.
 // Same title = same report; different titles on the same day+subtype must not collide.
 func TestUpsertReportThematicDedupsOnTitle(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		x := Rep{Symbol: "", Title: "新能源主题", RType: "交易分析", Date: "2026-07-16", MD: "v1"}
 		id1, created1 := mustUpsert(t, st, x)
@@ -209,6 +210,7 @@ func TestUpsertReportThematicDedupsOnTitle(t *testing.T) {
 // the overwrite path — tracking items, the webhook payload and the API response all
 // key off it, so a wrong id silently attaches data to the wrong report.
 func TestUpsertReportReturnsWrittenID(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		a := Rep{Symbol: "600519", Title: "A", RType: "交易分析", Date: "2026-07-16", MD: "a"}
 		b := Rep{Symbol: "000001", Title: "B", RType: "交易分析", Date: "2026-07-16", MD: "b"}

@@ -72,9 +72,11 @@ func testPlatformCapabilityForegroundSelect(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityForegroundSelectSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityForegroundSelect(t, false)
 }
 func TestPlatformCapabilityForegroundSelectPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityForegroundSelect(t, true)
 }
 
@@ -92,9 +94,11 @@ func testPlatformCapabilityPublicPolicyHasNoDigest(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityPublicPolicyHasNoDigestSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPublicPolicyHasNoDigest(t, false)
 }
 func TestPlatformCapabilityPublicPolicyHasNoDigestPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPublicPolicyHasNoDigest(t, true)
 }
 
@@ -127,9 +131,11 @@ func testPlatformCapabilityMidCallReview(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityMidCallReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityMidCallReview(t, false)
 }
 func TestPlatformCapabilityMidCallReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityMidCallReview(t, true)
 }
 
@@ -178,5 +184,11 @@ func testPlatformCapabilityEgress(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformCapabilityEgressSQLite(t *testing.T)   { testPlatformCapabilityEgress(t, false) }
-func TestPlatformCapabilityEgressPostgres(t *testing.T) { testPlatformCapabilityEgress(t, true) }
+func TestPlatformCapabilityEgressSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformCapabilityEgress(t, false)
+}
+func TestPlatformCapabilityEgressPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformCapabilityEgress(t, true)
+}

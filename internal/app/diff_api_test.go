@@ -25,6 +25,7 @@ func diffGET(t *testing.T, s *Server, user string, a, b int64) (int, map[string]
 }
 
 func TestDiffAPIComparesTwoReports(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	mustAddUser(t, s, "admin", true)
 	older, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-06-30", RType: "投资决策",
@@ -56,6 +57,7 @@ func TestDiffAPIComparesTwoReports(t *testing.T) {
 // checked — and a report the caller may not read must be indistinguishable from one that is not
 // there, or the endpoint becomes a way to ask which report ids exist.
 func TestDiffAPIRefusesAReportYouCannotRead(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})
@@ -94,6 +96,7 @@ func TestDiffAPIRefusesAReportYouCannotRead(t *testing.T) {
 // Choosing what to compare against. The default the UI wants — the previous edition of the same
 // analysis — is a query, not a guess, and it has to be scoped like every other read.
 func TestComparableReportsOffersThePreviousEditions(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	var ids []int64
@@ -122,6 +125,7 @@ func TestComparableReportsOffersThePreviousEditions(t *testing.T) {
 }
 
 func TestComparableReportsIsScoped(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})

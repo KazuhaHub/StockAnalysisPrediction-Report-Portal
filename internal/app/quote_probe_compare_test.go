@@ -58,6 +58,7 @@ func rewriteProbeManifest(t *testing.T, dir string, change func(*quoteProbeManif
 }
 
 func TestQuoteProbeCompareSharesComparatorOffline(t *testing.T) {
+	t.Parallel()
 	dir := probeCompareFixture(t) // Server closes before replay; no network client is passed.
 	report, err := compareQuoteProbe(dir, quoteSourceTencent, [2]string{"2026-10-19", "2026-10-20"})
 	if err != nil {
@@ -84,6 +85,7 @@ func TestQuoteProbeCompareSharesComparatorOffline(t *testing.T) {
 }
 
 func TestQuoteProbeCompareRejectsInvalidEvidence(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"raw_hash", "parsed_hash", "traversal", "symlink", "incomplete", "duplicate", "missing_source", "identity", "invalid_bar", "adjusted", "cached", "bar_source", "source", "no_http", "version", "anchors", "manifest_trailing", "manifest_unknown", "raw_size"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := probeCompareFixture(t)
@@ -177,6 +179,7 @@ func TestQuoteProbeCompareRejectsInvalidEvidence(t *testing.T) {
 }
 
 func TestQuoteProbeCompareFailedCaptureIsUnavailableNotAgreement(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"source", "http", "truncated", "empty_window", "primary", "missing_primary_anchor"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := probeCompareFixture(t)
@@ -212,6 +215,7 @@ func TestQuoteProbeCompareFailedCaptureIsUnavailableNotAgreement(t *testing.T) {
 }
 
 func TestQuoteProbeCompareTrimsCountSeriesBeforeSharedComparison(t *testing.T) {
+	t.Parallel()
 	dir := probeCompareFixture(t)
 	rewriteProbeManifest(t, dir, func(m *quoteProbeManifest) {
 		m.From, m.To = "2026-10-19", "2026-10-19"
@@ -224,6 +228,7 @@ func TestQuoteProbeCompareTrimsCountSeriesBeforeSharedComparison(t *testing.T) {
 }
 
 func TestQuoteProbeEvidenceReaderBoundsBeforeReading(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	file := filepath.Join(dir, "body")
 	if err := os.WriteFile(file, []byte("12345"), 0600); err != nil {

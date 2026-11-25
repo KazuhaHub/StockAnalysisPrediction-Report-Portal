@@ -38,6 +38,7 @@ func (p *platformPrincipalEnv) deriver(t *testing.T) appplatform.ViewerPrincipal
 // Doc 181 test 2: only a current administrator of an enabled, ready installation whose capability
 // is granted and whose launch binding matches. The answers carry no principal at all.
 func TestPlatformPrincipalRoutesRefuseEveryOtherCaller(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		for _, route := range []string{"search", "resolve"} {
 			body := func(p *platformPrincipalEnv) map[string]any {
@@ -96,6 +97,7 @@ func TestPlatformPrincipalRoutesRefuseEveryOtherCaller(t *testing.T) {
 }
 
 func TestPlatformPrincipalRoutesRequireASession(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		for _, route := range []string{"search", "resolve"} {
@@ -115,6 +117,7 @@ func TestPlatformPrincipalRoutesRequireASession(t *testing.T) {
 // Doc 181 test 3: a user outside the audience and an OU outside the granted subtrees never appear,
 // including through resolve, which only answers for principals inside the result space.
 func TestPlatformPrincipalResolveStaysInsideTheAudience(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		deriver := p.deriver(t)
@@ -163,6 +166,7 @@ func TestPlatformPrincipalResolveStaysInsideTheAudience(t *testing.T) {
 
 // Doc 181 test 4, with the other ways an account stops being listable.
 func TestPlatformPrincipalDirectoryFollowsCurrentMembership(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		if labels := p.searchLabels(t, "user"); !slices.Contains(labels, "Alice Analyst") {
@@ -205,6 +209,7 @@ func TestPlatformPrincipalDirectoryFollowsCurrentMembership(t *testing.T) {
 // A closed row on a descendant overrides the open ancestor: neither the OU nor its members are listed,
 // the same decision launch makes.
 func TestPlatformPrincipalDirectoryFollowsAClosedOverride(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		platformSetAccess(t, p.s, p.installation, p.groups["Research Lab"], false)
@@ -219,6 +224,7 @@ func TestPlatformPrincipalDirectoryFollowsAClosedOverride(t *testing.T) {
 
 // Doc 181 test 5: principals are scoped to one installation seed.
 func TestPlatformPrincipalsDifferPerInstallationSeed(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		first, _ := decodePlatformPrincipals(t, p.post(t, "search", map[string]any{"kind": "user"}))
@@ -254,6 +260,7 @@ func TestPlatformPrincipalsDifferPerInstallationSeed(t *testing.T) {
 
 // Doc 181 test 6, first half.
 func TestPlatformPrincipalCallsAreRateLimitedPerViewerAndInstallation(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		for n := 1; n <= 30; n++ {
@@ -305,6 +312,7 @@ func TestPlatformPrincipalDirectoryAnswersTenThousandUsersWithinTheDocumentBudge
 
 // Doc 181 test 7: nothing but the principal and a label.
 func TestPlatformPrincipalAnswersCarryNoProfileData(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		var seen strings.Builder
@@ -339,6 +347,7 @@ func TestPlatformPrincipalAnswersCarryNoProfileData(t *testing.T) {
 }
 
 func TestPlatformPrincipalSearchPagesFiltersAndRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		var all []string
@@ -403,6 +412,7 @@ func TestPlatformPrincipalSearchPagesFiltersAndRejectsMalformedInput(t *testing.
 }
 
 func TestPlatformPrincipalLabelsAreBoundedOnAUTF8Boundary(t *testing.T) {
+	t.Parallel()
 	label := strings.Repeat("研", 100)
 	got := truncatePlatformPrincipalLabel(label)
 	if len(got) > 160 || !utf8.ValidString(got) || !strings.HasPrefix(label, got) || len(got) != 159 {
@@ -415,6 +425,7 @@ func TestPlatformPrincipalLabelsAreBoundedOnAUTF8Boundary(t *testing.T) {
 
 // Doc 181 section 5: one audit row per viewer, installation and hour, with call counts only.
 func TestPlatformPrincipalDirectoryUseIsAuditedOncePerHour(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		for _, call := range []struct {
@@ -449,6 +460,7 @@ func TestPlatformPrincipalDirectoryUseIsAuditedOncePerHour(t *testing.T) {
 // account's OU is open (platformAccessChain). The directory applies the same rule, so it
 // never lists a user or OU that could not present the principal at launch.
 func TestPlatformPrincipalDirectoryExcludesChainsWithoutACreationIdentity(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		mustExec(t, p.s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, p.groups["Research Lab"])
@@ -491,6 +503,7 @@ func TestPlatformPrincipalDirectoryExcludesChainsWithoutACreationIdentity(t *tes
 // A deleted OU takes its rows with it, so an OU created later (even one that reuses the id) does not
 // inherit the old access: launch is refused and the directory is empty.
 func TestARecreatedOUWithTheSameIDDoesNotInheritThePlatformRows(t *testing.T) {
+	t.Parallel()
 	e := newPlatformAccessEnv(t, false)
 	group, err := e.s.st.CreateUserGroup("Recreated", "", 0)
 	if err != nil {
@@ -526,6 +539,7 @@ func TestARecreatedOUWithTheSameIDDoesNotInheritThePlatformRows(t *testing.T) {
 // Only a real installation the viewer may use reaches the limiter, so arbitrary installation ids
 // cannot grow the table past its cap and flush an exhausted viewer's counter.
 func TestPlatformPrincipalRateLimitSurvivesArbitraryInstallationIDs(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		body := map[string]any{"kind": "ou"}
@@ -554,6 +568,7 @@ func TestPlatformPrincipalRateLimitSurvivesArbitraryInstallationIDs(t *testing.T
 // The hourly row is counted inside one database transaction, not under an in-process mutex alone:
 // a second server value over the same store (another process) must not lose counts either.
 func TestPlatformPrincipalAuditCountsAcrossServersWithoutLosingCalls(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		other := &Server{st: p.s.st}

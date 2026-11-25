@@ -84,10 +84,12 @@ func testPlatformTrustQuarantineFrontend(t *testing.T, pg bool) {
 }
 
 func TestPlatformTrustQuarantineFrontendSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustQuarantineFrontend(t, false)
 }
 
 func TestPlatformTrustQuarantineFrontendPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustQuarantineFrontend(t, true)
 }
 
@@ -159,10 +161,12 @@ func testPlatformTrustQuarantineManaged(t *testing.T, pg bool) {
 }
 
 func TestPlatformTrustQuarantineManagedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustQuarantineManaged(t, false)
 }
 
 func TestPlatformTrustQuarantineManagedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTrustQuarantineManaged(t, true)
 }
 
@@ -171,6 +175,7 @@ func TestPlatformTrustQuarantineManagedPostgres(t *testing.T) {
 // stop; launch is refused; the load is later settled as an outcome Portal does not know; and a start-bearing
 // operation is refused until then. Fails if any part of the quarantine is deferred or lost.
 func TestTrustRevocationFullyQuarantinesAnInstallationWithAnUnsettledLoad(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformManagedAccessFixture(t, false)
 	writerBefore := scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID)
 	fenceBefore := scalar[int64](t, s.st, `SELECT control_fence FROM app_platform_installations WHERE id=?`, lease.installationID)
@@ -221,6 +226,7 @@ func TestTrustRevocationFullyQuarantinesAnInstallationWithAnUnsettledLoad(t *tes
 // Defence in depth: service identity re-verifies the publisher's trust, as the launch path does, so a revoked key
 // stops it before any quarantine has run. Fails if a service identity is issued for a release whose key was revoked.
 func TestServiceIdentityReverifiesPublisherTrust(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	if _, _, err := s.issuePlatformServiceIdentity(context.Background(), installation, platformFixtureID(5150), []string{"reports.read"}, time.Minute); err != nil {
 		t.Fatal(err)

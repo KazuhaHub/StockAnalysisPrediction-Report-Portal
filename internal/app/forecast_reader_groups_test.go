@@ -37,6 +37,7 @@ func readerGroups(t *testing.T, s *Server, user, query string) map[string]any {
 }
 
 func TestReaderAndAdminGetIdenticalAllRecords(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.forecastEval = forecastEvaluator{now: func() time.Time { return time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC) }}
 	seedForecastReader(t, s, "reader", scopeAll, false)
@@ -55,6 +56,7 @@ func TestReaderAndAdminGetIdenticalAllRecords(t *testing.T) {
 }
 
 func TestReaderGroupsOwnUsesIsolatedCache(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.forecastEval.now = func() time.Time { return dateAtClose("2026-10-22") }
 	ou := seedForecastReader(t, s, "reader", scopeOwn, false)
@@ -82,6 +84,7 @@ func TestReaderGroupsOwnUsesIsolatedCache(t *testing.T) {
 }
 
 func TestExternalCustomRangeRefused(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "external", scopeAll, true)
 	seedForecastReader(t, s, "none", scopeNone, false)
@@ -101,6 +104,7 @@ func TestExternalCustomRangeRefused(t *testing.T) {
 // administrator changed a scope or moved the reader. The population is therefore the server's own
 // statement, taken from the same decision that picked the cohort.
 func TestReaderGroupsStateThePopulationTheServerUsed(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	ensurePurgeEvidenceTable(t, s.st) // an own read needs the evidence an upgraded database has
 	s.forecastEval.now = func() time.Time { return dateAtClose("2026-10-22") }

@@ -187,6 +187,19 @@ go run ./cmd/report-portal           # 访问 :8790，SPA 由二进制内嵌服�
 
 辅助命令：`go run ./cmd/report-portal hashpw '密码'`（生成 bcrypt 哈希）、`... adduser <名> <密码> admin`（恢复管理员访问）、`... fetchnames`（更新 A 股名称）、`... backup <文件|->` / `... restore <文件|-> [--force]`（导出或恢复完整数据库）、`... recovery-bundle write|restore <目录> ...`（打包或加载平台恢复包）、`... recompute-kinds`（分类调整后重新计算 `kind`）、`... freeze-names`（将当前名称固化到历史报告）以及 `... version`（显示版本、提交和构建时间）。
 
+### 运行测试
+
+命令与 CI 相同：
+
+```bash
+go test -count=1 ./...                                  # 全部 Go 包；PostgreSQL 测试会跳过
+TEST_POSTGRES_DSN='postgres://portal:portal@localhost:5432/reports_test?sslmode=disable' \
+  go test -count=1 ./internal/app/                      # 连同 PostgreSQL 变体
+cd web && npm run test                                  # vitest
+```
+
+`internal/app` 的大部分测试并行运行。新测试第一行调用 `t.Parallel()`，除非它会改动进程级状态：包级变量或钩子、`log` 输出、环境变量或工作目录，或者它断言了耗时上限。测试为共享夹具设置的选项用 `testScoped`（按顶层测试隔离），不要用包级变量。PostgreSQL 测试通过 `testPostgresDSN(t)` 获取数据库（有守护测试禁止以其他方式使用 `TEST_POSTGRES_DSN`）：每个顶层测试拿到一份从模板库复制的新库，模板由一次 `OpenStore` 初始化，所以看不到其他测试的数据。这要求数据库角色可以建库（`ALTER ROLE portal CREATEDB`）；否则 PostgreSQL 测试轮流使用指定的库，同一时刻只有一个（其他测试照常并行），并且会看到之前测试留下的数据，与以前相同。
+
 ## 发布
 
 版本号采用 CalVer：`vYYYY.W[.R]`，`YYYY` 为 ISO 周历年份，`W` 为该版本系列起始的 UTC ISO 周，`R` 为可选的修订号、每次产物变更递增——该周第一次发布写 `v2026.38`，同一周再有产物就写 `v2026.38.2`。从 release note 生成标签并推送：

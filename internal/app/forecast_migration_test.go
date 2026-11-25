@@ -90,6 +90,7 @@ func seedPredictionSet(t *testing.T, st *Store, reportID sql.NullInt64, payloadS
 // the accepted baseline, written by the previous release, which has no forecast tables at all. It
 // must open, gain the step, and record it — and reopening must not run anything again.
 func TestMigration0004AppliesOnBaseline(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "pre-forecast.db")
 	backToTheBaseline(t, path)
 
@@ -134,6 +135,7 @@ func TestMigration0004AppliesOnBaseline(t *testing.T) {
 // that dump predates this step and cannot carry its tables. It must load, and the tables must exist
 // and be empty afterwards — a pre-step dump has no rows to bring.
 func TestMigration0004OlderDumpRestores(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	dump := preMigrationDump(t)
 	// A dump from before this step is written by a release that knew only 0001..0003, so it must not
@@ -160,6 +162,7 @@ func TestMigration0004OlderDumpRestores(t *testing.T) {
 // that adds a table but is not listed in the dump silently loses that table's data on every backup —
 // the kind of loss nobody notices until a restore.
 func TestBackupIncludesPredictionTables(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	setID := seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -194,6 +197,7 @@ func TestBackupIncludesPredictionTables(t *testing.T) {
 // row goes, the ledger stays, and the link is nulled. Nulled rather than deleted, because a set
 // outlives its report by design (the reports floor is 365 days and h12 resolves at 12 months).
 func TestDeleteReportNullsPredictionSets(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	setID := seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -225,6 +229,7 @@ func TestDeleteReportNullsPredictionSets(t *testing.T) {
 // TestCleanupChunkNullsPredictionSets is the same cascade on the retention path (ADR 0017). Missing
 // either site is not wasted rows — a set left pointing at a reused id is another report's claims.
 func TestCleanupChunkNullsPredictionSets(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -248,6 +253,7 @@ func TestCleanupChunkNullsPredictionSets(t *testing.T) {
 // report re-ingested between the scan and the delete is skipped. Its ledger must be skipped with it —
 // nulling the link for a report that still exists would strip a live report of its own sets.
 func TestCleanupChunkSkipsPredictionSetsForAReingestedReport(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -268,6 +274,7 @@ func TestCleanupChunkSkipsPredictionSetsForAReingestedReport(t *testing.T) {
 // later report from inheriting another report's claims. The row that proves it is the unique index
 // below; this test states the intent in the terms the cascade is argued in.
 func TestAPurgedSetIsNotInheritedByANewReport(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -287,6 +294,7 @@ func TestAPurgedSetIsNotInheritedByANewReport(t *testing.T) {
 // a unique index on both drivers, so any number of purged sets can carry the same payload hash — and
 // they will, because two runs of one symbol produce identical payloads.
 func TestPredSetIdemIndexAllowsManyNullReportIDs(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	seedPredictionSet(t, st, sql.NullInt64{}, "same-payload")
 	seedPredictionSet(t, st, sql.NullInt64{}, "same-payload")
@@ -298,6 +306,7 @@ func TestPredSetIdemIndexAllowsManyNullReportIDs(t *testing.T) {
 // TestPredSetIdemIndexRejectsADoubleIngest: the same set posted twice against one report is one row.
 // It is the retry key, and Dify does retry.
 func TestPredSetIdemIndexRejectsADoubleIngest(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "same-payload")
@@ -312,6 +321,7 @@ func TestPredSetIdemIndexRejectsADoubleIngest(t *testing.T) {
 // base_check and bench_code, and only while base_check is pending or refused. Resolved is terminal —
 // a mark whose inputs can still move is a cell whose numbers can still move.
 func TestPredictionSetIsInsertOnlyOnItsEvaluatorColumns(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	reportID := seedReport(t, st, "600519", "2026-10-16")
 	id := seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -336,6 +346,7 @@ func TestPredictionSetIsInsertOnlyOnItsEvaluatorColumns(t *testing.T) {
 // TestStorageUsageListsPredictions: the console must show the ledger's footprint, with no cleanup
 // target behind it — v1 has none, so an eligible count would be a promise nothing keeps.
 func TestStorageUsageListsPredictions(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	reportID := seedReport(t, s.st, "600519", "2026-10-16")
 	setID := seedPredictionSet(t, s.st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")

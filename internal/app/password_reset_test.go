@@ -20,6 +20,7 @@ func postJSON(t *testing.T, h http.HandlerFunc, body string) *httptest.ResponseR
 }
 
 func TestResetTokenRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "user"})
 
@@ -75,6 +76,7 @@ func wantNoEmail(t *testing.T, ch chan string) {
 }
 
 func TestForgotPassword(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "user"})
 	s.st.SetUserProfile("kaz", "Kazuha", "kaz@x.io")
@@ -106,6 +108,7 @@ func TestForgotPassword(t *testing.T) {
 // The reset link uses the configured public_url, never a forged Host / X-Forwarded-
 // Host — otherwise a forged host would poison the link (account takeover).
 func TestForgotPasswordIgnoresForgedHost(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "user"})
 	s.st.SetUserProfile("kaz", "Kazuha", "kaz@x.io")
@@ -129,6 +132,7 @@ func TestForgotPasswordIgnoresForgedHost(t *testing.T) {
 // With no public_url configured, reset-by-email is disabled (fail closed) — no link
 // can be trusted, so nothing is sent.
 func TestForgotPasswordFailsClosedWithoutPublicURL(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "user"})
 	s.st.SetUserProfile("kaz", "Kazuha", "kaz@x.io")
@@ -143,6 +147,7 @@ func TestForgotPasswordFailsClosedWithoutPublicURL(t *testing.T) {
 
 // A disabled account can't be reset even with an otherwise-valid token.
 func TestResetTokenRejectsDisabled(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "user"})
 	tok := s.resetToken(s.st.GetUser("kaz"))
@@ -156,6 +161,7 @@ func TestResetTokenRejectsDisabled(t *testing.T) {
 }
 
 func TestResetPassword(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "user"})
 	tok := s.resetToken(s.st.GetUser("kaz"))
@@ -181,6 +187,7 @@ func TestResetPassword(t *testing.T) {
 }
 
 func TestEmailSaveGetHidesPassword(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	post(t, s.apiEmailSave, `{"enabled":true,"host":"smtp.x.io","port":587,"user":"u","pass":"secret","from":"noreply@x.io","security":"starttls"}`)
 
@@ -205,6 +212,7 @@ func TestEmailSaveGetHidesPassword(t *testing.T) {
 }
 
 func TestNotifyJobDone(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "h", Role: "user"})
 	s.st.SetUserProfile("kaz", "Kazuha", "kaz@x.io")
@@ -244,6 +252,7 @@ func TestNotifyJobDone(t *testing.T) {
 }
 
 func TestRecoveryModesAndBlankAccount(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	rec := postJSON(t, s.apiForgotPassword, `{"account":"   "}`)
 	if rec.Code != http.StatusBadRequest {

@@ -5,6 +5,7 @@ import "testing"
 // GET /api/v1/reports needs real pagination (offset + total), name/code-aware
 // keyword search, and source/run_id filters.
 func TestQueryReportsPaginationAndFilters(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SyncStocks(map[string]string{"300750": "宁德时代"})
 	for _, d := range []string{"2026-01-01", "2026-02-01", "2026-03-01"} {
@@ -45,6 +46,7 @@ func TestQueryReportsPaginationAndFilters(t *testing.T) {
 
 // Ingest must signal whether the row was created or overwritten.
 func TestUpsertReportCreatedFlag(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	// Both ingests carry the SAME identity (symbol+date+rtype+title) — a re-run of one
 	// report — so the second must overwrite rather than insert.
@@ -66,6 +68,7 @@ func TestUpsertReportCreatedFlag(t *testing.T) {
 
 // Single tracking item can be updated by id (the hypothesis re-check loop).
 func TestUpdateTrackingStatus(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	id, _, err := st.UpsertReport(Rep{Symbol: "300750", Date: "2026-01-01", RType: "汇总"})
 	if err != nil {
@@ -93,6 +96,7 @@ func TestUpdateTrackingStatus(t *testing.T) {
 
 // Reports can be deleted/retracted, cascading their tracking items; idempotent.
 func TestDeleteReport(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	id, _, err := st.UpsertReport(Rep{Symbol: "300750", Date: "2026-01-01", RType: "汇总"})
 	if err != nil {

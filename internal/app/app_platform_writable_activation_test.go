@@ -26,9 +26,11 @@ func testPlatformWritableActivationMetadata(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableActivationMetadataSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableActivationMetadata(t, false)
 }
 func TestPlatformWritableActivationMetadataPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableActivationMetadata(t, true)
 }
 func testPlatformWritableActivationRefusals(t *testing.T, pg bool) {
@@ -67,8 +69,10 @@ func testPlatformWritableActivationRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableActivationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableActivationRefusals(t, false)
 }
 func TestPlatformWritableActivationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableActivationRefusals(t, true)
 }

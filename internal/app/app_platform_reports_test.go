@@ -69,6 +69,7 @@ func platformReportsRequest(t *testing.T, s *Server, session platformActorSessio
 }
 
 func TestPlatformReportsCurrentScopeAndCapability(t *testing.T) {
+	t.Parallel()
 	s, first, installation := platformReportsFixture(t)
 	binding, err := s.inspectPlatformLaunchAccess(first, installation)
 	if err != nil {
@@ -105,6 +106,7 @@ func TestPlatformReportsCurrentScopeAndCapability(t *testing.T) {
 }
 
 func TestPlatformReportsTwoOUsAndOldBinding(t *testing.T) {
+	t.Parallel()
 	s, first, installation := platformReportsFixture(t)
 	binding, err := s.inspectPlatformLaunchAccess(first, installation)
 	if err != nil {
@@ -180,6 +182,7 @@ func TestPlatformReportsTwoOUsAndOldBinding(t *testing.T) {
 }
 
 func TestPlatformReportsNoAccessAndAdminDemotion(t *testing.T) {
+	t.Parallel()
 	s, installationOwner, installation := platformReportsFixture(t)
 	binding, err := s.inspectPlatformLaunchAccess(installationOwner, installation)
 	if err != nil {

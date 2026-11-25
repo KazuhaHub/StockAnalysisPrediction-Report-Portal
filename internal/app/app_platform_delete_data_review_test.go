@@ -126,10 +126,12 @@ func testPlatformDeleteDataReview(t *testing.T, pg bool) {
 }
 
 func TestPlatformDeleteDataReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataReview(t, false)
 }
 
 func TestPlatformDeleteDataReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataReview(t, true)
 }
 
@@ -183,10 +185,12 @@ func testPlatformDeleteDataStaleReview(t *testing.T, pg bool) {
 }
 
 func TestPlatformDeleteDataStaleReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataStaleReview(t, false)
 }
 
 func TestPlatformDeleteDataStaleReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataStaleReview(t, true)
 }
 
@@ -235,10 +239,12 @@ func testPlatformConcurrentDeleteDataCommit(t *testing.T, pg bool) {
 }
 
 func TestPlatformConcurrentDeleteDataCommitSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformConcurrentDeleteDataCommit(t, false)
 }
 
 func TestPlatformConcurrentDeleteDataCommitPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformConcurrentDeleteDataCommit(t, true)
 }
 
@@ -273,10 +279,12 @@ func testPlatformDeleteDataOperatorConflict(t *testing.T, pg bool) {
 }
 
 func TestPlatformDeleteDataOperatorConflictSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataOperatorConflict(t, false)
 }
 
 func TestPlatformDeleteDataOperatorConflictPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataOperatorConflict(t, true)
 }
 
@@ -344,10 +352,12 @@ func testPlatformConcurrentDeleteDataOperators(t *testing.T, pg bool) {
 }
 
 func TestPlatformConcurrentDeleteDataOperatorsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformConcurrentDeleteDataOperators(t, false)
 }
 
 func TestPlatformConcurrentDeleteDataOperatorsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformConcurrentDeleteDataOperators(t, true)
 }
 
@@ -500,14 +510,17 @@ func testPlatformDeleteDataCompletion(t *testing.T, pg bool) {
 }
 
 func TestPlatformDeleteDataCompletionSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataCompletion(t, false)
 }
 
 func TestPlatformDeleteDataCompletionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformDeleteDataCompletion(t, true)
 }
 
 func TestPlatformDeleteDataUncertaintyRequiresReview(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, namespace := platformDeleteDataFixture(t, false)
 	review, err := s.createPlatformDeleteDataReview(
 		context.Background(), actor, installation, namespace)
@@ -560,6 +573,7 @@ func TestPlatformDeleteDataUncertaintyRequiresReview(t *testing.T) {
 }
 
 func TestPlatformDeleteDataManagementHTTP(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, namespace := platformDeleteDataFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

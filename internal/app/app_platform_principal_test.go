@@ -58,5 +58,11 @@ func testPlatformPrincipalCleanup(t *testing.T, postgres bool) {
 		t.Fatal("OU deletion moved the policy revision of an installation that only had an access row")
 	}
 }
-func TestAppPlatformPrincipalCleanup(t *testing.T)         { testPlatformPrincipalCleanup(t, false) }
-func TestPostgresAppPlatformPrincipalCleanup(t *testing.T) { testPlatformPrincipalCleanup(t, true) }
+func TestAppPlatformPrincipalCleanup(t *testing.T) {
+	t.Parallel()
+	testPlatformPrincipalCleanup(t, false)
+}
+func TestPostgresAppPlatformPrincipalCleanup(t *testing.T) {
+	t.Parallel()
+	testPlatformPrincipalCleanup(t, true)
+}

@@ -11,6 +11,7 @@ import (
 )
 
 func TestPasswordChangeInvalidatesExistingSession(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "alice", PasswordHash: "old", Role: "user"}); err != nil {
 		t.Fatal(err)

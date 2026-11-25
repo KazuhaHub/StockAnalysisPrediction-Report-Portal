@@ -6,6 +6,7 @@ import (
 )
 
 func TestPlatformSecretBindingPolicyV2Principals(t *testing.T) {
+	t.Parallel()
 	digest := strings.Repeat("a", 64)
 	head := `{"format":"portal.secret-binding-policy/2-dev.1","operation":"http_bearer","network_policy_sha256":"` + digest + `","principals":`
 	for _, c := range []struct {
@@ -44,6 +45,7 @@ func TestPlatformSecretBindingPolicyV2Principals(t *testing.T) {
 }
 
 func TestPlatformSecretBindingPolicyV2Refusals(t *testing.T) {
+	t.Parallel()
 	digest := strings.Repeat("a", 64)
 	head := `{"format":"portal.secret-binding-policy/2-dev.1","operation":"http_bearer","network_policy_sha256":"` + digest + `","principals":`
 	for _, raw := range []string{

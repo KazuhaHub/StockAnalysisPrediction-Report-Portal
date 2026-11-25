@@ -24,6 +24,7 @@ func peerWithXFF(peer, xff string) *http.Request {
 }
 
 func TestUnsetTrustsLoopbackOnly(t *testing.T) {
+	t.Parallel()
 	nets, err := parseTrustedProxies(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +49,7 @@ func TestUnsetTrustsLoopbackOnly(t *testing.T) {
 
 // "none" is how an operator asks for the old behaviour: believe nobody, not even loopback.
 func TestNoneTrustsNobody(t *testing.T) {
+	t.Parallel()
 	nets, err := parseTrustedProxies([]string{"none"})
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +65,7 @@ func TestNoneTrustsNobody(t *testing.T) {
 // "all" is for a listener that cannot be reached except through the proxy — a Docker network, a
 // unix socket. It is the right answer there and a hole anywhere else, so it is opt-in and loud.
 func TestAllTrustsEverything(t *testing.T) {
+	t.Parallel()
 	for _, tok := range []string{"all", "*", "ALL"} {
 		nets, err := parseTrustedProxies([]string{tok})
 		if err != nil {
@@ -80,6 +83,7 @@ func TestAllTrustsEverything(t *testing.T) {
 // A token mixed with real networks is a contradiction, and silently picking one meaning would give
 // an operator a trust policy they did not write.
 func TestTokensCannotBeMixedWithNetworks(t *testing.T) {
+	t.Parallel()
 	for _, entries := range [][]string{{"all", "10.0.0.0/8"}, {"10.0.0.0/8", "none"}} {
 		if _, err := parseTrustedProxies(entries); err == nil {
 			t.Errorf("%v was accepted", entries)
@@ -89,6 +93,7 @@ func TestTokensCannotBeMixedWithNetworks(t *testing.T) {
 
 // Explicit networks still work, and still exclude everything else.
 func TestExplicitNetworks(t *testing.T) {
+	t.Parallel()
 	nets, err := parseTrustedProxies([]string{"172.16.0.0/12", "10.1.2.3"})
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +114,7 @@ func TestExplicitNetworks(t *testing.T) {
 }
 
 func TestTrustAllIsReportedSoItCanBeWarnedAbout(t *testing.T) {
+	t.Parallel()
 	all, _ := parseTrustedProxies([]string{"all"})
 	if !trustsEverything(all) {
 		t.Error("trust-all was not recognised, so no warning would be logged")
@@ -131,6 +137,7 @@ func TestTrustAllIsReportedSoItCanBeWarnedAbout(t *testing.T) {
 // suggests -- a neighbouring container can then park an unparseable hop in front of any address
 // and have the portal adopt it, for both the rate-limit key and the audit column.
 func TestMalformedHopEndsTheChain(t *testing.T) {
+	t.Parallel()
 	nets, err := parseTrustedProxies([]string{"127.0.0.0/8", "10.0.0.0/8"})
 	if err != nil {
 		t.Fatal(err)

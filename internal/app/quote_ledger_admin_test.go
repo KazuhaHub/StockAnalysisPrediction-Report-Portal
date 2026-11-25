@@ -23,6 +23,7 @@ func ledgerAdminGet(t *testing.T, s *Server) map[string]any {
 }
 
 func TestLedgerAdminStateDescribesExplicitGrants(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	out := ledgerAdminGet(t, s)
 	if !reflect.DeepEqual(out["ledgerChain"], []any{quoteSourceTencent}) || out["ledgerPrimary"] != quoteSourceTencent || out["ledgerShadowPeer"] != quoteSourceSina {
@@ -58,6 +59,7 @@ func TestLedgerAdminStateDescribesExplicitGrants(t *testing.T) {
 }
 
 func TestLedgerAdminHealthCannotBeConfusedWithDisplayHealth(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	s.quotes.sources = []quoteSource{ledgerWalkSource(quoteSourceTencent, func(context.Context, string, string, string, string) (*QuoteResp, error) {
 		return nil, errors.New("ledger-only failure")
@@ -88,6 +90,7 @@ func TestLedgerAdminHealthCannotBeConfusedWithDisplayHealth(t *testing.T) {
 }
 
 func TestLedgerAdminConfiguredOrderAndShadowAreExplicit(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	primary := ledgerWalkSource(quoteSourceTencent, nil)
 	cash := ledgerWalkSource(quoteSourceSina, nil)

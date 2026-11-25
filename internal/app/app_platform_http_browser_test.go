@@ -19,6 +19,7 @@ import (
 // Explicit loopback development fixture. Its temporary app is installed through
 // the real no-data lifecycle; no production store or runtime is provisioned.
 func TestPlatformHTTPBrowserFixture(t *testing.T) {
+	t.Parallel()
 	directory := os.Getenv("APP_DOCUMENT_HTTP_FIXTURE_DIR")
 	stateFile := os.Getenv("APP_DOCUMENT_HTTP_STATE")
 	origin := os.Getenv("APP_DOCUMENT_HTTP_ORIGIN")

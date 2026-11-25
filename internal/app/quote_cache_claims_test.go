@@ -16,6 +16,7 @@ import (
 // reading page can only ever get a snapshot — us and bj, whose daily ranges degrade — the card and
 // the page land on ONE key instead of two entries holding the same price.
 func TestQuoteSnapshotKeyIsTheSameKeyWhateverBarCountWasAsked(t *testing.T) {
+	t.Parallel()
 	page := quoteCacheKey("us", "AAPL", 66, quoteIntervalSnapshot, quoteWindow{}) // a reading page at 3个月
 	card := quoteCacheKey("us", "AAPL", 0, quoteIntervalSnapshot, quoteWindow{})  // a home card, which asks for none
 	if page != card {
@@ -36,6 +37,7 @@ func TestQuoteSnapshotKeyIsTheSameKeyWhateverBarCountWasAsked(t *testing.T) {
 // per request for any symbol with more than one live entry — which is every symbol a reader has
 // looked at on two ranges.
 func TestSnapshotForTakesTheFreshestEntryAndNotWhicheverTheMapOffersFirst(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{}
 	c.init()
 	base := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -68,6 +70,7 @@ func TestSnapshotForTakesTheFreshestEntryAndNotWhicheverTheMapOffersFirst(t *tes
 // never claimed. With the shipped sources this branch never fires (Tencent declares every market for
 // a snapshot), which is exactly why it needs a stub to be exercised at all.
 func TestQuoteBatchGivesEachVendorOnlyTheMarketsItDeclared(t *testing.T) {
+	t.Parallel()
 	asked := map[string][]string{}
 	source := func(name string, ids ...string) quoteSource {
 		markets := map[string]bool{}
@@ -165,6 +168,7 @@ func TestQuoteBatchGivesEachVendorOnlyTheMarketsItDeclared(t *testing.T) {
 // an OPEN market on a one-minute chart, where asking the session first hands back the 30-second
 // open-market TTL for a series whose points arrive once a minute.
 func TestIntradayTTLWinsOverTheSessionOnAnOpenMarket(t *testing.T) {
+	t.Parallel()
 	open := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionOpen}}
 	closed := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionClose}}
 	cfg := quoteConfig{}

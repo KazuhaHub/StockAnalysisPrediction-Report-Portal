@@ -10,6 +10,7 @@ import (
 // The console's review request names a route for an ingress endpoint and shows the sender's address and
 // no secret (doc 180 section 4).
 func TestIngressBindingPlanRoute(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)

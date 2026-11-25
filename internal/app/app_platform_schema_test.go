@@ -9,6 +9,7 @@ import (
 )
 
 func TestAppPlatformControlSchemaProducts(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	step := migration0015()
 	if len(step.tables) != 14 || len(step.indices) != 24 {
@@ -26,6 +27,7 @@ func TestAppPlatformControlSchemaProducts(t *testing.T) {
 }
 
 func TestAppPlatformSqliteForeignKeysSurviveConnectionReplacement(t *testing.T) {
+	t.Parallel()
 	st, err := OpenStore("sqlite", filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +51,7 @@ func TestAppPlatformSqliteForeignKeysSurviveConnectionReplacement(t *testing.T) 
 }
 
 func TestPostgresAppPlatformControlSchema(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	if err := migration0015().verify(st.poolExec()); err != nil {
 		t.Fatal(err)
@@ -56,6 +59,7 @@ func TestPostgresAppPlatformControlSchema(t *testing.T) {
 }
 
 func TestAppPlatformSchemaComparisonPreservesMeaning(t *testing.T) {
+	t.Parallel()
 	if compactPlatformSQL("CHECK(public.octet_length(id)=36)") == compactPlatformSQL("CHECK(octet_length(id)=36)") {
 		t.Fatal("qualified function identity erased")
 	}
@@ -229,8 +233,8 @@ func testPlatformConstraints(t *testing.T, postgres bool) {
 		}
 	}
 }
-func TestAppPlatformConstraints(t *testing.T)         { testPlatformConstraints(t, false) }
-func TestPostgresAppPlatformConstraints(t *testing.T) { testPlatformConstraints(t, true) }
+func TestAppPlatformConstraints(t *testing.T)         { t.Parallel(); testPlatformConstraints(t, false) }
+func TestPostgresAppPlatformConstraints(t *testing.T) { t.Parallel(); testPlatformConstraints(t, true) }
 
 func testPlatformSchemaTamper(t *testing.T, postgres bool) {
 	st := platformTestStore(t, postgres)
@@ -249,12 +253,17 @@ func testPlatformSchemaTamper(t *testing.T, postgres bool) {
 		t.Fatal("weakened uniqueness accepted under the same product name")
 	}
 }
-func TestAppPlatformSchemaRejectsTamperedIndex(t *testing.T) { testPlatformSchemaTamper(t, false) }
+func TestAppPlatformSchemaRejectsTamperedIndex(t *testing.T) {
+	t.Parallel()
+	testPlatformSchemaTamper(t, false)
+}
 func TestPostgresAppPlatformSchemaRejectsTamperedIndex(t *testing.T) {
+	t.Parallel()
 	testPlatformSchemaTamper(t, true)
 }
 
 func TestPostgresAppPlatformSchemaRejectsWeakenedCheck(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	tx, err := st.db.Begin()
 	if err != nil {
@@ -273,6 +282,7 @@ func TestPostgresAppPlatformSchemaRejectsWeakenedCheck(t *testing.T) {
 }
 
 func TestAppPlatformSchemaRejectsDisabledForeignKeys(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.exec("PRAGMA foreign_keys=OFF"); err != nil {
 		t.Fatal(err)

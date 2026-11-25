@@ -11,10 +11,12 @@ import (
 )
 
 func TestNotificationReplayIsIdempotentAndDoesNotRewriteEvidence(t *testing.T) {
+	t.Parallel()
 	testNotificationReplayIsIdempotentAndDoesNotRewriteEvidence(t, newTestStore(t))
 }
 
 func TestNotificationHistoryPaginationKeepsSameTimestampRows(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	now := time.Now().UTC()
 	for _, id := range []string{"a", "b", "c"} {
@@ -54,6 +56,7 @@ func TestNotificationHistoryPaginationKeepsSameTimestampRows(t *testing.T) {
 }
 
 func TestNotificationDispatchResumeRequiresCurrentReview(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	pause := notificationAdminCall(t, s, s.apiNotificationDispatch, "POST", "", `{"paused":true}`)
 	if pause.Code != 200 {
@@ -129,6 +132,7 @@ func testNotificationReplayIsIdempotentAndDoesNotRewriteEvidence(t *testing.T, s
 }
 
 func TestNotificationReplayCannotRestoreDeletedAccount(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "reused", Role: "admin", PasswordHash: "h"}); err != nil {
 		t.Fatal(err)
@@ -160,6 +164,7 @@ func TestNotificationReplayCannotRestoreDeletedAccount(t *testing.T) {
 }
 
 func TestNotificationAccountDeletionSettlesInFlightAttempt(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "gone", Role: "admin", PasswordHash: "h"}); err != nil {
 		t.Fatal(err)

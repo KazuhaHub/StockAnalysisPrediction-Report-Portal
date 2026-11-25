@@ -31,6 +31,7 @@ func fakeCred(id string, signCount uint32) *webauthn.Credential {
 // TestPasskeyStoreRoundTrip proves credentials persist, list back with their labels, and are
 // scoped to their owner.
 func TestPasskeyStoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	if err := s.st.AddPasskey("alice", "YubiKey", fakeCred("cred-a", 3)); err != nil {
 		t.Fatal(err)
@@ -64,6 +65,7 @@ func TestPasskeyStoreRoundTrip(t *testing.T) {
 
 // TestPasskeyDeleteIsOwnerScoped proves one account cannot revoke another's key by guessing an id.
 func TestPasskeyDeleteIsOwnerScoped(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	s.st.AddPasskey("alice", "A", fakeCred("cred-a", 0))
 	s.st.AddPasskey("bob", "B", fakeCred("cred-b", 0))
@@ -85,6 +87,7 @@ func TestPasskeyDeleteIsOwnerScoped(t *testing.T) {
 // TestPasskeySignCounterIsPersisted proves the counter is recorded on use — without that, a
 // rollback (the signature of a cloned authenticator) could never be detected.
 func TestPasskeySignCounterIsPersisted(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	s.st.AddPasskey("alice", "A", fakeCred("cred-a", 5))
 	s.st.TouchPasskey([]byte("cred-a"), 9)
@@ -105,6 +108,7 @@ func TestPasskeySignCounterIsPersisted(t *testing.T) {
 // origin. It matters more than it looks: an RP ID that changes invalidates every credential
 // already registered, which users experience as their passkeys silently breaking.
 func TestPasskeyRelyingPartyComesFromPublicURL(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	wa, err := s.webAuthn()
 	if err != nil {
@@ -125,6 +129,7 @@ func TestPasskeyRelyingPartyComesFromPublicURL(t *testing.T) {
 // possession-only; accepting it as the sole credential would be weaker than the password it
 // replaced. The caller must present the single-use token from a completed password leg.
 func TestPasskeyLoginIsSecondFactorOnly(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	s.st.AddPasskey("alice", "A", fakeCred("cred-a", 0))
 	call := func(body string) *httptest.ResponseRecorder {
@@ -160,6 +165,7 @@ func TestPasskeyLoginIsSecondFactorOnly(t *testing.T) {
 // TestPasskeyRegistrationRequiresStepUp proves a stolen session cookie cannot be turned into
 // permanent access by registering the attacker's own authenticator.
 func TestPasskeyRegistrationRequiresStepUp(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	begin := func(q string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -177,6 +183,7 @@ func TestPasskeyRegistrationRequiresStepUp(t *testing.T) {
 // TestPasskeyCeremonyIsSingleUse proves a challenge cannot be replayed: the parked ceremony is
 // consumed on first use, like every other one-shot token in this codebase.
 func TestPasskeyCeremonyIsSingleUse(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	token, err := s.stashCeremony("alice", "webauthn-reg", &webauthn.SessionData{UserID: []byte("alice")})
 	if err != nil {
@@ -202,6 +209,7 @@ func TestPasskeyCeremonyIsSingleUse(t *testing.T) {
 // The account adapter exposes exactly what the WebAuthn library needs — identity plus the stored
 // credentials — and the list endpoint shows a user their own registered passkeys.
 func TestPasskeyUserAdapterAndList(t *testing.T) {
+	t.Parallel()
 	s := passkeyServer(t)
 	s.st.AddPasskey("alice", "My laptop", fakeCred("cred-a", 3))
 

@@ -98,12 +98,17 @@ func testPlatformBackendHTTPAdmission(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformBackendHTTPAdmissionSQLite(t *testing.T) { testPlatformBackendHTTPAdmission(t, false) }
+func TestPlatformBackendHTTPAdmissionSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformBackendHTTPAdmission(t, false)
+}
 func TestPlatformBackendHTTPAdmissionPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendHTTPAdmission(t, true)
 }
 
 func TestPlatformBackendHTTPDecoder(t *testing.T) {
+	t.Parallel()
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: strings.Repeat("a", 64)}
 	encode := func(method, path, body string) string {
 		raw, _ := json.Marshal(map[string]any{"binding": binding, "method": method, "path": path, "body": body})
@@ -137,6 +142,7 @@ func TestPlatformBackendHTTPDecoder(t *testing.T) {
 }
 
 func TestPlatformBackendHTTPBootstrapRefusal(t *testing.T) {
+	t.Parallel()
 	s, _, _, _, _, _ := platformBackendHTTPFixture(t, false)
 	before := dumpOf(t, s.st)
 	for _, endpoint := range []platformRuntimeEndpoint{{}, {path: "relative", controllerUID: 41001, controllerGID: 41001}, {path: "/tmp/a/../runner.sock", controllerUID: 41001, controllerGID: 41001}, {path: "/tmp/runner.sock", controllerUID: 0, controllerGID: 41001}} {
@@ -150,6 +156,7 @@ func TestPlatformBackendHTTPBootstrapRefusal(t *testing.T) {
 }
 
 func TestPlatformBackendHTTPEnrolment(t *testing.T) {
+	t.Parallel()
 	s, mux, _, path, cookie, body := platformBackendHTTPFixture(t, false)
 	id := scalar[int64](t, s.st, `SELECT id FROM user_groups WHERE is_default=1`)
 	if err := s.st.SetGroupRequire2FA(id, true); err != nil {
@@ -161,6 +168,7 @@ func TestPlatformBackendHTTPEnrolment(t *testing.T) {
 }
 
 func TestPlatformBackendHTTPReadDeadline(t *testing.T) {
+	t.Parallel()
 	// Exercise the production writer wrappers against a real connection. A
 	// stalled body must release the gateway slot even though global SSE writes
 	// have no timeout. Recorder-only tests cannot establish this property.
@@ -220,6 +228,7 @@ func (w *platformDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
 }
 
 func TestPlatformBackendHTTPWriteDeadline(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	w := &platformDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	r := httptest.NewRequest("POST", "/", nil)

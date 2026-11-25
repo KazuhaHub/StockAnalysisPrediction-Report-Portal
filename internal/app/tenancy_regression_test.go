@@ -28,6 +28,7 @@ func tenancyServer(t *testing.T) *Server {
 // leave-them-as-they-are branch and left a brand-new external user in group 0 — unrestricted,
 // able to read every report.
 func TestJITUserWithKeepOnMissLandsRestricted(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ext, err := s.st.CreateUserGroup("ext-org", "", 0)
@@ -73,6 +74,7 @@ func TestJITUserWithKeepOnMissLandsRestricted(t *testing.T) {
 // left Facts.Attrs empty. The admin UI happily accepts such rules, so they looked configured and
 // silently did nothing.
 func TestAttributeNamedRuleMatches(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ext, _ := s.st.CreateUserGroup("ext-org", "", 0)
@@ -108,6 +110,7 @@ func TestAttributeNamedRuleMatches(t *testing.T) {
 // group: SetPrimaryGroup treats an unknown id as "clear", which dropped the user into the
 // unrestricted Default group and turned a typo into a privilege escalation.
 func TestDanglingRuleTargetDoesNotUnrestrict(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ext, _ := s.st.CreateUserGroup("ext-org", "", 0)
@@ -149,6 +152,7 @@ func TestDanglingRuleTargetDoesNotUnrestrict(t *testing.T) {
 // compared every later ceremony against the registration-time value — making clone detection
 // permanently useless. The column is the authoritative counter.
 func TestPasskeyCounterLoadsFromColumn(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.AddPasskey("alice", "A", fakeCred("cred-a", 5))
@@ -167,6 +171,7 @@ func TestPasskeyCounterLoadsFromColumn(t *testing.T) {
 // self-provisioned into an unrestricted group and see everything. An easy misconfiguration, so it
 // is refused at enable time rather than discovered later.
 func TestJITDefaultGroupMustBeRestricted(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ext, _ := s.st.CreateUserGroup("ext-org", "", 0)
@@ -196,6 +201,7 @@ func TestJITDefaultGroupMustBeRestricted(t *testing.T) {
 // Spending a recovery code is a compare-and-set, so two concurrent uses of the same code cannot
 // both succeed. A plain write would make each code usable as many times as it is raced.
 func TestRecoveryCodeSurvivesConcurrentUse(t *testing.T) {
+	t.Parallel()
 	s := totpServer(t)
 	_, codes := enrol(t, s, "alice")
 
@@ -222,6 +228,7 @@ func TestRecoveryCodeSurvivesConcurrentUse(t *testing.T) {
 // A federated account has no local password, so a reset link would be meaningless — and following
 // one would hand it a password the SSO login path then refuses anyway.
 func TestPasswordResetSkipsFederatedAccounts(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	sent := enableEmail(s)
 	s.st.UpsertUser(User{Username: "ext", PasswordHash: "h", Role: "user", Email: "ext@acme.test"})

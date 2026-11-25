@@ -17,6 +17,7 @@ import (
 
 // The endpoint refuses an intent that cannot be verified by the runner before it opens a socket.
 func TestImportEndpointRefusesIntentWithoutDescriptor(t *testing.T) {
+	t.Parallel()
 	endpoint := platformRuntimeEndpoint{path: "/nonexistent/import.sock", controllerUID: 1000, controllerGID: 1001}
 	intent := platformImportIntent{raw: []byte("{}"), signature: make([]byte, 64)}
 	for name, run := range map[string]func(context.Context, platformRuntimeEndpoint, platformImportIntent) (transport.WritableLifecycleObservation, error){

@@ -71,6 +71,7 @@ func quoteEqStr(t *testing.T, what, got, want string) {
 // ---------- the fen parser everything else stands on ----------
 
 func TestQuoteFenParser(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want int64
@@ -122,6 +123,7 @@ func TestQuoteFenParser(t *testing.T) {
 // TestQuoteScaledUnits pins the two unit conversions the vendors force on us: Tencent's 成交额 is
 // 万元 and becomes 元 by asking for four decimal places of it, and a share count has none at all.
 func TestQuoteScaledUnits(t *testing.T) {
+	t.Parallel()
 	got, err := quoteScaled("593906", 4)
 	if err != nil {
 		t.Fatalf("quoteScaled: %v", err)
@@ -138,6 +140,7 @@ func TestQuoteScaledUnits(t *testing.T) {
 }
 
 func TestQuoteDivRoundHalfAwayFromZero(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ num, den, want int64 }{
 		{5, 2, 3}, {-5, 2, -3}, {5, -2, -3}, {4, 2, 2}, {3, 2, 2}, {-3, 2, -2}, {1, 0, 0},
 	}
@@ -151,6 +154,7 @@ func TestQuoteDivRoundHalfAwayFromZero(t *testing.T) {
 // ---------- goldens ----------
 
 func TestQuoteTencentGolden(t *testing.T) {
+	t.Parallel()
 	resp, err := parseTencentQuote("sh", "601899", readQuoteFixture(t, fixTencentSH), 0)
 	if err != nil {
 		t.Fatalf("parseTencentQuote: %v", err)
@@ -216,6 +220,7 @@ func TestQuoteTencentGolden(t *testing.T) {
 }
 
 func TestQuoteTencentGoldenShenzhen(t *testing.T) {
+	t.Parallel()
 	resp, err := parseTencentQuote("sz", "000001", readQuoteFixture(t, fixTencentSZ), 0)
 	if err != nil {
 		t.Fatalf("parseTencentQuote: %v", err)
@@ -250,6 +255,7 @@ func TestQuoteTencentGoldenShenzhen(t *testing.T) {
 // its qt array is 87 fields and not 88, its history is an empty array, and it reports high, low and
 // volume as zero while quoting a real last price.
 func TestQuoteTencentSuspendedBeijing(t *testing.T) {
+	t.Parallel()
 	body := readQuoteFixture(t, fixTencentBJ)
 	resp, err := parseTencentQuote("bj", "830799", body, 0)
 	if err != nil {
@@ -302,6 +308,7 @@ func TestQuoteTencentSuspendedBeijing(t *testing.T) {
 // per-market traps and are asserted as numbers rather than as shapes: the volume is shares and not
 // 手, the turnover is whole dollars and not 万, and the timestamp is a New York instant.
 func TestQuoteTencentGoldenUS(t *testing.T) {
+	t.Parallel()
 	resp, err := parseTencentQuote("us", "AAPL", readQuoteFixture(t, fixTencentUS), 0)
 	if err != nil {
 		t.Fatalf("parseTencentQuote(usAAPL): %v", err)
@@ -347,6 +354,7 @@ func TestQuoteTencentGoldenUS(t *testing.T) {
 }
 
 func TestQuoteTencentGoldenHongKong(t *testing.T) {
+	t.Parallel()
 	resp, err := parseTencentQuote("hk", "00700", readQuoteFixture(t, fixTencentHK), 0)
 	if err != nil {
 		t.Fatalf("parseTencentQuote(hk00700): %v", err)
@@ -396,6 +404,7 @@ func TestQuoteTencentGoldenHongKong(t *testing.T) {
 // except one: same exchange, same array length, same units, same layout — and qt[0] says "1" exactly
 // as 紫金矿业 does. Only the instrument-type field separates them.
 func TestQuoteTencentGoldenShanghaiIndex(t *testing.T) {
+	t.Parallel()
 	resp, err := parseTencentQuote("sh", "000001", readQuoteFixture(t, fixTencentIndex), 0)
 	if err != nil {
 		t.Fatalf("parseTencentQuote(sh000001): %v", err)
@@ -442,6 +451,7 @@ func TestQuoteTencentGoldenShanghaiIndex(t *testing.T) {
 // parser that has started scaling: 39,606,884 shares is a day of Apple, and 3,960,688,400 is about
 // four billion shares — a quarter of the company, changing hands, every day.
 func TestQuoteUSVolumeIsSharesNotLots(t *testing.T) {
+	t.Parallel()
 	doc := tencentDoc(t, fixTencentUS)
 	rawVolume, ok := tencentQtArray(t, doc, "usAAPL")[6].(string)
 	if !ok {
@@ -475,6 +485,7 @@ func TestQuoteUSVolumeIsSharesNotLots(t *testing.T) {
 // The US 成交额 is whole dollars where the Chinese exchanges send 万元, and this is the assertion
 // that a shared scale of 4 would fail: it would report Apple turning over 127 trillion dollars.
 func TestQuoteAmountUnitIsPerMarket(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		file, market, code string
 		want               int64
@@ -496,6 +507,7 @@ func TestQuoteAmountUnitIsPerMarket(t *testing.T) {
 // code we asked for. Both halves are load-bearing — a comparison loose enough for "AAPL.OQ" must
 // still refuse "MSFT.OQ", and it must not loosen the other three markets on the way past.
 func TestQuoteCodeEchoAcrossMarkets(t *testing.T) {
+	t.Parallel()
 	usEcho := func(t *testing.T, echo string) []byte {
 		t.Helper()
 		doc := tencentDoc(t, fixTencentUS)
@@ -551,6 +563,7 @@ func TestQuoteCodeEchoAcrossMarkets(t *testing.T) {
 
 // TestQuoteKindComesFromTheVendorNotTheCode pins the one field a code's shape cannot decide.
 func TestQuoteKindComesFromTheVendorNotTheCode(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ file, market, code, want string }{
 		{fixTencentIndex, "sh", "000001", quoteKindIndex},
 		{fixTencentSH, "sh", "601899", quoteKindStock},
@@ -622,6 +635,7 @@ func TestQuoteKindComesFromTheVendorNotTheCode(t *testing.T) {
 // data is worse than no data — so the market carries history=false and the handler is told to serve
 // no bars for it at all.
 func TestQuoteUSDailyHistoryIsNotASeries(t *testing.T) {
+	t.Parallel()
 	rows := tencentDayRows(t, tencentDoc(t, fixTencentUS), "usAAPL")
 	if len(rows) != 2 {
 		t.Fatalf("the captured US body has %d day rows; the finding this test records was 2", len(rows))
@@ -656,6 +670,7 @@ func TestQuoteUSDailyHistoryIsNotASeries(t *testing.T) {
 // So the line below is deliberately one that WOULD parse. Handing the parser a line whose key does
 // not match would have tested the code-echo check instead, and passed with this guard deleted.
 func TestQuoteSinaServesOnlyTheAShareMarkets(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ market, code, sym string }{
 		{"hk", "00700", "hk00700"},
 		{"us", "AAPL", "usAAPL"},
@@ -687,6 +702,7 @@ func TestQuoteSinaServesOnlyTheAShareMarkets(t *testing.T) {
 }
 
 func TestQuoteSinaGolden(t *testing.T) {
+	t.Parallel()
 	resp, err := parseSinaSnapshot("sh", "601899", string(readQuoteFixture(t, fixSinaSnap)))
 	if err != nil {
 		t.Fatalf("parseSinaSnapshot: %v", err)
@@ -742,6 +758,7 @@ func TestQuoteSinaGolden(t *testing.T) {
 // (Tencent: date, open, close, high, low; Sina: named keys), so a transposition in either parser
 // shows up here as a mismatched fen on some date.
 func TestQuoteVendorsAgreeOnOverlappingDays(t *testing.T) {
+	t.Parallel()
 	tencent, err := parseTencentQuote("sh", "601899", readQuoteFixture(t, fixTencentSH), 0)
 	if err != nil {
 		t.Fatalf("parseTencentQuote: %v", err)
@@ -884,6 +901,7 @@ func TestQuoteAsOfIsStampedInTheMarketsOwnZone(t *testing.T) {
 // tests has /usr/share/zoneinfo, so time.LoadLocation would answer here with or without the
 // time/tzdata import in quote.go. The import's job is the machine that does not.
 func TestQuoteMarketZonesLoad(t *testing.T) {
+	t.Parallel()
 	for id, m := range quoteMarkets {
 		loc, err := quoteZone(m.zone)
 		if err != nil {
@@ -908,6 +926,7 @@ func TestQuoteMarketZonesLoad(t *testing.T) {
 }
 
 func TestQuoteMarketSession(t *testing.T) {
+	t.Parallel()
 	// The captured session string, trimmed to the segments that matter. Every one of NEWSH_, NEWSZ_,
 	// NEWUS_ and HSZB_ is a real segment of the real line, and each of them CONTAINS the prefix of a
 	// market we serve — "SZ_" sits inside "NEWSZ_" and "HSZB_", "US_" inside "NEWUS_" — so a
@@ -1021,6 +1040,7 @@ func wantDrift(t *testing.T, body []byte, sentinel error) {
 // Check 1 — field count. The mutation truncates a real response to one field short of the highest
 // index the parser reads.
 func TestQuoteDriftFieldCount(t *testing.T) {
+	t.Parallel()
 	t.Run("tencent qt truncated to 38", func(t *testing.T) {
 		doc := tencentDoc(t, fixTencentSH)
 		setTencentQtArray(t, doc, "sh601899", tencentQtArray(t, doc, "sh601899")[:quoteTencentQtFields-1])
@@ -1054,6 +1074,7 @@ func TestQuoteDriftFieldCount(t *testing.T) {
 // comparison may not be a strings.Contains over the body: the body still contains the requested code
 // in three other places.
 func TestQuoteDriftCodeEcho(t *testing.T) {
+	t.Parallel()
 	doc := tencentDoc(t, fixTencentSH)
 	arr := tencentQtArray(t, doc, "sh601899")
 	if arr[2] != "601899" {
@@ -1078,6 +1099,7 @@ func TestQuoteDriftCodeEcho(t *testing.T) {
 
 // Check 3 — the arithmetic identity, and the only check that survives a vendor inserting a column.
 func TestQuoteDriftIdentity(t *testing.T) {
+	t.Parallel()
 	t.Run("vendor percentage contradicts its own prices", func(t *testing.T) {
 		doc := tencentDoc(t, fixTencentSH)
 		arr := tencentQtArray(t, doc, "sh601899")
@@ -1147,6 +1169,7 @@ func TestQuoteDriftIdentity(t *testing.T) {
 
 // Check 4 — per-bar sanity.
 func TestQuoteDriftBarSanity(t *testing.T) {
+	t.Parallel()
 	mutateRow := func(t *testing.T, field int, value string) []byte {
 		t.Helper()
 		doc := tencentDoc(t, fixTencentSH)
@@ -1187,6 +1210,7 @@ func TestQuoteDriftBarSanity(t *testing.T) {
 // Check 5 — the last price inside the day's range, and the zero-bound skip that keeps a suspended
 // stock from being reported as a source failure (asserted on the bj830799 fixture above).
 func TestQuoteDriftRange(t *testing.T) {
+	t.Parallel()
 	doc := tencentDoc(t, fixTencentSH)
 	arr := tencentQtArray(t, doc, "sh601899")
 	arr[33] = "33.00" // a high below the 33.35 last, with the 33.07 low left alone so nothing is zero
@@ -1228,6 +1252,7 @@ func sinaSnapshotWith(t *testing.T, sym string, fn func([]string) []string) stri
 // ---------- symbol validation ----------
 
 func TestQuoteSymbolRejectsWhatCannotGoInAURL(t *testing.T) {
+	t.Parallel()
 	bad := []struct{ market, code string }{
 		{"sh", "60189"},      // five digits
 		{"sh", "6018991"},    // seven
@@ -1285,6 +1310,7 @@ func TestQuoteSymbolRejectsWhatCannotGoInAURL(t *testing.T) {
 // become. Everything here is either a market decided from a code's shape or the explicit form that
 // overrides that decision.
 func TestQuoteResolve(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ in, market, code, sym string }{
 		// Six digits keep meaning exactly what marketPrefix has always said they mean.
 		{"601899", "sh", "601899", "sh601899"},
@@ -1379,6 +1405,7 @@ func TestQuoteResolve(t *testing.T) {
 // TestQuoteMarketsCoverEveryResolvableMarket keeps the table and the wire contract in step: every
 // market a symbol can resolve to has to carry the four things the SPA is promised.
 func TestQuoteMarketsCoverEveryResolvableMarket(t *testing.T) {
+	t.Parallel()
 	want := map[string]string{"sh": "CNY", "sz": "CNY", "bj": "CNY", "hk": "HKD", "us": "USD"}
 	if len(quoteMarkets) != len(want) {
 		t.Fatalf("quoteMarkets has %d rows, the wire contract names %d", len(quoteMarkets), len(want))
@@ -1393,6 +1420,7 @@ func TestQuoteMarketsCoverEveryResolvableMarket(t *testing.T) {
 }
 
 func TestQuoteBarCountClamps(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ in, want int }{
 		{0, quoteDefaultBars}, {-1, quoteDefaultBars}, {30, 30}, {quoteMaxBars + 1, quoteMaxBars},
 	} {
@@ -1410,6 +1438,7 @@ func TestQuoteBarCountClamps(t *testing.T) {
 // fixture is where it does the most damage: check 5 skips because high and low are zero, and check 4
 // sees no bars, so nothing else is left to notice.
 func TestQuoteDriftPriceCeiling(t *testing.T) {
+	t.Parallel()
 	// The wrap has to be REAL for the rest of this test to prove anything, and it is asserted at
 	// runtime because a constant expression that overflows an int64 will not compile.
 	last, prevClose := int64(288_230_376_151_711_844), int64(100)
@@ -1474,6 +1503,7 @@ func TestQuoteDriftPriceCeiling(t *testing.T) {
 // so an unguarded multiply puts a NEGATIVE 成交量 on the wire and a bar pointing the wrong way in the
 // chart, with every gate check reporting the response as sound.
 func TestQuoteVolumeIsNeverNegative(t *testing.T) {
+	t.Parallel()
 	const overflowing = "9223372036854775799" // MaxInt64 - 8: a legal int64 that wraps when x100
 	lots := int64(9_223_372_036_854_775_799)
 	if wrapped := lots * 100; wrapped != -900 {
@@ -1527,6 +1557,7 @@ func TestQuoteVolumeIsNeverNegative(t *testing.T) {
 // ---------- what actually guards the Sina path in check 3's place ----------
 
 func TestQuoteSinaOrderingStandsInForTheIdentity(t *testing.T) {
+	t.Parallel()
 	t.Run("the identity cannot fail on a derived percentage", func(t *testing.T) {
 		// This is why the call was removed rather than left in as belt and braces. parseSinaSnapshot
 		// DERIVES ChangePct from Last and PrevClose, so handing that snapshot to check 3 asks a
@@ -1614,6 +1645,7 @@ func TestQuoteSinaOrderingStandsInForTheIdentity(t *testing.T) {
 // past the switch reaches vendorGet and dies of the cancellation, naming the URL it was about to
 // call — so which endpoint an interval chose is observable without a wire.
 func TestFetchTencentAtSendsEachIntervalToItsOwnEndpoint(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

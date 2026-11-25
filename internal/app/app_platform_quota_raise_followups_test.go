@@ -132,6 +132,7 @@ func TestUpdateReviewIsRefusedOverAnUnsettledRaisePostgres(t *testing.T) {
 
 // Item 4: once the installation is removed and its data deleted, nothing reads its quota chain and the pin ends.
 func TestPlatformRetentionReleasesTheRaisePinWithTheInstallationsData(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		old := retNow - 100*retDay

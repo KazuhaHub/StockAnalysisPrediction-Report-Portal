@@ -38,6 +38,7 @@ func sinaRangeTestContext(t *testing.T, history []byte, historyStatus int) (cont
 }
 
 func TestSinaRangeFiltersByRowDate(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	response, err := fetchSinaRange(ctx, "sh", "601899", "2026-06-15", "2026-06-18")
 	if err != nil {
@@ -49,6 +50,7 @@ func TestSinaRangeFiltersByRowDate(t *testing.T) {
 }
 
 func TestSinaRangeKeepsAdmissionDeferralTyped(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	client := *vendorHTTPClient(ctx)
 	scheduler := newVendorScheduler()
@@ -61,6 +63,7 @@ func TestSinaRangeKeepsAdmissionDeferralTyped(t *testing.T) {
 }
 
 func TestSinaKlineMustAgreeWithItsSnapshot(t *testing.T) {
+	t.Parallel()
 	original, err := parseSinaSnapshot("sh", "601899", string(readQuoteFixture(t, fixSinaSnap)))
 	if err != nil {
 		t.Fatal(err)
@@ -125,6 +128,7 @@ func TestSinaKlineMustAgreeWithItsSnapshot(t *testing.T) {
 }
 
 func TestSinaRangeCancelledOrUnsupportedRequestNeverCallsVendor(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, nil, http.StatusOK)
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -141,6 +145,7 @@ func TestSinaRangeCancelledOrUnsupportedRequestNeverCallsVendor(t *testing.T) {
 }
 
 func TestSinaRangeRefusesWindowsBeyondCountCap(t *testing.T) {
+	t.Parallel()
 	start := time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC)
 	bars := make([]QuoteBar, quoteMaxBars)
 	for i := range bars {
@@ -159,6 +164,7 @@ func TestSinaRangeRefusesWindowsBeyondCountCap(t *testing.T) {
 }
 
 func TestSinaRangeTreatsUnavailableHistoryAsError(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, []byte("unavailable"), http.StatusServiceUnavailable)
 	if response, err := fetchSinaRange(ctx, "sh", "601899", "2026-06-15", "2026-06-18"); err == nil || response != nil || *calls != 2 {
 		t.Fatalf("display degradation became shadow evidence: calls=%d %+v %v", *calls, response, err)
@@ -166,6 +172,7 @@ func TestSinaRangeTreatsUnavailableHistoryAsError(t *testing.T) {
 }
 
 func TestSinaRangeValidatesWindowBeforeNetwork(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, nil, http.StatusOK)
 	for _, window := range [][2]string{{"", ""}, {"bad", "2026-06-18"}, {"2026-06-18", "2026-06-15"}} {
 		if _, err := fetchSinaRange(ctx, "sh", "601899", window[0], window[1]); err == nil {

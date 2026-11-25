@@ -60,6 +60,7 @@ func ledgerRowsFor(t *testing.T, st *Store, id string) int {
 // a write race gets a busy error rather than a wait, and a restart that overlapped its predecessor is
 // an ordinary event rather than a broken database.
 func TestAContendedStepIsRetried(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	attempts := 0
 	step := migration{id: "9006", up: func(e migExec) error {
@@ -105,6 +106,7 @@ func ledgerPicture(t *testing.T, st *Store) string {
 // every step, and each step is recorded as applied. Nothing is pre-stamped — the record has to follow
 // the work, or a step that silently failed to run would look applied for ever.
 func TestAFreshDatabaseRunsAndRecordsEveryStep(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	steps := st.migrations()
 	if len(steps) == 0 {
@@ -128,6 +130,7 @@ func TestAFreshDatabaseRunsAndRecordsEveryStep(t *testing.T) {
 // in production: a database at the accepted baseline, written by the previous release, which knows
 // nothing about migrations. It must open, gain the steps, and record them.
 func TestAnAcceptedDatabaseWithoutTheLedgerIsMigratedOnce(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "pre-migration.db")
 	// Wind the database back to what the previous release left: the baseline shape, no ledger. This
 	// is the fixture the whole upgrade story is about.
@@ -165,6 +168,7 @@ func TestAnAcceptedDatabaseWithoutTheLedgerIsMigratedOnce(t *testing.T) {
 
 // TestAStepRunsAtMostOnce drives the framework directly: an applied step is never applied twice.
 func TestAStepRunsAtMostOnce(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	runs := 0
 	step := probeStep("9001", "col_a", nil)
@@ -189,6 +193,7 @@ func TestAStepRunsAtMostOnce(t *testing.T) {
 // no ledger, or carried over before the ledger existed — must record itself rather than fail on a
 // duplicate column. It does not re-run the DDL.
 func TestAColumnAlreadyThereIsRecordedWithoutReRunningTheDDL(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	step := probeStep("9004", "col_c", nil)
 	if err := st.runMigrationSteps([]migration{step}); err != nil {
@@ -210,6 +215,7 @@ func TestAColumnAlreadyThereIsRecordedWithoutReRunningTheDDL(t *testing.T) {
 // not. Refusing is the same rule the schema generation marker already applies: this build cannot know
 // what those steps changed, so it must not operate on the result.
 func TestAnUnknownLedgerRowIsRefusedAtStartup(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "from-the-future.db")
 	mutateFile(t, path, `INSERT INTO meta(k,v) VALUES('mig:9999','2026-01-01T00:00:00Z')`)
 
@@ -232,6 +238,7 @@ func TestAnUnknownLedgerRowIsRefusedAtStartup(t *testing.T) {
 // ones the ledger says are applied. "Recorded" is not evidence: a column dropped by hand, or by a
 // restore from a hand-edited dump, would otherwise start up looking migrated.
 func TestADeclaredProductMustExist(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	liar := migration{
 		id:      "9002",
@@ -251,6 +258,7 @@ func TestADeclaredProductMustExist(t *testing.T) {
 }
 
 func TestARecordedStepWhoseProductWasDroppedIsRefused(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "product-dropped.db")
 	// The ledger still says 0001 ran; the column is gone.
 	mutateFile(t, path, `ALTER TABLE user_groups DROP COLUMN totp_enroll`)
@@ -278,6 +286,7 @@ func TestARecordedStepWhoseProductWasDroppedIsRefused(t *testing.T) {
 // (The idempotence guard still matters, and is tested separately: a restore rewrites `meta`, so a
 // column can be present with no ledger row for it — see TestAColumnAlreadyThereIsRecordedWithoutReRunningTheDDL.)
 func TestAFailedStepRollsBackCompletelyAndIsRetried(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	boom := errors.New("injected: failed after the DDL, before the ledger row")
 	step := probeStep("9003", "col_b", boom)
@@ -312,6 +321,7 @@ func TestAFailedStepRollsBackCompletelyAndIsRetried(t *testing.T) {
 // A step that fails before it touches anything must leave the database exactly as it was — including
 // its ledger — and the same step must succeed on a later run.
 func TestAStepThatFailsBeforeAnyDDLLeavesNothing(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	before := ledgerPicture(t, st)
 	step := migration{id: "9005", up: func(e migExec) error { return errors.New("injected: before any DDL") }}
@@ -334,6 +344,7 @@ func TestAStepThatFailsBeforeAnyDDLLeavesNothing(t *testing.T) {
 // exactly once, and neither may fail for it: the ledger is re-read inside each step's transaction, so
 // the loser sees the winner's row and does nothing.
 func TestConcurrentMigrationsApplyEachStepOnce(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "concurrent.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {

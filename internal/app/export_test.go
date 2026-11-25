@@ -241,6 +241,7 @@ func (s *Server) exportDefault(key string) []string { return exportSourceByKey(k
 // ---------- 2. equality with ListAudit ----------
 
 func TestExportAuditEqualsListAuditInOrder(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 70 // many batch boundaries, several inside one run of equal timestamps
 	seedAudit(t, e.s.st, 900, func(i int) AuditEntry {
@@ -301,6 +302,7 @@ func seedReports(t *testing.T, st *Store, n int, mk func(i int) Rep) {
 }
 
 func TestExportReportsQueryCountIsBatchedNotPerReport(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 50
 	seedReports(t, e.s.st, 230, func(i int) Rep {
@@ -327,6 +329,7 @@ func TestExportReportsQueryCountIsBatchedNotPerReport(t *testing.T) {
 // ---------- 4. restart ----------
 
 func TestExportInterruptedJobIsRequeuedAndItsPartFileRemoved(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 10, func(i int) AuditEntry {
 		return AuditEntry{At: atStamp(i), Actor: "a", Action: AuditLogin, IP: "10.0.0.1"}
@@ -363,6 +366,7 @@ func TestExportInterruptedJobIsRequeuedAndItsPartFileRemoved(t *testing.T) {
 // ---------- 5. cancel ----------
 
 func TestExportCancelRunningStopsWithinOneBatchAndLeavesNoFile(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 100
 	seedAudit(t, e.s.st, 1000, func(i int) AuditEntry {
@@ -389,6 +393,7 @@ func TestExportCancelRunningStopsWithinOneBatchAndLeavesNoFile(t *testing.T) {
 }
 
 func TestExportCancelQueuedThroughTheAPI(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := e.create(`{"source":"cleanup","format":"csv"}`)
 	w := e.do("admin", "POST", "/api/admin/exports/"+j.ID+"/cancel", "")
@@ -414,6 +419,7 @@ func TestExportCancelQueuedThroughTheAPI(t *testing.T) {
 // ---------- 6. expiry ----------
 
 func TestExportExpiredFileIsDeletedAndDownloadAnswers410(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 5, func(i int) AuditEntry {
 		return AuditEntry{At: atStamp(i), Actor: "a", Action: AuditLogin, IP: "10.0.0.1"}
@@ -443,6 +449,7 @@ func TestExportExpiredFileIsDeletedAndDownloadAnswers410(t *testing.T) {
 }
 
 func TestExportDownloadEnforcesExpiryBeforeTheSweepRuns(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := e.run2(`{"source":"cleanup","format":"csv"}`)
 	e.s.exports.now = func() time.Time { return time.UnixMilli(j.ExpiresAt).Add(time.Second) }
@@ -455,6 +462,7 @@ func TestExportDownloadEnforcesExpiryBeforeTheSweepRuns(t *testing.T) {
 }
 
 func TestExportSweepDeletesRowsOlderThanRetention(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := e.run2(`{"source":"cleanup","format":"csv"}`)
 	e.s.exportSweep(time.UnixMilli(j.CreatedAt).Add(exportRowTTL + time.Hour))
@@ -471,6 +479,7 @@ func (e *exportEnv) run2(body string) exportJobJSON {
 }
 
 func TestExportDownloadStates(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	if w := e.do("admin", "GET", "/api/admin/exports/missing/file", ""); w.Code != 404 {
 		t.Fatalf("unknown: %d", w.Code)
@@ -484,6 +493,7 @@ func TestExportDownloadStates(t *testing.T) {
 // ---------- 7. admin only ----------
 
 func TestExportEndpointsRefuseNonAdministrators(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := e.run2(`{"source":"cleanup","format":"csv"}`)
 	reqs := []struct{ method, path, body string }{
@@ -511,6 +521,7 @@ func TestExportEndpointsRefuseNonAdministrators(t *testing.T) {
 // ---------- 8. audit ----------
 
 func TestExportWritesExactlyOneCreateAuditRowAndOneDownloadRowPerDownload(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 2500, func(i int) AuditEntry {
 		return AuditEntry{At: atStamp(i), Actor: "a", Action: AuditReportRead, TargetType: "report", TargetID: strconv.Itoa(i), IP: "10.0.0.1"}
@@ -548,6 +559,7 @@ func TestExportWritesExactlyOneCreateAuditRowAndOneDownloadRowPerDownload(t *tes
 // ---------- 9. range / length / gzip ----------
 
 func TestExportDownloadSupportsRangeAndExactLengthBypassingGzip(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 300, func(i int) AuditEntry {
 		return AuditEntry{At: atStamp(i), Actor: "a", Action: AuditReportRead, Detail: strings.Repeat("d", 100), IP: "10.0.0.1"}
@@ -587,6 +599,7 @@ func TestExportDownloadSupportsRangeAndExactLengthBypassingGzip(t *testing.T) {
 // ---------- 11. filter limits ----------
 
 func TestExportFilterLimitsAndWhitelistAreRefusedBeforeAnySQLIsBuilt(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	st.Close() // any query would now fail: a 400 below proves none was attempted
@@ -639,6 +652,7 @@ func asFilterErr(err error, target **exportFilterError) bool {
 }
 
 func TestExportFilterErrorsAre400OverHTTP(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	bad := `{"source":"audit","format":"csv","filter":{"op":"and","items":[{"field":"nope","operator":"is","values":["x"]}]}}`
 	for _, path := range []string{"/api/admin/exports", "/api/admin/exports/preview"} {
@@ -666,6 +680,7 @@ func TestExportFilterErrorsAre400OverHTTP(t *testing.T) {
 // ---------- 12. kind includes later subtypes ----------
 
 func TestExportKindFilterIncludesASubtypeAddedAfterTheFilterWasSaved(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	st := e.s.st
 	seedReports(t, st, 1, func(int) Rep {
@@ -707,6 +722,7 @@ func TestExportKindFilterIncludesASubtypeAddedAfterTheFilterWasSaved(t *testing.
 // ---------- generator version ----------
 
 func TestExportGeneratorVersionIsExactEvenThoughSQLOnlyPrefilters(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	mk := func(sym, rtype, source, title string) Rep {
 		return Rep{Symbol: sym, Name: "N", Date: "2026-10-18", RType: rtype, Kind: "k", Source: source, Title: title, MD: "m"}
@@ -768,6 +784,7 @@ func TestExportGeneratorVersionIsExactEvenThoughSQLOnlyPrefilters(t *testing.T) 
 // ---------- panel time zone ----------
 
 func TestExportDateBoundariesFollowThePanelTimeZone(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.st.SetSetting("timezone", "Asia/Shanghai")
 	stamps := []string{"2026-09-30T15:59:59Z", "2026-09-30T16:00:00Z", "2026-10-01T15:59:59Z", "2026-10-01T16:00:00Z"}
@@ -811,6 +828,7 @@ func TestExportDateBoundariesFollowThePanelTimeZone(t *testing.T) {
 // ---------- formats ----------
 
 func TestExportCSVNeutralisesFormulasAndJSONLKeepsTypes(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedAudit(t, e.s.st, 1, func(int) AuditEntry {
 		return AuditEntry{At: atStamp(0), Actor: "=HYPERLINK(\"x\")", Action: AuditLogin, TargetID: "-5", Detail: `{"a":"<b>"}`, IP: "10.0.0.1", ActorOU: 0}
@@ -832,6 +850,7 @@ func TestExportCSVNeutralisesFormulasAndJSONLKeepsTypes(t *testing.T) {
 }
 
 func TestExportReportArchiveFrontMatterIndexAndLayout(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	tricky := "Q3: \"best\" - 2026\n--- tricky"
 	id1, _, _ := e.s.st.UpsertReport(Rep{Symbol: "600001", Name: "Alpha: Co", Date: "2026-10-18", RType: "投资决策建议", Kind: "投资决策",
@@ -916,6 +935,7 @@ func keysOfStr(m map[string]string) []string {
 // ---------- sources ----------
 
 func TestExportSourcesContract(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.st.RegisterType("宏观子类", "宏观")
 	e.s.st.UpsertReport(Rep{Symbol: "1", Date: "2026-10-01", RType: "投资决策建议", Kind: "投资决策", Source: "x V3.17", Title: "t", MD: "m"})
@@ -1022,6 +1042,7 @@ func TestExportSourcesContract(t *testing.T) {
 }
 
 func TestExportEverySourceCountsPreviewsAndExports(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedEverySource(t, e.s.st)
 	for _, src := range exportSourceList {
@@ -1085,6 +1106,7 @@ func seedEverySource(t *testing.T, st *Store) {
 }
 
 func TestExportSigninsParseMethodAndClientFromDetail(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedEverySource(t, e.s.st)
 	j := e.run2(`{"source":"signins","format":"csv","columns":["action","method","browser","os","device_type"]}`)
@@ -1095,6 +1117,7 @@ func TestExportSigninsParseMethodAndClientFromDetail(t *testing.T) {
 }
 
 func TestExportRunsAndNotificationsResolveNames(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedEverySource(t, e.s.st)
 	recs := parseCSV(t, e.fileOf(e.run2(`{"source":"runs","format":"csv","columns":["target","created_by","status","total"]}`)))
@@ -1114,6 +1137,7 @@ func TestExportRunsAndNotificationsResolveNames(t *testing.T) {
 // ---------- storage usage ----------
 
 func TestStorageUsageReportsTheExportsCategory(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := e.run2(`{"source":"cleanup","format":"csv"}`)
 	w := e.do("admin", "GET", "/api/admin/cleanup/usage", "")
@@ -1137,6 +1161,7 @@ func TestStorageUsageReportsTheExportsCategory(t *testing.T) {
 // ---------- 13. migration 0012 ----------
 
 func TestMigration0012IsIdempotentAndVerifiesItsShape(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "m12.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -1167,6 +1192,7 @@ func TestMigration0012IsIdempotentAndVerifiesItsShape(t *testing.T) {
 }
 
 func TestMigration0012RefusesADatabaseMissingWhatTheLedgerSaysExists(t *testing.T) {
+	t.Parallel()
 	for name, stmt := range map[string]string{
 		"index": `DROP INDEX idx_export_jobs_status`,
 		"table": `DROP TABLE export_jobs`,
@@ -1193,6 +1219,7 @@ func TestMigration0012RefusesADatabaseMissingWhatTheLedgerSaysExists(t *testing.
 }
 
 func TestMigration0012IsNotInTheFrozenBaseSchema(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, stmt := range st.baseSchemaStmts() {
 		if strings.Contains(stmt, "export_jobs") {
@@ -1204,6 +1231,7 @@ func TestMigration0012IsNotInTheFrozenBaseSchema(t *testing.T) {
 // ---------- worker robustness ----------
 
 func TestExportFailureIsRecordedAndLeavesNoPartFile(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	j := &exportJob{ID: newExportID(), Source: "audit", Format: "csv", Params: `{"filter":{"op":"and","items":[{"field":"nope","operator":"is","values":["x"]}]}}`,
 		RequestedBy: "admin", Status: exportQueued, FileName: "x.csv", CreatedAt: time.Now().UnixMilli()}
@@ -1220,6 +1248,7 @@ func TestExportFailureIsRecordedAndLeavesNoPartFile(t *testing.T) {
 }
 
 func TestExportListAndActiveFilter(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	// The list orders by created_at, newest first, and job ids are random, so two jobs created in
 	// the same millisecond have no defined order (CI did create both in one). A clock that moves a
@@ -1256,6 +1285,7 @@ func TestExportListAndActiveFilter(t *testing.T) {
 // with typed parameters (text and integer keys), every source's SQL, the LIKE prefilter and the
 // panel-zone boundaries. It is skipped unless TEST_POSTGRES_DSN is set.
 func TestPostgresExport(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_claims", "prediction_marks", "prediction_sets", "audit_log", "reports", "export_jobs", "batch_items", "batch_jobs", "notification_deliveries",
 		"notification_channels", "notification_events", "cleanup_runs", "type_config")
 	t.Cleanup(func() {

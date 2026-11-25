@@ -18,6 +18,7 @@ import (
 // not about contents: "ok" or "unreachable", never a driver message (those can carry the DSN's
 // host, user and database name) and never a count.
 func TestHealthzExposesLivenessOnly(t *testing.T) {
+	t.Parallel()
 	srv := &Server{st: newTestStore(t)}
 	rec := httptest.NewRecorder()
 	srv.handleHealthz(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -50,6 +51,7 @@ func healthGET(t *testing.T, s *Server) (int, map[string]any) {
 // process being gone — and stays green through the one it cannot: the portal up with its database
 // unreachable, serving an error on every page.
 func TestHealthzChecksTheDatabase(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 
@@ -79,6 +81,7 @@ func TestHealthzChecksTheDatabase(t *testing.T) {
 // TestHealthzCachesItsVerdict keeps an unauthenticated endpoint from being a query amplifier — and,
 // on SQLite, from queueing behind whatever write holds the single pooled connection.
 func TestHealthzCachesItsVerdict(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 
@@ -101,6 +104,7 @@ func TestHealthzCachesItsVerdict(t *testing.T) {
 // /api/version carries build identity (version/commit/buildDate) for the signed-in footer, so it
 // is session-gated: an anonymous request must be rejected and must not leak any build field.
 func TestVersionRequiresSession(t *testing.T) {
+	t.Parallel()
 	srv := &Server{}
 	rec := httptest.NewRecorder()
 	srv.requireUserJSON(srv.handleVersion)(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))

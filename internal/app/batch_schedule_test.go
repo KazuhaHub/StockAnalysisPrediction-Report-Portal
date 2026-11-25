@@ -8,6 +8,7 @@ import (
 
 // runAtDue: empty and past/malformed run_at are due; a future run_at is not.
 func TestRunAtDue(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.Local)
 	cases := []struct {
 		runAt string
@@ -29,6 +30,7 @@ func TestRunAtDue(t *testing.T) {
 // normalizeRunAt accepts the canonical local format or RFC3339 and returns the
 // canonical form; garbage is rejected.
 func TestNormalizeRunAt(t *testing.T) {
+	t.Parallel()
 	if v, ok := normalizeRunAt("2026-07-04 09:00:00"); !ok || v != "2026-07-04 09:00:00" {
 		t.Errorf("canonical: got %q ok=%v", v, ok)
 	}
@@ -44,6 +46,7 @@ func TestNormalizeRunAt(t *testing.T) {
 // jobFactors normalizes base/age/fair; with the default 24h age window a 12h wait is
 // age 0.5, base 50 is 0.5, and an unseen user is fair 1.
 func TestJobFactorsNormalization(t *testing.T) {
+	t.Parallel()
 	srv := &Server{st: newTestStore(t)}
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.Local)
 	j := BatchJob{ID: 1, Priority: "50", CreatedBy: "u",
@@ -66,6 +69,7 @@ func TestJobFactorsNormalization(t *testing.T) {
 // A due 定时 job ages from its run_at (its arrival time), not from created_at, so it
 // takes a fair position instead of jumping ahead of later immediate submissions.
 func TestJobFactorsAgesFromRunAt(t *testing.T) {
+	t.Parallel()
 	srv := &Server{st: newTestStore(t)}
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.Local)
 	// Created just now, but scheduled 48h in the past → aging from run_at saturates the
@@ -81,6 +85,7 @@ func TestJobFactorsAgesFromRunAt(t *testing.T) {
 // A heavier recent user has a lower fair factor: userUsage decays each of their runs
 // and jobFactors turns the tally into 2^(-usage), so more recent runs → smaller fair.
 func TestFairShareFavoursLighterUser(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	// "heavy" submits three runs; "light" none.
@@ -107,6 +112,7 @@ func TestFairShareFavoursLighterUser(t *testing.T) {
 // queuedItems hides a job whose run_at is still in the future, so the scheduler
 // (and the "N ahead" count) never sees a not-yet-due 定时 job.
 func TestQueuedItemsHidesFutureScheduledJobs(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	due, err := st.CreateBatchJob(tgt, 1, 0, "u", []map[string]string{{"x": "1"}}, "50")
@@ -127,6 +133,7 @@ func TestQueuedItemsHidesFutureScheduledJobs(t *testing.T) {
 }
 
 func TestRunAtDueUsesLaterAmbiguousDSTOccurrence(t *testing.T) {
+	t.Parallel()
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +154,7 @@ func TestRunAtDueUsesLaterAmbiguousDSTOccurrence(t *testing.T) {
 // clears cleanly, and DeleteBatchJob removes the job plus its side rows.
 // See docs/adr/0007-run-analysis-and-scheduling.md.
 func TestJobScheduleRoundTripAndDelete(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	jobID, err := st.CreateBatchJob(tgt, 1, 0, "kazuha", []map[string]string{{"symbol": "600519"}}, "50")

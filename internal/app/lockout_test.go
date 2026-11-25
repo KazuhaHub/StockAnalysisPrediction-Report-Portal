@@ -53,6 +53,7 @@ func failTwice(t *testing.T, s *Server, ip string) {
 // An unconfigured portal must behave exactly as it did: the window refuses wrong guesses, and no
 // setting anywhere refuses a right one.
 func TestTheLockoutIsOffUntilItIsConfigured(t *testing.T) {
+	t.Parallel()
 	s := lockoutServer(t)
 	if s.lockoutEnabled() {
 		t.Fatal("the lockout ships off: an upgrade must not start refusing logins")
@@ -73,6 +74,7 @@ func TestTheLockoutIsOffUntilItIsConfigured(t *testing.T) {
 // The documented break: with the lock bound to the ACCOUNT, a correct password stops working for the
 // duration. It is opt-in, and this test exists so that nobody discovers it by accident.
 func TestALockedAccountRefusesEvenACorrectPassword(t *testing.T) {
+	t.Parallel()
 	s := lockoutServer(t)
 	s.st.SetSetting(setLoginFailMax, "2")
 	s.st.SetSetting(setLockoutEnabled, "1")
@@ -94,6 +96,7 @@ func TestALockedAccountRefusesEvenACorrectPassword(t *testing.T) {
 // not sitting behind, and a shared address is not punished for someone else's attempts on another
 // account.
 func TestAnIPAccountLockDoesNotFollowTheAccountElsewhere(t *testing.T) {
+	t.Parallel()
 	s := lockoutServer(t)
 	s.st.SetSetting(setLoginFailMax, "2")
 	s.st.SetSetting(setLockoutEnabled, "1")
@@ -114,6 +117,7 @@ func TestAnIPAccountLockDoesNotFollowTheAccountElsewhere(t *testing.T) {
 // A lock is a refusal for its OWN duration, which is the whole point of having one: the window it was
 // taken in may roll over first.
 func TestTheLockOutlivesTheWindowItWasTakenIn(t *testing.T) {
+	t.Parallel()
 	s := lockoutServer(t)
 	s.st.SetSetting(setLoginFailMax, "1")
 	s.st.SetSetting(setLoginFailWindowMin, "1")
@@ -150,6 +154,7 @@ func TestTheLockOutlivesTheWindowItWasTakenIn(t *testing.T) {
 // The pruning that keeps the map bounded must never take a lock with it: a lock is a decision the
 // operator asked for, and dropping it under a flood is exactly when an attacker would want it gone.
 func TestAFloodOfKeysDoesNotDropALock(t *testing.T) {
+	t.Parallel()
 	s := lockoutServer(t)
 	s.st.SetSetting(setLoginFailMax, "1")
 	s.st.SetSetting(setLoginFailWindowMin, "60")
@@ -177,6 +182,7 @@ func TestAFloodOfKeysDoesNotDropALock(t *testing.T) {
 // The IP scope names the key the brake already uses, so its effect is to hold that refusal for longer
 // than the window — the brake itself is never replaced by the lockout.
 func TestTheIPScopeExtendsTheAddressRefusal(t *testing.T) {
+	t.Parallel()
 	s := lockoutServer(t)
 	s.st.SetSetting(setLoginFailMax, "1")
 	s.st.SetSetting(setLoginFailWindowMin, "1")

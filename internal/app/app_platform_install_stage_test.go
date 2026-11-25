@@ -114,15 +114,18 @@ func testPlatformInstallStagingRefusal(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallStagingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallStaging(t, false)
 	testPlatformInstallStagingRefusal(t, false)
 }
 func TestPlatformInstallStagingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallStaging(t, true)
 	testPlatformInstallStagingRefusal(t, true)
 }
 
 func TestPostgresPlatformInstallStageExpiryAfterAuditWait(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"lease", "key"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _, lease := platformInstallStageFixture(t, true)
@@ -211,9 +214,11 @@ func testPlatformInstallStageAuditRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallStageAuditSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallStageAuditRollback(t, false)
 }
 func TestPlatformInstallStageAuditPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallStageAuditRollback(t, true)
 }
 
@@ -317,11 +322,13 @@ func testPlatformFailedInstallStageNeverExposesCandidate(
 func TestPlatformFailedInstallStageNeverExposesCandidateSQLite(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformFailedInstallStageNeverExposesCandidate(t, false)
 }
 
 func TestPlatformFailedInstallStageNeverExposesCandidatePostgres(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformFailedInstallStageNeverExposesCandidate(t, true)
 }

@@ -48,8 +48,10 @@ func testPlatformPostgresCredentialPairing(t *testing.T, pg bool) {
 }
 
 func TestPlatformPostgresCredentialPairingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresCredentialPairing(t, false)
 }
 func TestPlatformPostgresCredentialPairingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresCredentialPairing(t, true)
 }

@@ -35,8 +35,10 @@ func testPlatformBackendBootRequiresAppliedDelivery(t *testing.T, pg bool) {
 }
 
 func TestPlatformBackendBootRequiresAppliedDeliverySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendBootRequiresAppliedDelivery(t, false)
 }
 func TestPlatformBackendBootRequiresAppliedDeliveryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformBackendBootRequiresAppliedDelivery(t, true)
 }

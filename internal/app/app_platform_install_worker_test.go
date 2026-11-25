@@ -35,9 +35,11 @@ func testPlatformStaticInstallRunProgress(t *testing.T, pg bool) {
 }
 
 func TestPlatformStaticInstallRunProgressSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticInstallRunProgress(t, false)
 }
 func TestPlatformStaticInstallRunProgressPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticInstallRunProgress(t, true)
 }
 func testPlatformStaticInstallRunActivation(t *testing.T, pg bool) {
@@ -51,12 +53,15 @@ func testPlatformStaticInstallRunActivation(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformStaticInstallRunActivationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticInstallRunActivation(t, false)
 }
 func TestPlatformStaticInstallRunActivationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformStaticInstallRunActivation(t, true)
 }
 func TestPlatformStaticInstallRunCanceledBeforeWorkSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformInstallStageFixture(t, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -70,6 +75,7 @@ func TestPlatformStaticInstallRunCanceledBeforeWorkSQLite(t *testing.T) {
 }
 
 func TestPlatformStaticInstallRunCancellationDuringStagePostgres(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformInstallStageFixture(t, true)
 	mustExec(t, s.st, `CREATE FUNCTION fixture_slow_install_run() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.5);RETURN NEW;END $$`)
 	mustExec(t, s.st, `CREATE TRIGGER fixture_slow_install_run BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.operation_stage') EXECUTE FUNCTION fixture_slow_install_run()`)

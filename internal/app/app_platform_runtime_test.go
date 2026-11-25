@@ -91,8 +91,14 @@ func testPlatformRuntimeRegistration(t *testing.T, pg bool) {
 		t.Fatalf("Portal public registration incompatible with runner: %v", err)
 	}
 }
-func TestPlatformRuntimeRegistrationSQLite(t *testing.T)   { testPlatformRuntimeRegistration(t, false) }
-func TestPlatformRuntimeRegistrationPostgres(t *testing.T) { testPlatformRuntimeRegistration(t, true) }
+func TestPlatformRuntimeRegistrationSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeRegistration(t, false)
+}
+func TestPlatformRuntimeRegistrationPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeRegistration(t, true)
+}
 
 func testPlatformRuntimeRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"other_deployment", "enabled", "epoch", "missing_key", "bad_pin", "foreign_seal", "paused", "demoted"} {
@@ -136,8 +142,14 @@ func testPlatformRuntimeRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformRuntimeRefusalsSQLite(t *testing.T)   { testPlatformRuntimeRefusals(t, false) }
-func TestPlatformRuntimeRefusalsPostgres(t *testing.T) { testPlatformRuntimeRefusals(t, true) }
+func TestPlatformRuntimeRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeRefusals(t, false)
+}
+func TestPlatformRuntimeRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeRefusals(t, true)
+}
 
 func testPlatformRuntimeConcurrentRegistration(t *testing.T, pg bool) {
 	s, session := runtimeRegistrationFixture(t, pg)
@@ -173,13 +185,16 @@ func testPlatformRuntimeConcurrentRegistration(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeConcurrentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeConcurrentRegistration(t, false)
 }
 func TestPlatformRuntimeConcurrentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeConcurrentRegistration(t, true)
 }
 
 func TestPlatformRuntimeRequiresExplicitControlInitialization(t *testing.T) {
+	t.Parallel()
 	s, session := platformActorTestServer(t, false)
 	if _, err := s.preparePlatformRuntimeBinding(session, platformFixtureID(400)); !errors.Is(err, errAppPlatformControlPaused) {
 		t.Fatalf("implicitly initialized control: %v", err)
@@ -214,12 +229,17 @@ func testPlatformRuntimeAuditRollback(t *testing.T, pg bool) {
 		t.Fatal("audit failure left binding or key")
 	}
 }
-func TestPlatformRuntimeAuditRollbackSQLite(t *testing.T) { testPlatformRuntimeAuditRollback(t, false) }
+func TestPlatformRuntimeAuditRollbackSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeAuditRollback(t, false)
+}
 func TestPlatformRuntimeAuditRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeAuditRollback(t, true)
 }
 
 func TestPostgresRuntimeRegistrationExpiryAfterAuditWait(t *testing.T) {
+	t.Parallel()
 	s, session := runtimeRegistrationFixture(t, true)
 	auditsBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.runtime_prepared'`)
 	now, err := platformDatabaseNow(s.st.poolExec())
@@ -288,6 +308,7 @@ func TestPostgresRuntimeRegistrationExpiryAfterAuditWait(t *testing.T) {
 }
 
 func TestPlatformRuntimeAcrossIndependentSQLiteStores(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -337,6 +358,7 @@ func TestPlatformRuntimeAcrossIndependentSQLiteStores(t *testing.T) {
 }
 
 func TestPlatformRuntimeKeyringRewrapPreservesIdentity(t *testing.T) {
+	t.Parallel()
 	s, session := runtimeRegistrationFixture(t, false)
 	expected, err := s.preparePlatformRuntimeBinding(session, platformFixtureID(400))
 	if err != nil {
@@ -390,8 +412,10 @@ func testPlatformRestoredRuntimeDoesNotRegenerate(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeRestoreSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoredRuntimeDoesNotRegenerate(t, false)
 }
 func TestPlatformRuntimeRestorePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoredRuntimeDoesNotRegenerate(t, true)
 }

@@ -39,6 +39,7 @@ func block(t *testing.T, doc map[string]any, name string) map[string]any {
 
 // The three blocks report what the portal is actually doing, on a portal that has never saved them.
 func TestTheSecurityPageShowsTheShippedPolicy(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	doc := readSecurity(t, s)
 
@@ -62,6 +63,7 @@ func TestTheSecurityPageShowsTheShippedPolicy(t *testing.T) {
 }
 
 func TestTheSecurityPolicyRoundTrips(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	body := `{"twofa":{"totp_enroll":false,"passkey_enroll":true},
 		"recovery":{"enabled":false},
@@ -87,6 +89,7 @@ func TestTheSecurityPolicyRoundTrips(t *testing.T) {
 }
 
 func TestHostedCaptchaCannotBeEnabledWithoutBothKeys(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{
 		`{"captcha":{"provider":"turnstile","login":true,"secret_key":"secret"}}`,
 		`{"captcha":{"provider":"turnstile","login":true,"site_key":"site"}}`,
@@ -117,6 +120,7 @@ func TestHostedCaptchaCannotBeEnabledWithoutBothKeys(t *testing.T) {
 // The page sends the cards it renders. A block it omits has to survive untouched — otherwise opening
 // the page and saving the 2FA card would silently switch password recovery off.
 func TestAnOmittedBlockIsLeftAlone(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	all := `{"twofa":{"totp_enroll":false,"passkey_enroll":false},
 		"recovery":{"enabled":false},
@@ -146,6 +150,7 @@ func TestAnOmittedBlockIsLeftAlone(t *testing.T) {
 // Out of range is refused rather than clamped, and the refusal takes the WHOLE request with it: a bad
 // duration must not leave the scope beside it saved.
 func TestARefusedFieldStoresNothingFromItsRequest(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	for _, bad := range []string{
 		`{"lockout":{"enabled":true,"duration_min":0,"scope":"account"}}`,
@@ -163,6 +168,7 @@ func TestARefusedFieldStoresNothingFromItsRequest(t *testing.T) {
 }
 
 func TestAnUnknownLockoutScopeIsRefused(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	if code := saveSecurity(t, s, `{"lockout":{"scope":"everyone"}}`); code != http.StatusBadRequest {
 		t.Fatalf("an unknown scope → %d, want 400", code)
@@ -177,6 +183,7 @@ func TestAnUnknownLockoutScopeIsRefused(t *testing.T) {
 // The overrides travel with the OU, because that is where an admin edits them: the settings page
 // carries the portal-wide switches, and the OU page carries what each OU decides for its members.
 func TestTheGroupAPICarriesTheEnrolmentOverrides(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	if err := s.st.UpsertUser(User{Username: "member", PasswordHash: mustHash("correct-horse-battery"), Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -225,6 +232,7 @@ func TestTheGroupAPICarriesTheEnrolmentOverrides(t *testing.T) {
 }
 
 func TestRecoveryModeRoundTripsAndRejectsInvalidMode(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	for _, mode := range []string{"hidden", "contact", "email"} {
 		if code := saveSecurity(t, s, `{"recovery":{"mode":"`+mode+`"}}`); code != http.StatusOK {

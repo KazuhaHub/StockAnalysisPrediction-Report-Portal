@@ -33,6 +33,7 @@ import (
 )
 
 func TestSAMLReplaySurvivesRestart(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "verify-restart.sqlite")
 
@@ -129,6 +130,7 @@ func verifySaveSAMLProvider(t *testing.T, s *Server, slug, idpMetadata string) S
 // hand-built samlReplayCache. This is the failure mode the task calls out explicitly: "if the
 // tenant id ends up inside a shared hash or cache key" (the audit-package failure repeated).
 func TestSAMLCrossTenantReplayCacheIsIsolated(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	st.EnsureDefaultGroup()
@@ -189,6 +191,7 @@ func TestSAMLCrossTenantReplayCacheIsIsolated(t *testing.T) {
 // serialized), step-up would silently degrade into an ordinary SSO-session check-in, exactly the
 // failure ADR 0023 and this file's own doc comment warn about — and nothing existing would catch it.
 func TestSAMLStepUpSetsForceAuthn(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	m, err := s.samlLoadMaterial(p)
@@ -252,6 +255,7 @@ func TestSAMLStepUpSetsForceAuthn(t *testing.T) {
 // confirmed correct here), but it is a real, reproducible gap: a future edit could typo one of
 // these two case labels and nothing in the suite would catch it.
 func TestSAMLFailureReasonCoversEveryBranch(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		err  error
 		want string

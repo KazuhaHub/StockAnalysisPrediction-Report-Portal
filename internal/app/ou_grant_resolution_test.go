@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestUnifiedOUVersionGrantReadFailureCannotInheritBroaderAccess(t *testing.T) {
+	t.Parallel()
 	s, org, _, _, _ := ouFixture(t)
 	if err := s.st.SetVersionGrants("default", []string{groupPrincipal(org)}); err != nil {
 		t.Fatal(err)

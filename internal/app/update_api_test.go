@@ -14,6 +14,7 @@ import (
 // switches: "may the user defer this" and "must the page be refreshed" are the same decision read
 // two ways, and a dismissible flag plus a required flag can describe a state nobody chose.
 func TestUpdatePromptPolicyIsOneValidatedEnum(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 
 	if got := s.updatePromptPolicy(); got != "dismissible" {
@@ -47,6 +48,7 @@ func TestUpdatePromptPolicyIsOneValidatedEnum(t *testing.T) {
 // An unreadable stored value degrades to the default instead of forcing a refresh on every reader:
 // the failure mode of a corrupted meta row must be the least disruptive one.
 func TestUpdatePromptPolicyFallsBackOnAnUnknownStoredValue(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if err := s.st.SetSetting("update_prompt_policy", "whatever"); err != nil {
 		t.Fatal(err)
@@ -59,6 +61,7 @@ func TestUpdatePromptPolicyFallsBackOnAnUnknownStoredValue(t *testing.T) {
 // Already-open pages learn the effective policy from the same poll that tells them a deploy landed,
 // so an admin's escalation reaches a tab nobody reloaded.
 func TestVersionPayloadCarriesTheUpdatePolicy(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	rec := httptest.NewRecorder()
 	s.handleVersion(rec, httptest.NewRequest("GET", "/api/version", nil), "alice")
@@ -76,6 +79,7 @@ func TestVersionPayloadCarriesTheUpdatePolicy(t *testing.T) {
 }
 
 func TestAutomaticUpdateUsesRequiredAsTheLegacyFallback(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if err := s.st.SetSetting(updatePromptPolicySetting, policyAutomatic); err != nil {
 		t.Fatal(err)
@@ -93,6 +97,7 @@ func TestAutomaticUpdateUsesRequiredAsTheLegacyFallback(t *testing.T) {
 }
 
 func TestReleaseNotesRequireASession(t *testing.T) {
+	t.Parallel()
 	srv := &Server{}
 	for _, path := range []string{"/api/release-notes", "/api/release-history"} {
 		rec := httptest.NewRecorder()
@@ -108,6 +113,7 @@ func TestReleaseNotesRequireASession(t *testing.T) {
 }
 
 func TestReleaseNotesResponseRules(t *testing.T) {
+	t.Parallel()
 	const note = "## Fixed\n\n- the thing\n"
 	url := version.ReleaseNotesBaseURL + "/releases/tag/v2026.38.1"
 	releases := []publishedRelease{{Tag: "v2026.38.1", Markdown: note, Maturity: "beta"}}
@@ -148,6 +154,7 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 }
 
 func TestReleaseHistoryUsesCurrentGitHubMaturity(t *testing.T) {
+	t.Parallel()
 	releases := []publishedRelease{
 		{Tag: "v2026.38.4", Title: "Current", Markdown: "current", Maturity: "beta"},
 		{Tag: "v2026.38.3", Title: "Candidate", Markdown: "candidate", Maturity: "beta"},
@@ -169,6 +176,7 @@ func TestReleaseHistoryUsesCurrentGitHubMaturity(t *testing.T) {
 // served as this one's. The one-digit boundary is where a prefix test would betray it: v2026.9 is a
 // string prefix of nothing that follows, v2026.10 is week ten, and the two must never be conflated.
 func TestReleaseNotesAreMatchedByExactTag(t *testing.T) {
+	t.Parallel()
 	const note = "## week ten\n"
 	releases := []publishedRelease{{Tag: "v2026.10", Markdown: note, Maturity: "release"}}
 	got := releaseNotesResp("v2026.9", "v2026.10", releases, false)
@@ -193,6 +201,7 @@ func TestReleaseNotesAreMatchedByExactTag(t *testing.T) {
 }
 
 func TestHandleReleaseNotesReadsGitHub(t *testing.T) {
+	t.Parallel()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []githubRelease{{Tag: "v2026.38.1", Body: "# live", Prerelease: true}})
 	}))
@@ -216,6 +225,7 @@ func TestHandleReleaseNotesReadsGitHub(t *testing.T) {
 // The settings payload is read by the management page, so the policy must round-trip through the
 // same endpoint that writes it.
 func TestAdminSettingsExposesTheUpdatePolicy(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if err := s.st.SetSetting("update_prompt_policy", "required"); err != nil {
 		t.Fatal(err)

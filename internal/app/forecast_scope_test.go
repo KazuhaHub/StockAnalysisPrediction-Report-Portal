@@ -9,6 +9,7 @@ import (
 )
 
 func TestForecastSubjectSnapshotIsConsistent(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	s := &Server{st: st}
 	mustAddUser(t, s, "forecast-snapshot-reader", false)
@@ -51,6 +52,7 @@ func TestForecastSubjectSnapshotIsConsistent(t *testing.T) {
 }
 
 func TestOwnMembershipIsComputedInsideThePopulation(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	a := seedOU(t, s.st, 0, scopeOwn)
 	b := seedOU(t, s.st, 0, scopeOwn)
@@ -85,6 +87,7 @@ func TestOwnMembershipIsComputedInsideThePopulation(t *testing.T) {
 }
 
 func TestOwnPopulationIsTheSubtreeByAttribution(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
 			st := newTestStore(t)
@@ -147,6 +150,7 @@ func TestOwnPopulationIsTheSubtreeByAttribution(t *testing.T) {
 }
 
 func TestForecastSubjectReadsLiveAccount(t *testing.T) {
+	t.Parallel()
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
 			st := newTestStore(t)
@@ -190,6 +194,7 @@ func scopeTree() ouIndex {
 }
 
 func TestForecastScopeNearestOUWins(t *testing.T) {
+	t.Parallel()
 	ix := scopeTree()
 	for _, tc := range []struct {
 		leaf, source int64
@@ -205,6 +210,7 @@ func TestForecastScopeNearestOUWins(t *testing.T) {
 }
 
 func TestForecastScopeDefaultsToNone(t *testing.T) {
+	t.Parallel()
 	ix := scopeTree()
 	for id, row := range ix.ous {
 		row.scope = nil
@@ -222,6 +228,7 @@ func TestForecastScopeDefaultsToNone(t *testing.T) {
 }
 
 func TestForecastScopeUnknownValueIsNone(t *testing.T) {
+	t.Parallel()
 	ix := scopeTree()
 	ix.ous[3] = ouRow{parent: 2, scope: scopeValue("everyone")}
 	d := resolveForecastScope(forecastSubject{User: "reader", GroupID: 4}, ix)
@@ -231,6 +238,7 @@ func TestForecastScopeUnknownValueIsNone(t *testing.T) {
 }
 
 func TestForecastAdminAlwaysAll(t *testing.T) {
+	t.Parallel()
 	for _, role := range roleRegistry {
 		d := resolveForecastScope(forecastSubject{User: "reader", Admin: can(role.Code, PermManage), RestrictedAccount: true, GroupID: 99}, scopeTree())
 		if can(role.Code, PermManage) {
@@ -244,6 +252,7 @@ func TestForecastAdminAlwaysAll(t *testing.T) {
 }
 
 func TestForecastScopeDanglingParentIsNone(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, reason string
 		rows         map[int64]ouRow
@@ -273,6 +282,7 @@ func TestForecastScopeDanglingParentIsNone(t *testing.T) {
 }
 
 func TestForecastScopeExternalIsSticky(t *testing.T) {
+	t.Parallel()
 	ix := scopeTree()
 	ix.ous[8] = ouRow{parent: 7, scope: scopeValue(scopeAll)}
 	for _, sub := range []forecastSubject{
@@ -287,6 +297,7 @@ func TestForecastScopeExternalIsSticky(t *testing.T) {
 }
 
 func TestForecastScopeOwnOnDefaultCoversItsChildren(t *testing.T) {
+	t.Parallel()
 	ix := scopeTree()
 	ix.ous[1] = ouRow{scope: scopeValue(scopeOwn)}
 	for _, tc := range []struct {
@@ -303,6 +314,7 @@ func TestForecastScopeOwnOnDefaultCoversItsChildren(t *testing.T) {
 }
 
 func TestForecastPopulationKeyTracksSubtree(t *testing.T) {
+	t.Parallel()
 	ix := scopeTree()
 	sub := forecastSubject{User: "reader", GroupID: 3}
 	a := populationFor(resolveForecastScope(sub, ix))
@@ -325,6 +337,7 @@ func TestForecastPopulationKeyTracksSubtree(t *testing.T) {
 }
 
 func TestForecastPopulationCacheAndSeedIsolation(t *testing.T) {
+	t.Parallel()
 	all := populationFor(forecastDecision{Scope: scopeAll})
 	own := populationFor(forecastDecision{Scope: scopeOwn, Subtree: []int64{2, 3}})
 	other := populationFor(forecastDecision{Scope: scopeOwn, Subtree: []int64{4}})
@@ -348,6 +361,7 @@ func TestForecastPopulationCacheAndSeedIsolation(t *testing.T) {
 }
 
 func TestForecastScopeDeniesOnStoreError(t *testing.T) {
+	t.Parallel()
 	for _, table := range []string{"users", "user_groups"} {
 		t.Run(table, func(t *testing.T) {
 			s := newV1Server(t)
@@ -364,6 +378,7 @@ func TestForecastScopeDeniesOnStoreError(t *testing.T) {
 }
 
 func TestForecastSubjectRejectsMissingAndInactiveAccounts(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "reader", true)
 	if _, err := s.st.exec("UPDATE users SET active=0 WHERE username=?", "reader"); err != nil {

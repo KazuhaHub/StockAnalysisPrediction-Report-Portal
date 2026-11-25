@@ -10,6 +10,7 @@ import (
 )
 
 func TestCreateBatchJobIsAtomic(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	if _, err := st.exec(`CREATE TRIGGER reject_second_batch_item BEFORE INSERT ON batch_items
@@ -28,6 +29,7 @@ func TestCreateBatchJobIsAtomic(t *testing.T) {
 }
 
 func TestCreateBatchJobRejectsUnboundedRows(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	rows := make([]map[string]string, maxBatchRows+1)
 	if _, err := st.CreateBatchJob(1, 1, 0, "admin", rows, "normal"); err == nil || !strings.Contains(err.Error(), "too many") {
@@ -36,6 +38,7 @@ func TestCreateBatchJobRejectsUnboundedRows(t *testing.T) {
 }
 
 func TestSchedulableJobsIncludesLiveItemSnapshot(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, err := st.CreateBatchJob(tgt, 3, 0, "admin", []map[string]string{{"x": "1"}, {"x": "2"}, {"x": "3"}}, "normal")
@@ -100,6 +103,7 @@ func seedTarget(t *testing.T, st *Store) int64 {
 // End-to-end: create a job, drive it with the real engine over the real Store,
 // and assert per-item state plus the final aggregate counts.
 func TestBatchJobLifecycleWithEngine(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	rows := []map[string]string{{"code": "a"}, {"code": "b"}, {"code": "c"}}
@@ -142,6 +146,7 @@ func TestBatchJobLifecycleWithEngine(t *testing.T) {
 
 // Targets list newest-first by default, but honour an admin's drag order once set.
 func TestTargetDragOrdering(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	a := seedTarget(t, st)
 	b := seedTarget(t, st)
@@ -168,6 +173,7 @@ func TestTargetDragOrdering(t *testing.T) {
 
 // Crash recovery: items left running are requeued and the job is resumable.
 func TestResetInFlightItemsRequeues(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"code": "a"}, {"code": "b"}}, "normal")
@@ -191,6 +197,7 @@ func TestResetInFlightItemsRequeues(t *testing.T) {
 
 // A cancelled job stops dispatching and unstarted rows stay queued.
 func TestCancelBatchJobStopsDispatch(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"code": "a"}, {"code": "b"}, {"code": "c"}}, "normal")
@@ -221,6 +228,7 @@ func TestCancelBatchJobStopsDispatch(t *testing.T) {
 // Per-row cancel: a queued row can be cancelled (skipped) but a running one can't be
 // queued-cancelled; LiveJobCounts tallies the new 'cancelled' status.
 func TestCancelQueuedItemAndCounts(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "u", []map[string]string{{"c": "a"}, {"c": "b"}}, "normal")
@@ -244,6 +252,7 @@ func TestCancelQueuedItemAndCounts(t *testing.T) {
 
 // Retrying failed rows requeues only them and reopens the job.
 func TestRequeueFailedOnly(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"code": "a"}, {"code": "b"}}, "normal")

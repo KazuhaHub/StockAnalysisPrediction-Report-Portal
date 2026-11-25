@@ -21,6 +21,7 @@ func sectionsByHeading(d []SectionDiff) map[string]SectionDiff {
 }
 
 func TestDiffClassifiesSectionsByHeading(t *testing.T) {
+	t.Parallel()
 	before := "# 结论\n买入\n\n## 风险\n政策风险\n\n## 估值\nPE 20x\n"
 	after := "# 结论\n买入\n\n## 风险\n政策风险\n汇率风险\n\n## 催化剂\n三季报\n"
 
@@ -48,6 +49,7 @@ func TestDiffClassifiesSectionsByHeading(t *testing.T) {
 }
 
 func TestDiffShowsTheChangedLines(t *testing.T) {
+	t.Parallel()
 	got := sectionsByHeading(diffMarkdown("## 估值\n目标价 48 元\n维持\n", "## 估值\n目标价 55 元\n维持\n"))
 	s := got["估值"]
 	if s.Status != "changed" {
@@ -79,6 +81,7 @@ func TestDiffShowsTheChangedLines(t *testing.T) {
 // Order is the reader's, not the algorithm's: sections come in the order of the NEWER document,
 // with anything only in the older one appended, so the diff reads like the current report.
 func TestDiffFollowsTheNewerDocumentsOrder(t *testing.T) {
+	t.Parallel()
 	d := diffMarkdown("## B\nx\n\n## A\ny\n", "## A\ny\n\n## C\nz\n")
 	var order []string
 	for _, s := range d {
@@ -90,6 +93,7 @@ func TestDiffFollowsTheNewerDocumentsOrder(t *testing.T) {
 }
 
 func TestDiffHandlesTheAwkwardShapes(t *testing.T) {
+	t.Parallel()
 	// Text before any heading is a section of its own, not dropped.
 	if d := diffMarkdown("开头一段\n", "开头两段\n"); len(d) != 1 || d[0].Heading != "" || d[0].Status != "changed" {
 		t.Errorf("preamble handling: %+v", d)
@@ -117,6 +121,7 @@ func TestDiffHandlesTheAwkwardShapes(t *testing.T) {
 // A fenced code block can contain lines that look like headings. Splitting on them would cut a
 // table or a mermaid diagram in half and report nonsense.
 func TestDiffIgnoresHeadingsInsideCodeFences(t *testing.T) {
+	t.Parallel()
 	doc := "## 图\n```\n# not a heading\n```\n"
 	d := diffMarkdown(doc, doc)
 	if len(d) != 1 || d[0].Heading != "图" {

@@ -23,6 +23,7 @@ func notificationAdminCall(t *testing.T, s *Server, h handler, method, id, body 
 }
 
 func TestNotificationLegacyTestsShareManualCapacity(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	enableEmail(s)
 	// The forecast test needs a configured channel to reach the capacity check at all.
@@ -47,6 +48,7 @@ func TestNotificationLegacyTestsShareManualCapacity(t *testing.T) {
 }
 
 func TestNotificationAdminLegacyFacadesShareDestinations(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.adoptNotificationChannels(); err != nil {
 		t.Fatal(err)
@@ -86,6 +88,7 @@ func TestNotificationAdminLegacyFacadesShareDestinations(t *testing.T) {
 }
 
 func TestNotificationAdminPausedForecastCannotKeepReadiness(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.adoptNotificationChannels(); err != nil {
 		t.Fatal(err)
@@ -119,6 +122,7 @@ func TestNotificationAdminPausedForecastCannotKeepReadiness(t *testing.T) {
 // it, so bringing the channel back must put item 5 back to "test again". Without this, a channel that
 // has never delivered would ride on the other channel's verification.
 func TestUnpausingAForecastChannelDeletesTheStamp(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	if err := s.adoptNotificationChannels(); err != nil {
 		t.Fatal(err)
@@ -145,6 +149,7 @@ func TestUnpausingAForecastChannelDeletesTheStamp(t *testing.T) {
 }
 
 func TestNotificationAdminManualTestIsSingleAndRecorded(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	bodies := make(chan string, 2)
 	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +203,7 @@ func TestNotificationAdminManualTestIsSingleAndRecorded(t *testing.T) {
 }
 
 func TestNotificationAdminRoutesRefuseOrdinaryAccounts(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	if err := s.st.UpsertUser(User{Username: "reader", PasswordHash: "h", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -227,6 +233,7 @@ func TestNotificationAdminRoutesRefuseOrdinaryAccounts(t *testing.T) {
 }
 
 func TestNotificationAdminPauseDoesNotInvalidatePendingMessage(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	sent := enableEmail(s)
 	w := notificationAdminCall(t, s, s.apiNotificationChannelSave, "POST", "", `{"label":"Mail","adapter":"email","recipients":["ops@example.com"],"enabled":true}`)
@@ -267,6 +274,7 @@ func TestNotificationAdminPauseDoesNotInvalidatePendingMessage(t *testing.T) {
 }
 
 func TestNotificationAdminChannelSecretsAndRevision(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	create := notificationAdminCall(t, s, s.apiNotificationChannelSave, "POST", "", `{"label":"Slack","adapter":"slack","url":"https://hooks.slack.com/services/private-token","enabled":true}`)
 	if create.Code != http.StatusOK {
@@ -310,6 +318,7 @@ func TestNotificationAdminChannelSecretsAndRevision(t *testing.T) {
 }
 
 func TestNotificationAdminRejectsInvalidAdapterAndRoutes(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	for _, body := range []string{
 		`{"label":"Bad","adapter":"slack","url":"https://example.com/secret","enabled":true}`,

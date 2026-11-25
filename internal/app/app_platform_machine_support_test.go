@@ -12,6 +12,7 @@ import (
 // The capability is offered only against a runner that says it forwards machine assertions: an older
 // one is refused at enable time, and a request is answered 503 before anything is relayed to it.
 func TestMachineReadNeedsARunnerThatForwardsMachineAssertions(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformMachineFixture(t, pg)
 		e.s.platformBackendEndpoint.Store(&platformRuntimeEndpoint{path: "/run/fixture/control.sock", controllerUID: 1000, controllerGID: 1000})

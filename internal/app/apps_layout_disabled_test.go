@@ -27,6 +27,7 @@ func disablePlatformFixture(t *testing.T, s *Server, id string) {
 }
 
 func TestLayoutDisabledInstallationKeepsDisplayFromCurrentRelease(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	active := disabledLayoutEntry(t, s, id)
@@ -50,6 +51,7 @@ func TestLayoutDisabledInstallationKeepsDisplayFromCurrentRelease(t *testing.T) 
 }
 
 func TestLayoutDisabledInstallationWithRevokedKeyFallsBackToAppID(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	disablePlatformFixture(t, s, id)
@@ -61,6 +63,7 @@ func TestLayoutDisabledInstallationWithRevokedKeyFallsBackToAppID(t *testing.T) 
 }
 
 func TestLayoutDisabledInstallationWithUntrustedPublisherFallsBackToAppID(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	disablePlatformFixture(t, s, id)

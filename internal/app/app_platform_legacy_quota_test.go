@@ -13,6 +13,7 @@ func legacyPlan() platformInstallProjection {
 // A plan written before the quota fields existed was reviewed at 256 MiB and 65,536 inodes. One that is still
 // unconsumed when the build is upgraded, or an install in flight across the deploy, must keep working.
 func TestPreUpgradePlanStillVerifiesAtTheFixedQuota(t *testing.T) {
+	t.Parallel()
 	manifest := quotaManifest(nil)
 	if err := platformCheckInstallQuota(legacyPlan(), platformManagedInstallFormat, manifest); err != nil {
 		t.Fatalf("a pre-upgrade plan was refused at stage: %v", err)
@@ -39,6 +40,7 @@ func TestPreUpgradePlanStillVerifiesAtTheFixedQuota(t *testing.T) {
 // Consuming rebuilds the projection and compares bytes with the stored plan, so for a pre-upgrade plan the
 // rebuild must come out in the pre-upgrade form.
 func TestRebuiltProjectionOfAPreUpgradePlanMatchesIt(t *testing.T) {
+	t.Parallel()
 	manifest := quotaManifest(nil)
 	stored := legacyPlan()
 	var rebuilt platformInstallProjection
@@ -73,6 +75,7 @@ func TestRebuiltProjectionOfAPreUpgradePlanMatchesIt(t *testing.T) {
 // A pre-upgrade plan is only the 256 MiB plan. Consuming one whose byte quota is anything else, or for a
 // descriptor that now requests more, is refused there as well as at the install stage.
 func TestPreUpgradePlanWithAnotherQuotaIsRefusedAtConsume(t *testing.T) {
+	t.Parallel()
 	for name, c := range map[string]struct {
 		bytes    int64
 		manifest appplatform.Manifest

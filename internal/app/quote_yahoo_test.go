@@ -138,6 +138,7 @@ func yahooWantGate(t *testing.T, market, code string, body []byte, iv quoteInter
 // vendor's own numbers converted by hand, not by the parser — the point of a fixture test is that it
 // disagrees with the parser when the parser is wrong.
 func TestYahooParsesEveryCapturedBody(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		file, market, code string
 		iv                 quoteInterval
@@ -265,6 +266,7 @@ func TestYahooParsesEveryCapturedBody(t *testing.T) {
 // follows, and the reason a range the vendor overshoots (6mo answered 128 bars for a 125-bar
 // request) does not shift the right-hand edge of the chart.
 func TestYahooTrimsTheOldestBarsAndKeepsTheNewest(t *testing.T) {
+	t.Parallel()
 	resp, err := parseYahooChart("us", "AAPL", readQuoteFixture(t, fixYahooAAPLDaily), 5, quoteIntervalDaily)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -290,6 +292,7 @@ func TestYahooTrimsTheOldestBarsAndKeepsTheNewest(t *testing.T) {
 // with that pair by a thousand times the tolerance, which is what makes this a runtime guarantee
 // rather than only a fact about today's code.
 func TestYahooPrevCloseIsNeverChartPreviousClose(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		file, market, code string
 		wantPrev, wantChar int64
@@ -342,6 +345,7 @@ func TestYahooPrevCloseIsNeverChartPreviousClose(t *testing.T) {
 // echo check that catches the body if the wrong symbol is ever sent anyway, and the currency check
 // that catches it even if the echo agrees.
 func TestYahooRefusesTheFundThatAnswersToTheWrongHKCode(t *testing.T) {
+	t.Parallel()
 	doc := yahooDoc(t, fixYahooHKFund)
 	meta := yahooMeta(t, doc)
 	// What the fixture IS, stated so that this test cannot quietly become a test of an empty file.
@@ -382,6 +386,7 @@ func TestYahooRefusesTheFundThatAnswersToTheWrongHKCode(t *testing.T) {
 // guessed at. Beijing has no mapping at all — `.BJ` is plausible and unmeasured, and trap 2 is what
 // a plausible unmeasured symbol costs.
 func TestYahooSymbolMappingIsMeasuredOrRefused(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		market, code, want string
 		refuse             bool
@@ -422,6 +427,7 @@ func TestYahooSymbolMappingIsMeasuredOrRefused(t *testing.T) {
 // integer arithmetic, rounding half away from zero — and never by ParseFloat: the obvious float64
 // route truncates the same literal to 32830, one 分 low, on a real value out of a real fixture.
 func TestYahooPricesComeFromTheDecimalStringNotAFloat64(t *testing.T) {
+	t.Parallel()
 	// The literals below are copied out of the captured bodies; the first assertion is that they
 	// still are, so this test cannot drift away from the fixture it claims to be about.
 	q := yahooSeries(t, yahooDoc(t, fixYahooAAPLDaily))
@@ -458,6 +464,7 @@ func TestYahooPricesComeFromTheDecimalStringNotAFloat64(t *testing.T) {
 // bar is a candle drawn at the bottom of the chart on a minute nothing traded, and it passes every
 // other check in the file: its four prices are ordered exactly as a candle's should be.
 func TestYahooSkipsNullPointsInsteadOfZeroFillingThem(t *testing.T) {
+	t.Parallel()
 	q := yahooSeries(t, yahooDoc(t, fixYahooTencentMinute))
 	closes := q["close"].([]any)
 	nulls := 0
@@ -493,6 +500,7 @@ func TestYahooSkipsNullPointsInsteadOfZeroFillingThem(t *testing.T) {
 // a cosmetic one: read short it is a series that stops early, read long it is an index panic in a
 // handler goroutine. Nothing else in the parser would notice.
 func TestYahooRefusesArraysThatAreNotTheSameLength(t *testing.T) {
+	t.Parallel()
 	for _, field := range []string{"open", "high", "low", "close", "volume"} {
 		t.Run(field, func(t *testing.T) {
 			doc := yahooDoc(t, fixYahooPingAnDaily)
@@ -508,6 +516,7 @@ func TestYahooRefusesArraysThatAreNotTheSameLength(t *testing.T) {
 // window it was asked for, and drawing the remainder spreads an hour of trading evenly across a day.
 // The 242-of-331 real body must survive, and the same body with the holes widened must not.
 func TestYahooRefusesASeriesThatIsMostlyHoles(t *testing.T) {
+	t.Parallel()
 	// The captured body is 27% null and is served.
 	resp := yahooParse(t, fixYahooMoutaiFiveMin, "sh", "600519", quoteIntervalIntraday)
 	if len(resp.Bars) != 242 {
@@ -531,6 +540,7 @@ func TestYahooRefusesASeriesThatIsMostlyHoles(t *testing.T) {
 // meta.regularMarketPrice is not the last bar's close, something is being read out of the wrong
 // place. One 分 of tolerance, for the float64 the vendor rendered both from.
 func TestYahooRefusesASnapshotThatDisagreesWithItsOwnLastBar(t *testing.T) {
+	t.Parallel()
 	doc := yahooDoc(t, fixYahooAAPLDaily)
 	meta := yahooMeta(t, doc)
 	// Two 分 away, and the percentage moved with it so that the identity check cannot be what fires:
@@ -551,6 +561,7 @@ func TestYahooRefusesASnapshotThatDisagreesWithItsOwnLastBar(t *testing.T) {
 // wrong for this market. A USD figure beside a CNY one, both bare numbers, reads as the same kind of
 // quantity — which is why ADR 0030 put currency on the wire in the first place.
 func TestYahooRefusesACurrencyThisMarketDoesNotQuote(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		what string
 		set  any
@@ -578,6 +589,7 @@ func TestYahooRefusesACurrencyThisMarketDoesNotQuote(t *testing.T) {
 // through the real parser rather than by calling quoteCheckBars directly, because the thing worth
 // testing is that this path reaches it.
 func TestYahooBarsGoThroughTheSharedCandleChecks(t *testing.T) {
+	t.Parallel()
 	t.Run("ordering", func(t *testing.T) {
 		doc := yahooDoc(t, fixYahooPingAnDaily)
 		q := yahooSeries(t, doc)
@@ -601,6 +613,7 @@ func TestYahooBarsGoThroughTheSharedCandleChecks(t *testing.T) {
 // five captured bodies carry one, and every one of them agrees with its own derived previous close —
 // so a body whose percentage does NOT agree is a source drifting, and is refused.
 func TestYahooIdentityRunsOnTheVendorsOwnPercentage(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		file, market, code string
 		iv                 quoteInterval
@@ -635,6 +648,7 @@ func TestYahooIdentityRunsOnTheVendorsOwnPercentage(t *testing.T) {
 // combinations that have captured bodies are named here; the rest of the daily table is the same
 // series over a longer window.
 func TestYahooWindowIsChosenByIntervalAndCount(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		iv        quoteInterval
 		bars      int
@@ -678,6 +692,7 @@ func TestYahooWindowIsChosenByIntervalAndCount(t *testing.T) {
 // declaration nobody can keep: quoteSource.call hands it over, and a source that declared intraday
 // with an interval-blind fetcher would answer a minute request with a daily series and no error.
 func TestYahooSourceIsWiredThroughTheIntervalAwareFetcher(t *testing.T) {
+	t.Parallel()
 	src := quoteYahooSource()
 	if src.fetchAt == nil {
 		t.Fatal("the yahoo source has no interval-aware fetcher; its intraday grant is a promise nothing keeps")
@@ -711,6 +726,7 @@ func TestYahooSourceIsWiredThroughTheIntervalAwareFetcher(t *testing.T) {
 // separate way for this to be wrong — a source that shipped enabled would send every US chart to an
 // unlicensed endpoint nobody chose, and one the order refused to name could never be switched on.
 func TestYahooShipsCompiledInAndDisabled(t *testing.T) {
+	t.Parallel()
 	if got := strings.Join(quoteShippedOrder(), ","); got != "tencent,sina" {
 		t.Errorf("the shipped order is %q, want tencent,sina — yahoo must not be in it", got)
 	}
@@ -793,6 +809,7 @@ func TestYahooShipsCompiledInAndDisabled(t *testing.T) {
 // reads last and prevClose only), the snapshot-against-series comparison — so this is the check that
 // has to catch it, and with quoteCheckRange removed from parseYahooChart the response is served.
 func TestYahooRefusesALastPriceOutsideTheDayRange(t *testing.T) {
+	t.Parallel()
 	doc := yahooDoc(t, fixYahooAAPLDaily)
 	meta := yahooMeta(t, doc)
 	if got := yahooFixtureFen(t, meta, "regularMarketDayLow"); got != 31786 {
@@ -831,6 +848,7 @@ func TestYahooRefusesALastPriceOutsideTheDayRange(t *testing.T) {
 // x-axis says nothing. So the assertion is not "the parse succeeded" — it is that every label carries
 // a TIME, and that the labels are as many as the bars.
 func TestYahooStampsTheFiveDayWindowWithTimesAndNotBareDates(t *testing.T) {
+	t.Parallel()
 	resp := yahooParse(t, fixYahooMoutaiFiveMin, "sh", "600519", quoteIntervalIntraday5D)
 	if len(resp.Bars) != 242 {
 		t.Fatalf("the 5d/5m body gave %d bars, want 242 — a fixture this test no longer describes", len(resp.Bars))
@@ -870,6 +888,7 @@ func TestYahooStampsTheFiveDayWindowWithTimesAndNotBareDates(t *testing.T) {
 // the function is asked directly, with the fund body's OWN meta: a default of quoteKindStock passes
 // every other test in this file and labels this MUTUALFUND a 股票.
 func TestYahooKindIsMeasuredAndNeverGuessed(t *testing.T) {
+	t.Parallel()
 	var trap yahooChartEnvelope
 	if err := json.Unmarshal(readQuoteFixture(t, fixYahooHKFund), &trap); err != nil {
 		t.Fatalf("decode the fund fixture: %v", err)
@@ -929,6 +948,7 @@ func wireYahooSource(s *Server, stub *quoteVendorStub) {
 // nothing ever resolved. Both halves are asserted here, because each is a separate way to be wrong —
 // with the source off the reader must get exactly today's answer, and with it on a real chart.
 func TestYahooUSChartAppearsTheMomentAnOperatorEnablesTheSource(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentUS))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -995,6 +1015,7 @@ func TestYahooUSChartAppearsTheMomentAnOperatorEnablesTheSource(t *testing.T) {
 // closes. Both halves are asserted: the counters stay clean, and the reader gets Tencent's price with
 // an empty chart instead.
 func TestYahooIsSkippedForAnHKCodeItHasNoSymbolFor(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	on := quoteConfig{Order: []string{quoteSourceTencent, quoteSourceSina, quoteSourceYahoo}}.orDefaults()
 	spellable, err := quoteTargetFor("hk", "00700")

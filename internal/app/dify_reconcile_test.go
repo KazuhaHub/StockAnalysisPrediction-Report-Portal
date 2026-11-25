@@ -18,6 +18,7 @@ import (
 // history — recovering the real outcome WITHOUT re-running the (possibly expensive,
 // still-executing) chat run.
 func TestDifyChatProviderReconcilesViaConversation(t *testing.T) {
+	t.Parallel()
 	var runs, gets int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -56,6 +57,7 @@ func TestDifyChatProviderReconcilesViaConversation(t *testing.T) {
 // Untracked with NO error. A nil error is what keeps the engine from re-running a live Dify run
 // (the duplicate-token-burn hazard the reconcile design exists to prevent).
 func TestDifyProviderStartedButUnreconcilableIsUntracked(t *testing.T) {
+	t.Parallel()
 	var runs int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -92,6 +94,7 @@ func TestDifyProviderStartedButUnreconcilableIsUntracked(t *testing.T) {
 // pre-stream failure (connection refused / non-2xx) is a retryable error — covered by
 // TestDifyProviderErrorClassification.
 func TestDifyProviderStreamOpenedButEmptyIsUntracked(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 200 + event-stream header, then an immediate clean close with zero events.
 		w.Header().Set("Content-Type", "text/event-stream")

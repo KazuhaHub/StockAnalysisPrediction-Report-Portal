@@ -16,6 +16,7 @@ import (
 )
 
 func TestQuoteProbeCapturePreservesRawBodiesAndPrivateManifest(t *testing.T) {
+	t.Parallel()
 	raw := []byte{0xff, 0x00, 0x81, 'p', 'r', 'o', 'b', 'e'}
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(raw) }))
 	defer stub.Close()
@@ -58,6 +59,7 @@ func TestQuoteProbeCapturePreservesRawBodiesAndPrivateManifest(t *testing.T) {
 }
 
 func TestQuoteProbeCaptureRejectsBadInputBeforeOutputOrNetwork(t *testing.T) {
+	t.Parallel()
 	for _, invalid := range []string{"source", "window", "target"} {
 		t.Run(invalid, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "capture")
@@ -86,6 +88,7 @@ func TestQuoteProbeCaptureRejectsBadInputBeforeOutputOrNetwork(t *testing.T) {
 }
 
 func TestQuoteProbeCaptureNeverOverwritesExistingDirectoryOrSymlink(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	for _, symlink := range []bool{false, true} {
 		dir := filepath.Join(parent, "capture")
@@ -104,6 +107,7 @@ func TestQuoteProbeCaptureNeverOverwritesExistingDirectoryOrSymlink(t *testing.T
 }
 
 func TestQuoteProbeCaptureAdmitsDisplayOnlyCandidateWithoutGrantingSettlement(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "capture")
 	calls := 0
 	source := quoteSource{name: quoteSourceYahoo, fetchAt: func(_ context.Context, market, code string, bars int, interval quoteInterval) (*QuoteResp, error) {
@@ -123,6 +127,7 @@ func TestQuoteProbeCaptureAdmitsDisplayOnlyCandidateWithoutGrantingSettlement(t 
 }
 
 func TestQuoteProbeCaptureKeepsHTTPFailuresAndBoundsRawBodies(t *testing.T) {
+	t.Parallel()
 	for _, oversized := range []bool{false, true} {
 		body := []byte("service unavailable")
 		status := http.StatusServiceUnavailable
@@ -157,6 +162,7 @@ func TestQuoteProbeCaptureKeepsHTTPFailuresAndBoundsRawBodies(t *testing.T) {
 }
 
 func TestQuoteProbeCaptureCancellationKeepsAnIncompleteManifest(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := filepath.Join(t.TempDir(), "capture")
@@ -178,6 +184,7 @@ func TestQuoteProbeCaptureCancellationKeepsAnIncompleteManifest(t *testing.T) {
 }
 
 func TestQuoteProbeCaptureLocalWriteFailureIsNotHiddenAsVendorFailure(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "capture")
 	source := quoteSource{name: quoteSourceTencent, fetchRange: func(context.Context, string, string, string, string) (*QuoteResp, error) {
 		if err := os.WriteFile(filepath.Join(dir, "0001.parsed.json"), []byte("keep"), 0600); err != nil {
@@ -196,6 +203,7 @@ func TestQuoteProbeCaptureLocalWriteFailureIsNotHiddenAsVendorFailure(t *testing
 }
 
 func TestQuoteProbeCaptureDoesNotReplaceTheGlobalVendorClient(t *testing.T) {
+	t.Parallel()
 	original := vendorClient
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("raw")) }))
 	defer stub.Close()
@@ -217,6 +225,7 @@ type quoteProbeReadFailure struct{}
 func (quoteProbeReadFailure) Read([]byte) (int, error) { return 0, errors.New("body interrupted") }
 
 func TestQuoteProbeCapturePreservesPartialReads(t *testing.T) {
+	t.Parallel()
 	client := &http.Client{Transport: forecastVendorTransport(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(io.MultiReader(bytes.NewReader([]byte("partial")), quoteProbeReadFailure{}))}, nil
 	})}
@@ -240,6 +249,7 @@ func TestQuoteProbeCapturePreservesPartialReads(t *testing.T) {
 }
 
 func TestQuoteProbeCapturePinsItsDirectoryDuringFetch(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir, moved, foreign := filepath.Join(parent, "capture"), filepath.Join(parent, "moved"), filepath.Join(parent, "foreign")
 	if err := os.Mkdir(foreign, 0700); err != nil {

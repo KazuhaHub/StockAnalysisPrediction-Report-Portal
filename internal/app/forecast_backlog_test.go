@@ -8,6 +8,7 @@ import (
 )
 
 func TestForecastBacklogIncludesSleepingRetries(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := seedAcceptedSetAt(t, s, "688469", "2026-10-19")
 	now := shanghai(2026, time.October, 29, 17, 0)
@@ -34,6 +35,7 @@ func TestForecastBacklogIncludesSleepingRetries(t *testing.T) {
 }
 
 func TestForecastBacklogDoesNotInventSessions(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := seedAcceptedSetAt(t, s, "600519", "2026-10-19")
 	now := shanghai(2026, time.October, 29, 17, 0)
@@ -52,6 +54,7 @@ func TestForecastBacklogDoesNotInventSessions(t *testing.T) {
 }
 
 func TestWatchdogUsesLedgerInsteadOfLastEmptyPass(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := seedAcceptedSetAt(t, s, "688469", "2026-10-19")
 	now := shanghai(2026, time.October, 29, 17, 0)
@@ -83,6 +86,7 @@ func TestWatchdogUsesLedgerInsteadOfLastEmptyPass(t *testing.T) {
 }
 
 func TestForecastDeliveryDiagnosticsBoundAndRedact(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	e := &forecastEvaluator{}
 	for i := int64(1); i <= 60; i++ {
@@ -107,6 +111,7 @@ func TestForecastDeliveryDiagnosticsBoundAndRedact(t *testing.T) {
 // session's marks only once the date has rolled over (newestBarFinal). The lagging clock must start
 // there: measured from the close, every trading evening paged at 21:00 over work nothing could do.
 func TestLaggingClockStartsWhenTheBarCanBeVouchedFor(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	id := seedAcceptedSetAt(t, s, "688469", "2026-10-23")
 	if _, err := s.st.exec(`UPDATE prediction_marks SET session_date='2026-10-30' WHERE set_id=? AND checkpoint='d5'`, id); err != nil {

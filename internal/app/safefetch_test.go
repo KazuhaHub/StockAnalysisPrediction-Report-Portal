@@ -11,6 +11,7 @@ import (
 // OIDC discovery, JWKS, token, userinfo). These URLs are admin-supplied and the discovery document
 // then supplies MORE urls, so the server must refuse to be aimed at its own infrastructure.
 func TestSafeFetchRejectsUnsafeTargets(t *testing.T) {
+	t.Parallel()
 	c := newSafeClient(false) // RFC1918 disallowed: the strict posture
 	for _, tc := range []struct{ name, url string }{
 		{"plain http", "http://example.com/x"},
@@ -38,6 +39,7 @@ func TestSafeFetchRejectsUnsafeTargets(t *testing.T) {
 // would make saving configuration depend on DNS and on the IdP resolving from wherever the admin
 // is — which split-horizon deployments routinely do not.
 func TestSafeFetchDoesNotRequireDNSAtSaveTime(t *testing.T) {
+	t.Parallel()
 	c := newSafeClient(false)
 	if err := c.checkURL("https://idp.invalid-tld-that-does-not-resolve.example/x"); err != nil {
 		t.Errorf("an unresolvable host must not fail the pre-check: %v", err)
@@ -52,6 +54,7 @@ func TestSafeFetchDoesNotRequireDNSAtSaveTime(t *testing.T) {
 // an internal network is the common case, so RFC1918 is admin-selectable — but loopback and the
 // cloud metadata address stay blocked unconditionally, since nothing legitimate lives there.
 func TestSafeFetchAllowsPrivateWhenEnabled(t *testing.T) {
+	t.Parallel()
 	c := newSafeClient(true)
 	if err := c.checkURL("https://10.0.0.5/x"); err != nil {
 		t.Errorf("RFC1918 must be permitted when enabled: %v", err)
@@ -66,6 +69,7 @@ func TestSafeFetchAllowsPrivateWhenEnabled(t *testing.T) {
 // TestSafeFetchReadsAndBoundsBody proves a normal fetch works and that an oversized response is
 // truncated rather than read into memory unbounded.
 func TestSafeFetchReadsAndBoundsBody(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(strings.Repeat("x", 5000)))
 	}))

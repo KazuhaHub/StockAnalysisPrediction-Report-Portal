@@ -16,6 +16,7 @@ import (
 // every mutation is logged, and the SPA's timer-driven polling — the only reason /api/ was ever
 // skipped — is the one thing that stays quiet.
 func TestWorthLoggingPolicy(t *testing.T) {
+	t.Parallel()
 	fast, slow := 5*time.Millisecond, 2*time.Second
 	cases := []struct {
 		name         string

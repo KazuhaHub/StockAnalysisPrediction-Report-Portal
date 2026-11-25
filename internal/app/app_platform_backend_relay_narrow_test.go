@@ -37,6 +37,7 @@ func recordPlatformPureSteps(t *testing.T, s *Server) func() map[string]int {
 // The predicate the seam relies on must be able to fail: it reports a held connection inside a
 // transaction and a free one outside.
 func TestPlatformConnectionHeldSeesAnOpenTransaction(t *testing.T) {
+	t.Parallel()
 	s, _, _ := platformWritableAccessFixture(t, false)
 	if platformConnectionHeld(s) {
 		t.Fatal("idle store reports a held connection")
@@ -80,6 +81,7 @@ func TestPlatformBackendAccessRunsCPUWorkAfterTheTransaction(t *testing.T) {
 // changes between them must be seen by the next admission, including with every verified
 // registration already remembered.
 func TestPlatformBackendAccessSeesChangesBetweenAdmissions(t *testing.T) {
+	t.Parallel()
 	fixture := func(t *testing.T) (*Server, platformActorSession, string) {
 		s, actor, lease := platformWritableAccessFixture(t, false)
 		return s, actor, lease.installationID
@@ -90,6 +92,7 @@ func TestPlatformBackendAccessSeesChangesBetweenAdmissions(t *testing.T) {
 }
 
 func TestPlatformBackendAccessGeneration2SeesChangesBetweenAdmissions(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"session", "grant", "publisher", "fence", "role", "revoke-key"} {
 		// The update history does not bind the control fence to the completed operation, so a fence
 		// move is admitted there and refused by the access comparison, like a role change.
@@ -157,6 +160,7 @@ func testPlatformBackendAccessSeesChange(t *testing.T, fixture func(*testing.T) 
 // A signed registration that is remembered must still be refused once the key that verified it is
 // no longer the authority: the runtime binding's key or control revision moved.
 func TestPlatformBackendAccessRefusesRotatedRuntimeKeyWithWarmVerificationCache(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"control_revision", "fingerprint", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			s, actor, lease := platformWritableAccessFixture(t, false)

@@ -36,6 +36,7 @@ func saveSecurity(t *testing.T, s *Server, body string) int {
 }
 
 func TestLimitsDefaultToWhatTheBinaryUsedToDo(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 
 	if got := s.sessionTTL(); got != defaultSessionTTL {
@@ -51,6 +52,7 @@ func TestLimitsDefaultToWhatTheBinaryUsedToDo(t *testing.T) {
 }
 
 func TestLimitsRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 
 	if code := saveSecurity(t, s, `{"limits":{"session_ttl_hours":12,"login_fail_max":4,"login_fail_window_min":30,"apiv1_rate_per_min":100}}`); code != http.StatusOK {
@@ -87,6 +89,7 @@ func TestLimitsRoundTrip(t *testing.T) {
 }
 
 func TestLimitsSurviveABodyThatDoesNotMentionThem(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.SetSetting(setSessionTTLHours, "12")
 
@@ -101,6 +104,7 @@ func TestLimitsSurviveABodyThatDoesNotMentionThem(t *testing.T) {
 }
 
 func TestNonsenseLimitsAreRefusedRatherThanStored(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	for _, body := range []string{
 		`{"limits":{"session_ttl_hours":0}}`,
@@ -125,6 +129,7 @@ func TestNonsenseLimitsAreRefusedRatherThanStored(t *testing.T) {
 // A stored value the code would choke on — hand-edited, or written by a build that allowed a range
 // this one does not — reads as the default rather than as zero.
 func TestAnUnreadableStoredLimitReadsAsTheDefault(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.SetSetting(setSessionTTLHours, "not a number")
 	s.st.SetSetting(setLoginFailMax, "0")
@@ -137,6 +142,7 @@ func TestAnUnreadableStoredLimitReadsAsTheDefault(t *testing.T) {
 }
 
 func TestSessionCookieFollowsTheConfiguredLifetime(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	s.st.SetSetting(setSessionTTLHours, "2")
@@ -156,6 +162,7 @@ func TestSessionCookieFollowsTheConfiguredLifetime(t *testing.T) {
 }
 
 func TestLoginCeilingFollowsTheSetting(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.SetSetting(setLoginFailMax, "2")
 	now := time.Now()
@@ -171,6 +178,7 @@ func TestLoginCeilingFollowsTheSetting(t *testing.T) {
 }
 
 func TestLoginWindowFollowsTheSetting(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.SetSetting(setLoginFailMax, "1")
 	s.st.SetSetting(setLoginFailWindowMin, "1")
@@ -188,6 +196,7 @@ func TestLoginWindowFollowsTheSetting(t *testing.T) {
 // ---------- the machine API's request ceiling ----------
 
 func TestAPIV1RateLimitIsOffUntilConfigured(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	h := s.rateLimitV1(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	for i := 0; i < 50; i++ {
@@ -200,6 +209,7 @@ func TestAPIV1RateLimitIsOffUntilConfigured(t *testing.T) {
 }
 
 func TestAPIV1RateLimitRefusesOverTheCeiling(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.SetSetting(setAPIV1RatePerMin, "3")
 	served := 0
@@ -230,6 +240,7 @@ func TestAPIV1RateLimitRefusesOverTheCeiling(t *testing.T) {
 }
 
 func TestAPIV1RateLimitCountsEachCallerSeparately(t *testing.T) {
+	t.Parallel()
 	s := limitsServer(t)
 	s.st.SetSetting(setAPIV1RatePerMin, "1")
 	h := s.rateLimitV1(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -254,6 +265,7 @@ func TestAPIV1RateLimitCountsEachCallerSeparately(t *testing.T) {
 }
 
 func TestRateLimiterWindowRolls(t *testing.T) {
+	t.Parallel()
 	l := newRateLimiter()
 	now := time.Now()
 	if !l.allow("k", 1, time.Minute, now) {
@@ -269,6 +281,7 @@ func TestRateLimiterWindowRolls(t *testing.T) {
 
 // The table cannot be grown without bound by a flood of distinct sources.
 func TestRateLimiterPrunes(t *testing.T) {
+	t.Parallel()
 	l := newRateLimiter()
 	now := time.Now()
 	for i := 0; i < 5000; i++ {

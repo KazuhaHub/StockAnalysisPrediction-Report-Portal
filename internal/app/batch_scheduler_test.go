@@ -33,6 +33,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 // a 2-row batch (concurrency 2) plus two single runs must never run more than 2 at once —
 // the exact regression that made the old per-job pools show 4 running against a cap of 3.
 func TestSchedulerCapsConcurrentRunsAcrossJobs(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "2")
 	st.SetSetting("batch_reserved_slots", "0")
@@ -87,6 +88,7 @@ func TestSchedulerCapsConcurrentRunsAcrossJobs(t *testing.T) {
 // run is admitted before a lower-priority job's — something the old plain semaphore gate
 // could not guarantee.
 func TestSchedulerAdmitsByRunPriority(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "1")
 	st.SetSetting("batch_reserved_slots", "0")
@@ -119,6 +121,7 @@ func TestSchedulerAdmitsByRunPriority(t *testing.T) {
 // A job finalizes on its own once its last run completes: the scheduler + startItem write
 // the aggregate counts and terminal status — no explicit FinishJob call needed.
 func TestSchedulerFinalizesJob(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "4")
 	tgt := seedTarget(t, st)
@@ -149,6 +152,7 @@ func TestSchedulerFinalizesJob(t *testing.T) {
 // saturated budget) must still finalize — not strand in 'cancelling' forever. Both the
 // cancel handler's finalizeJob and the scheduleTick backstop must close it out.
 func TestStrandedCancellingJobFinalizes(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*Server, int64) {
 		st := newTestStore(t)
 		tgt := seedTarget(t, st)
@@ -197,6 +201,7 @@ func blockingProv(release <-chan struct{}) batch.Provider {
 // Cancelling ONE running row aborts only that run and marks it 'cancelled' (not
 // 'failed'); the batch's other runs keep going and it finalizes normally.
 func TestCancelRunningRowAbortsOnlyThatRow(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "2")
 	st.SetSetting("batch_reserved_slots", "0")
@@ -232,6 +237,7 @@ func TestCancelRunningRowAbortsOnlyThatRow(t *testing.T) {
 // Cancelling a still-queued row skips it — it never runs; the job finalizes with that row
 // 'cancelled' and the rest run normally.
 func TestCancelQueuedRowSkips(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "1")
 	st.SetSetting("batch_reserved_slots", "0")
@@ -266,6 +272,7 @@ func TestCancelQueuedRowSkips(t *testing.T) {
 // A cancelling job contributes no runs to the scheduler — its remaining queued rows are
 // never admitted.
 func TestItemCandidatesExcludeCancellingJob(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "u", []map[string]string{{"c": "a"}, {"c": "b"}}, "50")

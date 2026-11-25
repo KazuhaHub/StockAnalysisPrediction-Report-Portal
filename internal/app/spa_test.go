@@ -25,6 +25,7 @@ func testDist() fstest.MapFS {
 // directly (skipping per-request gzip CPU work), with an accurate Content-Length and
 // the correct Content-Type (lost otherwise, since we bypass http.FileServer's sniffing).
 func TestSpaServesPrecompressedGzipForEligibleAsset(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 	req := httptest.NewRequest("GET", "/assets/app.js", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -57,6 +58,7 @@ func TestSpaServesPrecompressedGzipForEligibleAsset(t *testing.T) {
 
 // A client that doesn't advertise gzip support gets the plain bytes.
 func TestSpaServesPlainWhenClientDoesNotAcceptGzip(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 	req := httptest.NewRequest("GET", "/assets/app.js", nil)
 	rec := httptest.NewRecorder()
@@ -74,6 +76,7 @@ func TestSpaServesPlainWhenClientDoesNotAcceptGzip(t *testing.T) {
 // A Range request must fall back to plain (whole-file precompressed gzip breaks
 // byte-range semantics), so http.FileServer's Range handling stays correct.
 func TestSpaSkipsPrecompressedOnRangeRequest(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 	req := httptest.NewRequest("GET", "/assets/app.js", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -88,6 +91,7 @@ func TestSpaSkipsPrecompressedOnRangeRequest(t *testing.T) {
 
 // Unknown app routes (client-side React Router paths) fall back to index.html, unchanged.
 func TestSpaFallbackToIndexForUnknownRoute(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 	req := httptest.NewRequest("GET", "/stock/300750", nil)
 	rec := httptest.NewRecorder()
@@ -105,6 +109,7 @@ func TestSpaFallbackToIndexForUnknownRoute(t *testing.T) {
 }
 
 func TestSpaCSPAllowsConfiguredCaptchaProviders(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
@@ -126,6 +131,7 @@ func TestSpaCSPAllowsConfiguredCaptchaProviders(t *testing.T) {
 // /sw.js is served with the build version stamped into its cache name (so every deploy
 // ships a fresh SW) and marked no-cache. Non-token characters in the version are stripped.
 func TestSpaInjectsServiceWorkerVersion(t *testing.T) {
+	t.Parallel()
 	fsys := fstest.MapFS{
 		"index.html": {Data: []byte("<html></html>")},
 		"sw.js":      {Data: []byte("const CACHE_NAME = 'rp-cache-__RP_SW_VERSION__'")},
@@ -152,6 +158,7 @@ func TestSpaInjectsServiceWorkerVersion(t *testing.T) {
 // The shell's default title + favicon are replaced with the configured branding, so the
 // first paint isn't the default (no flash, and the default favicon isn't fetched).
 func TestSpaInjectsBranding(t *testing.T) {
+	t.Parallel()
 	fsys := fstest.MapFS{
 		"index.html": {Data: []byte(`<head><title>` + defaultSiteTitle + `</title>` +
 			`<link rel="icon" type="image/svg+xml" href="/favicon.svg" />` +
@@ -197,6 +204,7 @@ func TestSpaInjectsBranding(t *testing.T) {
 // A non-hashed static file (no /assets/ prefix) still gets precompressed-gzip
 // serving (by extension), but must NOT get the immutable long-cache header.
 func TestSpaPrecompressedAssetOutsideAssetsDirHasNoImmutableCache(t *testing.T) {
+	t.Parallel()
 	h := spaHandlerFS(testDist(), nil, "test")
 	req := httptest.NewRequest("GET", "/favicon.svg", nil)
 	req.Header.Set("Accept-Encoding", "gzip")

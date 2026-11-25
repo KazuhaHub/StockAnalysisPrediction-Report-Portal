@@ -102,10 +102,12 @@ func testPlatformManagedRestoreReview(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRestoreReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRestoreReview(t, false)
 }
 
 func TestPlatformManagedRestoreReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRestoreReview(t, true)
 }
 
@@ -167,10 +169,12 @@ func testPlatformManagedRestoreReviewRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRestoreReviewRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRestoreReviewRefusals(t, false)
 }
 
 func TestPlatformManagedRestoreReviewRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRestoreReviewRefusals(t, true)
 }
 
@@ -199,9 +203,11 @@ func testPlatformManagedRestoreReviewStaleTrust(t *testing.T, pg bool) {
 }
 
 func TestPlatformManagedRestoreReviewStaleTrustSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRestoreReviewStaleTrust(t, false)
 }
 
 func TestPlatformManagedRestoreReviewStaleTrustPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedRestoreReviewStaleTrust(t, true)
 }

@@ -130,16 +130,19 @@ func testPlatformUpdateReviewRefusesNewRequiredCapability(
 func TestPlatformUpdateReviewRefusesNewRequiredCapabilitySQLite(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformUpdateReviewRefusesNewRequiredCapability(t, false)
 }
 
 func TestPlatformUpdateReviewRefusesNewRequiredCapabilityPostgres(
 	t *testing.T,
 ) {
+	t.Parallel()
 	testPlatformUpdateReviewRefusesNewRequiredCapability(t, true)
 }
 
 func TestPlatformUpdateReviewQueuesTargetGenerationWithoutBreakingCurrent(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, 1)
@@ -172,6 +175,7 @@ func TestPlatformUpdateReviewQueuesTargetGenerationWithoutBreakingCurrent(t *tes
 }
 
 func TestPlatformUpdateReviewRefusesIncompatibleDataAndStaleSource(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{2})
 	if _, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, 1); err == nil {
 		t.Fatal("incompatible data upgrade was admitted")
@@ -215,14 +219,17 @@ func testPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(t *testing.T, pg bo
 }
 
 func TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpenSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(t, false)
 }
 
 func TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpenPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(t, true)
 }
 
 func TestPlatformStaticUpdateActivatesCandidateAndRetiresSource(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, 1)
@@ -278,6 +285,7 @@ func TestPlatformStaticUpdateActivatesCandidateAndRetiresSource(t *testing.T) {
 }
 
 func TestPlatformFrontendUpdateSchedulerClaimsAndCompletes(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, 1)
 	if err != nil {
@@ -304,6 +312,7 @@ func TestPlatformFrontendUpdateSchedulerClaimsAndCompletes(t *testing.T) {
 }
 
 func TestPlatformFrontendUpdateRetryExhaustionKeepsSourceGeneration(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, 1)
@@ -374,10 +383,12 @@ func testPlatformFrontendUpdateConcurrentClaim(t *testing.T, pg bool) {
 }
 
 func TestPlatformFrontendUpdateConcurrentClaimSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUpdateConcurrentClaim(t, false)
 }
 
 func TestPlatformFrontendUpdateConcurrentClaimPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUpdateConcurrentClaim(t, true)
 }
 
@@ -413,9 +424,11 @@ func testPlatformFrontendUpdateResumesAfterExpiredWorker(t *testing.T, pg bool) 
 }
 
 func TestPlatformFrontendUpdateResumesAfterExpiredWorkerSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUpdateResumesAfterExpiredWorker(t, false)
 }
 
 func TestPlatformFrontendUpdateResumesAfterExpiredWorkerPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendUpdateResumesAfterExpiredWorker(t, true)
 }

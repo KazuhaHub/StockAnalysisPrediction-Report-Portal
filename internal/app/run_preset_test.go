@@ -56,6 +56,7 @@ func parseLocal(t *testing.T, s string) time.Time {
 // panel timezone. It handles windows that wrap the period boundary (stop before start) and clamps
 // invalid month days (day 31 in a short month, 2/29 in a non-leap year). weekday: 0=Sun..6=Sat.
 func TestNextInterval(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		freq         string
@@ -115,6 +116,7 @@ func TestNextInterval(t *testing.T) {
 // nextWindow picks, across a preset's union of sub-windows, the occurrence whose end is the
 // earliest still after now — the next moment the run is eligible (a split low-peak 9-12 & 14-18).
 func TestNextWindowUnion(t *testing.T) {
+	t.Parallel()
 	ivs := []presetInterval{iv("09:00", "12:00"), iv("14:00", "18:00")}
 	cases := []struct {
 		name         string
@@ -143,6 +145,7 @@ func TestNextWindowUnion(t *testing.T) {
 // samePeriod distinguishes "another sub-window later this period" (auto-advance) from "period
 // exhausted" (apply on_overrun) for each frequency.
 func TestSamePeriod(t *testing.T) {
+	t.Parallel()
 	loc := time.UTC
 	cases := []struct {
 		freq string
@@ -169,6 +172,7 @@ func TestSamePeriod(t *testing.T) {
 // snapshot carrying the rule + on_overrun + the occurrence end (until). Both instants round-trip
 // through the local wall-clock basis the scheduler uses.
 func TestResolvePresetWindow(t *testing.T) {
+	t.Parallel()
 	runAt, snap, ok := resolvePresetWindow("daily",
 		[]presetInterval{iv("00:30", "08:30")}, "next", false, ut(2026, 7, 8, 10, 0), time.UTC)
 	if !ok {
@@ -197,6 +201,7 @@ func TestResolvePresetWindow(t *testing.T) {
 // it stays hidden until the block clears. The snapshot carries Invert and no Until (the scheduler
 // gates it live), and a malformed interval is still rejected.
 func TestResolveInvertWindow(t *testing.T) {
+	t.Parallel()
 	block := []presetInterval{iv("09:00", "12:00")} // "peak" hours the run must avoid
 
 	// Outside the block → run ASAP, snapshot marked inverted with no Until.
@@ -229,6 +234,7 @@ func TestResolveInvertWindow(t *testing.T) {
 // invertBlocksNow gates an inverted preset live at admission: a run is blocked while now is inside
 // any of the union's sub-windows and free otherwise. A non-inverted or empty snapshot never blocks.
 func TestInvertBlocksNow(t *testing.T) {
+	t.Parallel()
 	mk := func(invert bool) string {
 		b, _ := json.Marshal(runPresetSnapshot{Freq: "daily", Intervals: []presetInterval{iv("09:00", "12:00")}, Invert: invert})
 		return string(b)
@@ -253,6 +259,7 @@ func TestInvertBlocksNow(t *testing.T) {
 // run_presets is an admin-managed, ordered collection (like type_config/links): CRUD + reorder
 // must round-trip, and ordering is by ord then id. intervals is stored as JSON.
 func TestRunPresetsCRUD(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 
 	id, err := st.CreateRunPreset(RunPreset{Label: "低峰期", Freq: "daily",
@@ -307,6 +314,7 @@ func TestRunPresetsCRUD(t *testing.T) {
 // A job's window (run_at + run_preset snapshot) round-trips; QueuedPresetJobs surfaces only
 // queued jobs that carry a window; expiring or clearing removes them from that set.
 func TestJobWindowRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	snap := `{"freq":"daily","intervals":[{"start":{"time":"00:30"},"stop":{"time":"08:30"}}],"on_overrun":"next","until":"2099-01-01 08:30:00"}`
 
@@ -350,6 +358,7 @@ func makePresetJob(t *testing.T, st *Store, intervals []presetInterval, overrun,
 // Single-interval overrun: on close (the sole window always exhausts the period), continue → drop
 // the window, cancel → expired, next → roll to the next day. Deterministic via UTC panel + fixed now.
 func TestSweepPresetOverrun(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("timezone", "UTC")
 	srv := &Server{st: st}
@@ -377,6 +386,7 @@ func TestSweepPresetOverrun(t *testing.T) {
 // Union overrun: with two sub-windows, missing the first auto-advances to the second SAME DAY
 // regardless of policy; only once the whole day is exhausted does on_overrun (here cancel) fire.
 func TestSweepPresetUnion(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SetSetting("timezone", "UTC")
 	srv := &Server{st: st}
@@ -415,6 +425,7 @@ func TestSweepPresetUnion(t *testing.T) {
 // confirm the create wiring snapshots the resolved window (run_at + run_preset) onto the job. A
 // stub provider keeps any immediate run clean. Also covers CRUD validation.
 func TestRunPresetSchedulesJob(t *testing.T) {
+	t.Parallel()
 	srv := batchServer(t)
 	srv.st.SetSetting("timezone", "UTC")
 	srv.buildProv = func(BatchJob, func(string, string, string)) (batch.Provider, error) {

@@ -30,6 +30,12 @@ func newReadPathFixture(t *testing.T) *readPathFixture {
 	st, spy := newSpyTestStore(t)
 	s, session := platformActorTestServerWithStore(t, st)
 	s.names = LoadNames(t.TempDir(), st)
+	// LoadNames copies the names into the stocks table on a goroutine of its own. Wait for it, or its
+	// inserts land in whichever statement trace a test starts next.
+	names := len(s.names.All())
+	waitFor(t, "the stock names to reach the stocks table", func() bool {
+		return scalar[int](t, st, `SELECT COUNT(*) FROM stocks`) >= names
+	})
 	session.expires = time.Unix(time.Now().Add(time.Hour).Unix(), 0)
 	platformSeedActorSession(t, s.st, session)
 	if _, _, err := s.st.UpsertReport(Rep{Symbol: "600000", Name: "Soak Co", Date: "2026-11-13", RType: "x", Title: "soak report", MD: "body"}); err != nil {
@@ -80,6 +86,7 @@ func countMatching(statements []string, pattern string) int {
 // The activity stamp of a session is due once an interval, and the answer is remembered in memory, so the
 // requests in between do not even read it.
 func TestReadPathSessionActivityIsNotReadOnEveryRequest(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	if code, first := f.get(t, "/api/home"); code != 200 || countMatching(first, `^SELECT last_seen FROM user_sessions`) != 1 {
 		t.Fatalf("first request: %d, %d reads of the stamp", code, countMatching(first, `^SELECT last_seen FROM user_sessions`))
@@ -101,6 +108,7 @@ func TestReadPathSessionActivityIsNotReadOnEveryRequest(t *testing.T) {
 }
 
 func TestReadPathFacetsAreOneStatementAndEqualTheThreeListsTheyReplace(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	for i, v := range []struct{ symbol, rtype, version string }{{"600001", "alpha", "internal"}, {"600002", "beta", "external"}, {"600003", "alpha", ""}} {
 		if _, _, err := f.s.st.UpsertReport(Rep{Symbol: v.symbol, Name: "N", Date: "2026-11-1" + string(rune('0'+i)), RType: v.rtype, Title: "t" + v.symbol, MD: "b", Version: v.version}); err != nil {
@@ -131,6 +139,7 @@ func TestReadPathFacetsAreOneStatementAndEqualTheThreeListsTheyReplace(t *testin
 // The entry buttons, their groups and the kind colours are admin configuration read on every home load. They are
 // kept in memory and dropped by every write to them, with a short time limit behind that for another process.
 func TestReadPathHomeConfigurationIsCachedAndEveryWriterDropsIt(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	f.get(t, "/api/home") // warm
 	_, warm := f.get(t, "/api/home")
@@ -174,6 +183,7 @@ func TestReadPathHomeConfigurationIsCachedAndEveryWriterDropsIt(t *testing.T) {
 // A reader that loaded the home configuration before a write must not store what it read after the write
 // dropped the cache: the next reader would be served the pre-write configuration until the time limit.
 func TestHomeConfigDiscardsAFillAWriteOvertook(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	st := f.s.st
 	if err := st.SetKindColor("预测", "gold"); err != nil {
@@ -200,6 +210,7 @@ func TestHomeConfigDiscardsAFillAWriteOvertook(t *testing.T) {
 // A session stamp is remembered only when its UPDATE succeeded: after a failed write the next request reads the
 // stamp and writes it again instead of believing it fresh.
 func TestSessionStampIsRememberedOnlyWhenItsWriteSucceeded(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	f.s.sessionStamps.reset()
 	mustExec(t, f.s.st, `UPDATE user_sessions SET last_seen=1 WHERE id=?`, f.session.sessionID)
@@ -226,6 +237,7 @@ func TestSessionStampIsRememberedOnlyWhenItsWriteSucceeded(t *testing.T) {
 // Audit records stay durable: the report-read row is the ordinary audit insert, one statement, and no
 // synchronous_commit setting is used for it, not even a statement-scoped one.
 func TestReadPathReportReadAuditIsOneSynchronousInsert(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	f.spy.mu.Lock()
 	f.spy.tracing, f.spy.trace = true, nil
@@ -257,6 +269,7 @@ func TestReadPathReportReadAuditIsOneSynchronousInsert(t *testing.T) {
 // The same on PostgreSQL: the row is whole, and neither the pooled connections nor the database see any
 // synchronous_commit other than the server's own.
 func TestReadPathReportReadAuditLeavesTheCommitModeAloneOnPostgres(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	var before string
 	if err := st.db.QueryRow(`SHOW synchronous_commit`).Scan(&before); err != nil {
@@ -285,6 +298,7 @@ func TestReadPathReportReadAuditLeavesTheCommitModeAloneOnPostgres(t *testing.T)
 // one request are decided from the same account row and organisation tree, read once in one snapshot; the soak's
 // trace showed the stock page loading them five times over (four statements each on PostgreSQL) and home twice.
 func TestReadPathAccountSnapshotIsReadOncePerPage(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	if _, _, err := f.s.st.UpsertReport(Rep{Symbol: "600010", Name: "Forecast Co", Date: "2026-11-13", RType: predTestRtype, Title: "covered", MD: "body"}); err != nil {
 		t.Fatal(err)
@@ -303,6 +317,7 @@ func TestReadPathAccountSnapshotIsReadOncePerPage(t *testing.T) {
 
 // The snapshot lives for one request: a policy change between two requests is seen by the second.
 func TestReadPathAccountSnapshotIsNotSharedBetweenRequests(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	_, first := f.get(t, "/api/home")
 	_, second := f.get(t, "/api/home")
@@ -314,6 +329,7 @@ func TestReadPathAccountSnapshotIsNotSharedBetweenRequests(t *testing.T) {
 // Only a safe request (GET or HEAD) carries the snapshot, so a request that writes policy never decides from a
 // snapshot taken before its write; and the snapshot answers only for the account it was made for.
 func TestRequestAccountSnapshotOnlyForSafeRequestsAndItsOwnAccount(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	user := f.session.username
 	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role,restricted) VALUES(?,?,?,1)`, "someone-else", "h", "user")
@@ -355,6 +371,7 @@ func TestRequestAccountSnapshotOnlyForSafeRequestsAndItsOwnAccount(t *testing.T)
 // administrator and an unrestricted account are settled by the tree alone (one read), a restricted account's scope
 // still comes from its own full snapshot, and is scoped, never widened.
 func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role) VALUES(?,?,?)`, "an-admin", "h", "admin")
 	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role) VALUES(?,?,?)`, "a-reader", "h", "user")
@@ -415,6 +432,7 @@ func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
 // The account row and the organisation tree are one statement, so they need no explicit transaction to be read
 // from one state: four round trips on PostgreSQL (begin, the row, the tree, commit) become one, on every page.
 func TestOUPolicySubjectIsOneStatementAndEqualsTheTransactionalRead(t *testing.T) {
+	t.Parallel()
 	f := newReadPathFixture(t)
 	users := seedOUPolicySubjects(t, f.s.st)
 	for _, user := range append([]string{f.session.username}, users...) {
@@ -447,6 +465,7 @@ func TestOUPolicySubjectIsOneStatementAndEqualsTheTransactionalRead(t *testing.T
 // The same results on PostgreSQL, where the statement replaces a REPEATABLE READ transaction (the statement count
 // is pinned on SQLite, where the spy driver can see it).
 func TestOUPolicySubjectEqualsTheTransactionalReadOnPostgres(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "users", "user_groups")
 	t.Cleanup(func() {
 		for _, tbl := range []string{"users", "user_groups"} {

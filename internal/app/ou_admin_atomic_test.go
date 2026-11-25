@@ -10,6 +10,7 @@ import (
 )
 
 func TestUnifiedOUConcurrentMovesCannotCreateCycle(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	a := int64(postGroup(t, s, `{"name":"concurrent-a"}`)["id"].(float64))
 	b := int64(postGroup(t, s, `{"name":"concurrent-b"}`)["id"].(float64))
@@ -49,6 +50,7 @@ func TestUnifiedOUConcurrentMovesCannotCreateCycle(t *testing.T) {
 }
 
 func TestUnifiedOURejectedSaveIsAtomic(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	parent := int64(postGroup(t, s, `{"name":"atomic-parent"}`)["id"].(float64))
 	child := int64(postGroup(t, s, fmt.Sprintf(`{"name":"atomic-child","parent_id":%d}`, parent))["id"].(float64))
@@ -66,6 +68,7 @@ func TestUnifiedOURejectedSaveIsAtomic(t *testing.T) {
 }
 
 func TestUnifiedOURejectedCreateLeavesNoRow(t *testing.T) {
+	t.Parallel()
 	s := ouAPIServer(t)
 	before := scalar[int](t, s.st, `SELECT COUNT(*) FROM user_groups`)
 	w := httptest.NewRecorder()
@@ -79,6 +82,7 @@ func TestUnifiedOURejectedCreateLeavesNoRow(t *testing.T) {
 }
 
 func TestUnifiedOUMembershipRejectsMissingDestination(t *testing.T) {
+	t.Parallel()
 	s, org, _, _, _ := ouFixture(t)
 	if err := s.st.SetPrimaryGroup("ext", org); err != nil {
 		t.Fatal(err)
@@ -95,6 +99,7 @@ func TestUnifiedOUMembershipRejectsMissingDestination(t *testing.T) {
 }
 
 func TestUnifiedOUBulkMembershipIsAtomic(t *testing.T) {
+	t.Parallel()
 	s, org, team, _, _ := ouFixture(t)
 	if _, err := s.st.SetPrimaryGroups([]string{"ext", "missing-account"}, org); err == nil {
 		t.Fatal("partially missing batch accepted")

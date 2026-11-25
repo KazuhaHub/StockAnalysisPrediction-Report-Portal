@@ -68,7 +68,7 @@ jobs:
   # THE GO TESTS ARE FOUR KINDS OF JOB, AND TWO REQUIRED CHECKS. This job carries everything that
   # runs once: formatting, build, vet, staticcheck, govulncheck and every package except
   # internal/app. The app package's ordinary run is dealt over the go-test-shard jobs below, because
-  # its PostgreSQL variants put it at 16 to 20 minutes on a runner. The required check "go-test" is
+  # its PostgreSQL variants put it at 16 to 20 minutes on a runner when run one at a time. The required check "go-test" is
   # the summary job after them. There is no race lane on a pull request: the race detector runs on
   # pushes to main and on manual runs only, in the go-race-others and go-race-full jobs below.
   #
@@ -213,10 +213,14 @@ jobs:
             ~/.cache/staticcheck
           key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
 
-  # internal/app's ordinary run, dealt over four shards by recorded duration: the Go toolchain has
+  # internal/app's ordinary run, dealt over three shards by recorded duration: the Go toolchain has
   # no -shard flag, so each shard lists the tests and scripts/ci_shard.py prints its share for -run.
   # Dealt by position, the shards ran 243s to 594s of tests; dealt by the durations in
   # .github/ci/internal-app-test-timings.txt (heaviest first, to the lightest shard), 409s to 426s.
+  # Since most of the package's tests run in parallel (t.Parallel, and a PostgreSQL database of their
+  # own per test), a shard of four takes about 70s of tests on a 4-CPU machine, less than the
+  # go-test-checks job beside it. Three shards keep the pull request's wall clock bounded by that job
+  # (about 150s of tests each on a runner) with one runner fewer; two would be about a minute slower.
   # A test the file does not know is dealt by position, so a new test lands in exactly one shard
   # without editing anything, and a stale file costs balance, never coverage. To refresh it, put
   # the go-test-shard-N-timings artifacts of a recent main run together:
@@ -228,7 +232,7 @@ jobs:
   # it; a shard dealt nothing fails rather than pass green. release_guard_test.py holds the job
   # name, this matrix and release_guard.ci_ready to one count.
   go-test-shard:
-    name: go test (${{ matrix.shard }}/4)
+    name: go test (${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
@@ -236,7 +240,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:16-alpine

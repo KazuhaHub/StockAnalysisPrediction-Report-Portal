@@ -10,6 +10,7 @@ import (
 )
 
 func TestQuoteTrafficSeparatesLiveHistoryAndStaleOutcomes(t *testing.T) {
+	t.Parallel()
 	clock := time.Now()
 	fail := false
 	c := &quoteCache{now: func() time.Time { return clock }}
@@ -48,6 +49,7 @@ func TestQuoteTrafficSeparatesLiveHistoryAndStaleOutcomes(t *testing.T) {
 }
 
 func TestQuoteTrafficCountsFlightJoinsWithoutCallingThemCacheHits(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &quoteCache{}
 	c.init()
@@ -65,6 +67,7 @@ func TestQuoteTrafficCountsFlightJoinsWithoutCallingThemCacheHits(t *testing.T) 
 }
 
 func TestQuoteBatchTrafficUsesUniqueSymbolsAsCacheDenominator(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{sources: []quoteSource{{name: "tencent"}}}
 	a, _ := quoteResolve("600081")
 	b, _ := quoteResolve("600519")
@@ -80,6 +83,7 @@ func TestQuoteBatchTrafficUsesUniqueSymbolsAsCacheDenominator(t *testing.T) {
 }
 
 func TestQuoteLatencyHistogramIsBoundedAndReportsAnUpperBound(t *testing.T) {
+	t.Parallel()
 	var h quoteLatencyHistogram
 	if h.p95Millis() != 0 {
 		t.Fatal("empty percentile invented data")
@@ -98,6 +102,7 @@ func TestQuoteLatencyHistogramIsBoundedAndReportsAnUpperBound(t *testing.T) {
 }
 
 func TestQuoteAdminExposesDisplayTrafficWithoutSerializingHistogramState(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	s.quotes.put(quoteCacheKey("sh", "600081", 66, quoteIntervalDaily, quoteWindow{}), &QuoteResp{Symbol: "600081"}, time.Minute)
 	_, _, _, err := s.quotes.fetchUnder(context.Background(), quoteConfigDefault(), "sh", "600081", 66, quoteIntervalDaily, quoteWindow{})

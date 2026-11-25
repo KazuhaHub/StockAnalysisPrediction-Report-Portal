@@ -8,9 +8,11 @@ import (
 )
 
 func TestExtensionConnectionLifecycle(t *testing.T) {
+	t.Parallel()
 	testExtensionConnectionLifecycle(t, newTestStore(t))
 }
 func TestPostgresExtensionConnectionLifecycle(t *testing.T) {
+	t.Parallel()
 	testExtensionConnectionLifecycle(t, pgStore(t, "app_backend_connections", "app_files", "apps"))
 }
 func testExtensionConnectionLifecycle(t *testing.T, st *Store) {
@@ -65,6 +67,7 @@ func testExtensionConnectionLifecycle(t *testing.T, st *Store) {
 }
 
 func TestExtensionConnectionRestoreRequiresPairing(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.InstallApp(App{ID: "status", Name: "Status", Entry: "index.html"}, nil); err != nil {
 		t.Fatal(err)
@@ -93,6 +96,7 @@ func TestExtensionConnectionRestoreRequiresPairing(t *testing.T) {
 }
 
 func TestExtensionMigrationDeclaresAllColumns(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if !recorded(st, "0008") {
 		t.Fatal("connection migration not recorded")

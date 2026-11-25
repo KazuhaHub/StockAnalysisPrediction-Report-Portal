@@ -110,10 +110,17 @@ func testPlatformLeaseConcurrentClaim(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformLeaseLifecycle(t *testing.T)         { testPlatformLeaseLifecycle(t, false) }
-func TestPostgresAppPlatformLeaseLifecycle(t *testing.T) { testPlatformLeaseLifecycle(t, true) }
-func TestAppPlatformLeaseConcurrentClaim(t *testing.T)   { testPlatformLeaseConcurrentClaim(t, false) }
+func TestAppPlatformLeaseLifecycle(t *testing.T) { t.Parallel(); testPlatformLeaseLifecycle(t, false) }
+func TestPostgresAppPlatformLeaseLifecycle(t *testing.T) {
+	t.Parallel()
+	testPlatformLeaseLifecycle(t, true)
+}
+func TestAppPlatformLeaseConcurrentClaim(t *testing.T) {
+	t.Parallel()
+	testPlatformLeaseConcurrentClaim(t, false)
+}
 func TestPostgresAppPlatformLeaseConcurrentClaim(t *testing.T) {
+	t.Parallel()
 	testPlatformLeaseConcurrentClaim(t, true)
 }
 
@@ -151,10 +158,11 @@ func testPlatformLeaseGuards(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformLeaseGuards(t *testing.T)         { testPlatformLeaseGuards(t, false) }
-func TestPostgresAppPlatformLeaseGuards(t *testing.T) { testPlatformLeaseGuards(t, true) }
+func TestAppPlatformLeaseGuards(t *testing.T)         { t.Parallel(); testPlatformLeaseGuards(t, false) }
+func TestPostgresAppPlatformLeaseGuards(t *testing.T) { t.Parallel(); testPlatformLeaseGuards(t, true) }
 
 func TestAppPlatformLeaseSurvivesStoreRestart(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "leases.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {

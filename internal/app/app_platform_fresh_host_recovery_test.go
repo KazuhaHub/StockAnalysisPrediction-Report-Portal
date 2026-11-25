@@ -39,6 +39,7 @@ type platformRecoveryBundleMetadata struct {
 }
 
 func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_RECOVERY_CHILD") == "1" {
 		t.Skip("parent recovery fixture only")
 	}
@@ -225,6 +226,7 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 }
 
 func TestFreshHostPortalRecoveryBundleChild(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_RECOVERY_CHILD") != "1" {
 		t.Skip("fresh recovery child only")
 	}

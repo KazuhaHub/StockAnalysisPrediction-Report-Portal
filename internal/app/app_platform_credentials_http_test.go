@@ -11,6 +11,7 @@ import (
 )
 
 func TestPlatformCredentialManagementHTTP(t *testing.T) {
+	t.Parallel()
 	s, mux, actor, _, cookie := platformManagementFixture(t, false)
 	value := base64.StdEncoding.EncodeToString([]byte("disposable-http-value"))
 	create := sessionTestRequest(mux, "POST", "/api/admin/app-platform/credentials", cookie, fmt.Sprintf(`{"label":"HTTP fixture","value_base64":%q}`, value))
@@ -41,6 +42,7 @@ func TestPlatformCredentialManagementHTTP(t *testing.T) {
 }
 
 func TestPlatformSecretBindingManagementHTTP(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -76,6 +78,7 @@ func TestPlatformSecretBindingManagementHTTP(t *testing.T) {
 // An ACS3 binding is reviewed through the same endpoints, with the allowed (action, version) pairs
 // in the request (doc 177 section 4); the review response echoes them and never a secret.
 func TestPlatformSecretBindingManagementHTTPACS3(t *testing.T) {
+	t.Parallel()
 	s, admin, installation, credential := acs3Fixture(t, false, acs3FixtureToken)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

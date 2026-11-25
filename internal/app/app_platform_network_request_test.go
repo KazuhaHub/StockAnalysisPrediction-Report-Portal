@@ -12,6 +12,7 @@ import (
 )
 
 func TestPlatformNetworkRequestPayloadBoundary(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: strings.Repeat("a", 64)}
 	for _, tc := range []struct {
@@ -55,8 +56,10 @@ func testPlatformNetworkRequestRequiresGrant(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformNetworkRequestRequiresGrantSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformNetworkRequestRequiresGrant(t, false)
 }
 func TestPlatformNetworkRequestRequiresGrantPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformNetworkRequestRequiresGrant(t, true)
 }

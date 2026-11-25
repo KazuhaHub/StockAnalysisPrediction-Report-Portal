@@ -12,6 +12,7 @@ import (
 // fans a delivery out to the same installation must take them in the same order, or the two deadlock when
 // a backend submits while an event is captured (the soak saw "deadlock detected" on a capture).
 func TestPlatformEventCaptureTakesTheTaskAdmissionLockBeforeAnyInstallationRow(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixtureWithDatabase(t, true)
 	if _, created, err := s.createPlatformEventSubscription(context.Background(), installation, appplatform.EventSubscriptionSpec{
 		EventType: appplatform.EventReportIngested, ResourceType: "report", ResourceID: "7401", MaxInflight: 4,

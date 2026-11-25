@@ -9,6 +9,7 @@ import (
 // expired replay-cache entries go, live ones stay. These rows are worthless once expired, so unlike
 // the configurable retention targets this sweep is unconditional and is not an admin setting.
 func TestPurgeExpiredAuthState(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	now := time.Now().Unix()
 

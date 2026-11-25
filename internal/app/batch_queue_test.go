@@ -6,6 +6,7 @@ import "testing"
 // MarkJobRunning is an atomic single-winner transition, and cancelling a still-
 // queued job cancels it outright.
 func TestQueueStoreContract(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	rows := []map[string]string{{"code": "a"}}

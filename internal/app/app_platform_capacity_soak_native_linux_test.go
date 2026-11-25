@@ -1184,6 +1184,7 @@ type soakFloodTaskTarget struct {
 // as such. The Portal process whose latency is measured therefore carries the platform's work for those requests and none
 // of the generator's. It does nothing unless the soak child started it.
 func TestPlatformCapacitySoakFlood(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD") != "1" {
 		t.Skip("flood process of the capacity soak only")
 	}

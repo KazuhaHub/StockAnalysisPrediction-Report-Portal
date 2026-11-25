@@ -15,6 +15,7 @@ import (
 )
 
 func TestRestoreBringsOUScopesBackAsDumped(t *testing.T) {
+	t.Parallel()
 	eachRestoreDriver(t, func(t *testing.T, dst *Store) {
 		// The dump was taken while the OU was open to its members.
 		src := newTestStore(t)

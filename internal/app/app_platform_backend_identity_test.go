@@ -7,6 +7,7 @@ import (
 )
 
 func TestPlatformBackendRegistrationRequiresActualReadiness(t *testing.T) {
+	t.Parallel()
 	s, lease := platformCandidateIntentFixture(t, false)
 	before := dumpOf(t, s.st)
 	if registration, err := s.preparePlatformBackendRegistration(context.Background(), lease); err == nil {

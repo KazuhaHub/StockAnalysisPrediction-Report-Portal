@@ -10,11 +10,13 @@ import (
 )
 
 func TestPostgresNotificationPublisher(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, append(append([]string{}, notificationTables...), "api_tokens", "apps", "app_files")...)
 	testNotificationPublisherIsNamespacedAndIdempotent(t, &Server{st: st, cfg: &config.Config{SecretKey: "publisher-test-key"}})
 }
 
 func TestPostgresNotificationRetention(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, notificationTables...)
 	if err := st.SetSetting("notification_dispatch_paused", "0"); err != nil {
 		t.Fatal(err)
@@ -33,19 +35,23 @@ func TestPostgresNotificationRetention(t *testing.T) {
 }
 
 func TestPostgresNotificationInbox(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, append(append([]string{}, notificationTables...), "users")...)
 	testNotificationInboxChecksAuthorityAndSnapshot(t, &Server{st: st, cfg: &config.Config{SecretKey: "inbox-test-key"}})
 }
 
 func TestPostgresNotificationConfig(t *testing.T) {
+	t.Parallel()
 	testNotificationConfigRevisionsAndRollback(t, pgStore(t, notificationTables...))
 }
 
 func TestPostgresNotificationReplay(t *testing.T) {
+	t.Parallel()
 	testNotificationReplayIsIdempotentAndDoesNotRewriteEvidence(t, pgStore(t, notificationTables...))
 }
 
 func TestPostgresNotificationManualAttempt(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, notificationTables...)
 	c := NotificationChannel{ID: "manual-channel", Adapter: "webhook", Enabled: true, Revision: 1}
 	if err := st.InsertNotificationChannel(c); err != nil {
@@ -73,6 +79,7 @@ func TestPostgresNotificationManualAttempt(t *testing.T) {
 }
 
 func TestPostgresNotificationManualAndWorkerShareChannelLimit(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, notificationTables...)
 	c := NotificationChannel{ID: "shared-channel", Adapter: "webhook", Enabled: true, Revision: 1}
 	if err := st.InsertNotificationChannel(c); err != nil {
@@ -117,18 +124,22 @@ func TestPostgresNotificationManualAndWorkerShareChannelLimit(t *testing.T) {
 }
 
 func TestPostgresNotificationCandidateDeletionFence(t *testing.T) {
+	t.Parallel()
 	testNotificationRoutingSnapshotCannotFollowReusedUsername(t, pgStore(t, append(append([]string{}, notificationTables...), "users")...))
 }
 
 func TestPostgresNotificationJobRecovery(t *testing.T) {
+	t.Parallel()
 	testNotificationJobIntentSurvivesServerRestart(t, pgStore(t, append(append([]string{}, notificationTables...), "batch_jobs", "batch_items", "users")...))
 }
 
 func TestPostgresNotificationJobRetry(t *testing.T) {
+	t.Parallel()
 	testNotificationJobRetryHasNewOccurrenceWithoutNewConsent(t, pgStore(t, append(append([]string{}, notificationTables...), "batch_jobs", "batch_items", "users")...))
 }
 
 func TestPostgresNotificationCaptureAndClaims(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, notificationTables...)
 	now := time.Now().UTC()
 	e := NotificationEvent{ID: "pg-event", SourceKey: "pg-source", Type: EventBatchFinished, Payload: `{}`, CreatedAt: now.UnixMilli()}
@@ -188,6 +199,7 @@ func TestPostgresNotificationCaptureAndClaims(t *testing.T) {
 }
 
 func TestPostgresNotificationChannelConcurrency(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, notificationTables...)
 	now := time.Now().UTC()
 	for i := range 8 {

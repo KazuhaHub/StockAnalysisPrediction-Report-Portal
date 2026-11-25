@@ -9,6 +9,7 @@ import (
 // the manifest (scopes parsed), AppFile returns the bytes + content type, and a
 // re-install fully replaces the previous files (no stale leftovers).
 func TestInstallListDeleteApp(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 
 	app := App{ID: "hello", Name: "Hello", Icon: "😀", Version: "1.0.0", Entry: "index.html", Scopes: []string{"query"}}

@@ -213,9 +213,11 @@ func testLegacyInFlightUpdateRunsWithNoRaise(t *testing.T, pg bool) {
 }
 
 func TestLegacyInFlightUpdateRunsWithNoRaiseSQLite(t *testing.T) {
+	t.Parallel()
 	testLegacyInFlightUpdateRunsWithNoRaise(t, false)
 }
 func TestLegacyInFlightUpdateRunsWithNoRaisePostgres(t *testing.T) {
+	t.Parallel()
 	testLegacyInFlightUpdateRunsWithNoRaise(t, true)
 }
 

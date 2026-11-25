@@ -52,6 +52,7 @@ func platformRefusedCheckpoint(t *testing.T, intent platformCheckpointIntent, co
 // The runner's typed refusal of a checkpoint is a definite failure of the stage: it is recognised for exactly this
 // command and never committed as a receipt.
 func TestPlatformCheckpointCommitRecognisesTheRunnersTypedRefusal(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	intent, err := s.preparePlatformCheckpoint(context.Background(), snapshot)
 	if err != nil {
@@ -80,6 +81,7 @@ func TestPlatformCheckpointCommitRecognisesTheRunnersTypedRefusal(t *testing.T) 
 // A managed update whose snapshot is refused ends for review at once, from the snapshot stage, and the installation
 // keeps its source generation: the update is never retried against a refusal that answers the same every time.
 func TestPlatformManagedUpdateWithRefusedSnapshotEndsFailedWithSourceKept(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	intent, err := s.preparePlatformCheckpoint(context.Background(), snapshot)
 	if err != nil {
@@ -114,6 +116,7 @@ func TestPlatformManagedUpdateWithRefusedSnapshotEndsFailedWithSourceKept(t *tes
 // An operation that was admitted and then wedged at the snapshot stage (its review plan expired, its fence moved on
 // with every lease it lost) is finished, not looped on.
 func TestPlatformManagedUpdateWedgedAtSnapshotIsClaimedAndFinished(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 		t.Fatal(err)
@@ -169,6 +172,7 @@ func platformExpectPlanExpired(t *testing.T, s *Server, operation, installation 
 // Expiry of the review plan blocks only a new start, and a new start whose plan expired ends: it is failed with
 // plan_expired, with no effects to settle, instead of being skipped for ever.
 func TestPlatformManagedUpdateNotYetStartedEndsOnceItsReviewPlanExpired(t *testing.T) {
+	t.Parallel()
 	s, operation := platformManagedUpdateOperationFixture(t, false)
 	platformExpireReview(t, s, operation.id)
 	selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6140))
@@ -205,6 +209,7 @@ func platformUpdateAtQuiesceWithoutEffect(t *testing.T) (*Server, platformOperat
 
 // An update at the quiesce stage with no effect row has stopped nothing: an expired review plan ends it there.
 func TestPlatformManagedUpdateAtQuiesceWithoutAnEffectEndsOnceItsReviewPlanExpired(t *testing.T) {
+	t.Parallel()
 	s, lease := platformUpdateAtQuiesceWithoutEffect(t)
 	platformExpireReview(t, s, lease.id)
 	if selected, err := s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(6170)); err != nil || selected.lease.id != "" {
@@ -216,6 +221,7 @@ func TestPlatformManagedUpdateAtQuiesceWithoutAnEffectEndsOnceItsReviewPlanExpir
 // Once a quiesce effect row exists, in any state, the stop may have been sent: the update is admitted whatever the
 // clock says, and carried on.
 func TestPlatformManagedUpdateAtQuiesceWithAnEffectIsClaimedAfterItsReviewPlanExpired(t *testing.T) {
+	t.Parallel()
 	s, lease, _, _ := platformManagedUpdateQuiesceFixture(t, false)
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce'`, lease.id) != 1 {
 		t.Fatal("the fixture holds no quiesce effect")
@@ -316,6 +322,7 @@ func TestPlatformManagedUpdateSkipLogIsBounded(t *testing.T) {
 // An intent whose fence is ahead of the lease's was not written under any claim this lease follows: it is refused, where
 // one behind it (an earlier claim of the same operation) is carried forward.
 func TestPlatformCheckpointIntentWithAFenceAheadOfTheLeaseIsRefused(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 		t.Fatal(err)

@@ -11,6 +11,7 @@ import (
 )
 
 func TestRecordVersionUseRequiresASession(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	rec := httptest.NewRecorder()
 	s.requireUserJSON(s.handleVersionUse)(rec, httptest.NewRequest(http.MethodPost, "/api/me/version-use", strings.NewReader(`{"version":"v2026.40.3"}`)))
@@ -20,6 +21,7 @@ func TestRecordVersionUseRequiresASession(t *testing.T) {
 }
 
 func TestRecordUserVersionUseKeepsTheHighestRelease(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "alice", PasswordHash: "hash", Role: "user"}); err != nil {
 		t.Fatal(err)

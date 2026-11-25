@@ -277,6 +277,7 @@ func platformImageEnsureFixtureFor(t *testing.T, pg bool) (*Server, platformOper
 }
 
 func TestEnsureImageLoadsAMissingImageByUploadingExactlyTheBlobsTheRunnerNamedUnderOneEffect(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); err != nil {
 		t.Fatal(err)
@@ -294,6 +295,7 @@ func TestEnsureImageLoadsAMissingImageByUploadingExactlyTheBlobsTheRunnerNamedUn
 }
 
 func TestEnsureImageUploadsNothingWhenTheImageIsAlreadyOnTheHost(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.present = true
 	if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); err != nil {
@@ -306,6 +308,7 @@ func TestEnsureImageUploadsNothingWhenTheImageIsAlreadyOnTheHost(t *testing.T) {
 
 // Fails if a second attempt, a restart or a lease takeover mints a second identity for the load.
 func TestEnsureImageSendsTheSameEffectIdOnEveryAttemptAndNeverUploadsAgainOnceApplied(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	for range 3 {
 		if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); err != nil {
@@ -323,6 +326,7 @@ func TestEnsureImageSendsTheSameEffectIdOnEveryAttemptAndNeverUploadsAgainOnceAp
 
 // Fails if an unknown execute is sent again under a new identity, or if it is believed failed.
 func TestEnsureImageReadsBackAnUncertainExecuteUnderItsOwnIdentityAndTakesItsReceipt(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.present = true
 	fake.loseExecuteReplyOnce = true
@@ -336,6 +340,7 @@ func TestEnsureImageReadsBackAnUncertainExecuteUnderItsOwnIdentityAndTakesItsRec
 
 // Fails if a load the runner is still doing is treated as a failure that counts against the operation.
 func TestEnsureImageReportsABusyRunnerAsBusyNotAsAFailure(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.pendingFor = 1
 	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)
@@ -349,6 +354,7 @@ func TestEnsureImageReportsABusyRunnerAsBusyNotAsAFailure(t *testing.T) {
 
 // Fails if a definite rejection is retried as if it were transient, or hidden.
 func TestEnsureImageSurfacesARunnerRejectionAsADefiniteFailure(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.rejectLoad = "inspect_mismatch"
 	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)
@@ -359,6 +365,7 @@ func TestEnsureImageSurfacesARunnerRejectionAsADefiniteFailure(t *testing.T) {
 
 // Fails if a typed refusal of an upload is retried until the attempts run out, or reported as transient.
 func TestEnsureImageStopsOnTheRunnersTypedRefusalOfABlob(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.refuseBlob = imagestore.RefusalDiffIDMismatch
 	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)
@@ -376,6 +383,7 @@ func TestEnsureImageStopsOnTheRunnersTypedRefusalOfABlob(t *testing.T) {
 
 // Fails if a lost upload connection discards the effect or is reported as a rejection.
 func TestEnsureImageResumesALostUploadWithoutANewEffect(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	fake.failUpload = errors.New("connection reset")
 	if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); err != nil {
@@ -392,6 +400,7 @@ func TestEnsureImageResumesALostUploadWithoutANewEffect(t *testing.T) {
 
 // Fails (sends a command) if any runner effect leaves the Portal for a release whose blobs fail the hash check.
 func TestEnsureImageSendsNothingToTheRunnerWhenAStoredBlobFailsItsHashCheck(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	store, _ := s.platformImages()
 	layer := parts.plan.Layers[1]
@@ -419,6 +428,7 @@ func TestEnsureImageSendsNothingToTheRunnerWhenAStoredBlobFailsItsHashCheck(t *t
 
 // Fails if a release with a registry reference (the development form) triggers a load, or a static one does.
 func TestEnsureImageDoesNothingForAReleaseThatCarriesNoManagedImage(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	fake.present = false
 	// The operation's original target release names a registry reference.
@@ -434,6 +444,7 @@ func TestEnsureImageDoesNothingForAReleaseThatCarriesNoManagedImage(t *testing.T
 
 // Fails if the sender believes a reply that answers another command.
 func TestEnsureImageDoesNotBelieveAReceiptForAnotherEffect(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	liar := &platformLyingImageRunner{platformFakeImageRunner: fake}
 	s.platformImageRunner = liar

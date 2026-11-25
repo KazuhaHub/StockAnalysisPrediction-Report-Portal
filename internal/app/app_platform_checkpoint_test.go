@@ -147,10 +147,12 @@ func testPlatformCheckpointPreparesExactIntent(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointPreparesExactIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointPreparesExactIntent(t, false)
 }
 
 func TestPlatformCheckpointPreparesExactIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointPreparesExactIntent(t, true)
 }
 
@@ -169,10 +171,12 @@ func testPlatformWritableCheckpointPreparesIntent(t *testing.T, pg bool) {
 }
 
 func TestPlatformWritableCheckpointPreparesIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableCheckpointPreparesIntent(t, false)
 }
 
 func TestPlatformWritableCheckpointPreparesIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableCheckpointPreparesIntent(t, true)
 }
 
@@ -203,10 +207,12 @@ func testPlatformCheckpointSettlesVerifiedReceipt(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointSettlesVerifiedReceiptSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointSettlesVerifiedReceipt(t, false)
 }
 
 func TestPlatformCheckpointSettlesVerifiedReceiptPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointSettlesVerifiedReceipt(t, true)
 }
 
@@ -247,10 +253,12 @@ func testPlatformCheckpointRejectsChangedObservation(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointRejectsChangedObservationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointRejectsChangedObservation(t, false)
 }
 
 func TestPlatformCheckpointRejectsChangedObservationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointRejectsChangedObservation(t, true)
 }
 
@@ -296,10 +304,12 @@ func testPlatformCheckpointPreparationRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointPreparationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointPreparationRefusals(t, false)
 }
 
 func TestPlatformCheckpointPreparationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointPreparationRefusals(t, true)
 }
 
@@ -344,14 +354,17 @@ func testPlatformCheckpointCommitRollbackAndPause(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointCommitRollbackAndPauseSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointCommitRollbackAndPause(t, false)
 }
 
 func TestPlatformCheckpointCommitRollbackAndPausePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointCommitRollbackAndPause(t, true)
 }
 
 func TestPlatformCheckpointEndpointRefusesUnverifiedRuntimeSQLite(t *testing.T) {
+	t.Parallel()
 	endpoint := platformRuntimeEndpoint{path: "/run/portal-test/missing-checkpoint.sock", controllerUID: 1000, controllerGID: 1001}
 	s, dispatchLease := platformCheckpointUpdateFixture(t, false)
 	if _, err := s.dispatchPlatformCheckpoint(context.Background(), dispatchLease, endpoint); err == nil {
@@ -398,10 +411,12 @@ func testPlatformCheckpointRejectsChangedDurableIntent(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointRejectsChangedDurableIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointRejectsChangedDurableIntent(t, false)
 }
 
 func TestPlatformCheckpointRejectsChangedDurableIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointRejectsChangedDurableIntent(t, true)
 }
 
@@ -434,9 +449,11 @@ func testPlatformCheckpointPrepareRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformCheckpointPrepareRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointPrepareRollback(t, false)
 }
 
 func TestPlatformCheckpointPrepareRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCheckpointPrepareRollback(t, true)
 }

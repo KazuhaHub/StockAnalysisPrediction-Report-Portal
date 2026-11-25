@@ -5,6 +5,7 @@ import "testing"
 // The restructuring (重组) report line rolls up under a single top-level kind
 // named 重组决策 (renamed from 并购重组).
 func TestRunKindRestructuring(t *testing.T) {
+	t.Parallel()
 	for _, ty := range []string{"重组分析", "重组基本面分析", "重组交易分析"} {
 		if got := runKind([]string{ty}); got != "重组决策" {
 			t.Errorf("runKind(%q) = %q, want 重组决策", ty, got)
@@ -16,6 +17,7 @@ func TestRunKindRestructuring(t *testing.T) {
 // kinds — no subtype (e.g. 舆情分析/股权分析/管理能力分析) may leak through as its
 // own "kind", or cards/timeline show inconsistent tags.
 func TestRunKindMapsEveryCategory(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"汇总":      "投资决策",
 		"投资决策建议":  "投资决策",
@@ -52,6 +54,7 @@ func TestRunKindMapsEveryCategory(t *testing.T) {
 // A card's kind tags should reflect EVERY distinct top-level kind present in the
 // group (not one arbitrarily-collapsed guess), ordered by kindOrder.
 func TestBuildGroupsShowsAllKinds(t *testing.T) {
+	t.Parallel()
 	name := func(string) string { return "利通电子" }
 	reps := []Rep{
 		{ID: 1, Symbol: "603629", Date: "2026-07-01", RType: "估值分析"},    // → 投资决策
@@ -77,6 +80,7 @@ func TestBuildGroupsShowsAllKinds(t *testing.T) {
 // 重组决策 must be a registered top-level kind (drives the stock-page Segmented
 // order and the type-management grouping).
 func TestKindOrderHasRestructuringDecision(t *testing.T) {
+	t.Parallel()
 	found := false
 	for _, k := range kindOrder {
 		if k == "重组决策" {
@@ -95,6 +99,7 @@ func TestKindOrderHasRestructuringDecision(t *testing.T) {
 // per (stock, day) — collapseLatestBySymbol drops older-date duplicates. Thematic
 // (symbol-less) groups are all kept; the full per-day history stays on the stock page.
 func TestCollapseLatestBySymbol(t *testing.T) {
+	t.Parallel()
 	name := func(string) string { return "麦加芯彩" }
 	reps := []Rep{
 		{ID: 1, Symbol: "603062", Date: "2026-07-05", RType: "投资决策建议", Time: "2026-07-05 00:50"},

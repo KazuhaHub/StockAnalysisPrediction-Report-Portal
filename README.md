@@ -213,6 +213,27 @@ An optional pre-commit hook checks the staged files for `gofmt` and, when `web/n
 git config core.hooksPath .githooks
 ~~~
 
+### Running the tests
+
+The commands are the ones CI runs:
+
+~~~bash
+go test -count=1 ./...                                  # every Go package; PostgreSQL tests skip
+TEST_POSTGRES_DSN='postgres://portal:portal@localhost:5432/reports_test?sslmode=disable' \
+  go test -count=1 ./internal/app/                      # the PostgreSQL variants too
+cd web && npm run test                                  # vitest
+~~~
+
+Most `internal/app` tests run in parallel. A new test calls `t.Parallel()` first unless it changes
+process-wide state: a package-level variable or hook, `log` output, the environment or working
+directory, or a timing budget it asserts. A fixture option a test sets for the shared fixtures to
+read is a `testScoped` value (per top-level test), not a package variable. A PostgreSQL test gets its
+database from `testPostgresDSN(t)` (a guard test refuses any other use of `TEST_POSTGRES_DSN`): each
+top-level test gets a fresh copy of a template database that one `OpenStore` initialized, so it never
+sees another test's rows. That needs a role that may create databases (`ALTER ROLE portal CREATEDB`);
+without it the PostgreSQL tests take turns on the named database, one at a time while the other
+tests run beside them, and each sees what earlier ones left there, as before.
+
 The required pull request checks are `go-test`, `web typecheck + build`, `docker image (font gate + smoke)` and `workflow lint` (which also scans the change for secrets with gitleaks; `.gitleaks.toml` allows only throwaway fixture literals in Go and Python test files, and `.gitleaksignore` lists the other known false positives by fingerprint). The Go race detector is not a pull request check: it runs on pushes to main and on manual runs of the `test` workflow (`go race full` jobs, including the app platform's PostgreSQL tests), and a release is tagged only from a commit where they passed. The licence scan runs on a pull request only when the dependency manifests or the licence tooling change, and the app runner probe and the app project quota probe (including the capacity soak) run only on main or by hand.
 
 ## Release process

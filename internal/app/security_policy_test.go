@@ -69,6 +69,7 @@ func securityOf(t *testing.T, st *Store, user string) SecuritySettings {
 // With nothing configured, every account may enrol — which is what the portal did before this
 // existed, and what an upgrade must not change.
 func TestEnrolmentDefaultsToAllowed(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	for _, u := range []string{"root-user", "child-user"} {
 		got := securityOf(t, env.s.st, u)
@@ -83,6 +84,7 @@ func TestEnrolmentDefaultsToAllowed(t *testing.T) {
 
 // An OU that withdraws enrolment does so for its members, and for nobody else.
 func TestAnOUWithdrawsEnrolmentFromItsMembersOnly(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
@@ -101,6 +103,7 @@ func TestAnOUWithdrawsEnrolmentFromItsMembersOnly(t *testing.T) {
 // Deeper wins: a child may allow what its parent withdrew, because the setting is a policy about its
 // own members rather than a prohibition on the subtree.
 func TestADeeperOUSettingWins(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	// Default withdraws TOTP; the child re-allows it.
 	if err := env.s.st.SetGroupEnrolment(env.defaultID, boolPtr(false), nil, nil); err != nil {
@@ -119,6 +122,7 @@ func TestADeeperOUSettingWins(t *testing.T) {
 
 // An OU with no setting of its own takes its parent's, all the way up to the Default.
 func TestAnOUWithNoSettingInheritsItsParent(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	if err := env.s.st.SetGroupEnrolment(env.defaultID, nil, boolPtr(false), nil); err != nil {
 		t.Fatal(err)
@@ -133,6 +137,7 @@ func TestAnOUWithNoSettingInheritsItsParent(t *testing.T) {
 // portal's switch onto it — because a test that read only one of them would pass with the other left
 // out of the path entirely.
 func TestTheGlobalSwitchOverridesEveryOU(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	env.s.st.SetSetting(setTOTPEnroll, "0")
 	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(true), nil, nil); err != nil {
@@ -156,6 +161,7 @@ func TestTheGlobalSwitchOverridesEveryOU(t *testing.T) {
 // A withdrawn enrolment is refused at the endpoint, before step-up and before anything is written —
 // the refusal the UI cannot talk its way past.
 func TestTOTPEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	// Enrol first, while it is allowed, so the second half of this test has a real credential to
 	// remove rather than a staged one.
@@ -179,6 +185,7 @@ func TestTOTPEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
 }
 
 func TestPasskeyEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	if err := env.s.st.SetGroupEnrolment(env.childID, nil, boolPtr(false), nil); err != nil {
 		t.Fatal(err)
@@ -192,6 +199,7 @@ func TestPasskeyEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
 // The switch is about ADDING a factor. An account that already has one keeps signing in with it,
 // which is the whole reason withdrawing enrolment is not a lockout.
 func TestAnEnrolledFactorStillSignsInWhenEnrolmentIsWithdrawn(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	s := env.s
 	// Enrol TOTP while it is allowed, then withdraw it for this OU.
@@ -229,6 +237,7 @@ func TestAnEnrolledFactorStillSignsInWhenEnrolmentIsWithdrawn(t *testing.T) {
 
 // /api/me carries the resolved policy so the account page can hide what would only fail on submit.
 func TestMeReportsTheResolvedEnrolmentPolicy(t *testing.T) {
+	t.Parallel()
 	env := policyServer(t)
 	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)

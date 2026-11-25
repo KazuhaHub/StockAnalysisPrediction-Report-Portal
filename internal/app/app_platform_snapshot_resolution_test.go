@@ -44,6 +44,7 @@ func platformExpectResolvedByRepair(t *testing.T, s *Server, operation string) {
 // An update that ended at the snapshot stage changed no data: the snapshot comes before the migration. Once a repair
 // has brought the source back, the update is resolved, so nothing it left holds launch and the rest for ever.
 func TestPlatformRepairResolvesAnUpdateThatEndedAtTheSnapshot(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{"checkpoint_unsafe", "checkpoint_too_large", "checkpoint_incomplete"} {
 		t.Run(code, func(t *testing.T) {
 			var s *Server
@@ -51,7 +52,7 @@ func TestPlatformRepairResolvesAnUpdateThatEndedAtTheSnapshot(t *testing.T) {
 			var fixture platformManagedUpdateReviewFixture
 			if code == "checkpoint_incomplete" {
 				s, snapshot = platformSnapshotStageFixture(t, false)
-				fixture = lastPlatformUpdateFixture
+				fixture = lastPlatformUpdateFixture.get(t)
 				if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 					t.Fatal(err)
 				}
@@ -76,8 +77,9 @@ func TestPlatformRepairResolvesAnUpdateThatEndedAtTheSnapshot(t *testing.T) {
 // A retry that ended at the snapshot stage leaves the installation disabled for recovery; repair is the way back, and
 // once it has brought the source back, the retry and the failed update it retried are both resolved.
 func TestPlatformRepairResolvesARetryThatEndedAtTheSnapshotAndTheUpdateItRetried(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
-	fixture := lastPlatformUpdateFixture
+	fixture := lastPlatformUpdateFixture.get(t)
 	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +119,7 @@ func TestPlatformRepairResolvesARetryThatEndedAtTheSnapshotAndTheUpdateItRetried
 // A retry that ended plan_expired before it began did nothing: it is not the failed update's successor, so the update
 // can still be retried. Any other retry, in any state, is.
 func TestPlatformExpiredUnbegunRetryIsNotASuccessor(t *testing.T) {
+	t.Parallel()
 	s, operation := platformManagedUpdateOperationFixture(t, false)
 	parent := platformFixtureID(6195)
 	review := `{"recovers_operation_id":"` + parent + `"}`
@@ -145,6 +148,7 @@ func TestPlatformExpiredUnbegunRetryIsNotASuccessor(t *testing.T) {
 // The expiry of a review plan governs a start the claim admits. Once claimed, the update carries on: a plan that
 // expires between the claim and the first quiesce effect does not end it for review with its source never stopped.
 func TestPlatformClaimedUpdateCarriesOnPastAPlanThatExpiresBeforeTheQuiesceEffect(t *testing.T) {
+	t.Parallel()
 	s, lease := platformUpdateAtQuiesceWithoutEffect(t)
 	mustExec(t, s.st, `UPDATE app_platform_review_plans SET expires_ms=1 WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, lease.id)
 	if _, err := s.preparePlatformManagedUpdateQuiesce(context.Background(), lease); err != nil {
@@ -156,6 +160,7 @@ func TestPlatformClaimedUpdateCarriesOnPastAPlanThatExpiresBeforeTheQuiesceEffec
 // more before ending the update: a verified checkpoint is committed and the update goes on, instead of ending
 // checkpoint_incomplete with the runner's archive left behind.
 func TestPlatformSnapshotWithALostReplyIsReadBackBeforeTheUpdateEnds(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	intent, err := s.preparePlatformCheckpoint(context.Background(), snapshot)
 	if err != nil {
@@ -192,6 +197,7 @@ func TestPlatformSnapshotWithALostReplyIsReadBackBeforeTheUpdateEnds(t *testing.
 
 // When the read back finds nothing either, the update ends checkpoint_incomplete as before.
 func TestPlatformSnapshotWithNoReceiptOnReadBackEndsIncomplete(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	if _, err := s.preparePlatformCheckpoint(context.Background(), snapshot); err != nil {
 		t.Fatal(err)
@@ -223,6 +229,7 @@ func TestPlatformSnapshotWithNoReceiptOnReadBackEndsIncomplete(t *testing.T) {
 // A checkpoint code names an ending at the snapshot stage and nothing else: the finisher refuses it at a later stage,
 // so the repair that resolves such endings can rely on the code.
 func TestPlatformCheckpointCodeIsRefusedAfterTheSnapshotStage(t *testing.T) {
+	t.Parallel()
 	s, lease, _, _ := platformManagedUpdateQuiesceFixture(t, false)
 	if err := s.finishPlatformManagedUpdateWith(context.Background(), lease, nil, "checkpoint_unsafe"); !errors.Is(err, errAppPlatformStageEvidence) {
 		t.Fatal("a checkpoint code was accepted at the quiesce stage", err)
@@ -232,6 +239,7 @@ func TestPlatformCheckpointCodeIsRefusedAfterTheSnapshotStage(t *testing.T) {
 // A read back that finds the checkpoint refused (the runner settled the refusal while the reply was lost) ends the
 // update with the runner's code, not checkpoint_incomplete.
 func TestPlatformSnapshotRefusalFoundOnReadBackKeepsTheRunnersCode(t *testing.T) {
+	t.Parallel()
 	s, snapshot := platformSnapshotStageFixture(t, false)
 	intent, err := s.preparePlatformCheckpoint(context.Background(), snapshot)
 	if err != nil {

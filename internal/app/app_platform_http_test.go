@@ -18,6 +18,7 @@ func platformHTTPFixture(t *testing.T) (*Server, *http.ServeMux, platformActorSe
 	return s, mux, reader, id, cookie
 }
 func TestPlatformHTTPDocumentCurrentUserAndPolicy(t *testing.T) {
+	t.Parallel()
 	s, mux, reader, id, cookie := platformHTTPFixture(t)
 	launch := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+id+"/launch", cookie, "")
 	if launch.Code != 200 {
@@ -79,6 +80,7 @@ func TestPlatformHTTPDocumentCurrentUserAndPolicy(t *testing.T) {
 	}
 }
 func TestPlatformHTTPDocumentEnrolmentAndBudget(t *testing.T) {
+	t.Parallel()
 	s, mux, _, id, cookie := platformHTTPFixture(t)
 	path := "/api/app-platform/installations/" + id + "/launch"
 	// An existing Default OU security mandate must cover the newly registered route.
@@ -114,6 +116,7 @@ func TestPlatformHTTPDocumentEnrolmentAndBudget(t *testing.T) {
 }
 
 func TestPlatformHTTPDocumentCounterAndIdentityRefusals(t *testing.T) {
+	t.Parallel()
 	s, mux, reader, id, cookie := platformHTTPFixture(t)
 	binding, err := s.inspectPlatformLaunchAccess(reader, id)
 	if err != nil {
@@ -136,6 +139,7 @@ func TestPlatformHTTPDocumentCounterAndIdentityRefusals(t *testing.T) {
 }
 
 func TestPlatformHTTPReaderPinsSignedSessionLifetime(t *testing.T) {
+	t.Parallel()
 	s, _, reader, _, cookie := platformHTTPFixture(t)
 	request := httptest.NewRequest("GET", "/", nil)
 	request.AddCookie(&http.Cookie{Name: cookieName, Value: cookie})
@@ -150,6 +154,7 @@ func TestPlatformHTTPReaderPinsSignedSessionLifetime(t *testing.T) {
 }
 
 func TestPlatformHTTPLaunchProvidesSignedLayoutAndConfiguredTimezone(t *testing.T) {
+	t.Parallel()
 	s, mux, _, id, cookie := platformHTTPFixture(t)
 	mustExec(t, s.st, `INSERT INTO meta(k,v) VALUES('timezone','Asia/Shanghai') ON CONFLICT(k) DO UPDATE SET v=excluded.v`)
 	response := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+id+"/launch", cookie, "")
@@ -172,6 +177,7 @@ func TestPlatformHTTPLaunchProvidesSignedLayoutAndConfiguredTimezone(t *testing.
 }
 
 func TestPlatformHTTPLaunchRegistryIsSignedAndRootLayoutDoesNotFollowOrder(t *testing.T) {
+	t.Parallel()
 	_, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.2")
 	s, reader, id := platformFrontendBrowserInstallFixture(t, archive)
 	cookie := s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())

@@ -61,6 +61,7 @@ func versionFilterFixture(t *testing.T) *Server {
 // are the manual version, so a version filter is the whole answer — and it generalizes to the
 // internal/external forms ADR 0024 already allows, instead of hard-coding one special case.
 func TestBrowseFiltersByVersion(t *testing.T) {
+	t.Parallel()
 	s := versionFilterFixture(t)
 
 	all := homeTitles(t, homeAs(t, s, "", "admin"))
@@ -85,6 +86,7 @@ func TestBrowseFiltersByVersion(t *testing.T) {
 // version nobody has written in is not offered — and the filter is withheld entirely while there is
 // only one written form, because a filter whose every setting means the same thing is noise.
 func TestBrowseOffersTheVersionsItCanSee(t *testing.T) {
+	t.Parallel()
 	s := versionFilterFixture(t)
 
 	names := versionNames(homeAs(t, s, "", "admin"))
@@ -108,6 +110,7 @@ func TestBrowseOffersTheVersionsItCanSee(t *testing.T) {
 // reaching past their scope — and the options must not name it either, or the filter becomes a
 // directory of what exists.
 func TestVersionFilterCannotWidenAScope(t *testing.T) {
+	t.Parallel()
 	s := versionFilterFixture(t)
 	s.st.UpsertUser(User{Username: "client", PasswordHash: "h", Role: "user"})
 	if err := s.st.SetUserRestricted("client", true); err != nil {

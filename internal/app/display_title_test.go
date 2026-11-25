@@ -13,6 +13,7 @@ import (
 // on-screen heading, the PDF <h1>, and the MD/PDF download filenames all read
 // "001696 宗申动力 投资决策建议" instead of the bare "001696 投资决策建议" that ingest stores.
 func TestDisplayTitle(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		desc             string
 		title, sym, comp string
@@ -40,6 +41,7 @@ func TestDisplayTitle(t *testing.T) {
 // the current name) before folding it in. It must be nil-safe on s.names, which unit
 // tests leave unset.
 func TestRepDisplayTitleNilSafeAndSnapshot(t *testing.T) {
+	t.Parallel()
 	s := &Server{} // s.names == nil, as in a bare unit test
 
 	if got := s.repDisplayTitle(&Rep{Title: "001696 投资决策建议", Symbol: "001696", Name: "宗申动力"}); got != "001696 宗申动力 投资决策建议" {
@@ -54,6 +56,7 @@ func TestRepDisplayTitleNilSafeAndSnapshot(t *testing.T) {
 // The PDF <h1> is rendered from rep.Title via the template, so the company name must be
 // folded in before the template runs.
 func TestRenderPDFHTMLFoldsCompanyNameIntoHeading(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	s.parseTemplates()
 
@@ -85,6 +88,7 @@ func decodeFilenameStar(t *testing.T, cd string) string {
 // descriptor" title + as-of company name) must download as "001696 宗申动力 投资决策建议.md",
 // with the company name folded into the actual Content-Disposition filename.
 func TestReportMDDownloadFilenameFoldsCompanyName(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	mustAddUser(t, s, "tester", false)
 
@@ -119,6 +123,7 @@ func TestReportMDDownloadFilenameFoldsCompanyName(t *testing.T) {
 // repJSON must expose displayTitle (folded) for the SPA heading while leaving the raw
 // title field untouched for machine consumers.
 func TestRepJSONExposesDisplayTitle(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	j := repJSON(&Rep{Title: "001696 投资决策建议", Symbol: "001696", Name: "宗申动力"}, s.names.Get)
 	if j["displayTitle"] != "001696 宗申动力 投资决策建议" {

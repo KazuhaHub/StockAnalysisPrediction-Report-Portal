@@ -16,6 +16,7 @@ import (
 // (batch_jobs.total), not jobs, so a multi-row submit cannot dodge the cap; it counts only the
 // caller's own jobs; and it counts only jobs created since the panel-tz civil midnight.
 func TestRunsTodayCountsRowsSincePanelMidnight(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt, err := st.CreateTarget(difyPluginSlug, "t", "{}")
 	if err != nil {
@@ -56,6 +57,7 @@ func TestRunsTodayCountsRowsSincePanelMidnight(t *testing.T) {
 // OU quota (rows counted for the whole submit), internal users and admins are never capped, and a
 // quota of 0 means unlimited.
 func TestRunQuotaGate(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	root := st.EnsureDefaultGroup()
@@ -107,6 +109,7 @@ func TestRunQuotaGate(t *testing.T) {
 // restricted user's third run of a 2/day quota is refused with 429 + a machine-readable payload,
 // while an internal user submitting the same body is unaffected.
 func TestApiBatchJobCreateEnforcesQuota(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	st := s.st
 	root := st.EnsureDefaultGroup()

@@ -13,6 +13,7 @@ import (
 // afterwards the accepted set stopped receiving its h12 mark — which broke every assertion about
 // "one mark per checkpoint" for a reason that had nothing to do with the code under test.
 func TestPredWireIsAStandardHorizonPayloadOnAnyDay(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	code, m := ingestPost(t, s, ingestBody(string(predWire(nil))))
 	if code != 200 || m["predictions_status"] != predStateAccepted {
@@ -49,6 +50,7 @@ func TestPredWireIsAStandardHorizonPayloadOnAnyDay(t *testing.T) {
 // A non-standard horizon must still be expressible, or the derivation above would hide the very
 // distinction it exists to preserve: h12 is absent for a caller-supplied horizon.
 func TestPredWireLetsACaseChooseANonStandardHorizon(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	raw := predWire(func(m map[string]any) {
 		m["horizon_end"] = time.Now().UTC().AddDate(3, 0, 0).Format("2006-01-02")

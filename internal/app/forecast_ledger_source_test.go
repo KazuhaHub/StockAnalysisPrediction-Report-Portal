@@ -9,6 +9,7 @@ import (
 )
 
 func TestShippedLedgerEvidenceGrants(t *testing.T) {
+	t.Parallel()
 	for _, src := range defaultQuoteSources() {
 		want := src.name == quoteSourceTencent
 		if src.cashDividends != want || src.reportsKind != want {
@@ -43,6 +44,7 @@ func TestEvaluatorLedgerSourceOrderCannotBeBypassed(t *testing.T) {
 }
 
 func TestEvaluatorUsesUncachedLedgerWalkAndCompletionGate(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	calls := 0
 	s.quotes.sources = []quoteSource{ledgerWalkSource(quoteSourceTencent, func(context.Context, string, string, string, string) (*QuoteResp, error) {
@@ -64,10 +66,12 @@ func TestEvaluatorUsesUncachedLedgerWalkAndCompletionGate(t *testing.T) {
 }
 
 func TestEvaluatorNoSourceRemainsASourceFault(t *testing.T) {
+	t.Parallel()
 	assertEvaluatorNoSourceFault(t, newV1Server(t))
 }
 
 func TestPostgresEvaluatorNoSourceRemainsASourceFault(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "reports", "api_tokens")
 	if err := st.CreateToken("tok-all", "test", "all", ""); err != nil {
 		t.Fatal(err)
@@ -109,6 +113,7 @@ func assertEvaluatorNoSourceFault(t *testing.T, s *Server) {
 }
 
 func TestEvaluatorRuntimeLedgerRespectsDryAndBenchmarkGate(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{forecastModeDry, forecastModeOn} {
 		t.Run(mode, func(t *testing.T) {
 			s := newV1Server(t)
@@ -139,6 +144,7 @@ func TestEvaluatorRuntimeLedgerRespectsDryAndBenchmarkGate(t *testing.T) {
 }
 
 func TestEvaluatorPreservesTypedStockAndLookbackRefusals(t *testing.T) {
+	t.Parallel()
 	for _, widened := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stock", true: "lookback"}[widened], func(t *testing.T) {
 			s := newV1Server(t)
@@ -187,6 +193,7 @@ func TestEvaluatorPreservesTypedStockAndLookbackRefusals(t *testing.T) {
 }
 
 func TestEvaluatorRuntimeBreakerIsSharedAndResetsEachTick(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	for _, symbol := range []string{"600161", "600162", "600163", "600164"} {

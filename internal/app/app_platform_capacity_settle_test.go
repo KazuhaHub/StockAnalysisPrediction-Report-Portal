@@ -26,6 +26,7 @@ func migrateRefusal(i platformMigrateIntent, dimension string) *journal.Capacity
 // reverted (with the typed receipt), the operation waits for recovery, and no discard is ever asked of the runner,
 // which holds the effect reverted too. Fails if the effect is left unknown, which a discard can never settle.
 func TestMigrateRefusedByCapacitySettlesRevertedAndRecovers(t *testing.T) {
+	t.Parallel()
 	for _, via := range []string{"execute", "read_back"} {
 		t.Run(via, func(t *testing.T) {
 			s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
@@ -123,6 +124,7 @@ func (f refusedEffectFixture) finished(t *testing.T) bool {
 // The refused effect is closed in the same transaction that ends the operation, under its lease, fence and the
 // effect's payload digest.
 func TestFinishCapacitySettlesTheRefusedEffectAtomicallyWithTheOperation(t *testing.T) {
+	t.Parallel()
 	f := newRefusedEffectFixture(t)
 	if err := f.w.finishCapacity(context.Background(), f.refusal()); err != nil {
 		t.Fatal(err)
@@ -136,6 +138,7 @@ func TestFinishCapacitySettlesTheRefusedEffectAtomicallyWithTheOperation(t *test
 // An effect of another identity, a payload digest the effect does not carry, and an effect that is already settled
 // are not touched; the operation still ends.
 func TestFinishCapacityLeavesOtherEffectsAlone(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		mutate func(*refusedEffectFixture, *journal.CapacityRefusal)
@@ -168,6 +171,7 @@ func TestFinishCapacityLeavesOtherEffectsAlone(t *testing.T) {
 
 // A lease that moved on (a different owner, a moved fence) ends nothing and settles nothing.
 func TestFinishCapacityWithAStaleLeaseSettlesNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		mutate func(*platformOperationLease)
@@ -194,6 +198,7 @@ func TestFinishCapacityWithAStaleLeaseSettlesNothing(t *testing.T) {
 
 // If ending the operation fails after the effect was closed, the effect is not settled: one transaction.
 func TestFinishCapacitySettlesNothingWhenTheOperationCannotEnd(t *testing.T) {
+	t.Parallel()
 	f := newRefusedEffectFixture(t)
 	if _, err := f.s.st.db.Exec(`CREATE TRIGGER refuse_operation_end BEFORE UPDATE ON app_platform_operations WHEN NEW.completed_ms IS NOT NULL BEGIN SELECT RAISE(ABORT, 'operation cannot end'); END`); err != nil {
 		t.Fatal(err)

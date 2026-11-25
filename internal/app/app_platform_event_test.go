@@ -15,6 +15,7 @@ import (
 )
 
 func TestPlatformEventSubscriptionAdmissionAndAuthority(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	spec := appplatform.EventSubscriptionSpec{
 		EventType: appplatform.EventReportIngested, ResourceType: "report",
@@ -52,6 +53,7 @@ func TestPlatformEventSubscriptionAdmissionAndAuthority(t *testing.T) {
 }
 
 func TestPlatformEventSubscriptionInstallationQuota(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	for i := 1; i <= 16; i++ {
 		if _, _, err := s.createPlatformEventSubscription(
@@ -78,6 +80,7 @@ func TestPlatformEventSubscriptionInstallationQuota(t *testing.T) {
 }
 
 func TestPlatformEventCaptureAndDeliveryAreTransactional(t *testing.T) {
+	t.Parallel()
 	for _, postgres := range []bool{false, true} {
 		name := "sqlite"
 		if postgres {
@@ -140,6 +143,7 @@ func TestPlatformEventCaptureAndDeliveryAreTransactional(t *testing.T) {
 }
 
 func TestPlatformEventSubscriptionLifecycleAndRestore(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	id, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,
@@ -183,6 +187,7 @@ func TestPlatformEventSubscriptionLifecycleAndRestore(t *testing.T) {
 }
 
 func TestPlatformEventBatchDeliveryMatchesOwnerScopedJob(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	id, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,
@@ -216,6 +221,7 @@ func TestPlatformEventBatchDeliveryMatchesOwnerScopedJob(t *testing.T) {
 }
 
 func TestPlatformEventSubscriptionRevocationIsMonotonic(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	id, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,
@@ -250,6 +256,7 @@ func TestPlatformEventSubscriptionRevocationIsMonotonic(t *testing.T) {
 }
 
 func TestPlatformEventCaptureRollsBackWhenTaskIdentityConflicts(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	subscriptionID, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,
@@ -300,6 +307,7 @@ func TestPlatformEventCaptureRollsBackWhenTaskIdentityConflicts(t *testing.T) {
 }
 
 func TestPlatformEventSubscriptionAdminAPI(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	create := httptest.NewRecorder()
 	body := `{"installationId":"` + installation +
@@ -348,6 +356,7 @@ func TestPlatformEventSubscriptionAdminAPI(t *testing.T) {
 }
 
 func TestPlatformEventSubscriptionInflightBoundIsAtomic(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	id, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,
@@ -391,6 +400,7 @@ func TestPlatformEventSubscriptionInflightBoundIsAtomic(t *testing.T) {
 }
 
 func TestPlatformEventInflightIsScopedPerSubscription(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	for _, resourceID := range []string{"41", "42"} {
 		if _, _, err := s.createPlatformEventSubscription(
@@ -433,6 +443,7 @@ func TestPlatformEventInflightIsScopedPerSubscription(t *testing.T) {
 }
 
 func TestPlatformEventExpiredSourceCreatesNoDelivery(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	if _, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,
@@ -460,6 +471,7 @@ func TestPlatformEventExpiredSourceCreatesNoDelivery(t *testing.T) {
 }
 
 func TestPlatformEventSubscriptionRevocationFencesClaimedDelivery(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	id, _, err := s.createPlatformEventSubscription(
 		context.Background(), installation,

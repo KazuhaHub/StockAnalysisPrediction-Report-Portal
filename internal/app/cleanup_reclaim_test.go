@@ -38,6 +38,7 @@ func fileSize(t *testing.T, st *Store) int64 {
 // stays exactly as large as it was, so the console could report "deleted 12,431 rows" while `df`
 // showed nothing at all.
 func TestReclaimReturnsSpaceToTheFilesystem(t *testing.T) {
+	t.Parallel()
 	st, err := OpenStore("sqlite", t.TempDir()+"/portal.db")
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +70,7 @@ func TestReclaimReturnsSpaceToTheFilesystem(t *testing.T) {
 // TestReclaimSkipsWhatIsNotWorthIt keeps a VACUUM — which rewrites the whole file and blocks every
 // other query on SQLite's single connection — from running for a handful of pages.
 func TestReclaimSkipsWhatIsNotWorthIt(t *testing.T) {
+	t.Parallel()
 	path := t.TempDir() + "/portal.db"
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -118,6 +120,7 @@ func TestReclaimSkipsWhatIsNotWorthIt(t *testing.T) {
 // ACCESS EXCLUSIVE lock on every table — a full outage of unbounded length, and not something a
 // background ticker should ever schedule on a database this portal does not own exclusively.
 func TestReclaimIsASQLiteOnlyAnswer(t *testing.T) {
+	t.Parallel()
 	pg := pgStore(t)
 	freed, err := pg.reclaim()
 	if err != nil {
@@ -131,6 +134,7 @@ func TestReclaimIsASQLiteOnlyAnswer(t *testing.T) {
 // TestCleanupReportsWhatItFreed carries the number all the way to the console: through the pass, the
 // result the page reads, and the history row it writes.
 func TestCleanupReportsWhatItFreed(t *testing.T) {
+	t.Parallel()
 	st, err := OpenStore("sqlite", t.TempDir()+"/portal.db")
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +177,7 @@ func TestCleanupReportsWhatItFreed(t *testing.T) {
 // TestPreviewReclaimsNothing keeps a dry run dry. VACUUM rewrites the file; a preview that did it
 // would be the one "preview" in the product that changes something.
 func TestPreviewReclaimsNothing(t *testing.T) {
+	t.Parallel()
 	st, err := OpenStore("sqlite", t.TempDir()+"/portal.db")
 	if err != nil {
 		t.Fatal(err)

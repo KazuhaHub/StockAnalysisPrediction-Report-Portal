@@ -166,10 +166,12 @@ func testPlatformRestorePreparesExactIntent(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestorePreparesExactIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePreparesExactIntent(t, false)
 }
 
 func TestPlatformRestorePreparesExactIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePreparesExactIntent(t, true)
 }
 
@@ -193,10 +195,12 @@ func testPlatformRestoreSettlesVerifiedReceipt(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestoreSettlesVerifiedReceiptSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreSettlesVerifiedReceipt(t, false)
 }
 
 func TestPlatformRestoreSettlesVerifiedReceiptPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreSettlesVerifiedReceipt(t, true)
 }
 
@@ -233,10 +237,12 @@ func testPlatformRestoreRejectsChangedObservation(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestoreRejectsChangedObservationSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRejectsChangedObservation(t, false)
 }
 
 func TestPlatformRestoreRejectsChangedObservationPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreRejectsChangedObservation(t, true)
 }
 
@@ -278,10 +284,12 @@ func testPlatformRestoreCommitRollbackAndPause(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestoreCommitRollbackAndPauseSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreCommitRollbackAndPause(t, false)
 }
 
 func TestPlatformRestoreCommitRollbackAndPausePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestoreCommitRollbackAndPause(t, true)
 }
 
@@ -318,10 +326,12 @@ func testPlatformRestorePreparationRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestorePreparationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePreparationRefusals(t, false)
 }
 
 func TestPlatformRestorePreparationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePreparationRefusals(t, true)
 }
 
@@ -351,14 +361,17 @@ func testPlatformRestorePrepareRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformRestorePrepareRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePrepareRollback(t, false)
 }
 
 func TestPlatformRestorePrepareRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRestorePrepareRollback(t, true)
 }
 
 func TestPlatformRestoreEndpointRefusesUnverifiedRuntimeSQLite(t *testing.T) {
+	t.Parallel()
 	endpoint := platformRuntimeEndpoint{path: "/run/portal-test/missing-restore.sock", controllerUID: 1000, controllerGID: 1001}
 	s, lease, _ := platformVerifiedCheckpointUpdateFixture(t, false)
 	if _, err := s.dispatchPlatformRestore(context.Background(), lease, endpoint); err == nil {

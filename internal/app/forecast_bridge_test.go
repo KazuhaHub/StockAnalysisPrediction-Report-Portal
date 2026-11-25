@@ -69,6 +69,7 @@ func bridgeLedger(t *testing.T, s *Server) (report, accepted int64, paths []stri
 // TestBridgeTokenGetsNoForecastReads: whatever account minted it, a bridge token holding the query
 // scope is refused on both v1 prediction reads, and the refusal carries nothing but the error.
 func TestBridgeTokenGetsNoForecastReads(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
 	for _, scope := range []string{scopeAll, scopeOwn, scopeNone} {
@@ -103,6 +104,7 @@ func TestBridgeTokenGetsNoForecastReads(t *testing.T) {
 // on the read it attempts (500), while a bridge token is still refused at the credential (403). A
 // refusal that happened after a ledger query would surface the same 500.
 func TestBridgeDenialReadsNothingFromTheLedger(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
 	seedForecastReader(t, s, scopeAll, scopeAll, false)
@@ -124,6 +126,7 @@ func TestBridgeDenialReadsNothingFromTheLedger(t *testing.T) {
 
 // TestBridgeDenialSurvivesStoreError: a closed store neither admits nor crashes a bridge request.
 func TestBridgeDenialSurvivesStoreError(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
 	seedForecastReader(t, s, scopeAll, scopeAll, false)
@@ -141,6 +144,7 @@ func TestBridgeDenialSurvivesStoreError(t *testing.T) {
 // bridge token only. A token that is expired, unknown or lacks the query scope is still a 401, so a
 // caller can tell a dead credential from one the portal declines to honour.
 func TestBridgeCredentialsThatAreNotQueryTokensStayUnauthorized(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
 	_, _, paths := bridgeLedger(t, s)
@@ -162,6 +166,7 @@ func TestBridgeCredentialsThatAreNotQueryTokensStayUnauthorized(t *testing.T) {
 // every other Bearer. A persistent query token (or an all-scope one) is the documented machine
 // credential and keeps its unscoped diagnostic contract.
 func TestPersistentQueryTokenKeepsTheMachineView(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
 	if err := s.st.CreateToken("forecast-machine", "test", "query", ""); err != nil {
@@ -209,6 +214,7 @@ func TestPersistentQueryTokenKeepsTheMachineView(t *testing.T) {
 // TestCookieReaderStaysScopedOnV1Reads: a cookie user's own decision applies, and a cookie wins over
 // an accompanying Bearer token, whichever way that decision goes.
 func TestCookieReaderStaysScopedOnV1Reads(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
 	seedForecastReader(t, s, "reader", scopeAll, false)

@@ -19,6 +19,7 @@ import (
 // puts a report in exactly that state, which is the honest one.
 
 func TestNormalizeSymbolKeepsOnlyWhatCouldBeACode(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		in          string
 		want        string
@@ -51,6 +52,7 @@ func TestNormalizeSymbolKeepsOnlyWhatCouldBeACode(t *testing.T) {
 }
 
 func TestIngestFilesAMalformedSymbolAsNoSymbolRatherThanRefusingIt(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	post := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/v1/reports", strings.NewReader(body))

@@ -193,6 +193,7 @@ func soakImageRelease(t *testing.T, app, seed, platform string, binary []byte, f
 }
 
 func TestSoakFillerLayersMakeAnImageDeclareTheMaximumLessAMiB(t *testing.T) {
+	t.Parallel()
 	// The soak backend's own binary is some MiB of tar; the fillers bring the image to the descriptor limit.
 	for _, binaryTar := range []int64{2 << 20, 6 << 20, 12 << 20} {
 		files := soakFillerFileBytes(binaryTar)
@@ -221,6 +222,7 @@ func TestSoakFillerLayersMakeAnImageDeclareTheMaximumLessAMiB(t *testing.T) {
 }
 
 func TestSoakImageDeclaresWhatItsLayersHoldAndNoTwoImagesShareALayer(t *testing.T) {
+	t.Parallel()
 	binary := bytes.Repeat([]byte{0x7f}, 4096)
 	resources := appplatform.Resources{MemoryMiB: 64, CPUMillis: 50, PIDs: 64}
 	a := soakImageRelease(t, "notes-soak-i-a", "a", "linux/amd64", binary, []int64{1 << 20, 1 << 20}, resources)
@@ -268,6 +270,7 @@ func TestSoakImageDeclaresWhatItsLayersHoldAndNoTwoImagesShareALayer(t *testing.
 }
 
 func TestSoakZeroLayerIsTheDeclaredSizeAndCompressesToAlmostNothing(t *testing.T) {
+	t.Parallel()
 	const file = 32 << 20
 	compressed, diffID, tarBytes, err := soakZeroLayer("seed", 0, file)
 	if err != nil {

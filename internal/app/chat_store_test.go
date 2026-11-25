@@ -5,6 +5,7 @@ import "testing"
 // The chat conversation index: create/list (per-user, per-target), get, AfterTurn binds
 // the Dify conversation_id + title once (sticky), rename, delete.
 func TestChatConversationCRUD(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 
@@ -71,6 +72,7 @@ func TestChatConversationCRUD(t *testing.T) {
 // ListAllConversations is the admin oversight view: unlike ListConversations it returns every
 // user's threads (not just the caller's), carries created_by, and honors the owner + target filters.
 func TestListAllConversations(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	other := seedTarget(t, st)
@@ -101,6 +103,7 @@ func TestListAllConversations(t *testing.T) {
 // Starring a conversation is per-row (reflected by Get + List) and sorts starred
 // conversations ahead of the rest, independent of recency.
 func TestChatConversationStar(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 

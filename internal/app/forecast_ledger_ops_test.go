@@ -8,6 +8,7 @@ import (
 )
 
 func TestReadinessItemSixNeedsALedgerChain(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	satisfyForecastReadiness(t, s)
 	for _, order := range []string{quoteSourceSina, quoteSourceYahoo} {
@@ -38,6 +39,7 @@ func TestReadinessItemSixNeedsALedgerChain(t *testing.T) {
 }
 
 func TestWatchdogNoSourceIsDailyAndOffIsSilent(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setQuoteSourceOrder, quoteSourceSina); err != nil {
 		t.Fatal(err)
@@ -76,6 +78,7 @@ func TestWatchdogNoSourceIsDailyAndOffIsSilent(t *testing.T) {
 }
 
 func TestReadinessLedgerChainNeedsExplicitGrantAndBothEvidenceFlags(t *testing.T) {
+	t.Parallel()
 	for _, missing := range []string{"grant", "cash", "kind"} {
 		t.Run(missing, func(t *testing.T) {
 			s := newV1Server(t)
@@ -98,6 +101,7 @@ func TestReadinessLedgerChainNeedsExplicitGrantAndBothEvidenceFlags(t *testing.T
 }
 
 func TestWatchdogNoSourceDoesNotRequireAHeartbeat(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setQuoteSourceOrder, quoteSourceSina); err != nil {
 		t.Fatal(err)

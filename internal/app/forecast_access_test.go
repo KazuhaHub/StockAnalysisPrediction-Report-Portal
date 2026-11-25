@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,12 +25,11 @@ import (
 
 // ---------- helpers ----------
 
-var ouNameSeq int
+var ouNameSeq atomic.Int64
 
 func seedOU(t *testing.T, st *Store, parent int64, scope any) int64 {
 	t.Helper()
-	ouNameSeq++
-	name := fmt.Sprintf("ou-%d-%d", time.Now().UnixNano(), ouNameSeq)
+	name := fmt.Sprintf("ou-%d-%d", time.Now().UnixNano(), ouNameSeq.Add(1))
 	var p any
 	if parent != 0 {
 		p = parent
@@ -82,6 +82,7 @@ func tokenServer(t *testing.T) *Server {
 // ---------- migration 0006 ----------
 
 func TestMigration0006(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "p38.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -121,6 +122,7 @@ func TestMigration0006(t *testing.T) {
 }
 
 func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	// One set exists before the step, so the dump has a row to come back NULL.
 	seedPredictionSet(t, src, sql.NullInt64{}, "p38-older")
@@ -168,6 +170,7 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 
 // TestDefaultScopeNormalisedAtBoot: the hook is in OpenStore, not only in the helper.
 func TestDefaultScopeNormalisedAtBoot(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "p38-boot.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -190,6 +193,7 @@ func TestDefaultScopeNormalisedAtBoot(t *testing.T) {
 }
 
 func TestDefaultOUScopeIsNormalisedToNone(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	def := st.EnsureDefaultGroup()
 	if err := st.EnsureDefaultForecastScope(); err != nil {
@@ -213,6 +217,7 @@ func TestDefaultOUScopeIsNormalisedToNone(t *testing.T) {
 // ---------- attribution ----------
 
 func TestSetAttributionIsFrozenAtInsert(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	ouA := seedOU(t, s.st, 0, scopeAll)
 	ouB := seedOU(t, s.st, 0, scopeAll)
@@ -248,6 +253,7 @@ func TestSetAttributionIsFrozenAtInsert(t *testing.T) {
 }
 
 func TestInvalidOrMissingTokenLeavesSetsUnattributed(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	ou := seedOU(t, s.st, 0, scopeAll)
 	valid := s.mintOwnerToken(ou, "asker")
@@ -266,6 +272,7 @@ func TestInvalidOrMissingTokenLeavesSetsUnattributed(t *testing.T) {
 }
 
 func TestTokenForADeletedOULeavesTheSetUnattributed(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	ou := seedOU(t, s.st, 0, scopeAll)
 	tok := s.mintOwnerToken(ou, "x") // minted while the OU existed
@@ -279,6 +286,7 @@ func TestTokenForADeletedOULeavesTheSetUnattributed(t *testing.T) {
 }
 
 func TestAttributionNeverSerialised(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	ou := seedOU(t, s.st, 0, scopeAll)
 	reportID, _ := ingestWithToken(t, s, "600190", s.mintOwnerToken(ou, "asker"))
@@ -305,6 +313,7 @@ func TestAttributionNeverSerialised(t *testing.T) {
 }
 
 func TestNothingElseWritesAttributedOU(t *testing.T) {
+	t.Parallel()
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -362,6 +371,7 @@ func TestNothingElseWritesAttributedOU(t *testing.T) {
 // ---------- the OU index ----------
 
 func TestOUIndexSurfacesErrors(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.Close()
 	if _, err := st.loadOUIndex(); err == nil {
@@ -370,6 +380,7 @@ func TestOUIndexSurfacesErrors(t *testing.T) {
 }
 
 func TestOUChainRefusesADanglingOrCyclicParent(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	def := st.EnsureDefaultGroup()
 
@@ -423,6 +434,7 @@ func TestOUChainRefusesADanglingOrCyclicParent(t *testing.T) {
 }
 
 func TestOUSubtreeAndScopeWalk(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	def := st.EnsureDefaultGroup()
 	root := seedOU(t, st, 0, scopeAll)
@@ -450,6 +462,7 @@ func TestOUSubtreeAndScopeWalk(t *testing.T) {
 // ---------- deleting an OU ----------
 
 func TestDeletingOUMovesChildrenToItsParent(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	root := seedOU(t, st, 0, nil)
 	parent := seedOU(t, st, root, nil)
@@ -463,6 +476,7 @@ func TestDeletingOUMovesChildrenToItsParent(t *testing.T) {
 }
 
 func TestDeletingOUWithADanglingParentKeepsChildrenAsRoots(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	ghost := seedOU(t, st, 0, nil)
 	parent := seedOU(t, st, ghost, nil)
@@ -484,6 +498,7 @@ func TestDeletingOUWithADanglingParentKeepsChildrenAsRoots(t *testing.T) {
 }
 
 func TestDeletingRootOUKeepsChildrenAsRoots(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	root := seedOU(t, st, 0, nil)
 	child := seedOU(t, st, root, nil)
@@ -500,6 +515,7 @@ func TestDeletingRootOUKeepsChildrenAsRoots(t *testing.T) {
 }
 
 func TestDeletingOUReattributesSetsToParent(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	a := seedOU(t, s.st, 0, scopeAll)
 	b := seedOU(t, s.st, a, scopeAll)
@@ -527,6 +543,7 @@ func TestDeletingOUReattributesSetsToParent(t *testing.T) {
 }
 
 func TestDeletingRootOUReattributesSetsToDefault(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	def := s.st.EnsureDefaultGroup()
 	root := seedOU(t, s.st, 0, scopeAll)
@@ -540,6 +557,7 @@ func TestDeletingRootOUReattributesSetsToDefault(t *testing.T) {
 }
 
 func TestDeletingOUWritesAuditCounts(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	parent := seedOU(t, s.st, 0, scopeAll)
 	ou := seedOU(t, s.st, parent, scopeAll)
@@ -586,6 +604,7 @@ func TestDeletingOUWritesAuditCounts(t *testing.T) {
 }
 
 func TestDeleteOUReattributionIsAtomic(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	parent := seedOU(t, s.st, 0, scopeAll)
 	ou := seedOU(t, s.st, parent, scopeAll)
@@ -608,6 +627,7 @@ func TestDeleteOUReattributionIsAtomic(t *testing.T) {
 }
 
 func TestAComputationAcrossAPurgeIsNotCached(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, gen := s.cachedForecastCell("k")
 	cell := &forecastCell{State: "mature"}
@@ -624,6 +644,7 @@ func TestAComputationAcrossAPurgeIsNotCached(t *testing.T) {
 }
 
 func TestDeletingOUPurgesForecastCache(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	root := seedOU(t, s.st, 0, scopeAll)
 	s.forecastGroupsMu.Lock()
@@ -642,6 +663,7 @@ func TestDeletingOUPurgesForecastCache(t *testing.T) {
 }
 
 func TestDeletedOUIdIsNeverReferencedBySets(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	a := seedOU(t, s.st, 0, scopeAll)
 	b := seedOU(t, s.st, a, scopeAll)
@@ -661,6 +683,7 @@ func TestDeletedOUIdIsNeverReferencedBySets(t *testing.T) {
 }
 
 func TestReusedOUIdCarriesNoScope(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	def := st.EnsureDefaultGroup()
 	old := seedOU(t, st, 0, scopeAll)

@@ -16,13 +16,12 @@ import (
 // network.proxy with suggested hosts. The grant is off, as it is after install.
 func platformProxyFixture(t *testing.T, pg bool) (*Server, platformActorSession, string) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		m.Capabilities.Required = []string{"background.run", "network.http", "notifications.publish"}
 		m.Capabilities.Optional = []string{"network.proxy"}
 		m.NetworkProxy = &appplatform.NetworkProxy{Hosts: []string{"*.eastmoney.com", "qt.gtimg.cn"}}
-	}
-	platformFixtureNetworkTarget = true
-	t.Cleanup(func() { platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false })
+	})
+	platformFixtureNetworkTarget.set(t, true)
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability<>'network.proxy'`, lease.installationID)
 	runner := &platformProxyRunner{profile: transport.NewProxyProfile()}
@@ -185,8 +184,12 @@ func testPlatformProxyPlanThenConsume(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformProxyPlanThenConsume(t *testing.T) { testPlatformProxyPlanThenConsume(t, false) }
+func TestPlatformProxyPlanThenConsume(t *testing.T) {
+	t.Parallel()
+	testPlatformProxyPlanThenConsume(t, false)
+}
 func TestPlatformProxyPlanThenConsumePostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyPlanThenConsume)
 }
 
@@ -274,8 +277,12 @@ func testPlatformProxyCreateRefusals(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformProxyCreateRefusals(t *testing.T) { testPlatformProxyCreateRefusals(t, false) }
+func TestPlatformProxyCreateRefusals(t *testing.T) {
+	t.Parallel()
+	testPlatformProxyCreateRefusals(t, false)
+}
 func TestPlatformProxyCreateRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyCreateRefusals)
 }
 
@@ -446,7 +453,11 @@ func testPlatformProxyConsumeRefusals(t *testing.T, pg bool) {
 	})
 }
 
-func TestPlatformProxyConsumeRefusals(t *testing.T) { testPlatformProxyConsumeRefusals(t, false) }
+func TestPlatformProxyConsumeRefusals(t *testing.T) {
+	t.Parallel()
+	testPlatformProxyConsumeRefusals(t, false)
+}
 func TestPlatformProxyConsumeRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyConsumeRefusals)
 }

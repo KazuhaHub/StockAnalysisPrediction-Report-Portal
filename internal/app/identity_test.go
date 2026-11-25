@@ -15,6 +15,7 @@ import (
 // (provider, issuer, subject) and by nothing else — in particular a same-subject value under a
 // DIFFERENT issuer is a different person, because `sub` is only unique within an issuer.
 func TestIdentityLinkRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 
@@ -51,6 +52,7 @@ func TestIdentityLinkRoundTrip(t *testing.T) {
 // carrying the IdP's immutable object id is found on first SSO login, so it is linked rather than
 // duplicated. The lookup is scoped per provider, so two IdPs cannot collide on the same id.
 func TestFindUserByExternalID(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.UpsertUser(User{Username: "bob", PasswordHash: "h", Role: "user"})
 	if err := st.SetUserExternalID("bob", "acme", "objid-42"); err != nil {
@@ -70,6 +72,7 @@ func TestFindUserByExternalID(t *testing.T) {
 // TestSSOUsernameSanitizer proves a mapped UPN is reduced to a safe, bounded username, and that
 // anything with no usable characters is rejected rather than silently becoming something odd.
 func TestSSOUsernameSanitizer(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"alice@acme.com":         "alice",
 		"Alice.Smith@x.io":       "alice.smith",
@@ -95,6 +98,7 @@ func TestSSOUsernameSanitizer(t *testing.T) {
 // exposed to password guessing and to bcrypt CPU burn, and today it only fails by the accident that
 // bcrypt rejects an empty hash.
 func TestApiLoginRejectsFederatedAccount(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	h, _ := bcrypt.GenerateFromPassword([]byte("correct-horse-battery"), bcrypt.MinCost)
@@ -126,6 +130,7 @@ func TestApiLoginRejectsFederatedAccount(t *testing.T) {
 // SSO user's role or OU invalidates their existing cookie, so a downgrade cannot be outrun by a
 // still-valid 7-day session.
 func TestApplyAssignmentBumpsSessionOnChange(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 	root := st.EnsureDefaultGroup()

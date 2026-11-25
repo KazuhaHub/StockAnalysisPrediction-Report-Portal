@@ -71,8 +71,8 @@ func testPlatformDataStage(t *testing.T, pg bool) {
 		t.Fatal("stale stage retry changed state")
 	}
 }
-func TestPlatformDataStageSQLite(t *testing.T)   { testPlatformDataStage(t, false) }
-func TestPlatformDataStagePostgres(t *testing.T) { testPlatformDataStage(t, true) }
+func TestPlatformDataStageSQLite(t *testing.T)   { t.Parallel(); testPlatformDataStage(t, false) }
+func TestPlatformDataStagePostgres(t *testing.T) { t.Parallel(); testPlatformDataStage(t, true) }
 func testPlatformDataStageRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"zero", "old_proof", "future_proof", "private_profile", "endpoint", "controller_uid", "root_uid", "authority", "command_digest", "request_digest", "physical_quota", "effect", "namespace", "runtime_disabled", "sealed_key", "sponsor", "lease", "pause"} {
 		t.Run(kind, func(t *testing.T) {
@@ -131,8 +131,14 @@ func testPlatformDataStageRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformDataStageRefusalsSQLite(t *testing.T)   { testPlatformDataStageRefusals(t, false) }
-func TestPlatformDataStageRefusalsPostgres(t *testing.T) { testPlatformDataStageRefusals(t, true) }
+func TestPlatformDataStageRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformDataStageRefusals(t, false)
+}
+func TestPlatformDataStageRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformDataStageRefusals(t, true)
+}
 func testPlatformDataStageRollback(t *testing.T, pg bool) {
 	for _, table := range []string{"app_platform_operation_effects", "app_platform_operations"} {
 		t.Run(table, func(t *testing.T) {
@@ -177,10 +183,17 @@ func testPlatformDataStageRollback(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformDataStageRollbackSQLite(t *testing.T)   { testPlatformDataStageRollback(t, false) }
-func TestPlatformDataStageRollbackPostgres(t *testing.T) { testPlatformDataStageRollback(t, true) }
+func TestPlatformDataStageRollbackSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformDataStageRollback(t, false)
+}
+func TestPlatformDataStageRollbackPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformDataStageRollback(t, true)
+}
 
 func TestPlatformDataStageRequiresAuthenticatedEndpoint(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformDataIntentFixture(t, false)
 	intent, err := s.preparePlatformInstallData(context.Background(), lease)
 	if err != nil {
@@ -198,6 +211,7 @@ func TestPlatformDataStageRequiresAuthenticatedEndpoint(t *testing.T) {
 }
 
 func TestPlatformDataStageLateAuditRefusalPostgres(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"expired_proof", "canceled_context"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _, lease := platformDataIntentFixture(t, true)

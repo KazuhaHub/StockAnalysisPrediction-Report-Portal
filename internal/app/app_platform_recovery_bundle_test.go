@@ -82,6 +82,7 @@ func platformBundleFiles(t *testing.T, dir string) []string {
 }
 
 func TestRecoveryBundleManifestListsEveryRetainedCheckpoint(t *testing.T) {
+	t.Parallel()
 	b := platformBundleFixture(t)
 	s := b.s
 	first := b.retain(t, 1, "verified", b.release, []byte("checkpoint archive one"))
@@ -143,6 +144,7 @@ func TestRecoveryBundleManifestListsEveryRetainedCheckpoint(t *testing.T) {
 }
 
 func TestRecoveryBundleRefusesWrongOrMissingArchives(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(*testing.T, *platformBundleSource, string){
 		"archive missing": func(t *testing.T, b *platformBundleSource, id string) { delete(b.archives, id) },
 		"digest differs": func(t *testing.T, b *platformBundleSource, id string) {
@@ -190,6 +192,7 @@ func TestRecoveryBundleRefusesWrongOrMissingArchives(t *testing.T) {
 // The old runner's journal is evidence about the old host. It is copied byte for byte and never opened:
 // opening it would create write-ahead files beside it and take a lock that belongs to a runner.
 func TestRecoveryBundleCopiesOldJournalWithoutOpeningIt(t *testing.T) {
+	t.Parallel()
 	b := platformBundleFixture(t)
 	b.retain(t, 1, "verified", b.release, []byte("checkpoint archive one"))
 	oldHost, err := filepath.EvalSymlinks(t.TempDir())
@@ -251,6 +254,7 @@ func TestRecoveryBundleCopiesOldJournalWithoutOpeningIt(t *testing.T) {
 }
 
 func TestRequiredReleaseBlobsCoverActiveAndPinnedReleases(t *testing.T) {
+	t.Parallel()
 	b := platformBundleFixture(t)
 	s := b.s
 	copyRelease := func(sha, version string, managed int) {

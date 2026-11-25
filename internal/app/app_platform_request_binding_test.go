@@ -10,6 +10,7 @@ import (
 )
 
 func TestPlatformWritableRequestBindingBoundary(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	valid := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: strings.Repeat("a", 64)}
 	for _, change := range []func(*platformBackendRequestBinding){
@@ -70,9 +71,11 @@ func testPlatformWritableRequestBinding(t *testing.T, pg bool) {
 }
 
 func TestPlatformWritableRequestBindingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableRequestBinding(t, false)
 }
 
 func TestPlatformWritableRequestBindingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableRequestBinding(t, true)
 }

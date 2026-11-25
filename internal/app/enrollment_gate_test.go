@@ -81,6 +81,7 @@ func sessionForPath(t *testing.T, s *Server, user, pattern, path string) *http.R
 // ---------- the policy ----------
 
 func TestTheMandateIsStickyDownTheTree(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	st := env.s.st
 	// A child of the mandated OU sets it OFF: the parent still governs, as `restricted` does.
@@ -103,6 +104,7 @@ func TestTheMandateIsStickyDownTheTree(t *testing.T) {
 }
 
 func TestTheMandateReachesOnlyItsOwnMembers(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	inside := securityOf(t, env.s.st, env.must)
 	outside := securityOf(t, env.s.st, env.free)
@@ -116,6 +118,7 @@ func TestTheMandateReachesOnlyItsOwnMembers(t *testing.T) {
 
 // The global switch is for staff, and it is the portal's floor rather than an OU's.
 func TestTheStaffMandateCoversAdministrators(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	if err := env.s.st.UpsertUser(User{Username: "ops", PasswordHash: mustHash("correct-horse-battery"), Role: "admin"}); err != nil {
 		t.Fatal(err)
@@ -133,6 +136,7 @@ func TestTheStaffMandateCoversAdministrators(t *testing.T) {
 }
 
 func TestAFactorSatisfiesTheMandate(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	if must, _ := env.s.mustEnroll(env.already); must {
 		t.Error("an account with a factor is required to enrol one")
@@ -145,6 +149,7 @@ func TestAFactorSatisfiesTheMandate(t *testing.T) {
 // A federated account's factors belong to its IdP, so it can never satisfy a local mandate — and
 // holding it at a wall it cannot climb is a lockout dressed as a policy.
 func TestFederatedAccountsAreExempt(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	if err := env.s.st.UpsertUser(User{Username: "fed", PasswordHash: "", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -161,6 +166,7 @@ func TestFederatedAccountsAreExempt(t *testing.T) {
 // There is no "and nobody can enrol anyway" escape: an unsatisfiable mandate keeps holding the
 // account, because the alternative is a policy that switches itself off and says nothing.
 func TestAnUnsatisfiableMandateStillHolds(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	env.s.st.SetSetting(setTOTPEnroll, "0")
 	env.s.st.SetSetting(setPasskeyEnroll, "0")
@@ -182,6 +188,7 @@ func TestAnUnsatisfiableMandateStillHolds(t *testing.T) {
 // handler must hold the mandated cookie at the wall with the v1 error envelope, while a machine
 // Bearer(query) token is not a reader to be held there.
 func TestV1ReadsAreHeldAtTheEnrolmentWall(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	// Forecast permission does not bypass the independent enrolment wall.
 	if _, err := env.s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE is_default=1 OR id=?", scopeAll, env.ouID); err != nil {
@@ -263,6 +270,7 @@ func TestV1ReadsAreHeldAtTheEnrolmentWall(t *testing.T) {
 
 // The wall: a mandated account with no factor reaches the enrolment routes and nothing else.
 func TestTheGateHoldsAMandatedAccountAtTheWall(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	for _, pattern := range []string{"GET /api/home", "GET /api/stock/{symbol}", "GET /api/admin/users", "GET /api/announcements"} {
 		rec := httptest.NewRecorder()
@@ -280,6 +288,7 @@ func TestTheGateHoldsAMandatedAccountAtTheWall(t *testing.T) {
 // The routes an account needs to GET OUT of the wall, and the ones signing out needs. Everything
 // here is exact: a wildcard would be a hole nobody could see.
 func TestTheGateLetsTheEnrolmentRoutesAndSignOutThrough(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	for _, pattern := range []string{
 		"GET /api/me", "POST /api/me/password",
@@ -296,6 +305,7 @@ func TestTheGateLetsTheEnrolmentRoutesAndSignOutThrough(t *testing.T) {
 
 // An account NOT under the mandate is unaffected: this is a policy, not a maintenance mode.
 func TestTheGateDoesNotTouchUnmandatedAccounts(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	rec := httptest.NewRecorder()
 	env.s.gateEnrolment(rec, sessionFor(t, env.s, env.free), env.free)
@@ -312,6 +322,7 @@ func TestTheGateDoesNotTouchUnmandatedAccounts(t *testing.T) {
 // A policy that cannot be read refuses the request rather than answering "you are fine": the gate
 // decides whether business data is readable, so its failure mode is the safe direction.
 func TestTheGateFailsClosedWhenThePolicyCannotBeRead(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	// A closed store is the honest way to make the read fail. The request is built first: it needs
 	// the account, and the account needs the store.
@@ -330,6 +341,7 @@ func TestTheGateFailsClosedWhenThePolicyCannotBeRead(t *testing.T) {
 // /api/me is what the SPA uses to learn it is gated, so it has to answer even while gated — and it
 // has to say so.
 func TestMeSaysWhetherTheAccountMustEnrol(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	read := func(user string) map[string]any {
 		var out map[string]any
@@ -352,6 +364,7 @@ func TestMeSaysWhetherTheAccountMustEnrol(t *testing.T) {
 // left. Refusing the pair is what keeps an operator from locking their own people out with two
 // individually reasonable saves.
 func TestAPolicyThatNobodyCouldSatisfyIsRefused(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t) // one OU already requires a factor
 	// ...and both methods are on, which is the state everything above ran in.
 	if code := saveSecurity(t, env.s, `{"twofa":{"totp_enroll":false,"passkey_enroll":false}}`); code != http.StatusBadRequest {
@@ -386,6 +399,7 @@ func TestAPolicyThatNobodyCouldSatisfyIsRefused(t *testing.T) {
 // The OU page is the other place a mandate is turned on, and it has to refuse the same impossible
 // state — including when the OU is MOVED under a parent that mandates one.
 func TestTheOUSaveRefusesAMandateWithNoMethodEnabled(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	if err := env.s.st.SetGroupRequire2FA(env.ouID, false); err != nil {
 		t.Fatal(err)
@@ -404,6 +418,7 @@ func TestTheOUSaveRefusesAMandateWithNoMethodEnabled(t *testing.T) {
 // The number, not just the flag: turning a mandate on asks people to do something, and how many is
 // the difference between a policy and a surprise.
 func TestTheOUSaveReportsWhoWouldBeAskedToEnrol(t *testing.T) {
+	t.Parallel()
 	env := mandateServer(t)
 	for _, u := range []string{"a", "b"} {
 		if err := env.s.st.UpsertUser(User{Username: u, PasswordHash: mustHash("correct-horse-battery"), Role: "user"}); err != nil {
@@ -438,6 +453,7 @@ func TestTheOUSaveReportsWhoWouldBeAskedToEnrol(t *testing.T) {
 // operator with shell access has the database anyway; what they do not have is the web UI they are
 // locked out of.
 func TestTheSecurityCLILetsAnOperatorBackIn(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "portal.db")
 	cfgPath := writeTestConfig(t, dbPath)
 	st, err := OpenStore("sqlite", dbPath)
@@ -481,6 +497,7 @@ func TestTheSecurityCLILetsAnOperatorBackIn(t *testing.T) {
 // `set` goes through the same validation as the settings page, so an operator cannot use the CLI to
 // build the state the product refuses.
 func TestTheSecurityCLIRefusesWhatThePageRefuses(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "portal.db")
 	cfgPath := writeTestConfig(t, dbPath)
 	if _, err := SecurityCommand(cfgPath, []string{"set", setTOTPEnroll, "false"}); err != nil {

@@ -8,6 +8,7 @@ import (
 )
 
 func TestStockDeepLinkByReportID(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertStockDeepLinkByReportID(t, newV1Server(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t, "reports", "users")

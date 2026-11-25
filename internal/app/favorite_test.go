@@ -19,6 +19,7 @@ func seedFavoriteUser(t *testing.T, st *Store, name string) {
 }
 
 func TestStockFavoritesAreOrderedIdempotentAndUserScoped(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	seedFavoriteUser(t, st, "alice")
 	seedFavoriteUser(t, st, "bob")
@@ -56,6 +57,7 @@ func TestStockFavoritesAreOrderedIdempotentAndUserScoped(t *testing.T) {
 }
 
 func TestStockFavoriteLimitAndAtomicReorder(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	seedFavoriteUser(t, st, "alice")
 	for i := 0; i < stockFavoriteLimit; i++ {
@@ -96,6 +98,7 @@ func TestStockFavoriteLimitAndAtomicReorder(t *testing.T) {
 }
 
 func TestDeletingAUserSweepsStockFavorites(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	seedFavoriteUser(t, st, "alice")
 	if _, _, err := st.AddStockFavorite("alice", "sh", "600519"); err != nil {
@@ -111,6 +114,7 @@ func TestDeletingAUserSweepsStockFavorites(t *testing.T) {
 }
 
 func TestLatestReportsForFavoritesHonorsReportScopeAndSkipsInternalRows(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SaveVersion(ReportVersion{Name: "private", Ord: 0, Visibility: VisibilityAll})
 	st.SaveVersion(ReportVersion{Name: "public", Ord: 1, Visibility: VisibilityAll})
@@ -166,6 +170,7 @@ func favoriteBody(t *testing.T, rec *httptest.ResponseRecorder) favoriteListResp
 }
 
 func TestFavoriteAPIUsesTheSessionOwnerAndCanonicalIdentity(t *testing.T) {
+	t.Parallel()
 	s := favoriteServer(t)
 	added := favoriteRequest(t, s, "alice", http.MethodPut, "/api/favorites/us/aapl", "")
 	if added.Code != http.StatusOK {
@@ -190,6 +195,7 @@ func TestFavoriteAPIUsesTheSessionOwnerAndCanonicalIdentity(t *testing.T) {
 }
 
 func TestFavoriteAPIAddReturnsTheVisibleReportSummary(t *testing.T) {
+	t.Parallel()
 	s := favoriteServer(t)
 	if _, _, err := s.st.UpsertReport(Rep{Symbol: "600519", Name: "Moutai", Date: "2026-09-08",
 		RType: "Research", Title: "Decision", MD: "body"}); err != nil {
@@ -209,6 +215,7 @@ func TestFavoriteAPIAddReturnsTheVisibleReportSummary(t *testing.T) {
 }
 
 func TestFavoriteAPIReorderAndDeleteAreSafe(t *testing.T) {
+	t.Parallel()
 	s := favoriteServer(t)
 	for _, path := range []string{"/api/favorites/sh/600519", "/api/favorites/hk/00700"} {
 		if rec := favoriteRequest(t, s, "alice", http.MethodPut, path, ""); rec.Code != http.StatusOK {

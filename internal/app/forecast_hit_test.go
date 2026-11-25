@@ -10,6 +10,7 @@ import (
 )
 
 func TestDirectionReconcilesWithHitRate(t *testing.T) {
+	t.Parallel()
 	// s0 10000: 4.99% is below the floor, 5.00% is exactly on it, 5.01% is above.
 	cases := []struct {
 		name     string
@@ -39,6 +40,7 @@ func TestDirectionReconcilesWithHitRate(t *testing.T) {
 // set predHitClass does not call untested. A member with no benchmark excess is not tested, and a
 // flat row is tested but not agreed.
 func TestHitRateCountsExactlyTheAgreed(t *testing.T) {
+	t.Parallel()
 	// Build members through the real scoring arrays: excess and upside are set by scoreForecastCell,
 	// so a wrong sign or a wrong denominator cannot hide behind a hand-built big[].
 	s := newV1Server(t)
@@ -117,6 +119,7 @@ func TestMembersRouteScoresNothing(t *testing.T) {
 
 // TestMembersWithholdOutcomesUnlessMature: a pending or small cell sends identity and status only.
 func TestMembersWithholdOutcomesUnlessMature(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, 3, nil) // below the mature threshold
 	rec := httptest.NewRecorder()

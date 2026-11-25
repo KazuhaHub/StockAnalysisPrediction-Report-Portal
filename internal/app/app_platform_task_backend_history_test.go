@@ -149,44 +149,56 @@ func testPlatformServiceHistoryUnknownPlanFormatIsRefused(t *testing.T, pg bool)
 }
 
 func TestPlatformServiceHistoryManagedGenerationOneSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryManagedGenerationOne(t, false)
 }
 func TestPlatformServiceHistoryManagedGenerationOnePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryManagedGenerationOne(t, true)
 }
 
 func TestPlatformServiceHistoryWritableGenerationOneUsesWritableKindSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryWritableGenerationOneUsesWritableKind(t, false)
 }
 func TestPlatformServiceHistoryWritableGenerationOneUsesWritableKindPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryWritableGenerationOneUsesWritableKind(t, true)
 }
 
 func TestPlatformServiceHistoryGenerationTwoAfterUpdateSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryGenerationTwoAfterUpdate(t, false)
 }
 func TestPlatformServiceHistoryGenerationTwoAfterUpdatePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryGenerationTwoAfterUpdate(t, true)
 }
 
 func TestPlatformServiceHistoryGenerationTwoAfterRestoreSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryGenerationTwoAfterRestore(t, false)
 }
 func TestPlatformServiceHistoryGenerationTwoAfterRestorePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryGenerationTwoAfterRestore(t, true)
 }
 
 func TestPlatformServiceHistoryGenerationTwoAfterResumeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryGenerationTwoAfterResume(t, false)
 }
 func TestPlatformServiceHistoryGenerationTwoAfterResumePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryGenerationTwoAfterResume(t, true)
 }
 
 func TestPlatformServiceHistoryUnknownPlanFormatIsRefusedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryUnknownPlanFormatIsRefused(t, false)
 }
 func TestPlatformServiceHistoryUnknownPlanFormatIsRefusedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceHistoryUnknownPlanFormatIsRefused(t, true)
 }
 
@@ -364,20 +376,26 @@ func testPlatformServiceTaskAfterGrantChangeGenerationTwo(t *testing.T, pg bool)
 }
 
 func TestPlatformServiceTaskAfterGrantChangeManagedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceTaskAfterGrantChangeManaged(t, false)
 }
 func TestPlatformServiceTaskAfterGrantChangeManagedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceTaskAfterGrantChangeManaged(t, true)
 }
 func TestPlatformServiceTaskAfterGrantChangeWritableSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceTaskAfterGrantChangeWritable(t, false)
 }
 func TestPlatformServiceTaskAfterGrantChangeWritablePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceTaskAfterGrantChangeWritable(t, true)
 }
 func TestPlatformServiceTaskAfterGrantChangeGenerationTwoSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceTaskAfterGrantChangeGenerationTwo(t, false)
 }
 func TestPlatformServiceTaskAfterGrantChangeGenerationTwoPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceTaskAfterGrantChangeGenerationTwo(t, true)
 }

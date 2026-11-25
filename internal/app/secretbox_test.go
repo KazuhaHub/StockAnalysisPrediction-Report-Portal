@@ -16,6 +16,7 @@ func secretServer(t *testing.T) *Server {
 // a value round-trips, ciphertext is recognisable and never contains the plaintext, and each seal is
 // distinct (a fresh nonce), so identical secrets don't produce identical ciphertext.
 func TestSealOpenRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := secretServer(t)
 	const secret = "app-super-secret-client-value"
 
@@ -47,6 +48,7 @@ func TestSealOpenRoundTrip(t *testing.T) {
 // provider or another field, so a database edit can't promote one provider's client secret into
 // another's — or a low-value field into a high-value one.
 func TestSealIsBoundToItsContext(t *testing.T) {
+	t.Parallel()
 	s := secretServer(t)
 	box, err := s.sealSecret("acme", "oidc_client_secret", "v")
 	if err != nil {
@@ -63,6 +65,7 @@ func TestSealIsBoundToItsContext(t *testing.T) {
 // TestOpenRejectsTampering proves an altered ciphertext fails loudly rather than returning garbage —
 // AES-GCM authenticates, and the caller must be able to tell "needs re-entering" from "wrong value".
 func TestOpenRejectsTampering(t *testing.T) {
+	t.Parallel()
 	s := secretServer(t)
 	box, err := s.sealSecret("acme", "saml_sp_key", "private-key-material")
 	if err != nil {
@@ -84,6 +87,7 @@ func TestOpenRejectsTampering(t *testing.T) {
 // restarting the server (or a second Server value against the same store) can still open existing
 // secrets — the failure mode that would otherwise silently invalidate every stored credential.
 func TestKeyringIsStableAndLazy(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	cfg := &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
 	s1 := &Server{st: st, cfg: cfg}

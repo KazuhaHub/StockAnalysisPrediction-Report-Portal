@@ -124,8 +124,14 @@ func testPlatformWritableStartIntent(t *testing.T, pg bool) {
 		t.Fatal("start audit not idempotent")
 	}
 }
-func TestPlatformWritableStartIntentSQLite(t *testing.T)   { testPlatformWritableStartIntent(t, false) }
-func TestPlatformWritableStartIntentPostgres(t *testing.T) { testPlatformWritableStartIntent(t, true) }
+func TestPlatformWritableStartIntentSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableStartIntent(t, false)
+}
+func TestPlatformWritableStartIntentPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformWritableStartIntent(t, true)
+}
 func testPlatformWritableStartRefusals(t *testing.T, pg bool) {
 	for _, mode := range []string{"writer", "writer_receipt", "namespace", "runtime", "publisher", "pause", "lease", "fence", "candidate", "start_unknown", "start_digest", "start_time", "partial", "extra"} {
 		t.Run(mode, func(t *testing.T) {
@@ -174,8 +180,10 @@ func testPlatformWritableStartRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableStartRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableStartRefusals(t, false)
 }
 func TestPlatformWritableStartRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableStartRefusals(t, true)
 }

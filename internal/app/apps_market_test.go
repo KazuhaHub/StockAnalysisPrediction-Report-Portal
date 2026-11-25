@@ -39,6 +39,7 @@ func appMarketServer(t *testing.T) *Server {
 
 // The market list reports each entry and flips `installed` once installed.
 func TestAppMarketList(t *testing.T) {
+	t.Parallel()
 	market := marketAppServer(t)
 	defer market.Close()
 	srv := appMarketServer(t)
@@ -84,6 +85,7 @@ func TestAppMarketList(t *testing.T) {
 
 // Installing from the market downloads the bundle and stores the app + its files.
 func TestAppMarketInstall(t *testing.T) {
+	t.Parallel()
 	market := marketAppServer(t)
 	defer market.Close()
 	srv := appMarketServer(t)
@@ -105,6 +107,7 @@ func TestAppMarketInstall(t *testing.T) {
 
 // An unknown id yields 404 from the market install endpoint.
 func TestAppMarketInstallUnknown(t *testing.T) {
+	t.Parallel()
 	market := marketAppServer(t)
 	defer market.Close()
 	srv := appMarketServer(t)
@@ -118,6 +121,7 @@ func TestAppMarketInstallUnknown(t *testing.T) {
 }
 
 func TestAppMarketInstallRejectsDeclarationDrift(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, manifest, request string
 		status                  int
@@ -168,6 +172,7 @@ func TestAppMarketInstallRejectsDeclarationDrift(t *testing.T) {
 }
 
 func TestAppMarketReviewedInstallAndDuplicateIdentity(t *testing.T) {
+	t.Parallel()
 	market := marketAppServer(t)
 	defer market.Close()
 	srv := appMarketServer(t)

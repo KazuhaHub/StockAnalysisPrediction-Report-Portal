@@ -133,6 +133,7 @@ func TestFastForecastGroupsRequestLogsNothing(t *testing.T) {
 }
 
 func TestForecastRequestStatsRecordFlightJoinsAndSlotWait(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	cfg := forecastComputeConfig{Official: 1, Explore: 1, Wait: 2 * time.Second}
 	var sig forecastSignals
@@ -190,6 +191,7 @@ func TestForecastRequestStatsRecordFlightJoinsAndSlotWait(t *testing.T) {
 }
 
 func TestForecastRequestStatsAreOptional(t *testing.T) {
+	t.Parallel()
 	c := &forecastCompute{}
 	cfg := forecastComputeConfig{Official: 1, Explore: 1, Wait: time.Second}
 	if _, err := c.do(context.Background(), "plain", true, cfg, func() (*forecastCell, error) { return &forecastCell{}, nil }); err != nil {
@@ -221,6 +223,7 @@ func counterFixture(t *testing.T, scope string) (*Server, func(path string) *htt
 }
 
 func TestForecastServedRequestsCountCacheHitsScoringAndDrawerOpens(t *testing.T) {
+	t.Parallel()
 	s, get := counterFixture(t, scopeAll)
 	// A served request scores its one mature cell; the repeat is answered from the memo.
 	for i := 0; i < 2; i++ {
@@ -243,6 +246,7 @@ func TestForecastServedRequestsCountCacheHitsScoringAndDrawerOpens(t *testing.T)
 }
 
 func TestForecastBusyIsCounted(t *testing.T) {
+	t.Parallel()
 	s, get := counterFixture(t, scopeAll)
 	s.st.SetSetting(setForecastSlotsExplore, "0") // no exploratory capacity: a custom range is busy
 	w := get("/api/forecast/groups?mode=custom&from=2025-06-01&to=2025-06-30&group=month")
@@ -257,6 +261,7 @@ func TestForecastBusyIsCounted(t *testing.T) {
 }
 
 func TestForecastRateLimitsAreCountedForGroupsAndMembers(t *testing.T) {
+	t.Parallel()
 	s, get := counterFixture(t, scopeAll)
 	s.st.SetSetting(setForecastCustomPerMin, "1")
 	s.st.SetSetting(setForecastMembersPerMin, "1")

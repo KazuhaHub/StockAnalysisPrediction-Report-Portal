@@ -25,6 +25,7 @@ func identityAdminServer(t *testing.T) *Server {
 }
 
 func TestAdminSeesTheIdentityBehindAnAccount(t *testing.T) {
+	t.Parallel()
 	s := identityAdminServer(t)
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/admin/users/alice/identity", nil)
@@ -53,6 +54,7 @@ func TestAdminSeesTheIdentityBehindAnAccount(t *testing.T) {
 }
 
 func TestAdminCanRevokeAnIdentityWithoutDeletingTheAccount(t *testing.T) {
+	t.Parallel()
 	s := identityAdminServer(t)
 	if _, ok := s.st.FindIdentity("oidc", "https://idp.example", "sub-1"); !ok {
 		t.Fatal("failed to seed the link")

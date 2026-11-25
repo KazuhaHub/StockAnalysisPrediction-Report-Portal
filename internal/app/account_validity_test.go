@@ -15,6 +15,7 @@ import (
 // TestUserExpiryRoundTrip locks the store round-trip for the account validity cutoff (ADR 0022 R4):
 // a fresh user has none, a set date reads back, and clearing it returns to "never".
 func TestUserExpiryRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertUser(User{Username: "bob", PasswordHash: "h", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -39,6 +40,7 @@ func TestUserExpiryRoundTrip(t *testing.T) {
 // TestAccountExpiredBlocksSession proves an already-issued session dies the moment the account's
 // panel-tz validity date passes — and that the account stays valid THROUGH the expiry day itself.
 func TestAccountExpiredBlocksSession(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.UpsertUser(User{Username: "bob", PasswordHash: "h", Role: "user"})
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
@@ -73,6 +75,7 @@ func TestAccountExpiredBlocksSession(t *testing.T) {
 // TestApiLoginRejectsExpiredAccount proves login is refused (403) for an expired account even with
 // the correct password, and still succeeds (200) before expiry.
 func TestApiLoginRejectsExpiredAccount(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	h, _ := bcrypt.GenerateFromPassword([]byte("secret123"), bcrypt.MinCost)
 	st.UpsertUser(User{Username: "bob", PasswordHash: string(h), Role: "user"})

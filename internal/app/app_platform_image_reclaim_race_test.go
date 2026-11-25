@@ -57,6 +57,7 @@ func (f *reclaimFixture) target(t *testing.T, name string) platformReclaimTarget
 // Interleaving 1: the operation is admitted after the references were computed and before the row is inserted. The
 // row is computed again in the inserting transaction, so the removal is not started.
 func TestReclaimRecomputesTheReferencesInTheTransactionThatInsertsTheRow(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -73,6 +74,7 @@ func TestReclaimRecomputesTheReferencesInTheTransactionThatInsertsTheRow(t *test
 
 // The same, for a load of the same image applied after the watermark was taken.
 func TestReclaimDoesNotInsertARowWhenAnotherLoadWasAppliedAfterTheWatermark(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -96,6 +98,7 @@ func TestReclaimDoesNotInsertARowWhenAnotherLoadWasAppliedAfterTheWatermark(t *t
 // Interleaving 2: the removal row exists first. The load resolves it inline instead of waiting for an idle tick: a
 // receipt settles it, a runner that holds nothing running it abandons it, and only a running removal is waited for.
 func TestALoadResolvesAnOpenRemovalOfItsImageInline(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		setup func(f *platformFakeReclaimRunner, effect string)
 		state string
@@ -133,6 +136,7 @@ func TestALoadResolvesAnOpenRemovalOfItsImageInline(t *testing.T) {
 
 // A removal the runner is still doing is a bounded wait, not an abandonment.
 func TestALoadWaitsOnlyForARemovalTheRunnerIsStillDoing(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -157,6 +161,7 @@ func TestALoadWaitsOnlyForARemovalTheRunnerIsStillDoing(t *testing.T) {
 // Reinstalling the same app while its removal has no verdict completes: the load path resolves the removal and goes
 // on, and the image is loaded.
 func TestReinstallCompletesWhileItsRemovalIsUnknown(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	runtimeID := scalar[string](t, s.st, `SELECT id FROM app_platform_runtime_bindings WHERE enabled=1 LIMIT 1`)
 	installOp := scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='install'`, lease.installationID)
@@ -176,6 +181,7 @@ func TestReinstallCompletesWhileItsRemovalIsUnknown(t *testing.T) {
 
 // An open row whose intent cannot be read is open: it is listed, blocks nothing silently, and is closed.
 func TestAnUnreadableOpenRemovalRowFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
@@ -194,6 +200,7 @@ func TestAnUnreadableOpenRemovalRowFailsClosed(t *testing.T) {
 
 // More than the old 64-row window of open removals are all seen.
 func TestOpenRemovalsAreNotWindowed(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	for i := range 70 {
 		mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
@@ -239,6 +246,7 @@ func TestReclaimStopsAfterTheAttemptCapAndReportsTheImage(t *testing.T) {
 
 // An unreadable recovery pause stops the step, and a pause set after the sweep began stops the insert.
 func TestReclaimFailsClosedOnTheRecoveryPause(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -262,6 +270,7 @@ func TestReclaimFailsClosedOnTheRecoveryPause(t *testing.T) {
 // The settlement closure ends with the transaction that used it: the operation's ending hands later calls a context
 // without it.
 func TestTheEffectSettlementDoesNotOutliveTheTransactionThatRanIt(t *testing.T) {
+	t.Parallel()
 	ctx := withPlatformEffectSettlement(context.Background(), func(migExec, platformLeaseFacts) error { return nil })
 	if settle, _ := ctx.Value(platformEffectSettlementKey{}).(platformEffectSettlement); settle == nil {
 		t.Fatal("setup: the closure is not carried")
@@ -283,6 +292,7 @@ func TestTheEffectSettlementDoesNotOutliveTheTransactionThatRanIt(t *testing.T) 
 
 // An open removal whose image was loaded again is not completed: the watermark no longer names every load.
 func TestReclaimAbandonsAnOpenRemovalWhoseWatermarkIsStale(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -362,6 +372,7 @@ func TestReclaimNeverStartsANewAttemptWhileARemovalHasNoVerdict(t *testing.T) {
 
 // While the Portal is paused for recovery the step sends nothing.
 func TestReclaimWaitsForTheRecoveryPauseToEnd(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	f.load(t, "a")
@@ -388,6 +399,7 @@ func pinFixture(t *testing.T) *reclaimFixture {
 }
 
 func TestReclaimKeepsTheImageOfAnUnfinishedOperationsRelease(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"queued", "migrate"} {
 		f := pinFixture(t)
 		f.otherOperation(t, 1, f.otherInstallation(t, 1), f.shas["x"], stage, false)
@@ -398,6 +410,7 @@ func TestReclaimKeepsTheImageOfAnUnfinishedOperationsRelease(t *testing.T) {
 }
 
 func TestReclaimKeepsTheImageOfAnUnrecoveredFailure(t *testing.T) {
+	t.Parallel()
 	f := pinFixture(t)
 	f.otherOperation(t, 2, f.otherInstallation(t, 2), f.shas["x"], "recovery_required", true)
 	if f.targets(t)[f.config("x")] {
@@ -406,6 +419,7 @@ func TestReclaimKeepsTheImageOfAnUnrecoveredFailure(t *testing.T) {
 }
 
 func TestReclaimKeepsTheImageOfAnOpenReviewPlan(t *testing.T) {
+	t.Parallel()
 	f := pinFixture(t)
 	mustExec(t, f.s.st, `INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
 		SELECT ?,installation_id,app_id,publisher_id,'update',source_release_sha256,?,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,?,NULL,created_ms,updated_ms
@@ -418,6 +432,7 @@ func TestReclaimKeepsTheImageOfAnOpenReviewPlan(t *testing.T) {
 
 // Two releases carry the same image: the one still needed keeps it for the one that is not.
 func TestReclaimKeepsAnImageASecondReleaseStillCarries(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.releaseSeed(t, "old", "shared-image")
 	f.releaseSeed(t, "new", "shared-image")
@@ -436,6 +451,7 @@ func TestReclaimKeepsAnImageASecondReleaseStillCarries(t *testing.T) {
 
 // An image loaded on another runtime is never removed through this runtime's endpoint.
 func TestReclaimNeverSendsAnImageOfAnotherRuntimeToThisOne(t *testing.T) {
+	t.Parallel()
 	f := newReclaimFixture(t)
 	f.release(t, "a")
 	other := platformFixtureID(9400)
@@ -452,6 +468,7 @@ func TestReclaimNeverSendsAnImageOfAnotherRuntimeToThisOne(t *testing.T) {
 }
 
 func TestRemoveImageWatermarkFitsTheJournalBound(t *testing.T) {
+	t.Parallel()
 	if control.MaxKnownLoads < 8 {
 		t.Fatal("the watermark bound is too small to be useful")
 	}

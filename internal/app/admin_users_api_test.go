@@ -8,6 +8,7 @@ import (
 )
 
 func TestUserSaveRejectedBatchLeavesAccountAndAuditUnchanged(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{
 		`{"role":"operator","display_name":"changed","active":false,"primary_group":999999}`,
 		`{"role":"operator","email":"changed@example.com","expires_at":"invalid"}`,
@@ -39,6 +40,7 @@ func TestUserSaveRejectedBatchLeavesAccountAndAuditUnchanged(t *testing.T) {
 // modal: only the fields present in the body are applied, with guards for the last admin and the
 // acting account itself.
 func TestUserSavePartialUpdateAndGuards(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	if err := s.st.UpsertUser(User{Username: "alice", PasswordHash: "x", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -110,6 +112,7 @@ func TestUserSavePartialUpdateAndGuards(t *testing.T) {
 // apiUserDelete refuses deleting yourself and the last admin, deletes anyone else, and records the
 // removal only when it actually happened.
 func TestUserDeleteGuardsAndAudit(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	if err := s.st.UpsertUser(User{Username: "alice", PasswordHash: "x", Role: "user"}); err != nil {
 		t.Fatal(err)
@@ -148,6 +151,7 @@ func TestUserDeleteGuardsAndAudit(t *testing.T) {
 
 // apiTokenDelete removes a token by id and audits the removal; an unknown id is a harmless no-op.
 func TestTokenDeleteHandler(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	if err := s.st.CreateToken("tok-secret", "dify", "query", ""); err != nil {
 		t.Fatal(err)

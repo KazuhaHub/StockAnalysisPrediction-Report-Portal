@@ -11,6 +11,7 @@ import (
 // The Email service page sends a blank recipient and relies on the server to address
 // the test to the signed-in admin; a blank recipient with no address on file is refused.
 func TestEmailTestBlankRecipientUsesSignedInAccount(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "hash1", Role: "admin"})
 	s.st.SetUserProfile("kaz", "Kazuha", "kaz@x.io")

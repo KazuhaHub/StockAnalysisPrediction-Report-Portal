@@ -11,6 +11,7 @@ import (
 // ListRuns folds the subtypes of one symbol+date into a single run; the Postgres integration test
 // covers the STRING_AGG path, this pins the SQLite default the whole product runs on.
 func TestListRunsGroupsSubtypesSQLite(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, rtype := range []string{"交易分析", "舆情分析"} {
 		if _, _, err := st.UpsertReport(Rep{Title: rtype, Symbol: "600519", Name: "Moutai", RType: rtype, Kind: "重组决策", Date: "2026-07-01"}); err != nil {
@@ -46,6 +47,7 @@ func TestListRunsGroupsSubtypesSQLite(t *testing.T) {
 // A hand-written report is recognized by its manual version; a workflow report never is, and the
 // identity collision names the occupant.
 func TestManualReportIdentity(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	workflowID, _, err := st.UpsertReport(Rep{Title: "ingested", Symbol: "600519", RType: "投资决策", Kind: "投资决策", Date: "2026-07-01"})
 	if err != nil {
@@ -80,6 +82,7 @@ func TestManualReportIdentity(t *testing.T) {
 // apiCleanupUsage is the storage-analysis screen: row counts, approximate bytes and the
 // oldest/newest spans that retention policies are set from.
 func TestCleanupUsageEndpoint(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	if _, _, err := s.st.UpsertReport(Rep{Title: "r1", Symbol: "600519", Name: "Moutai", RType: "投资决策", Kind: "投资决策", Date: "2026-07-01", MD: "some body text", Time: nowStr()}); err != nil {
 		t.Fatal(err)

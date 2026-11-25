@@ -34,10 +34,11 @@ func testPlatformDocumentRead(t *testing.T, pg bool) {
 		t.Fatal("revoked reader received derived document")
 	}
 }
-func TestPlatformDocumentReadSQLite(t *testing.T)   { testPlatformDocumentRead(t, false) }
-func TestPlatformDocumentReadPostgres(t *testing.T) { testPlatformDocumentRead(t, true) }
+func TestPlatformDocumentReadSQLite(t *testing.T)   { t.Parallel(); testPlatformDocumentRead(t, false) }
+func TestPlatformDocumentReadPostgres(t *testing.T) { t.Parallel(); testPlatformDocumentRead(t, true) }
 
 func TestPostgresPlatformDocumentReadExpiryAfterReleaseWait(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"reader", "signing_key"} {
 		t.Run(kind, func(t *testing.T) {
 			s, reader, id := platformLaunchFixture(t, true)

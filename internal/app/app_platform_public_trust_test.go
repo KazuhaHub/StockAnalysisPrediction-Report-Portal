@@ -11,6 +11,7 @@ import (
 // Publisher trust is read with every request, so a disabled publisher or a revoked key stops the
 // anonymous projection on the very next request, from the cache too (doc 03 lifecycle).
 func TestPublicTrustChangesAreHonouredOnTheNextRequest(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		cases := map[string]struct{ revoke, restore string }{
 			"publisher disabled":              {`UPDATE app_platform_publishers SET enabled=0,revision=revision+1`, `UPDATE app_platform_publishers SET enabled=1,revision=revision+1`},
@@ -46,6 +47,7 @@ func TestPublicTrustChangesAreHonouredOnTheNextRequest(t *testing.T) {
 }
 
 func TestPublicVerifiedReleaseIsNotEvictedByResponses(t *testing.T) {
+	t.Parallel()
 	var p platformPublicState
 	now := time.Now()
 	p.useTuple("a", "t")
@@ -72,6 +74,7 @@ func TestPublicVerifiedReleaseIsNotEvictedByResponses(t *testing.T) {
 }
 
 func TestPublicDatabaseFailureCreatesNoPerIdentifierState(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -105,6 +108,7 @@ func TestPublicDatabaseFailureCreatesNoPerIdentifierState(t *testing.T) {
 }
 
 func TestPublicSummaryLoopStopsAtShutdown(t *testing.T) {
+	t.Parallel()
 	var s Server
 	done := make(chan struct{})
 	go func() { s.platformPublicSummaryLoop(); close(done) }()
@@ -120,6 +124,7 @@ func TestPublicSummaryLoopStopsAtShutdown(t *testing.T) {
 // A release that cannot be verified is answered 503 and left alone: no archive read per request, and
 // never a 429, which would blame the visitor.
 func TestPublicUnverifiableReleaseBacksOffAndAnswers503(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)

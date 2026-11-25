@@ -12,6 +12,7 @@ import (
 )
 
 func TestBaselineCheckFollowsDesignTable(t *testing.T) {
+	t.Parallel()
 	sessions := []string{"2026-10-15", "2026-10-16", "2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22"}
 	closes := []int64{990, 1010, 1000, 1005, 1008, 1011}
 	var stock []QuoteBar
@@ -61,6 +62,7 @@ func TestBaselineCheckFollowsDesignTable(t *testing.T) {
 // session comes from made_at, so a body stamped with a date when the price did match cannot make a
 // current mismatch into a match.
 func TestBackdatedAsOfCannotTurnMismatchIntoMatch(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	dates := tradingDays("2026-10-13", 8)
@@ -99,6 +101,7 @@ func haltInput(sessions []string, lastTraded int, asOf string, now time.Time) se
 // TestHaltResolvesOnEvidenceOrConfirmation: a missing bar is a halt only when the vendor's own stamp
 // covers the session, or three sessions have passed in silence. Until then it is retryable.
 func TestHaltResolvesOnEvidenceOrConfirmation(t *testing.T) {
+	t.Parallel()
 	all := tradingDays("2026-10-20", 20)
 	earlyNow := shanghai(2026, time.November, 4, 15, 31) // only one completed session past the due
 	early := all[:12]
@@ -140,6 +143,7 @@ func TestHaltResolvesOnEvidenceOrConfirmation(t *testing.T) {
 // TestHaltedOnS0UsesLastPreS0Close: a stock halted on the start session is measured from its last
 // traded close BEFORE S0, and the benchmark leg still runs from S0.
 func TestHaltedOnS0UsesLastPreS0Close(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 20)
 	// The stock trades before S0 at 900, then is halted from S0 onward.
 	pre := bar(shiftDays(dates[0], -3), 900, 900, 910, 890)
@@ -174,6 +178,7 @@ func TestHaltedOnS0UsesLastPreS0Close(t *testing.T) {
 // TestHaltLongerThanTheWindowFetchesBack: when the ten-day window has no price, the evaluator widens
 // it once (400 days) rather than declaring the baseline unknowable.
 func TestHaltLongerThanTheWindowFetchesBack(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	dates := tradingDays("2026-10-19", 10)
@@ -213,6 +218,7 @@ func TestHaltLongerThanTheWindowFetchesBack(t *testing.T) {
 }
 
 func TestLimitBackstopNeverFlagsATradingDay(t *testing.T) {
+	t.Parallel()
 	notFlagged := []struct {
 		name     string
 		symbol   string
@@ -239,6 +245,7 @@ func TestLimitBackstopNeverFlagsATradingDay(t *testing.T) {
 // TestLimitBackstopLeavesListingsFirstBarsAlone is the "first five bars" rule: a series that begins
 // inside the fetch window is a listing's no-limit days and is never a corporate action.
 func TestLimitBackstopLeavesListingsFirstBarsAlone(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 20)
 	floor := dates[0]
 	// The series begins a fortnight after the fetch floor: a listing. Its first bar is four times
@@ -257,6 +264,7 @@ func TestLimitBackstopLeavesListingsFirstBarsAlone(t *testing.T) {
 }
 
 func TestMissingBenchBarIsUnverifiableNotResolved(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 10)
 	stock := barsFor(dates, 1000)
 	index := append(barsFor(dates[:9], 4000), barsFor(dates[9:], 4000)[1:]...)
@@ -278,6 +286,7 @@ func TestMissingBenchBarIsUnverifiableNotResolved(t *testing.T) {
 }
 
 func TestNewestBarRule(t *testing.T) {
+	t.Parallel()
 	b := bar("2026-10-22", 1000, 1000, 1010, 990)
 	// Thursday 01:00: Wednesday's bar is final.
 	if final, unv := newestBarFinal(bar("2026-10-21", 1000, 1000, 1010, 990),
@@ -304,6 +313,7 @@ func TestNewestBarRule(t *testing.T) {
 }
 
 func TestCalendarAndAnchorChecks(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 10)
 	stock := barsFor(dates, 1000)
 	index := barsFor(dates, 4000)
@@ -339,6 +349,7 @@ func withStock(in settleInput, stock []QuoteBar) settleInput {
 // the calendar does not reproduce are source faults. Twelve failed sessions leave every mark refused
 // with attempts unchanged and none final.
 func TestIndexWideCalendarFaultsNeverCountTowardFinality(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		setup func(index *forecastSeries, s *Server, setID int64)
@@ -383,6 +394,7 @@ func TestIndexWideCalendarFaultsNeverCountTowardFinality(t *testing.T) {
 }
 
 func TestSourceFailuresLeaveAttemptsAlone(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-19")
 	var markID int64
@@ -406,6 +418,7 @@ func TestSourceFailuresLeaveAttemptsAlone(t *testing.T) {
 }
 
 func TestSettleRecordsTheAnsweringSource(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 10)
 	res := settleMark(settleInput{
 		Set: forecastWorkSet{Symbol: "600160"}, Mark: forecastMark{Checkpoint: "d5"},
@@ -436,6 +449,7 @@ func TestSettleRecordsTheAnsweringSource(t *testing.T) {
 // TestMalformedMadeOnNeverReachesAVendorURL: a receipt date that cannot build a window is refused
 // before any fetch, so a bad row cannot put a control character into a vendor URL.
 func TestMalformedMadeOnNeverReachesAVendorURL(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-10-17")
 	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='not-a-date', made_at='2026-10-17T13:00:00Z' WHERE id=?", setID); err != nil {
@@ -464,6 +478,7 @@ func TestMalformedMadeOnNeverReachesAVendorURL(t *testing.T) {
 // TestValveIsSettledFromTheWholePass: the stale valve is a property of every stock body in the pass,
 // not of one set, so a single halted stock cannot trip it.
 func TestValveIsSettledFromTheWholePass(t *testing.T) {
+	t.Parallel()
 	dates := tradingDays("2026-10-19", 10)
 	newest := dates[9]
 	var stocks []forecastSeries

@@ -165,9 +165,11 @@ func testSettleUnknownDiscardsThenRestores(t *testing.T, pg bool) {
 }
 
 func TestSettleUnknownDiscardsThenRestoresSQLite(t *testing.T) {
+	t.Parallel()
 	testSettleUnknownDiscardsThenRestores(t, false)
 }
 func TestSettleUnknownDiscardsThenRestoresPostgres(t *testing.T) {
+	t.Parallel()
 	testSettleUnknownDiscardsThenRestores(t, true)
 }
 
@@ -245,9 +247,11 @@ func testSettleReadinessFailureRemovesTargetFirst(t *testing.T, pg bool) {
 }
 
 func TestSettleReadinessFailureRemovesTargetFirstSQLite(t *testing.T) {
+	t.Parallel()
 	testSettleReadinessFailureRemovesTargetFirst(t, false)
 }
 func TestSettleReadinessFailureRemovesTargetFirstPostgres(t *testing.T) {
+	t.Parallel()
 	testSettleReadinessFailureRemovesTargetFirst(t, true)
 }
 
@@ -292,8 +296,12 @@ func testSettleRestoreUnknownReadBack(t *testing.T, pg bool) {
 	}
 }
 
-func TestSettleRestoreUnknownReadBackSQLite(t *testing.T) { testSettleRestoreUnknownReadBack(t, false) }
+func TestSettleRestoreUnknownReadBackSQLite(t *testing.T) {
+	t.Parallel()
+	testSettleRestoreUnknownReadBack(t, false)
+}
 func TestSettleRestoreUnknownReadBackPostgres(t *testing.T) {
+	t.Parallel()
 	testSettleRestoreUnknownReadBack(t, true)
 }
 
@@ -332,15 +340,18 @@ func testSettleAbsenceOnlyAfterSignedWindow(t *testing.T, pg bool) {
 }
 
 func TestSettleAbsenceOnlyAfterSignedWindowSQLite(t *testing.T) {
+	t.Parallel()
 	testSettleAbsenceOnlyAfterSignedWindow(t, false)
 }
 func TestSettleAbsenceOnlyAfterSignedWindowPostgres(t *testing.T) {
+	t.Parallel()
 	testSettleAbsenceOnlyAfterSignedWindow(t, true)
 }
 
 // The same holds for the migration itself: an absent migrate-data settles it as never claimed, and then the
 // namespace needs no restore.
 func TestSettleAbsentMigrationNeedsNoRestore(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	fake.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errors.New("lost") }
 	fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
@@ -373,6 +384,7 @@ func TestSettleAbsentMigrationNeedsNoRestore(t *testing.T) {
 // The installation's fence moving past the failed update's means something else holds the installation:
 // nothing is sent.
 func TestSettleRefusedAfterFenceMoved(t *testing.T) {
+	t.Parallel()
 	f := settleAfterEnd(t, false, orphanedScript)
 	mustExec(t, f.s.st, `UPDATE app_platform_installations SET control_fence=control_fence+1 WHERE id=?`, f.lease.installationID)
 	if _, err := f.s.settlePlatformMigration(context.Background(), f.endpoint, f.op); err == nil {

@@ -8,6 +8,7 @@ import (
 // column, table and index is declared once in baseSchemaStmts, which is now also the acceptance
 // contract for an existing database (ADR 0034).
 func TestExternalUserSchemaBaseline(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 
 	cols := []struct{ table, col string }{

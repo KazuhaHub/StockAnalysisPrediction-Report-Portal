@@ -103,6 +103,7 @@ func quoteAdminRow(t *testing.T, view quoteAdminView, name string) quoteSourceSt
 // Every one of the three is admin-only, and the two that WRITE have to refuse a reader without
 // writing: a 403 that still saved would be the worst of both answers.
 func TestQuoteAdminRoutesAreAdminOnly(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	wireQuoteSources(s, tencentStub(readQuoteFixture(t, fixTencentSH)), sinaStub(t))
 
@@ -158,6 +159,7 @@ func TestQuoteAdminRoutesAreAdminOnly(t *testing.T) {
 // int(quoteTTLOpen/time.Second) is true of any value the constant could ever hold, and the promise
 // this test exists to keep is that an unconfigured portal behaves exactly as ADR 0028 shipped it.
 func TestQuoteAdminDefaultsReproduceTodaysBehaviour(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 
 	cfg := s.quoteConfigLoad()
@@ -267,6 +269,7 @@ func TestQuoteAdminDefaultsReproduceTodaysBehaviour(t *testing.T) {
 // out, so a value that reached meta from an older build, a restore or a hand edit cannot take the
 // portal below the floor either.
 func TestQuoteAdminClampsTTLsOnSaveAndOnRead(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 
 	rec := quoteAdminSave(t, s, `{"ttlOpenSecs":1,"ttlClosedSecs":10}`)
@@ -324,6 +327,7 @@ func TestQuoteAdminClampsTTLsOnSaveAndOnRead(t *testing.T) {
 // Both sites are asserted separately below (meta for the save, quoteConfigLoad for the read), because
 // a ceiling on one of them is exactly the half-fix the floor's own history warns about.
 func TestQuoteAdminClampsTTLsToTheCeilingOnSaveAndOnRead(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	// The literal, not quoteTTLSecs(quoteTTLCeiling): shortening the ceiling is a policy change about
 	// what a reader can be shown, and it should have to come past this line rather than through it.
@@ -389,6 +393,7 @@ func TestQuoteAdminClampsTTLsToTheCeilingOnSaveAndOnRead(t *testing.T) {
 // The TTL an admin saves is the one the CACHE uses, not merely the one the panel prints back. Both
 // halves are asserted: the max-age the browser is told, and the moment the entry actually expires.
 func TestQuoteAdminTTLReachesTheCache(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -425,6 +430,7 @@ func TestQuoteAdminTTLReachesTheCache(t *testing.T) {
 // A vendor this build has no parser for is refused outright. There is no sensible interpretation of
 // it, and dropping the name quietly would leave an admin looking at an order they did not type.
 func TestQuoteAdminRefusesAnUnknownSource(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	if rec := quoteAdminSave(t, s, `{"order":"sina"}`); rec.Code != http.StatusOK {
 		t.Fatalf("a real change → %d (%s)", rec.Code, rec.Body.String())
@@ -470,6 +476,7 @@ func TestQuoteAdminRefusesAnUnknownSource(t *testing.T) {
 // save that stored the order while load ignored it would pass any number of assertions about the
 // setting.
 func TestQuoteAdminOrderDisablesTheSourceItLeavesOut(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	sina := sinaStub(t)
@@ -516,6 +523,7 @@ func TestQuoteAdminOrderDisablesTheSourceItLeavesOut(t *testing.T) {
 // ---------- the cache ----------
 
 func TestQuoteAdminCacheClearReallyEmptiesIt(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -581,6 +589,7 @@ func TestQuoteAdminCacheClearReallyEmptiesIt(t *testing.T) {
 // assertions, and the record that has to survive includes a FAILURE STREAK, which no amount of
 // successful traffic could rebuild.
 func TestQuoteAdminCacheClearKeepsTheHealthRecord(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 
 	// Both vendors down, twice, so sina ends up with a streak of two and a reason of its own.
@@ -642,6 +651,7 @@ func TestQuoteAdminCacheClearKeepsTheHealthRecord(t *testing.T) {
 // ---------- health ----------
 
 func TestQuoteAdminHealthReportsWhatTheSourcesDid(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	sina := failingStub("sina timed out")
 	wireQuoteSources(s, failingStub("tencent 502"), sina)
@@ -690,6 +700,7 @@ func TestQuoteAdminHealthReportsWhatTheSourcesDid(t *testing.T) {
 // that as a vendor failure would paint a permanent red streak on the fallback for every US symbol
 // somebody looks up while Tencent is having a bad afternoon.
 func TestQuoteAdminNeverBlamesASourceForAMarketItCannotServe(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	sina := sinaStub(t)
 	wireQuoteSources(s, failingStub("tencent 502"), sina)
@@ -726,6 +737,7 @@ func TestQuoteAdminNeverBlamesASourceForAMarketItCannotServe(t *testing.T) {
 // do. And a REFUSED save writes nothing: a log entry for a change that did not happen is worse than
 // no entry, because it is read as evidence.
 func TestQuoteAdminSaveIsRecordedInTheAuditLog(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	if rec := quoteAdminSave(t, s, `{"order":"sina","ttlOpenSecs":45}`); rec.Code != http.StatusOK {
 		t.Fatalf("save → %d (%s)", rec.Code, rec.Body.String())
@@ -763,6 +775,7 @@ func TestQuoteAdminSaveIsRecordedInTheAuditLog(t *testing.T) {
 // symbol against a free endpoint, and no reader can see the difference, because the bar itself only
 // changes once a minute.
 func TestQuoteAdminClampsTheIntradayTTLOnSaveAndOnRead(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 
 	// The shipped default, written out rather than derived from the constant it mirrors.
@@ -824,6 +837,7 @@ func TestQuoteAdminClampsTheIntradayTTLOnSaveAndOnRead(t *testing.T) {
 // than through SetSetting. A test that wrote the row directly would still pass with the handler's
 // branch deleted.
 func TestQuoteAdminHomeCardsSwitchIsWiredBothWays(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 
 	// ON by default, and the panel says so: the ask was for it to ship on, and a page that read

@@ -81,8 +81,10 @@ func testPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange(t *testing.T,
 }
 
 func TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChangeSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange(t, false)
 }
 func TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChangePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange(t, true)
 }

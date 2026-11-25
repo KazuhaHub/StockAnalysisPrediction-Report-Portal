@@ -91,8 +91,10 @@ func TestPlatformServiceEgressCredentialWrongTargetNeverOpensPostgres(t *testing
 	testPlatformServiceEgressCredentialWrongTargetNeverOpens(t, true)
 }
 func TestPlatformServiceEgressCredentialStoreErrorIsUnavailableSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCredentialStoreErrorIsUnavailable(t, false)
 }
 func TestPlatformServiceEgressCredentialStoreErrorIsUnavailablePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressCredentialStoreErrorIsUnavailable(t, true)
 }

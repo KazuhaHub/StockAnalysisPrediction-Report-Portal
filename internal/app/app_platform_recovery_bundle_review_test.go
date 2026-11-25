@@ -58,6 +58,7 @@ func writeGoodBundle(t *testing.T) (*platformBundleSource, string, platformRecov
 
 // 1. The plugin-table list must come from the same snapshot as the rows (PostgreSQL shows the difference).
 func TestBackupTableListFollowsTheReadSnapshot(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	appID := platformFixtureID(7501)
 	table := platformPluginDataTableName(appID)
@@ -98,6 +99,7 @@ func TestBackupTableListFollowsTheReadSnapshot(t *testing.T) {
 
 // 2. The bundle keyring must open under the target's secret_key, before anything is written, dry run included.
 func TestRecoveryBundleRestoreRefusesAWrongSecretKeyBeforeAnyWrite(t *testing.T) {
+	t.Parallel()
 	_, dir, _ := writeGoodBundle(t)
 	for _, args := range [][]string{{"restore", dir}, {"restore", dir, "--force"}} {
 		cfgPath, dbPath, root := bundleTestConfig(t, wrongSecretKey)
@@ -119,6 +121,7 @@ func TestRecoveryBundleRestoreRefusesAWrongSecretKeyBeforeAnyWrite(t *testing.T)
 
 // 3. A checkpoint id is a UUID before it names a file, on both sides.
 func TestRecoveryBundleRefusesACheckpointIDThatIsNotAUUID(t *testing.T) {
+	t.Parallel()
 	crafted := platformRetainedSet{id: platformFixtureID(7100), checkpoint: "../../outside", manifest: platformDigest([]byte("x"))}
 	if err := validatePlatformRetainedSets([]platformRetainedSet{crafted}); !errors.Is(err, errPlatformBundle) {
 		t.Fatalf("a crafted checkpoint id was accepted by the writer: %v", err)
@@ -139,6 +142,7 @@ func TestRecoveryBundleRefusesACheckpointIDThatIsNotAUUID(t *testing.T) {
 // 4. The reservation is capacity accounting inside this process and protects nothing from a sweep, so it is not held
 // across the dump load (which would count the placed bytes twice). The real protection is a stopped Portal.
 func TestRecoveryBundleRestoreReleasesTheBlobReservationOncePlaced(t *testing.T) {
+	t.Parallel()
 	b, _, _ := bundleWithManagedReleases(t)
 	dir := t.TempDir()
 	manifest, err := b.s.writePlatformRecoveryBundle(dir, platformRecoveryBundleInput{Archives: b.archives})
@@ -172,6 +176,7 @@ func TestRecoveryBundleRestoreReleasesTheBlobReservationOncePlaced(t *testing.T)
 
 // 5. --force against a populated database needs --replace-existing.
 func TestRecoveryBundleRestoreRefusesANonEmptyTargetUnlessReplaceIsExplicit(t *testing.T) {
+	t.Parallel()
 	_, dir, _ := writeGoodBundle(t)
 	target := freshTarget(t, rotOldKey)
 	if err := target.st.UpsertUser(User{Username: "someone", PasswordHash: "x", Role: "admin"}); err != nil {
@@ -192,6 +197,7 @@ func TestRecoveryBundleRestoreRefusesANonEmptyTargetUnlessReplaceIsExplicit(t *t
 
 // 6. A dry run opens no target database and creates nothing.
 func TestRecoveryBundleDryRunCreatesNothing(t *testing.T) {
+	t.Parallel()
 	_, dir, _ := writeGoodBundle(t)
 	cfgPath, dbPath, _ := bundleTestConfig(t, rotOldKey)
 	var out bytes.Buffer
@@ -209,6 +215,7 @@ func TestRecoveryBundleDryRunCreatesNothing(t *testing.T) {
 
 // 7. "Recovery mode" is printed only when the restore paused something.
 func TestRecoveryBundleRestoreReportsRecoveryModeOnlyWhenPaused(t *testing.T) {
+	t.Parallel()
 	_, dir, _ := writeGoodBundle(t)
 	cfgPath, _, _ := bundleTestConfig(t, rotOldKey)
 	var out bytes.Buffer
@@ -239,6 +246,7 @@ func TestRecoveryBundleRestoreReportsRecoveryModeOnlyWhenPaused(t *testing.T) {
 
 // 8. The journal guard covers a hot -journal and a change during the copy.
 func TestRecoveryBundleJournalGuard(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		before func(t *testing.T, journal string)
 		during func(t *testing.T, journal string)
@@ -278,6 +286,7 @@ func TestRecoveryBundleJournalGuard(t *testing.T) {
 
 // 9. The bundle directory is owner-only, even when it already existed with a looser mode.
 func TestRecoveryBundleModes(t *testing.T) {
+	t.Parallel()
 	b, journal := bundleHostFixture(t, false)
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o755); err != nil {
@@ -311,6 +320,7 @@ func TestRecoveryBundleModes(t *testing.T) {
 // 10. A directory may hold archives of deleted recovery sets (the runner cannot delete a checkpoint), so they are
 // left out and reported rather than refused.
 func TestRecoveryBundleReportsIgnoredArchivesInADirectory(t *testing.T) {
+	t.Parallel()
 	b, journal := bundleHostFixture(t, false)
 	stray := filepath.Join(b.hostDir, platformFixtureID(7299)+".tar")
 	if err := os.WriteFile(stray, []byte("a deleted set's archive"), 0o400); err != nil {
@@ -327,6 +337,7 @@ func TestRecoveryBundleReportsIgnoredArchivesInADirectory(t *testing.T) {
 
 // 11. The dump that is loaded is the dump that was verified.
 func TestRecoveryBundleRestoreRefusesADumpSwappedAfterVerification(t *testing.T) {
+	t.Parallel()
 	_, dir, m := writeGoodBundle(t)
 	target := freshTarget(t, rotOldKey)
 	_, err := target.restoreRecoveryBundle(dir, recoveryBundleRestoreOptions{Force: true, afterVerify: func() {
@@ -347,6 +358,7 @@ func TestRecoveryBundleRestoreRefusesADumpSwappedAfterVerification(t *testing.T)
 
 // 3 (round 3). A rotated secret_key whose keyring was not re-wrapped yet: the previous key opens the bundle keyring.
 func TestRecoveryBundleKeyringCheckAcceptsThePreviousKeyWithoutRewrapping(t *testing.T) {
+	t.Parallel()
 	_, dir, _ := writeGoodBundle(t)
 	cfg := func(key, previous string) string {
 		path, _, _ := bundleTestConfig(t, key)
@@ -374,6 +386,7 @@ func TestRecoveryBundleKeyringCheckAcceptsThePreviousKeyWithoutRewrapping(t *tes
 
 // 4 (round 3). A target with a registered plugin table is reported as holding data, not as a missing table.
 func TestRecoveryBundleRestoreReportsAPluginTableAsExistingData(t *testing.T) {
+	t.Parallel()
 	_, dir, _ := writeGoodBundle(t)
 	target := freshTarget(t, rotOldKey)
 	appID := platformFixtureID(7601)

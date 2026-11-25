@@ -9,6 +9,7 @@ import (
 )
 
 func TestSinaShadowResumesHistoryInsteadOfRefetchingSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	client := *vendorHTTPClient(ctx)
 	scheduler := newVendorScheduler()
@@ -39,6 +40,7 @@ func TestSinaShadowResumesHistoryInsteadOfRefetchingSnapshot(t *testing.T) {
 }
 
 func TestSinaPartialSnapshotsAreScopedBoundedAndDoNotRenewExpiry(t *testing.T) {
+	t.Parallel()
 	var progress sinaRangeProgress
 	now := time.Now()
 	ctx := withSinaRangeProgress(context.Background(), &progress, "scope-A", now)
@@ -71,6 +73,7 @@ func TestSinaPartialSnapshotsAreScopedBoundedAndDoNotRenewExpiry(t *testing.T) {
 }
 
 func TestSinaContinuationPreservesSnapshotAtTheShadowAttemptCap(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	var progress sinaRangeProgress
 	now := time.Now()
@@ -93,6 +96,7 @@ func TestSinaContinuationPreservesSnapshotAtTheShadowAttemptCap(t *testing.T) {
 }
 
 func TestSinaContinuationStillRequiresNewestHistoryCoherence(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	var progress sinaRangeProgress
 	ctx = withSinaRangeProgress(ctx, &progress, "scope", time.Now())
@@ -123,6 +127,7 @@ func TestSinaContinuationStillRequiresNewestHistoryCoherence(t *testing.T) {
 }
 
 func TestSinaDisplayDoesNotConsumePartialComparisonSnapshots(t *testing.T) {
+	t.Parallel()
 	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
 	var progress sinaRangeProgress
 	ctx = withSinaRangeProgress(ctx, &progress, "scope", time.Now())

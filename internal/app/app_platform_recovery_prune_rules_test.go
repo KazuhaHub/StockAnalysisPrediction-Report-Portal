@@ -53,6 +53,7 @@ func TestPruneBreaksTiesBetweenSetsOfOneCreatedMsLikeTheRunner(t *testing.T) {
 // The runner refuses to delete the newest checkpoint of a namespace whose volume still exists, per namespace, while
 // keep is per installation. The selection mirrors it, so such a refusal never burns an effect number.
 func TestPruneNeverSelectsTheNewestVerifiedSetOfAnOlderNamespaceThatStillExists(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		live := f.liveInstallation(1)
@@ -149,6 +150,7 @@ func TestPruneReportsADeletionOpenForADayAndDoesNotRevertIt(t *testing.T) {
 // of it is applied. Fails if they are swept (the attempt count resets and the same effect id is signed again under
 // another host), and passes only once an applied deletion exists.
 func TestRetentionKeepsTheRefusedDeletionsOfASetOfADeletedNamespaceUntilOneIsApplied(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		old := retNow - 100*retDay
@@ -175,6 +177,7 @@ func TestRetentionKeepsTheRefusedDeletionsOfASetOfADeletedNamespaceUntilOneIsApp
 // The retained-set predicate and the admission helper read the effect ledger once per query and never per set: no
 // correlated scan of receipt_json may come back.
 func TestPruneDoesNotScanTheEffectLedgerPerSet(t *testing.T) {
+	t.Parallel()
 	for _, file := range []string{"app_platform_recovery_prune.go", "app_platform_retention.go", "app_platform_recovery_bundle.go"} {
 		raw, err := os.ReadFile(file)
 		if err != nil {
@@ -302,6 +305,7 @@ func TestPruneAfterProgressContinuesWhileOperationsRun(t *testing.T) {
 // The reads behind the retained predicate and the selection are bounded by the sets they ask about: a long history of
 // deletions of other sets changes neither the answer nor the statements (no scan of the ledger by kind and state).
 func TestPruneReadsAreBoundedByTheSetsNotTheLedger(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()

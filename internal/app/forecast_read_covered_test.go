@@ -21,6 +21,7 @@ func serveReportPredictionsFor(t *testing.T, s *Server, reportID int64, view for
 // The reading card must be able to tell a covered report that made no forecast from a report type
 // the ledger never covers: the first earns the explicit empty state, the second earns nothing.
 func TestReportPredictionsSayWhetherTheLedgerCoversTheReport(t *testing.T) {
+	t.Parallel()
 	eachReaderServer(t, func(t *testing.T, s *Server) {
 		covered, _, err := s.st.UpsertReport(Rep{Symbol: "600001", Date: "2026-09-17", RType: predTestRtype, Title: "Covered", MD: "# covered"})
 		if err != nil {
@@ -61,6 +62,7 @@ func TestReportPredictionsSayWhetherTheLedgerCoversTheReport(t *testing.T) {
 // Coverage is a fact about a report the caller may read. A report the caller cannot read is still a
 // 404, and the refusal must not leak its type.
 func TestReportPredictionsCoverageIsNotDisclosedForAnUnreadableReport(t *testing.T) {
+	t.Parallel()
 	eachReaderServer(t, func(t *testing.T, s *Server) {
 		report, _, err := s.st.UpsertReport(Rep{Symbol: "600001", Date: "2026-09-17", RType: predTestRtype, Title: "Hidden", MD: "# hidden"})
 		if err != nil {

@@ -128,6 +128,7 @@ func testPlatformFrontendEnableIgnoresAccessEdits(t *testing.T, pg bool) {
 }
 
 func TestPlatformFrontendEnableSchedulerCompletesWithoutReinstall(t *testing.T) {
+	t.Parallel()
 	s, actor, reader, installation := platformFrontendDisabledFixture(t, false)
 	review, err := s.createPlatformFrontendEnableReviewContext(
 		context.Background(), actor, installation)
@@ -162,17 +163,21 @@ func TestPlatformFrontendEnableSchedulerCompletesWithoutReinstall(t *testing.T) 
 }
 
 func TestPlatformFrontendEnableRestoresSameTupleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendEnableRestoresSameTuple(t, false)
 }
 
 func TestPlatformFrontendEnableRestoresSameTuplePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendEnableRestoresSameTuple(t, true)
 }
 
 func TestPlatformFrontendEnableIgnoresAccessEditsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendEnableIgnoresAccessEdits(t, false)
 }
 
 func TestPlatformFrontendEnableIgnoresAccessEditsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformFrontendEnableIgnoresAccessEdits(t, true)
 }

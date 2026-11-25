@@ -85,6 +85,7 @@ func withHeaderMigrations(t *testing.T, dump []byte, ids []string) []byte {
 // into a new build, the new columns come back empty (which is what "inherit" is), and the ledger is
 // rebuilt so the next start does not think the database was written by a stranger.
 func TestADumpFromBeforeAStepLoadsWithoutItsColumns(t *testing.T) {
+	t.Parallel()
 	dump := preMigrationDump(t)
 	dst := newTestStore(t)
 
@@ -119,6 +120,7 @@ func TestADumpFromBeforeAStepLoadsWithoutItsColumns(t *testing.T) {
 // the sequence, and a list with a hole, a repeat, an unknown id or a different order names no such
 // point. This drives the rule itself — whether the content bears the claim out is the next test's job.
 func TestADumpMigrationListMustBeAContiguousPrefix(t *testing.T) {
+	t.Parallel()
 	steps := newTestStore(t).migrations() // this build's list; 0001 today
 	known := []string{}
 	for _, m := range steps {
@@ -155,6 +157,7 @@ func TestADumpMigrationListMustBeAContiguousPrefix(t *testing.T) {
 // A dump whose header lies about its own shape is refused, whatever the header says: the list is a
 // claim the content has to bear out, and this is the half that makes it one.
 func TestADumpClaimingAStepMustHaveLoadableContent(t *testing.T) {
+	t.Parallel()
 	dump := preMigrationDump(t)
 	dst := newTestStore(t)
 	before := describe(t, dst.db)
@@ -178,6 +181,7 @@ func TestADumpClaimingAStepMustHaveLoadableContent(t *testing.T) {
 // never upgraded — so the answer is no, with the operator told to restore with the release that wrote
 // it.
 func TestARestoreRequiringADataUpgradeIsRefused(t *testing.T) {
+	t.Parallel()
 	steps := []migration{
 		{id: "0001", restore: restoreRule{olderDumpOK: true}},
 		{id: "0002", columns: []colRef{{table: "t", name: "c"}}, restore: restoreRule{needsDataUpgrade: true}},
@@ -198,6 +202,7 @@ func TestARestoreRequiringADataUpgradeIsRefused(t *testing.T) {
 // none of them do. A dump that fails halfway must leave the database — and its ledger — exactly as it
 // was, rather than empty or half-loaded.
 func TestARestoreIsAtomic(t *testing.T) {
+	t.Parallel()
 	dst := newTestStore(t)
 	seedForBackup(t, dst)
 	before := describe(t, dst.db)
@@ -221,6 +226,7 @@ func TestARestoreIsAtomic(t *testing.T) {
 
 // After a restore, the next start must find nothing to do: the ledger it rebuilt says so.
 func TestASuccessfulRestoreLeavesNothingForTheNextStart(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "target.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -246,6 +252,7 @@ func TestASuccessfulRestoreLeavesNothingForTheNextStart(t *testing.T) {
 // silently leaves that table's data out of backups, which is the kind of data loss nobody notices
 // until a restore.
 func TestBackupCoversTablesDeclaredByMigrations(t *testing.T) {
+	t.Parallel()
 	steps := []migration{
 		{id: "0001", columns: []colRef{{table: "user_groups", name: "c"}}},
 		{id: "0002", tables: []string{"security_events"}},

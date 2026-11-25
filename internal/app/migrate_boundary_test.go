@@ -111,6 +111,7 @@ func mutateFile(t *testing.T, path string, stmts ...string) {
 // ---------- the accepted baseline ----------
 
 func TestFreshStoreIsStampedAtCurrentBaseline(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if got := st.schemaVersion(); got != schemaBaseline {
 		t.Fatalf("fresh schema version = %d, want %d", got, schemaBaseline)
@@ -122,6 +123,7 @@ func TestFreshStoreIsStampedAtCurrentBaseline(t *testing.T) {
 // but erosion — an ADD COLUMN here, a re-stamp there, each invisible until a rollback to the old
 // binary meets a database the new one quietly reshaped.
 func TestReopeningTheAcceptedShapeWritesNothing(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "accepted.db")
 	mutateFile(t, path, `INSERT INTO reports(symbol,rdate,rtype,title,body_md) VALUES('600519','2026-07-01','投资决策','T','body')`,
 		`INSERT INTO meta(k,v) VALUES('panel_note','untouched')`)
@@ -151,6 +153,7 @@ func TestReopeningTheAcceptedShapeWritesNothing(t *testing.T) {
 // boundary is "does it satisfy the baseline", not "does it match exactly" — refusing a superset
 // would reject the databases the old binary itself produced.
 func TestASupersetShapeIsAccepted(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "superset.db")
 	mutateFile(t, path, `ALTER TABLE reports ADD COLUMN legacy_leftover TEXT DEFAULT ''`)
 
@@ -170,6 +173,7 @@ func TestASupersetShapeIsAccepted(t *testing.T) {
 // checks the same two things each time: the message names the v0.4.72 bridge, and the database is
 // exactly as it was.
 func TestLegacyShapesAreRejectedBeforeMutation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		seed  []string
@@ -262,6 +266,7 @@ func TestLegacyShapesAreRejectedBeforeMutation(t *testing.T) {
 // database. The generation marker is not evidence on its own — this is the case a marker-only check
 // waves through, and the reports.identity change (v0.3.0, 626 reports merged) is what that costs.
 func TestAMissingColumnIsRejected(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "older.db")
 	// Rename rather than drop: it leaves the rest of the table, and any index, exactly as they were,
 	// so the only difference from the accepted shape is the missing column.
@@ -284,6 +289,7 @@ func TestAMissingColumnIsRejected(t *testing.T) {
 }
 
 func TestAMissingTableIsRejected(t *testing.T) {
+	t.Parallel()
 	path := fileStore(t, "notable.db")
 	mutateFile(t, path, `ALTER TABLE announcements RENAME TO announcements_old`)
 
@@ -300,6 +306,7 @@ func TestAMissingTableIsRejected(t *testing.T) {
 // from one the v0.3.10 binary created. It is the shape production was on, and this release reads
 // none of it — so the fixture now proves the refusal rather than an upgrade.
 func TestTheV0310ShapeIsRejected(t *testing.T) {
+	t.Parallel()
 	path, err := buildFromFixture(t, "schema_v0.3.10.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -326,6 +333,7 @@ func TestTheV0310ShapeIsRejected(t *testing.T) {
 // from a schema nobody has written to yet, which is why a table with the wrong shape, or any row at
 // all, turns it back into a refusal.
 func TestInterruptedFreshInitializationIsResumed(t *testing.T) {
+	t.Parallel()
 	db := rawStoreDB(t)
 	// Match connectStore initialization while retaining this deliberately raw fixture.
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
@@ -361,6 +369,7 @@ func TestInterruptedFreshInitializationIsResumed(t *testing.T) {
 // A table left by an OLDER release at that point is not a half-created current table, even though
 // both have no rows and no marker. Only the columns tell them apart.
 func TestAnEmptyTableFromAnOlderShapeIsStillRejected(t *testing.T) {
+	t.Parallel()
 	db := rawStoreDB(t)
 	execAll(t, db,
 		`CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT)`,

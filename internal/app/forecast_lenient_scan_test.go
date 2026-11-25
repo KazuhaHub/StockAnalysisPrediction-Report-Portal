@@ -80,6 +80,7 @@ func callsForecastGate(fn *ast.FuncDecl) bool {
 // in full, and every gate call site. In a forecast_* file the whole file is scanned (those files exist
 // to serve the forecast decision); in a shared file only the functions that call the gate are.
 func TestForecastScopeHasNoLenientRead(t *testing.T) {
+	t.Parallel()
 	// The scanner must see what it is looking for, or a clean result means nothing.
 	probe, err := parser.ParseFile(token.NewFileSet(), "probe.go", `package p
 func f() { s.st.GetUser(u); isAdmin(u); s.groupChain(1) }`, 0)

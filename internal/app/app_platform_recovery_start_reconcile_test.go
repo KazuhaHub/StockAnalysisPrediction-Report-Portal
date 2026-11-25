@@ -83,6 +83,7 @@ func unknownResumeStartFixtureFor(t *testing.T, pg bool) (*platformResumeFixture
 // operation back to the probe stage on the lease it needs, and the unchanged stage code then takes the
 // installation to ready.
 func TestRecoveryReconcileSettlesUnknownResumeStart(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.applied = true
 	effect := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation)
@@ -115,6 +116,7 @@ func TestRecoveryReconcileSettlesUnknownResumeStart(t *testing.T) {
 }
 
 func TestRecoveryReconcileKeepsAnUnknownStartAnswer(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.err = errors.New("endpoint unreachable")
 	selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640))
@@ -132,6 +134,7 @@ func TestRecoveryReconcileKeepsAnUnknownStartAnswer(t *testing.T) {
 // recovery_required, the installation is not returned to review and no new resume is admitted, however
 // long ago every signed command expired. It is audited once and settled only by abandoning the runtime.
 func TestRecoveryReconcileTreatsAnAbsentReservedStartAsALostJournal(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.absent = true
 	generation := scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
@@ -190,6 +193,7 @@ func unreservedResumeStartFixture(t *testing.T, pg bool) (*platformResumeFixture
 }
 
 func TestRecoveryReconcileDoesNotRevertAnUnreservedStartTheRunnerMayHold(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unreservedResumeStartFixture(t, false)
 	// The reserve was accepted and its reply lost: the runner answers prepared/unknown, or not at all.
 	fake.err = errors.New("runner has not settled the start")
@@ -204,6 +208,7 @@ func TestRecoveryReconcileDoesNotRevertAnUnreservedStartTheRunnerMayHold(t *test
 }
 
 func TestRecoveryReconcileUnreservedAbsenceBeforeExpiryWaits(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unreservedResumeStartFixture(t, false)
 	fake.absent = true
 	if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
@@ -259,14 +264,17 @@ func testRecoveryReconcileUnreservedAbsenceAfterExpiry(t *testing.T, pg bool) {
 }
 
 func TestRecoveryReconcileUnreservedAbsenceAfterExpiryRevertsAndAllowsARetry(t *testing.T) {
+	t.Parallel()
 	testRecoveryReconcileUnreservedAbsenceAfterExpiry(t, false)
 }
 func TestRecoveryReconcileUnreservedAbsenceAfterExpiryRevertsAndAllowsARetryPostgres(t *testing.T) {
+	t.Parallel()
 	testRecoveryReconcileUnreservedAbsenceAfterExpiry(t, true)
 }
 
 // The scheduler settles such a start by itself while the Portal is paused and it has nothing else to run.
 func TestRecoveryReconcileResumeStartRunsFromTheSchedulerWhenIdle(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.applied = true
 	worker, err := newPlatformWritableInstallScheduler(f.s, f.endpoint, platformFixtureID(5642), time.Second)
@@ -287,6 +295,7 @@ func TestRecoveryReconcileResumeStartRunsFromTheSchedulerWhenIdle(t *testing.T) 
 // operation held it, the stored fence no longer matches, so even an applied answer settles nothing and the
 // start stays unknown.
 func TestRecoveryReconcileRefusesAnInstallationFenceThatMoved(t *testing.T) {
+	t.Parallel()
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.applied = true
 	mustExec(t, f.s.st, `UPDATE app_platform_installations SET control_fence=control_fence+1 WHERE id=?`, f.installation)
@@ -364,15 +373,18 @@ func testResumeFailsAfterAppliedStart(t *testing.T, pg bool) {
 }
 
 func TestResumeFailsAfterAppliedStartAllowsARetry(t *testing.T) {
+	t.Parallel()
 	testResumeFailsAfterAppliedStart(t, false)
 }
 func TestResumeFailsAfterAppliedStartAllowsARetryPostgres(t *testing.T) {
+	t.Parallel()
 	testResumeFailsAfterAppliedStart(t, true)
 }
 
 // A resume that follows an applied start cannot skip the quiesce: leaving the stage without the stop and
 // remove effects is refused, and so is quiescing when no earlier container exists.
 func TestResumeAfterAppliedStartCannotSkipItsQuiesce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := platformResumeFixture(t, false)
 	commit := f.reviewAndConsumeResume(t)

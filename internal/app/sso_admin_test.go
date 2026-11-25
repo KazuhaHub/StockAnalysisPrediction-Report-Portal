@@ -58,6 +58,7 @@ func listProviders(t *testing.T, s *Server) (string, []map[string]any) {
 // step one and saving the portal side is step four. Sending them only for stored rows left the
 // setup guide showing two empty boxes on exactly the install that had never configured SSO.
 func TestSSOAdminSendsSPAddressesBeforeAnythingIsSaved(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	rec := httptest.NewRecorder()
 	s.apiAdminSSOProviders(rec, httptest.NewRequest(http.MethodGet, "/api/admin/sso/providers", nil), "admin")
@@ -86,6 +87,7 @@ func TestSSOAdminSendsSPAddressesBeforeAnythingIsSaved(t *testing.T) {
 // And a saved provider's addresses must be the SAME strings, or the guide would teach one value
 // while the server accepts another.
 func TestSSOAdminDefaultsMatchTheSavedProvider(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	saveProvider(t, s, `{"kind":"saml","slug":"saml","name":"Corp"}`)
 
@@ -113,6 +115,7 @@ func TestSSOAdminDefaultsMatchTheSavedProvider(t *testing.T) {
 // from the fetch button and "fetch or paste the IdP metadata first" from save, and neither says
 // which order to do them in. The fetch button now carries the URL itself and creates the draft.
 func TestFetchMetadataWorksBeforeTheProviderIsSaved(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
@@ -150,6 +153,7 @@ func TestFetchMetadataWorksBeforeTheProviderIsSaved(t *testing.T) {
 // An edited URL must be the one fetched. Reading it from the stored row meant retyping the URL and
 // pressing fetch silently re-fetched the OLD address.
 func TestFetchMetadataUsesTheURLTheAdminJustTyped(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	hits := make(chan string, 4)
 	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +188,7 @@ func TestFetchMetadataUsesTheURLTheAdminJustTyped(t *testing.T) {
 // Every failure on this path is read by an admin mid-setup, so it must carry a code the client can
 // translate. A bare English sentence is what "no such provider" looked like on a Chinese screen.
 func TestFetchMetadataFailuresCarryACode(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/sso/providers/saml/metadata", strings.NewReader(`{"kind":"saml"}`))
@@ -203,6 +208,7 @@ func TestFetchMetadataFailuresCarryACode(t *testing.T) {
 // secret and the SP private key must never leave the server, in any field, on any read. Only
 // booleans saying whether they are set.
 func TestSSOAdminNeverReturnsSecrets(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	const secret = "super-secret-client-value"
 	if rec := saveProvider(t, s, `{"kind":"oidc","slug":"acme","issuer":"https://idp.example",
@@ -240,6 +246,7 @@ func TestSSOAdminNeverReturnsSecrets(t *testing.T) {
 // TestSSOAdminBlankSecretKeepsStored proves an admin can rename or retune a provider without
 // re-entering credentials, and that an explicit empty string still clears them.
 func TestSSOAdminBlankSecretKeepsStored(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	saveProvider(t, s, `{"kind":"oidc","slug":"acme","issuer":"https://idp.example","client_id":"cid","client_secret":"s1"}`)
 	before, _ := s.st.SSOProviderBySlug("acme")
@@ -263,6 +270,7 @@ func TestSSOAdminBlankSecretKeepsStored(t *testing.T) {
 // TestSSOAdminValidatesBeforeEnabling proves a half-configured provider can be saved as a draft but
 // never put in front of users — failing at save time is far kinder than failing mid-login.
 func TestSSOAdminValidatesBeforeEnabling(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	// Draft: incomplete but disabled → allowed.
 	if rec := saveProvider(t, s, `{"kind":"oidc","slug":"acme"}`); rec.Code != http.StatusOK {
@@ -298,6 +306,7 @@ func TestSSOAdminValidatesBeforeEnabling(t *testing.T) {
 // the middle and therefore no order an admin has to discover. This pins that: it is the reason the
 // SAML deadlock had no OIDC twin, and the reason is a property of the code, not an accident.
 func TestOIDCEnablesOnTheFirstSave(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	s.ssoInsecureForTest = true
 	s.st.SetSetting("sso_allow_private", "1")
@@ -325,6 +334,7 @@ func TestOIDCEnablesOnTheFirstSave(t *testing.T) {
 // to a third party before anyone has signed in. Two shapes are allowed and nothing else — a
 // built-in preset name, or a path under /site-assets/ that this portal serves itself.
 func TestSSOIconRefusesAnythingItWouldHaveToFetch(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	for _, tc := range []struct {
 		icon string
@@ -362,6 +372,7 @@ func TestSSOIconRefusesAnythingItWouldHaveToFetch(t *testing.T) {
 // The icon has to reach the login page, which is unauthenticated and sees a deliberately thin
 // projection of a provider. An icon nobody can read is not an icon.
 func TestSSOIconReachesTheLoginPage(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	s.st.SetSetting("public_url", "https://portal.example")
 	saveProvider(t, s, `{"kind":"saml","slug":"saml","name":"Kazuha Hub SSO","icon":"preset:entra"}`)
@@ -393,6 +404,7 @@ func TestSSOIconReachesTheLoginPage(t *testing.T) {
 // TestSSORulesRoundTripPreservesOrder proves order survives a save, because order IS the contract:
 // the first matching rule decides the role and OU.
 func TestSSORulesRoundTripPreservesOrder(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	body := `{"rules":[
 		{"enabled":true,"attr":"","value":"admins","target_role":"operator","target_group":0,"note":"first"},
@@ -436,6 +448,7 @@ func TestSSORulesRoundTripPreservesOrder(t *testing.T) {
 // with nothing to go on. It must return the NAMES and only a truncated preview of each value — an
 // assertion carries personal data an admin has no reason to read in bulk.
 func TestSSOLastSeenShowsRealClaimNames(t *testing.T) {
+	t.Parallel()
 	s := adminSSOServer(t)
 	saveProvider(t, s, `{"kind":"oidc","slug":"acme","issuer":"https://idp.example","client_id":"c","client_secret":"s"}`)
 

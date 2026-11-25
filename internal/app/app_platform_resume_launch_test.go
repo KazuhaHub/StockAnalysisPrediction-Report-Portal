@@ -65,9 +65,11 @@ func testResumedInstallationLaunchSnapshot(t *testing.T, pg bool) {
 }
 
 func TestResumedInstallationLaunchSnapshotSQLite(t *testing.T) {
+	t.Parallel()
 	testResumedInstallationLaunchSnapshot(t, false)
 }
 func TestResumedInstallationLaunchSnapshotPostgres(t *testing.T) {
+	t.Parallel()
 	testResumedInstallationLaunchSnapshot(t, true)
 }
 
@@ -85,8 +87,10 @@ func testRestoredInstallationWithoutResumeHasNoSnapshot(t *testing.T, pg bool) {
 }
 
 func TestRestoredInstallationWithoutResumeHasNoSnapshotSQLite(t *testing.T) {
+	t.Parallel()
 	testRestoredInstallationWithoutResumeHasNoSnapshot(t, false)
 }
 func TestRestoredInstallationWithoutResumeHasNoSnapshotPostgres(t *testing.T) {
+	t.Parallel()
 	testRestoredInstallationWithoutResumeHasNoSnapshot(t, true)
 }

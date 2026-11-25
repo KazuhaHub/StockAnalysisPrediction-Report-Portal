@@ -113,10 +113,11 @@ func (h migrationHTTP) activateMigrated(t *testing.T, lease platformOperationLea
 // review and commit are HTTP calls, and once the retry's migration, start and activation have run the application
 // launches. No operation is written by the test.
 func TestMigrationC1RetryReviewCommitLaunchHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, false)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	if h.launch() == 200 {
 		t.Fatal("an application launched while its failed update was unresolved")
 	}
@@ -137,10 +138,11 @@ func TestMigrationC1RetryReviewCommitLaunchHTTP(t *testing.T) {
 // A retry that fails in turn is settled and retried again, still through the routes: the second retry names the
 // first, and its completion leaves the application launching.
 func TestMigrationC1RetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, false)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	first := h.retryOverHTTP(platformFixtureID(7610))
 	lease := driveRetryToMigrate(t, f, first)
 	h.activateMigrated(t, lease, "failed")
@@ -177,6 +179,7 @@ func TestMigrationC1RetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
 // migrate-data stays applied while settlement removes the target and restores the checkpoint. The retry that
 // follows must still be admitted by the runner's rule (checked in its journal) and the portal must carry it.
 func TestMigrationC5RetryReviewCommitLaunchHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := readinessFailedFixture(t, false)
 	f.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
@@ -197,7 +200,7 @@ func TestMigrationC5RetryReviewCommitLaunchHTTP(t *testing.T) {
 	}
 	f.fake.calls = nil
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	if h.launch() == 200 {
 		t.Fatal("an application launched while its failed update was unresolved")
 	}
@@ -243,12 +246,13 @@ func settleNeverClaimed(t *testing.T, f *settleFixture, lease platformOperationL
 // The migration never reached the runner. Settlement restores nothing, and the retry offered afterwards goes through
 // review, commit, migration, start and activation over the routes to a launching application.
 func TestMigrationNeverClaimedRetryReviewCommitLaunchHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	f := &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
 	settleNeverClaimed(t, f, lease)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	if h.launch() == 200 {
 		t.Fatal("an application launched while its failed update was unresolved")
 	}
@@ -265,12 +269,13 @@ func TestMigrationNeverClaimedRetryReviewCommitLaunchHTTP(t *testing.T) {
 
 // The first retry's migration is lost as well. The second retry names the first, and the application launches.
 func TestMigrationNeverClaimedRetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	f := &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
 	settleNeverClaimed(t, f, lease)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	first := h.retryOverHTTP(platformFixtureID(7650))
 	retry := driveRetryToMigrate(t, f, first)
 	settleNeverClaimed(t, f, retry)
@@ -320,7 +325,7 @@ func c5RetryAtStart(t *testing.T) (*settleFixture, platformOperationLease) {
 	}
 	f.fake.calls = nil
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	lease := driveRetryToMigrate(t, f, h.retryOverHTTP(platformFixtureID(7670)))
 	f.fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
 		return platformMigrateAnswers(i, f.endpoint, "migrated", ""), nil
@@ -335,6 +340,7 @@ func c5RetryAtStart(t *testing.T) (*settleFixture, platformOperationLease) {
 // The retry takes over the failed update's candidate activation only when settlement shows that update removed the
 // target the row stands for. Each thing the evidence must show, withheld, refuses the start.
 func TestRetryTakesOverTheCandidateOnlyWithSettlementEvidence(t *testing.T) {
+	t.Parallel()
 	f, start := c5RetryAtStart(t)
 	if _, err := f.s.preparePlatformUpdateStart(context.Background(), start); err != nil {
 		t.Fatalf("a retry with the settlement's evidence was refused the failed update's candidate: %v", err)
@@ -395,7 +401,7 @@ func testRollbackOfAFailedRetryResolvesTheChain(t *testing.T, retries int) {
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, false)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	chain := []string{f.op}
 	for i := range retries {
 		operation := h.retryOverHTTP(platformFixtureID(7700 + 10*i))
@@ -418,10 +424,12 @@ func testRollbackOfAFailedRetryResolvesTheChain(t *testing.T, retries int) {
 }
 
 func TestMigrationRollbackOfFailedRetryResolvesItsAncestorsHTTP(t *testing.T) {
+	t.Parallel()
 	testRollbackOfAFailedRetryResolvesTheChain(t, 1)
 }
 
 func TestMigrationRollbackOfFailedRetryOfRetryResolvesTheChainHTTP(t *testing.T) {
+	t.Parallel()
 	testRollbackOfAFailedRetryResolvesTheChain(t, 2)
 }
 
@@ -446,10 +454,11 @@ func (h migrationHTTP) commitPlan(review map[string]any, key string) int {
 // An update is recovered by one retry. A second retry naming it, whether reviewed before or after the first was
 // committed, is refused: only the head of a chain, the latest unresolved update, can be recovered.
 func TestMigrationOnlyOneRetryMayRecoverAnUpdateHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, false)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	code, first := h.reviewRetry(f.op)
 	code2, second := h.reviewRetry(f.op)
 	if code != http.StatusOK || code2 != http.StatusOK {
@@ -472,10 +481,11 @@ func TestMigrationOnlyOneRetryMayRecoverAnUpdateHTTP(t *testing.T) {
 
 // A chain holds at most 16 updates. The 17th retry is refused when it is reviewed, before anything can be committed.
 func TestMigrationSeventeenthRetryRefusedAtReviewHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settledFixture(t, false)
 	h := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	head := f.op
 	for i := range 16 {
 		operation := h.retryOverHTTP(platformFixtureID(7900 + i))

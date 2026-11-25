@@ -21,6 +21,7 @@ import (
 // is the whole reason the pins exist. govulncheck also runs in CI, but only flags a vulnerability
 // whose symbols it can prove we reach — a floor is the stronger statement.
 func TestSecurityCriticalDependencyFloors(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("../../go.mod")
 	if err != nil {
 		t.Fatal(err)

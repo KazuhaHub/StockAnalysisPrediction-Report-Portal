@@ -9,6 +9,7 @@ import (
 )
 
 func TestReaderMembersUseFrozenCounts(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{markResolved, markPending} {
 		t.Run(status, func(t *testing.T) {
 			s := newV1Server(t)
@@ -37,6 +38,7 @@ func TestReaderMembersUseFrozenCounts(t *testing.T) {
 }
 
 func TestReaderMembersFrozenCountsIncludeExcluded(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	ou := seedForecastReader(t, s, "reader", scopeOwn, false)
 	sampleMembers(t, s, 32, func(i int, g *gsSeed) {
@@ -71,6 +73,7 @@ func TestReaderMembersFrozenCountsIncludeExcluded(t *testing.T) {
 }
 
 func TestExternalDrawerListsOnlyReadableReports(t *testing.T) {
+	t.Parallel()
 	f := seedReadFixture(t, VisibilityGroup)
 	s := f.s
 	if _, err := s.st.exec("UPDATE users SET active=1 WHERE username=?", "alice"); err != nil {
@@ -137,6 +140,7 @@ func TestExternalDrawerListsOnlyReadableReports(t *testing.T) {
 // mistake a flat return for a quiet stock, but only on a scored row of a mature cell: a halt flag
 // on a cell that has not matured would be an outcome the matrix itself refuses to publish.
 func TestMembersFlagHaltedMarksOnScoredRowsOfMatureCells(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, predMatureMinN+2, func(i int, g *gsSeed) {
 		m := g.Marks["d5"]
@@ -176,6 +180,7 @@ func TestMembersFlagHaltedMarksOnScoredRowsOfMatureCells(t *testing.T) {
 }
 
 func TestMembersOfANonMatureCellCarryNoHaltedFlag(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sampleMembers(t, s, predMatureMinN+2, func(i int, g *gsSeed) {
 		m := g.Marks["d5"]

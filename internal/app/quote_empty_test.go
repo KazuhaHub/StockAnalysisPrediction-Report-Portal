@@ -7,6 +7,7 @@ import (
 )
 
 func TestQuoteEmptyPayloadIsNotAnOutage(t *testing.T) {
+	t.Parallel()
 	_, err := parseTencentQuote("sz", "000000", []byte(`{"code":0,"data":{"sz000000":{"day":[],"qt":{"sz000000":[]}}}}`), 60)
 	if !errors.Is(err, errQuoteNoData) {
 		t.Fatalf("empty snapshot: %v", err)
@@ -25,6 +26,7 @@ func TestQuoteEmptyPayloadIsNotAnOutage(t *testing.T) {
 	}
 }
 func TestQuoteAPISeparatesEmptyDataFromSourceFailure(t *testing.T) {
+	t.Parallel()
 	for _, mixed := range []bool{false, true} {
 		s := quoteServer(t)
 		empty := &quoteVendorStub{parse: func(string, string, int) (*QuoteResp, error) { return nil, errQuoteNoData }}

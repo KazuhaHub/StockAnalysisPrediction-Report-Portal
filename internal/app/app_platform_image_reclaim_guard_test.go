@@ -16,6 +16,7 @@ import (
 // the load_image tests beside them keep failing if the exclusion widened to every kind.
 
 func TestManagedAccessHistoryCountIgnoresARemoveImageRow(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformManagedAccessFixture(t, false)
 	addEffectRow(t, s, lease.id, "remove_image", "stage", 2, platformFixtureID(9601))
 	if a, err := s.preparePlatformManagedBackendAccess(context.Background(), actor, lease.installationID); err != nil {
@@ -26,6 +27,7 @@ func TestManagedAccessHistoryCountIgnoresARemoveImageRow(t *testing.T) {
 }
 
 func TestCandidateIntentEffectCountIgnoresARemoveImageRow(t *testing.T) {
+	t.Parallel()
 	s, lease := platformCandidateIntentFixture(t, false)
 	addEffectRow(t, s, lease.id, "remove_image", "stage", 2, platformFixtureID(9602))
 	if _, err := s.preparePlatformInstallCandidate(context.Background(), lease); err != nil {
@@ -34,6 +36,7 @@ func TestCandidateIntentEffectCountIgnoresARemoveImageRow(t *testing.T) {
 }
 
 func TestInstallAdmissionResourceCountIgnoresARemoveImageRow(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformInstallStageFixture(t, false)
 	addEffectRow(t, s, lease.id, "remove_image", "stage", 2, platformFixtureID(9603))
 	e := s.st.poolExec()
@@ -51,6 +54,7 @@ func TestInstallAdmissionResourceCountIgnoresARemoveImageRow(t *testing.T) {
 }
 
 func TestRemovalSelectionAdvanceRuleToleratesARemoveImageRow(t *testing.T) {
+	t.Parallel()
 	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, false)
 	review, err := s.createPlatformRemovalReview(actor, enabled.installationID, appplatform.ActionDisable)
 	if err != nil {
@@ -81,6 +85,7 @@ func TestEnableOperationCompletesWithARemoveImageRow(t *testing.T) {
 // operation and must never hold back a start-bearing gate. Each test fails if its reader starts counting the row.
 
 func TestManagedAccessHistoryCountIgnoresADeleteCheckpointRow(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformManagedAccessFixture(t, false)
 	addEffectRow(t, s, lease.id, "delete_checkpoint", "remove_data", 2, platformFixtureID(9701))
 	if a, err := s.preparePlatformManagedBackendAccess(context.Background(), actor, lease.installationID); err != nil {
@@ -91,6 +96,7 @@ func TestManagedAccessHistoryCountIgnoresADeleteCheckpointRow(t *testing.T) {
 }
 
 func TestCandidateIntentEffectCountIgnoresADeleteCheckpointRow(t *testing.T) {
+	t.Parallel()
 	s, lease := platformCandidateIntentFixture(t, false)
 	addEffectRow(t, s, lease.id, "delete_checkpoint", "remove_data", 2, platformFixtureID(9702))
 	if _, err := s.preparePlatformInstallCandidate(context.Background(), lease); err != nil {
@@ -99,6 +105,7 @@ func TestCandidateIntentEffectCountIgnoresADeleteCheckpointRow(t *testing.T) {
 }
 
 func TestInstallAdmissionResourceCountIgnoresADeleteCheckpointRow(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformInstallStageFixture(t, false)
 	addEffectRow(t, s, lease.id, "delete_checkpoint", "remove_data", 2, platformFixtureID(9703))
 	e := s.st.poolExec()
@@ -116,6 +123,7 @@ func TestInstallAdmissionResourceCountIgnoresADeleteCheckpointRow(t *testing.T) 
 }
 
 func TestRemovalSelectionAdvanceRuleToleratesADeleteCheckpointRow(t *testing.T) {
+	t.Parallel()
 	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, false)
 	review, err := s.createPlatformRemovalReview(actor, enabled.installationID, appplatform.ActionDisable)
 	if err != nil {
@@ -144,6 +152,7 @@ func TestEnableOperationCompletesWithADeleteCheckpointRow(t *testing.T) {
 // The guards above only mean something while the kind is on the shared list, and the readers that were not given a
 // test of their own are covered by the list: a row of this kind is a neutral kind, a start-bearing kind is not.
 func TestDeleteCheckpointIsANeutralEffectKind(t *testing.T) {
+	t.Parallel()
 	if !strings.Contains(platformInstallationNeutralEffectKinds, "'"+platformDeleteCheckpointKind+"'") {
 		t.Fatal("delete_checkpoint is not on the shared list of effect kinds that are not installation work")
 	}
@@ -157,6 +166,7 @@ func TestDeleteCheckpointIsANeutralEffectKind(t *testing.T) {
 // Fails if an effect counter spells the neutral kinds out instead of using the shared list, or if the list drifts.
 // A further kind that is not installation work is then added in one place rather than in every counter.
 func TestInstallationWideEffectReadersUseTheSharedKindList(t *testing.T) {
+	t.Parallel()
 	if platformInstallationNeutralEffectKinds != "'load_image','remove_image','delete_checkpoint'" {
 		t.Fatalf("neutral effect kinds drifted: %s", platformInstallationNeutralEffectKinds)
 	}

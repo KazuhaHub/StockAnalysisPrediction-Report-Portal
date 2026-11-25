@@ -8,6 +8,7 @@ import (
 // An install may carry a v2 policy with public targets only: a private target
 // needs the runner allowlist digest, which the install review cannot bind.
 func TestPlatformInstallNetworkPolicyV2PublicOnly(t *testing.T) {
+	t.Parallel()
 	profile := platformNetworkRuntimeProfileFixture()
 	public := &platformManagedInstallTarget{NetworkPolicy: platformV2PolicyFixture(t, platformV2DefaultTarget(), platformV2ExtraTarget()), NetworkProfile: profile}
 	if http, _, err := platformNetworkTargetPolicies(public); err != nil || http != public.NetworkPolicy {

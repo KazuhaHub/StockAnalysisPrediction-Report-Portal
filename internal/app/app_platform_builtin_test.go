@@ -60,6 +60,7 @@ func builtinEnsure(t *testing.T, s *Server) {
 
 // Fails if a fresh deployment's initialization does not trust the built-in publisher, or does so unaudited.
 func TestBuiltinPublisherIsSeededByInitialization(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testBuiltinPublisherIsSeededByInitialization)
 }
 
@@ -82,6 +83,7 @@ func testBuiltinPublisherIsSeededByInitialization(t *testing.T, pg bool) {
 // Fails if the startup step for an initialized deployment does not seed, is not idempotent, re-enables a
 // publisher an administrator disabled, or does anything before initialization.
 func TestBuiltinPublisherEnsureAtStartup(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testBuiltinPublisherEnsureAtStartup)
 }
 
@@ -113,6 +115,7 @@ func testBuiltinPublisherEnsureAtStartup(t *testing.T, pg bool) {
 
 // Fails if a rotation released in Portal does not reach an existing deployment.
 func TestBuiltinPublisherEnsureAddsARotatedKey(t *testing.T) {
+	t.Parallel()
 	s, _ := platformTrustTestServer(t, false)
 	first, second := platformTrustFixtureKey(9, "kazuha-hub-2026-11"), platformTrustFixtureKey(10, "kazuha-hub-2027-05")
 	s.platformBuiltinPublishers = []platformBuiltinPublisher{builtinTestPublisher(first)}
@@ -128,6 +131,7 @@ func TestBuiltinPublisherEnsureAddsARotatedKey(t *testing.T) {
 // Fails if an identical hand-registered publisher is not taken as the built-in one, or a conflicting one
 // is overwritten instead of reported.
 func TestBuiltinPublisherMigratesIdenticalAndReportsConflicts(t *testing.T) {
+	t.Parallel()
 	key := platformTrustFixtureKey(9, "kazuha-hub-2026-11")
 	t.Run("identical", func(t *testing.T) {
 		s, actor := platformTrustTestServer(t, false)
@@ -172,6 +176,7 @@ func TestBuiltinPublisherMigratesIdenticalAndReportsConflicts(t *testing.T) {
 
 // Fails if an administrator can take over, extend or re-scope the built-in publisher.
 func TestBuiltinPublisherRefusesAdministratorTakeover(t *testing.T) {
+	t.Parallel()
 	key := platformTrustFixtureKey(9, "kazuha-hub-2026-11")
 	s, actor := platformTrustTestServer(t, false)
 	s.platformBuiltinPublishers = []platformBuiltinPublisher{builtinTestPublisher(key)}
@@ -208,6 +213,7 @@ func builtinDirectory(t *testing.T, s *Server, actor platformActorSession) strin
 
 // Fails if the official catalogue is not offered, cannot be disabled and re-enabled, or changes unaudited.
 func TestOfficialCatalogueSourceCanBeDisabled(t *testing.T) {
+	t.Parallel()
 	s, actor := platformTrustTestServer(t, false)
 	s.platformOfficialCatalogue = "https://raw.githubusercontent.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/catalogue/catalogue.json"
 	mux := http.NewServeMux()
@@ -241,6 +247,7 @@ func TestOfficialCatalogueSourceCanBeDisabled(t *testing.T) {
 
 // Fails if the production initialize endpoint does not seed the built-in publisher.
 func TestBuiltinPublisherIsSeededByTheInitializeEndpoint(t *testing.T) {
+	t.Parallel()
 	s, actor := platformActorTestServer(t, false)
 	s.platformBuiltinPublishers = []platformBuiltinPublisher{builtinTestPublisher(platformTrustFixtureKey(9, "kazuha-hub-2026-11"))}
 	mux := http.NewServeMux()
@@ -258,6 +265,7 @@ func TestBuiltinPublisherIsSeededByTheInitializeEndpoint(t *testing.T) {
 // key is handed over by revoking that key, a row with another scope can be disabled, and an overlapping
 // publisher that is rescoped lets the built-in one in without a restart.
 func TestBuiltinPublisherConflictsCanBeResolvedByAnAdministrator(t *testing.T) {
+	t.Parallel()
 	key := platformTrustFixtureKey(9, "kazuha-hub-2026-11")
 	t.Run("own key revoked", func(t *testing.T) {
 		s, actor := platformTrustTestServer(t, false)
@@ -307,6 +315,7 @@ func TestBuiltinPublisherConflictsCanBeResolvedByAnAdministrator(t *testing.T) {
 
 // Fails if the shipped built-in key is not the 32-byte Ed25519 key the Apps release environment signs with.
 func TestOfficialPublisherKeyIsTheReleasedOne(t *testing.T) {
+	t.Parallel()
 	k := platformOfficialPublishers[0].keys[0]
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(k.publicKey)
 	sum := sha256.Sum256(raw)

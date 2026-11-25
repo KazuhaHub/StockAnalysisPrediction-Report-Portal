@@ -17,6 +17,7 @@ var frameAncestorsDirective = regexp.MustCompile(`(?:^|; )frame-ancestors ('self
 // only safe while no /app-documents/ or public document response, success or
 // failure, lets an origin other than the Portal embed it.
 func TestPlatformDocumentResponsesRestrictFrameAncestors(t *testing.T) {
+	t.Parallel()
 	s := &Server{}
 	cases := []struct {
 		name string
@@ -46,6 +47,7 @@ func TestPlatformDocumentResponsesRestrictFrameAncestors(t *testing.T) {
 
 // The success path end to end: an installed frontend served through the real mux.
 func TestPlatformDocumentSuccessResponseRestrictsFrameAncestors(t *testing.T) {
+	t.Parallel()
 	var archive bytes.Buffer
 	zw := zip.NewWriter(&archive)
 	f, err := zw.Create("index.html")

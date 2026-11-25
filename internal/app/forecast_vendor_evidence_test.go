@@ -202,6 +202,7 @@ func TestCapturedOrdinaryLimitDownIsNotAnAdjustment(t *testing.T) {
 }
 
 func TestCapturedBoardMovesStayInsideRoundedLimits(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		market, code, before, after string
 		previous, close, limit      int64

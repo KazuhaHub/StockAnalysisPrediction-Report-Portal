@@ -7,6 +7,7 @@ import (
 )
 
 func TestNotificationRoutingIntersectsOUWithResourceAuthority(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	st := s.st
 	ou, err := st.CreateUserGroup("Operations", "", 0)
@@ -57,6 +58,7 @@ func TestNotificationRoutingIntersectsOUWithResourceAuthority(t *testing.T) {
 }
 
 func TestNotificationRoutingSnapshotCannotFollowReusedUsername(t *testing.T) {
+	t.Parallel()
 	testNotificationRoutingSnapshotCannotFollowReusedUsername(t, newTestStore(t))
 }
 

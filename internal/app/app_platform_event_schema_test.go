@@ -7,6 +7,7 @@ import (
 )
 
 func TestAppPlatformEventSubscriptionSchemaProducts(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	step := migration0020()
 	if got, want := strings.Join(step.tables, ","), "app_platform_event_subscriptions"; got != want {
@@ -27,6 +28,7 @@ func TestAppPlatformEventSubscriptionSchemaProducts(t *testing.T) {
 }
 
 func TestPostgresAppPlatformEventSubscriptionSchemaProducts(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	if err := migration0020().verify(st.poolExec()); err != nil {
 		t.Fatal(err)
@@ -34,6 +36,7 @@ func TestPostgresAppPlatformEventSubscriptionSchemaProducts(t *testing.T) {
 }
 
 func TestAppPlatformEventSubscriptionConstraints(t *testing.T) {
+	t.Parallel()
 	for _, postgres := range []bool{false, true} {
 		name := "sqlite"
 		if postgres {
@@ -69,6 +72,7 @@ func TestAppPlatformEventSubscriptionConstraints(t *testing.T) {
 }
 
 func TestAppPlatformEventSubscriptionOlderDumpRestoresEmpty(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	dump := withoutSections(
 		t, dumpOf(t, src), migration0020().tables, []string{"0020"})
@@ -91,6 +95,7 @@ func TestAppPlatformEventSubscriptionOlderDumpRestoresEmpty(t *testing.T) {
 }
 
 func TestAppPlatformEventSubscriptionBackupRoundTrip(t *testing.T) {
+	t.Parallel()
 	src, installation := platformServiceIdentityFixture(t)
 	row := appPlatformEventSubscriptionFixture(t, src, installation)
 	insertAppPlatformEventSubscription(t, src.st.poolExec(), row)

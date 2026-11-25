@@ -57,12 +57,15 @@ func testPlatformInstallSchedulerRetries(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallSchedulerRetriesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallSchedulerRetries(t, false)
 }
 func TestPlatformInstallSchedulerRetriesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallSchedulerRetries(t, true)
 }
 func TestPlatformInstallSchedulerCanceledSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, _ := platformInstallQueueFixture(t, false)
 	w := platformSchedulerFixture(t, s)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,6 +80,7 @@ func TestPlatformInstallSchedulerCanceledSQLite(t *testing.T) {
 }
 
 func TestPlatformInstallHeartbeatLateRefusalPostgres(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"expiry", "cancellation"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _, id := platformInstallQueueFixture(t, true)
@@ -120,6 +124,7 @@ func TestPlatformInstallHeartbeatLateRefusalPostgres(t *testing.T) {
 }
 
 func TestPlatformInstallSchedulerServiceGuardsSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, _ := platformInstallQueueFixture(t, false)
 	w := platformSchedulerFixture(t, s)
 	ctx, cancel := context.WithCancel(context.Background())

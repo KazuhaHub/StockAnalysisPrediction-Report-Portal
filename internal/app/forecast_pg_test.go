@@ -19,6 +19,7 @@ import (
 // TestPostgresForecastStepApplies: a Postgres database at the accepted baseline gains the step, and
 // reopening does not run it again.
 func TestPostgresForecastStepApplies(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	windBackToBeforeTheForecastStep(t, st)
 	st.Close()
@@ -62,6 +63,7 @@ func TestPostgresForecastStepApplies(t *testing.T) {
 // eventually. If Postgres treated NULLs as equal here, the second purged set would be refused and the
 // failure would appear only in production, long after the ingest that wrote it.
 func TestPostgresPredSetIdemIndexAllowsManyNullReportIDs(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets")
 	seedPredictionSet(t, st, sql.NullInt64{}, "same-payload")
 	seedPredictionSet(t, st, sql.NullInt64{}, "same-payload")
@@ -73,6 +75,7 @@ func TestPostgresPredSetIdemIndexAllowsManyNullReportIDs(t *testing.T) {
 // TestPostgresPredSetIdemIndexRejectsADoubleIngest: the other half of the same index. A retried ingest
 // of one set against one report is one row.
 func TestPostgresPredSetIdemIndexRejectsADoubleIngest(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets")
 	reportID := seedPgReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "same-payload")
@@ -85,6 +88,7 @@ func TestPostgresPredSetIdemIndexRejectsADoubleIngest(t *testing.T) {
 
 // TestPostgresCleanupChunkNullsPredictionSets mirrors the cascade on the driver production runs.
 func TestPostgresCleanupChunkNullsPredictionSets(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets", "reports")
 	reportID := seedPgReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -103,6 +107,7 @@ func TestPostgresCleanupChunkNullsPredictionSets(t *testing.T) {
 
 // TestPostgresDeleteReportNullsPredictionSets is the API/manual path on Postgres.
 func TestPostgresDeleteReportNullsPredictionSets(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets", "reports")
 	reportID := seedPgReport(t, st, "600519", "2026-10-16")
 	seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "sha-set-1")
@@ -133,6 +138,7 @@ func seedPgReport(t *testing.T, st *Store, symbol, date string) int64 {
 // the transactional save (including the INSERT ... ON CONFLICT the SQLite path cannot prove) and the
 // restore rule that carries the write-once key from live when a dump lacks it.
 func TestPostgresLedgerStartSaveAndRestoreRule(t *testing.T) {
+	t.Parallel()
 	// Clean only the key this test writes: Postgres shares ONE database across the whole suite, and
 	// pgStore's `tables` argument DELETEs every row — clearing `meta` would drop the schema_version
 	// marker the next OpenStore needs.
@@ -190,6 +196,7 @@ func clearForecastPopulation(t *testing.T, st *Store) {
 // TestPostgresUnrecordedFloorAndRestore covers P2's floor on Postgres: captured at save, counted with
 // the same exclusions, and re-derived through a restore that lacks the keys.
 func TestPostgresUnrecordedFloorAndRestore(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets", "reports", "audit_log")
 	for _, k := range []string{setForecastPopulationFrom, setForecastUnrecordedFloorID, setForecastUnrecordedFloorAt, setForecastUnrecordedFloorMethod} {
 		if _, err := st.exec(`DELETE FROM meta WHERE k=?`, k); err != nil {
@@ -236,6 +243,7 @@ func TestPostgresUnrecordedFloorAndRestore(t *testing.T) {
 // selection, the one-shot heal and the plan's transaction are all SQL this package writes, and the
 // SQLite tests would not catch a Postgres-only spelling or locking mistake.
 func TestPostgresDueSelectionHealAndPlan(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_marks", "prediction_sets", "audit_log")
 	if _, err := st.exec("DELETE FROM meta WHERE k=?", setForecastRepairPremature); err != nil {
 		t.Fatal(err)
@@ -300,6 +308,7 @@ func TestPostgresDueSelectionHealAndPlan(t *testing.T) {
 }
 
 func TestPostgresDueSelectionUsesTheDueIndex(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	// SET LOCAL is scoped to the transaction (and its connection), so the plan is read on the same
 	// connection that disabled the sequential scan.
@@ -333,6 +342,7 @@ func TestPostgresDueSelectionUsesTheDueIndex(t *testing.T) {
 // TestPostgresAccessSchemaAndReattribution is the Postgres twin of step 0006 and the OU delete's
 // re-attribution: the step's DDL, the index, and the one UPDATE that moves a deleted OU's sets.
 func TestPostgresAccessSchemaAndReattribution(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets", "user_groups")
 	if err := st.EnsureDefaultForecastScope(); err != nil {
 		t.Fatal(err)
@@ -381,6 +391,7 @@ func TestPostgresAccessSchemaAndReattribution(t *testing.T) {
 // TestPostgresMigration0006OlderDumpRestores: a dump written before step 0006 loads into a build that
 // has it, both columns come back NULL, and the Default OU then reads none.
 func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "prediction_sets", "user_groups")
 	st.EnsureDefaultGroup() // pgStore emptied user_groups; the dump needs a Default to normalise
 	seedPredictionSet(t, st, sql.NullInt64{}, "p38-pg-older")

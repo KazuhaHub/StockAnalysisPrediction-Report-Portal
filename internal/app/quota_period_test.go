@@ -24,6 +24,7 @@ func quotaServer(t *testing.T) *Server {
 }
 
 func TestQuotaPeriodStart(t *testing.T) {
+	t.Parallel()
 	s := quotaServer(t)
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	// A Wednesday, mid-afternoon.
@@ -59,6 +60,7 @@ func TestQuotaPeriodStart(t *testing.T) {
 // Sunday is the trap: Go's Weekday() makes it 0, so a naive subtraction puts the week start six
 // days in the FUTURE.
 func TestQuotaWeekStartsOnMondayEvenOnSunday(t *testing.T) {
+	t.Parallel()
 	s := quotaServer(t)
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	sunday := time.Date(2026, 8, 9, 10, 0, 0, 0, loc)
@@ -71,6 +73,7 @@ func TestQuotaWeekStartsOnMondayEvenOnSunday(t *testing.T) {
 // The counting end: RunsToday already floors at the account's own creation, and "total" must keep
 // that floor rather than counting a previous holder of the username.
 func TestTotalQuotaStillExcludesAPreviousHolder(t *testing.T) {
+	t.Parallel()
 	s := quotaServer(t)
 	st := s.st
 	const name = "client@corp.example"
@@ -95,6 +98,7 @@ func TestTotalQuotaStillExcludesAPreviousHolder(t *testing.T) {
 // The period is inherited WITH the number it belongs to, not separately. Resolving them apart would
 // let a cap of "20" from one OU meet a period of "month" from another — a limit neither configured.
 func TestQuotaPeriodTravelsWithTheNumber(t *testing.T) {
+	t.Parallel()
 	s := quotaServer(t)
 	st := s.st
 	root := st.EnsureDefaultGroup()
@@ -122,6 +126,7 @@ func TestQuotaPeriodTravelsWithTheNumber(t *testing.T) {
 // which is the mixed cap the whole design exists to prevent, and it tightens a 5-per-day child to
 // 5-per-month the moment an admin puts a monthly cap on the parent.
 func TestLegacyQuotaRowDoesNotBorrowAnAncestorsWindow(t *testing.T) {
+	t.Parallel()
 	s := quotaServer(t)
 	st := s.st
 	root := st.EnsureDefaultGroup()
@@ -148,6 +153,7 @@ func TestLegacyQuotaRowDoesNotBorrowAnAncestorsWindow(t *testing.T) {
 // The reset instant the 429 and the run form show. A lifetime cap never refills, so there is no
 // date to print and the API must say so rather than invent one.
 func TestQuotaResetsAt(t *testing.T) {
+	t.Parallel()
 	s := quotaServer(t)
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	now := time.Date(2026, 8, 5, 15, 0, 0, 0, loc) // a Wednesday

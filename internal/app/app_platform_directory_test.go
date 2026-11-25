@@ -38,9 +38,10 @@ func testPlatformDirectory(t *testing.T, pg bool) {
 		t.Fatal("closed installation stayed in the directory")
 	}
 }
-func TestPlatformDirectorySQLite(t *testing.T)   { testPlatformDirectory(t, false) }
-func TestPlatformDirectoryPostgres(t *testing.T) { testPlatformDirectory(t, true) }
+func TestPlatformDirectorySQLite(t *testing.T)   { t.Parallel(); testPlatformDirectory(t, false) }
+func TestPlatformDirectoryPostgres(t *testing.T) { t.Parallel(); testPlatformDirectory(t, true) }
 func TestPlatformDirectoryHTTP(t *testing.T) {
+	t.Parallel()
 	s, mux, _, id, cookie := platformHTTPFixture(t)
 	response := sessionTestRequest(mux, http.MethodGet, "/api/app-platform/apps", cookie, "")
 	var result platformAppDirectory
@@ -88,8 +89,14 @@ func testPlatformDirectoryPagination(t *testing.T, pg bool) {
 		}
 	}
 }
-func TestPlatformDirectoryPaginationSQLite(t *testing.T)   { testPlatformDirectoryPagination(t, false) }
-func TestPlatformDirectoryPaginationPostgres(t *testing.T) { testPlatformDirectoryPagination(t, true) }
+func TestPlatformDirectoryPaginationSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformDirectoryPagination(t, false)
+}
+func TestPlatformDirectoryPaginationPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformDirectoryPagination(t, true)
+}
 
 func testPlatformDirectoryOU(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
@@ -154,10 +161,11 @@ func testPlatformDirectoryOU(t *testing.T, pg bool) {
 		t.Fatal("no row anywhere in the chain must resolve closed", err)
 	}
 }
-func TestPlatformDirectoryOUSQLite(t *testing.T)   { testPlatformDirectoryOU(t, false) }
-func TestPlatformDirectoryOUPostgres(t *testing.T) { testPlatformDirectoryOU(t, true) }
+func TestPlatformDirectoryOUSQLite(t *testing.T)   { t.Parallel(); testPlatformDirectoryOU(t, false) }
+func TestPlatformDirectoryOUPostgres(t *testing.T) { t.Parallel(); testPlatformDirectoryOU(t, true) }
 
 func TestPlatformDirectoryUninitializedEmpty(t *testing.T) {
+	t.Parallel()
 	s, reader := platformActorTestServer(t, false)
 	before := dumpOf(t, s.st)
 	page, err := s.listPlatformApps(context.Background(), reader, "")
@@ -170,6 +178,7 @@ func TestPlatformDirectoryUninitializedEmpty(t *testing.T) {
 }
 
 func TestPlatformDirectoryHTTPInvalidQuery(t *testing.T) {
+	t.Parallel()
 	_, mux, _, _, cookie := platformHTTPFixture(t)
 	for _, suffix := range []string{"?", "?after=", "?after=bad", "?unknown=1", "?after=" + platformFixtureID(1) + "&after=" + platformFixtureID(2), "?%zz=1"} {
 		response := sessionTestRequest(mux, http.MethodGet, "/api/app-platform/apps"+suffix, cookie, "")
@@ -180,6 +189,7 @@ func TestPlatformDirectoryHTTPInvalidQuery(t *testing.T) {
 }
 
 func TestPlatformDirectoryAdminHasNoAudienceBypass(t *testing.T) {
+	t.Parallel()
 	s, reader, _ := platformLaunchFixture(t, false)
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, reader.username)
 	result, err := s.listPlatformApps(context.Background(), reader, "")
@@ -189,6 +199,7 @@ func TestPlatformDirectoryAdminHasNoAudienceBypass(t *testing.T) {
 }
 
 func TestPostgresPlatformDirectoryWaitRefusal(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"expiry", "cancel"} {
 		t.Run(kind, func(t *testing.T) {
 			s, reader, id := platformLaunchFixture(t, true)
@@ -262,6 +273,7 @@ func TestPostgresPlatformDirectoryWaitRefusal(t *testing.T) {
 }
 
 func TestPlatformDirectorySignedDisplay(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	page, err := s.listPlatformApps(context.Background(), reader, "")
@@ -276,6 +288,7 @@ func TestPlatformDirectorySignedDisplay(t *testing.T) {
 }
 
 func TestPlatformDirectoryDisplayDoesNotInspectExecutable(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	var content []byte
@@ -293,6 +306,7 @@ func TestPlatformDirectoryDisplayDoesNotInspectExecutable(t *testing.T) {
 }
 
 func TestPostgresPlatformDisplayKeyExpiryAfterWait(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, true)
 	platformGrantLaunchUser(t, s, reader, id)
 	now, err := platformDatabaseNow(s.st.poolExec())

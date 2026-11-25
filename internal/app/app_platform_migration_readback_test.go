@@ -14,6 +14,7 @@ import (
 // the runner settled earlier, observed before the read was signed; it settles the effect all the same.
 
 func TestMigrateReadBackOfEarlierSettledReceiptSettles(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
 		_ = platformMigrateAnswers(i, endpoint, "migrated", "") // the job finished and was recorded
@@ -41,6 +42,7 @@ func TestMigrateReadBackOfEarlierSettledReceiptSettles(t *testing.T) {
 }
 
 func TestSettlementDiscardReadBackOfEarlierReceiptSettles(t *testing.T) {
+	t.Parallel()
 	f := settleAfterEnd(t, false, orphanedScript)
 	f.fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
 		return platformMigrateStatusAnswer(i, f.endpoint, "orphaned"), nil
@@ -70,6 +72,7 @@ func TestSettlementDiscardReadBackOfEarlierReceiptSettles(t *testing.T) {
 }
 
 func TestSettlementRestoreReadBackOfEarlierReceiptSettles(t *testing.T) {
+	t.Parallel()
 	f := settleAfterEnd(t, false, failedScript)
 	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
 		_ = restoreAnswer(i, f.endpoint) // the restore finished and was recorded
@@ -144,10 +147,12 @@ func testSettlementDiscardRefusedAfterMigrationSettled(t *testing.T, state, outc
 }
 
 func TestSettlementDiscardRefusedAfterMigrationRevertedSettles(t *testing.T) {
+	t.Parallel()
 	testSettlementDiscardRefusedAfterMigrationSettled(t, "failed", "exit_nonzero")
 }
 
 func TestSettlementDiscardRefusedAfterMigrationAppliedSettles(t *testing.T) {
+	t.Parallel()
 	testSettlementDiscardRefusedAfterMigrationSettled(t, "migrated", "")
 }
 
@@ -155,6 +160,7 @@ func TestSettlementDiscardRefusedAfterMigrationAppliedSettles(t *testing.T) {
 // this effect, this payload and this operation, and be fresh. An answer for anything else is evidence of a fault,
 // never a reason to send the restore again.
 func TestSettlementRestoreStatusMustAnswerTheEffect(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(*platformFakeObservation){
 		"another effect": func(o *platformFakeObservation) { o.status.EffectID = platformFixtureID(8801) },
 		"another payload": func(o *platformFakeObservation) {
@@ -189,6 +195,7 @@ func TestSettlementRestoreStatusMustAnswerTheEffect(t *testing.T) {
 // A migrate-data command lost in transit is read back as a typed absence. The absence is definite only once the
 // window the command was signed for has passed; then the same effect is sent again, and the update goes on.
 func TestMigrateCommandLostInTransitIsSentAgainAfterItsWindow(t *testing.T) {
+	t.Parallel()
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	var effects []string
 	fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
@@ -224,6 +231,7 @@ func TestMigrateCommandLostInTransitIsSentAgainAfterItsWindow(t *testing.T) {
 // rightly refused the reply as coming from the future: a failure of roughly one run in a few thousand, which only a
 // long suite or a repeated run ever met. The fake now receives a reply when it is asked, never before what it says.
 func TestFakeRunnerRepliesAreNeverObservedAfterTheyAreReceived(t *testing.T) {
+	t.Parallel()
 	f := settleAfterEnd(t, false, orphanedScript)
 	intent, err := f.s.signPlatformSettlementMigrate(context.Background(), mustSettlementLease(t, f))
 	if err != nil {

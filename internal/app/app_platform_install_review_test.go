@@ -28,7 +28,7 @@ func platformInstallFixtureWith(t *testing.T, pg bool, edit func(*appplatform.Ma
 	}
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{}
-	for _, name := range platformManagedFixtureOptional {
+	for _, name := range platformManagedFixtureOptional.get(t) {
 		// This is the static install template: a public projection needs a backend, so only the
 		// managed release the later steps substitute declares it (an ingress capability likewise).
 		if name != "public.projection" && name != "ingress.webhook" && name != "machine.read" {
@@ -175,16 +175,19 @@ func testPlatformConcurrentInstallCommit(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallReview(t, false)
 	testPlatformInstallStaleReview(t, false)
 	testPlatformConcurrentInstallCommit(t, false)
 }
 func TestPlatformInstallReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallReview(t, true)
 	testPlatformInstallStaleReview(t, true)
 	testPlatformConcurrentInstallCommit(t, true)
 }
 func TestPlatformInstallRequirements(t *testing.T) {
+	t.Parallel()
 	raw, _, _ := platformSignedReleaseFixture(t, "1.0.0-beta.1")
 	parsed, err := appplatform.ParseDescriptor(raw)
 	if err != nil {
@@ -255,13 +258,16 @@ func testPlatformInstallAtomicRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallAtomicRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallAtomicRollback(t, false)
 }
 func TestPlatformInstallAtomicRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallAtomicRollback(t, true)
 }
 
 func TestPostgresPlatformInstallReviewExpiryAfterAuditWait(t *testing.T) {
+	t.Parallel()
 	s, session, staged := platformInstallFixture(t, true)
 	review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
@@ -365,8 +371,10 @@ func testPlatformInstallRemovedOperationFence(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallRemovedFenceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallRemovedOperationFence(t, false)
 }
 func TestPlatformInstallRemovedFencePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallRemovedOperationFence(t, true)
 }

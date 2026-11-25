@@ -10,6 +10,7 @@ import (
 // The submit-time policy: users spend 加急 tickets unless one of their groups grants
 // unlimited urgent runs; admins do not get a role-based exemption.
 func TestUrgentAllowedSpendsTickets(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "x"}}
 	s.st.SetSetting("batch_urgent_enabled", "1") // ticket mechanics only apply when the 加急 lane is on
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: "x", Role: "admin"})
@@ -47,6 +48,7 @@ func TestUrgentAllowedSpendsTickets(t *testing.T) {
 // priority — even an admin's — while a non-urgent priority passes through unchanged.
 // Turning the lane on still requires a ticket or an unlimited group.
 func TestUrgentDisabledDowngrades(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "x"}}
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: "x", Role: "admin"})
 
@@ -77,6 +79,7 @@ func TestUrgentDisabledDowngrades(t *testing.T) {
 // The pure refill policy: a full allocation on first use, no change within a
 // period, and a reset (not accumulation) after one or more whole periods elapse.
 func TestTicketRefill(t *testing.T) {
+	t.Parallel()
 	t0 := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
 	week := 7
 
@@ -108,6 +111,7 @@ func TestTicketRefill(t *testing.T) {
 }
 
 func TestTicketSpendAndAllocation(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	mkUser(t, st, "op", "operator")
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)

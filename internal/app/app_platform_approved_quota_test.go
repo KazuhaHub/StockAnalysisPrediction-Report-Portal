@@ -33,8 +33,10 @@ func testNamespaceMustMatchTheApprovedQuota(t *testing.T, pg bool) {
 }
 
 func TestNamespaceMustMatchTheApprovedQuotaSQLite(t *testing.T) {
+	t.Parallel()
 	testNamespaceMustMatchTheApprovedQuota(t, false)
 }
 func TestNamespaceMustMatchTheApprovedQuotaPostgres(t *testing.T) {
+	t.Parallel()
 	testNamespaceMustMatchTheApprovedQuota(t, true)
 }

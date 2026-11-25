@@ -85,8 +85,9 @@ func testPlatformProxyPinRefusals(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformProxyPinRefusals(t *testing.T) { testPlatformProxyPinRefusals(t, false) }
+func TestPlatformProxyPinRefusals(t *testing.T) { t.Parallel(); testPlatformProxyPinRefusals(t, false) }
 func TestPlatformProxyPinRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyPinRefusals)
 }
 
@@ -179,8 +180,12 @@ func testPlatformProxyPinPlanThenConsume(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformProxyPinPlanThenConsume(t *testing.T) { testPlatformProxyPinPlanThenConsume(t, false) }
+func TestPlatformProxyPinPlanThenConsume(t *testing.T) {
+	t.Parallel()
+	testPlatformProxyPinPlanThenConsume(t, false)
+}
 func TestPlatformProxyPinPlanThenConsumePostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyPinPlanThenConsume)
 }
 
@@ -223,9 +228,11 @@ func testPlatformProxyPinConsumeNeedsTheRunnerStill(t *testing.T, pg bool) {
 }
 
 func TestPlatformProxyPinConsumeNeedsTheRunnerStill(t *testing.T) {
+	t.Parallel()
 	testPlatformProxyPinConsumeNeedsTheRunnerStill(t, false)
 }
 func TestPlatformProxyPinConsumeNeedsTheRunnerStillPostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyPinConsumeNeedsTheRunnerStill)
 }
 
@@ -257,8 +264,9 @@ func testPlatformProxyPinWithdraw(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformProxyPinWithdraw(t *testing.T) { testPlatformProxyPinWithdraw(t, false) }
+func TestPlatformProxyPinWithdraw(t *testing.T) { t.Parallel(); testPlatformProxyPinWithdraw(t, false) }
 func TestPlatformProxyPinWithdrawPostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyPinWithdraw)
 }
 
@@ -302,9 +310,11 @@ func testPlatformProxyPlanFormatsAcrossUpgrade(t *testing.T, pg bool) {
 }
 
 func TestPlatformProxyPlanFormatsAcrossUpgrade(t *testing.T) {
+	t.Parallel()
 	testPlatformProxyPlanFormatsAcrossUpgrade(t, false)
 }
 func TestPlatformProxyPlanFormatsAcrossUpgradePostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformProxyPlanFormatsAcrossUpgrade)
 }
 
@@ -343,6 +353,7 @@ func platformProxyViewOf(t *testing.T, s *Server, actor platformActorSession, in
 // The 1-dev.1 plan keeps its exact encoding, the 1-dev.2 plan its own, and each is read only in its own
 // format. Fails closed: anything not canonical is refused.
 func TestPlatformProxyPlanCodecAcrossFormats(t *testing.T) {
+	t.Parallel()
 	policy, _ := appplatform.CanonicalProxyPolicy(appplatform.ProxyPolicy{Hosts: []string{"qt.gtimg.cn"}, Pins: []appplatform.ProxyPin{pinQuotes}, DailyBytes: appplatform.ProxyDailyBytesMax})
 	base := platformProxyPlan{
 		Format: platformProxyReviewFormatPins, InstallationID: platformFixtureID(1), AppID: "app", PublisherID: "publisher", Generation: 1, InstallationRevision: 1,
@@ -468,15 +479,18 @@ func testPlatformServiceEgressPinnedSession(t *testing.T, pg bool) {
 }
 
 func TestPlatformServiceEgressPinnedSession(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressPinnedSession(t, false)
 }
 func TestPlatformServiceEgressPinnedSessionPostgres(t *testing.T) {
+	t.Parallel()
 	runOnPostgres(t, testPlatformServiceEgressPinnedSession)
 }
 
 // An operator edit to proxy_pins leaves every unpinned grant's plan, session and console state unchanged. The
 // grant here has hosts only; the runner's pins change under it (added, changed, emptied, PRPY0001 only).
 func TestPlatformServiceEgressUnpinnedGrantIgnoresOperatorPinEdits(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	platformProxySeedGrant(t, s, installation, []string{"qt.gtimg.cn"}, appplatform.ProxyDailyBytesMax)
 	f := newFakeEgressRunner()
@@ -516,6 +530,7 @@ func TestPlatformServiceEgressUnpinnedGrantIgnoresOperatorPinEdits(t *testing.T)
 
 // Rollup and refusal audit rows for a pinned host carry pinned and pin; an ordinary host's rows do not.
 func TestPlatformServiceEgressProxyReportsOfAPinnedHostAreAnnotated(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	platformProxySeedPolicy(t, s, installation, string(mustProxyPolicy(t, []string{"qt.gtimg.cn"}, []appplatform.ProxyPin{pinQuotes})), true)
 	f := newFakeEgressRunner()

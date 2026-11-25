@@ -187,9 +187,11 @@ func testPlatformCapabilityCreateRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityCreateRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityCreateRefusals(t, false)
 }
 func TestPlatformCapabilityCreateRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityCreateRefusals(t, true)
 }
 
@@ -227,9 +229,11 @@ func testPlatformCapabilityCreateSuccess(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityCreateSuccessSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityCreateSuccess(t, false)
 }
 func TestPlatformCapabilityCreateSuccessPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityCreateSuccess(t, true)
 }
 
@@ -333,9 +337,11 @@ func platformV2DefaultTargetForPolicy(t *testing.T) appplatform.HTTPTarget {
 }
 
 func TestPlatformCapabilityConsumeSuccessSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityConsumeSuccess(t, false)
 }
 func TestPlatformCapabilityConsumeSuccessPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityConsumeSuccess(t, true)
 }
 
@@ -376,9 +382,11 @@ func testPlatformCapabilityTargetBindingLifecycle(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityTargetBindingLifecycleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityTargetBindingLifecycle(t, false)
 }
 func TestPlatformCapabilityTargetBindingLifecyclePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityTargetBindingLifecycle(t, true)
 }
 
@@ -475,9 +483,11 @@ func testPlatformCapabilityConsumeRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityConsumeRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityConsumeRefusals(t, false)
 }
 func TestPlatformCapabilityConsumeRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityConsumeRefusals(t, true)
 }
 
@@ -516,8 +526,10 @@ func testPlatformCapabilityConsumeRace(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityConsumeRaceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityConsumeRace(t, false)
 }
 func TestPlatformCapabilityConsumeRacePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityConsumeRace(t, true)
 }

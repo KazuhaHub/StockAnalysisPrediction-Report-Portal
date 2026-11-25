@@ -14,7 +14,7 @@ func testSchemaUpgradeAt0023(t *testing.T, pg bool) {
 	if pg {
 		st = platformTestStore(t, true)
 		cfg = filepath.Join(t.TempDir(), "config.yaml")
-		if err := os.WriteFile(cfg, []byte("db_driver: postgres\ndb_dsn: "+os.Getenv("TEST_POSTGRES_DSN")+"\n"), 0600); err != nil {
+		if err := os.WriteFile(cfg, []byte("db_driver: postgres\ndb_dsn: "+testPostgresDSN(t)+"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	} else {
@@ -43,5 +43,5 @@ func testSchemaUpgradeAt0023(t *testing.T, pg bool) {
 	}
 }
 
-func TestSchemaUpgradeAt0023SQLite(t *testing.T)   { testSchemaUpgradeAt0023(t, false) }
-func TestSchemaUpgradeAt0023Postgres(t *testing.T) { testSchemaUpgradeAt0023(t, true) }
+func TestSchemaUpgradeAt0023SQLite(t *testing.T)   { t.Parallel(); testSchemaUpgradeAt0023(t, false) }
+func TestSchemaUpgradeAt0023Postgres(t *testing.T) { t.Parallel(); testSchemaUpgradeAt0023(t, true) }

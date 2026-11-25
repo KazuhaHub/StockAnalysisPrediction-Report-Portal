@@ -52,9 +52,8 @@ func testIngressBlock() *appplatform.Ingress {
 // whose backend answers through a recording hook (the runner path is covered separately).
 func platformIngressFixture(t *testing.T, pg bool) *platformIngressEnv {
 	t.Helper()
-	platformManagedFixtureOptional = []string{"ingress.webhook"}
-	platformManagedFixtureIngress = testIngressBlock()
-	t.Cleanup(func() { platformManagedFixtureOptional, platformManagedFixtureIngress = nil, nil })
+	platformManagedFixtureOptional.set(t, []string{"ingress.webhook"})
+	platformManagedFixtureIngress.set(t, testIngressBlock())
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
 	t.Cleanup(func() { mustExec(t, s.st, `DELETE FROM audit_log WHERE action LIKE 'app_platform.ingress_%'`) })
@@ -210,6 +209,7 @@ func withTimestamp(ts int64) func(*ingressSend) { return func(m *ingressSend) { 
 // Doc 180 test 1: a POST to /ingress/apps/... matched no route before; it is 401 unsigned and 202
 // signed, and it is 401 until the capability is granted and an endpoint exists.
 func TestIngressAnswersUnsignedAndSignedRequests(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		secret := ingressSecret("a")
@@ -319,6 +319,7 @@ func TestIngressRefusalsAreUniformAndWriteNothing(t *testing.T) {
 // Doc 180 test 3: a repeated nonce inside the window is refused; after a restart the backend gets the
 // same digest and deduplicates.
 func TestIngressNonceReplayAndRestart(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)
@@ -360,6 +361,7 @@ func TestIngressNonceReplayAndRestart(t *testing.T) {
 }
 
 func TestIngressNonceCacheIsBoundedAndExpires(t *testing.T) {
+	t.Parallel()
 	var p platformIngressState
 	start := time.Unix(1_800_000_000, 0)
 	for i := 0; i < platformIngressNonceEntries+500; i++ {
@@ -391,6 +393,7 @@ func TestIngressNonceCacheIsBoundedAndExpires(t *testing.T) {
 
 // Doc 180 test 4: the 11th heartbeat in a minute for one endpoint is 429; other endpoints are not affected.
 func TestIngressEndpointLimit(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)
@@ -417,6 +420,7 @@ func TestIngressEndpointLimit(t *testing.T) {
 // Doc 180 test 5: revoking the binding, withdrawing the capability, disabling the app and a restore
 // pause are each honoured on the next request.
 func TestIngressChangesAreHonouredOnTheNextRequest(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)
@@ -464,6 +468,7 @@ func TestIngressChangesAreHonouredOnTheNextRequest(t *testing.T) {
 // Doc 180 test 6: the backend gets the verified fact and the nonce digest, never the secret. The
 // command and assertion are signed through the real relay path and every byte is searched.
 func TestIngressRelayRequestCarriesNoSecret(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)
@@ -638,6 +643,7 @@ func TestIngressClientAndInstallationCeilings(t *testing.T) {
 // Secrets are entered by the administrator, never generated or shown (owner decision 3), and an
 // endpoint is a binding with the ingress operation and the route in its policy.
 func TestIngressBindingReviewAndPolicy(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		short, err := e.s.changePlatformCredential(e.actor, platformCredentialChange{kind: "create", label: "Short", value: []byte(strings.Repeat("s", 31))})
@@ -719,6 +725,7 @@ func TestIngressBindingReviewAndPolicy(t *testing.T) {
 
 // Traffic is aggregated, never an address, and only the timer writes it.
 func TestIngressSummaryIsAggregatedWithoutAnAddress(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)
@@ -759,6 +766,7 @@ func TestIngressSummaryIsAggregatedWithoutAnAddress(t *testing.T) {
 
 // A backend that refuses or fails is reported as the contract says (step 8).
 func TestIngressBackendOutcomes(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformIngressFixture(t, pg)
 		e.enable(t)

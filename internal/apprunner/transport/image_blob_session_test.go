@@ -160,11 +160,19 @@ func TestBlobChannelResumesAfterALostConnection(t *testing.T) {
 		t.Fatalf("broken upload: %v", err)
 	}
 	conn.Close()
-	time.Sleep(50 * time.Millisecond) // the runner notices the closed connection and keeps the partial
-	// Resuming at the wrong place names the right one.
+	// Resuming at the wrong place names the right one. The runner refuses with "busy" until it has
+	// noticed the closed connection and released the dropped session (keeping its partial), so a
+	// refusal of that kind means "not yet", and only for a bounded while.
 	wrong := payload
 	wrong.ResumeOffset = "7"
-	result, err := h.send(wrong, body[7:])
+	var result ImageBlobResult
+	var err error
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		result, err = h.send(wrong, body[7:])
+		if err == nil || result.Refusal != "busy" || time.Now().After(deadline) {
+			break
+		}
+	}
 	if err != nil || result.Stored || result.ResumeAt != ImageBlobChunkBytes {
 		t.Fatalf("wrong resume: %+v %v", result, err)
 	}

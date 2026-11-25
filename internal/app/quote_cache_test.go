@@ -70,6 +70,7 @@ func quoteAsk(t *testing.T, market string) quoteTarget {
 // nothing rather than everything — which is the reason a source declares (markets, intervals) pairs
 // instead of two independent sets that a half-filled literal could leave meaning the opposite.
 func TestQuoteCapabilityDeclarationEdges(t *testing.T) {
+	t.Parallel()
 	sh := quoteMarkets["sh"]
 
 	var undeclared quoteSource
@@ -134,6 +135,7 @@ func TestQuoteCapabilityDeclarationEdges(t *testing.T) {
 // turns into the price plus an empty chart. That is what makes the US row a hole a source can fill
 // rather than a question nobody asks — see TestQuoteDailyRangeAsksTheResolverAndNotTheMarketTable.
 func TestQuoteResolverAnswersThePairAndNotJustTheMarket(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	cfg := quoteConfigDefault()
 	for _, tc := range []struct {
@@ -195,6 +197,7 @@ func TestQuoteResolverAnswersThePairAndNotJustTheMarket(t *testing.T) {
 // The want column below is therefore not derived from the declarations — deriving it would make this
 // test agree with whatever they say — it is the old table, written out.
 func TestQuoteResolverKeepsEveryChainThePortalActuallyWalks(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	cfg := quoteConfigDefault()
 	for _, tc := range []struct{ market, want string }{
@@ -233,6 +236,7 @@ func TestQuoteResolverKeepsEveryChainThePortalActuallyWalks(t *testing.T) {
 // failing or serving the request from a source that never claimed it. The order is a preference
 // among the capable, not an instruction to the incapable.
 func TestQuoteResolverFallsThroughASourceThatCannotServeThePair(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 
 	// Sina first, and Hong Kong is a market it has no line shape for.
@@ -294,6 +298,7 @@ func TestQuoteResolverFallsThroughASourceThatCannotServeThePair(t *testing.T) {
 // and counting it would paint a permanent red streak on the fallback for every US symbol looked up
 // while Tencent is having a bad afternoon.
 func TestQuoteSkippedSourceIsNeverBlamedInTheHealthRecord(t *testing.T) {
+	t.Parallel()
 	sina := failingStub("sina should never have been called")
 	c := &quoteCache{sources: []quoteSource{
 		{name: quoteSourceTencent, fetch: failingStub("tencent is down").fetch,
@@ -347,6 +352,7 @@ func TestQuoteSkippedSourceIsNeverBlamedInTheHealthRecord(t *testing.T) {
 // grant alone would quietly drop the US and Beijing rows an operator uses to see that the primary
 // covers them at all.
 func TestQuoteSourceMarketsAreTheUnionOverIntervals(t *testing.T) {
+	t.Parallel()
 	byName := map[string]quoteSource{}
 	for _, src := range defaultQuoteSources() {
 		byName[src.name] = src
@@ -376,6 +382,7 @@ func TestQuoteSourceMarketsAreTheUnionOverIntervals(t *testing.T) {
 // and the panel's 日线 column advertised a capability an operator could switch on for no effect. The
 // two `us` rows below are the whole difference; the other rows are the behaviour that must not move.
 func TestQuoteDailyRangeAsksTheResolverAndNotTheMarketTable(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	off := quoteConfigDefault()
 	on := quoteConfig{Order: []string{quoteSourceTencent, quoteSourceSina, quoteSourceYahoo}}.orDefaults()
@@ -436,6 +443,7 @@ func TestQuoteDailyRangeAsksTheResolverAndNotTheMarketTable(t *testing.T) {
 // unreachable, because no request ever asked for (us, daily). This walks the panel's own columns
 // rather than the declarations, so it fails on the day the two disagree in either direction.
 func TestQuotePanelAdvertisesNothingTheResolverCannotBeAskedFor(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	// Every compiled-in source enabled: the panel lists the disabled ones too, and what it says about
 	// them is a claim about what enabling them would do.
@@ -495,6 +503,7 @@ func TestQuotePanelAdvertisesNothingTheResolverCannotBeAskedFor(t *testing.T) {
 // asymmetry is supplied here rather than waited for: one source, one window, and a check that the
 // column for the OTHER window does not borrow it.
 func TestPanelKeepsTheTwoIntradayWindowsApartWhenASourceServesOnlyOne(t *testing.T) {
+	t.Parallel()
 	oneDayOnly := quoteSource{
 		name:  "sessiononly",
 		fetch: func(context.Context, string, string, int) (*QuoteResp, error) { return nil, nil },

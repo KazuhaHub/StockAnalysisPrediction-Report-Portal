@@ -18,6 +18,7 @@ import (
 // marketPrefix is the URL-construction boundary, so it is the thing that has to refuse a symbol a
 // URL cannot carry. Six ASCII digits and a known board byte, or "".
 func TestMarketPrefixRejectsNonDigitSymbols(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ code, want string }{
 		{"600000", "sh"},
 		{"601899", "sh"},
@@ -84,6 +85,7 @@ func TestFetchOneNameRejectsControlCharSymbol(t *testing.T) {
 // empty string is what a connection failure produces, so conflating the two makes a wholly blocked
 // deployment look healthy and reduces the two-source failover to decoration.
 func TestVendorGetRefusesNon2xx(t *testing.T) {
+	t.Parallel()
 	const interstitial = `<html><head><title>403 Forbidden</title></head><body><h1>访问被拒绝</h1></body></html>`
 	var gotAgent, gotReferer string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +121,7 @@ func TestVendorGetRefusesNon2xx(t *testing.T) {
 // fixed number of bytes rather than the whole of it. The 80-page name-table loop runs in a
 // small-memory container.
 func TestVendorGetTruncatesOversizedBody(t *testing.T) {
+	t.Parallel()
 	const served = 512 << 10
 	const limit = 1 << 10
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -158,6 +161,7 @@ func gbkFixtureServer(t *testing.T) (*httptest.Server, string) {
 // A 200 with a real captured body still comes back whole and correctly decoded, and the shipped
 // Sina parser still reads the company name out of it.
 func TestVendorGetGBKDecodesCapturedSnapshot(t *testing.T) {
+	t.Parallel()
 	srv, want := gbkFixtureServer(t)
 
 	got, err := vendorGetGBK(context.Background(), srv.URL+"/list=sh601899", "https://finance.sina.com.cn/", maxNameBodyBytes)
@@ -228,6 +232,7 @@ func TestVendorLogRateLimit(t *testing.T) {
 // reverting that line to `req, _ :=` left the whole suite green while leaving a nil request to be
 // dereferenced by the next caller that reaches vendorGet without going through marketPrefix.
 func TestVendorGetRefusesAURLTheRequestBuilderRejects(t *testing.T) {
+	t.Parallel()
 	body, err := vendorGet(context.Background(), "https://hq.sinajs.cn/list=sh600\x0000", "", 1024)
 	if err == nil {
 		t.Fatalf("a control character in a URL returned no error; body=%q", body)

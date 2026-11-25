@@ -41,6 +41,7 @@ func extensionSaveBody(revision int64, key string) string {
 	return string(raw)
 }
 func TestExtensionAdminSealsAndRotatesKeys(t *testing.T) {
+	t.Parallel()
 	s := extensionFixture(t)
 	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
 	w := extensionAdminCall(s, "PUT", extensionSaveBody(0, key))
@@ -146,6 +147,7 @@ func extensionRequest(s *Server, token, method, app string) *httptest.ResponseRe
 	return w
 }
 func TestExtensionProxyEnforcesCurrentAuthority(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"read", "manage", "machine", "wrong-app", "demoted", "inactive", "expired", "session", "reinstall", "disabled", "changed-before-send", "OU", "app-closed"} {
 		t.Run(mode, func(t *testing.T) {
 			s := extensionFixture(t)
@@ -218,6 +220,7 @@ func TestExtensionProxyEnforcesCurrentAuthority(t *testing.T) {
 }
 
 func TestExtensionPrincipalDirectoryRequiresCurrentAdmin(t *testing.T) {
+	t.Parallel()
 	s := extensionFixture(t)
 	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
 	w := extensionAdminCall(s, "PUT", extensionSaveBody(0, key))
@@ -242,6 +245,7 @@ func TestExtensionPrincipalDirectoryRequiresCurrentAdmin(t *testing.T) {
 }
 
 func TestExtensionProxyReturnsSafeConflictWithoutBackendDetails(t *testing.T) {
+	t.Parallel()
 	s := extensionFixture(t)
 	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
 	w := extensionAdminCall(s, "PUT", extensionSaveBody(0, key))

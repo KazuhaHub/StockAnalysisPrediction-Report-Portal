@@ -73,8 +73,14 @@ func testPlatformLegacyAccountViewer(t *testing.T, pg bool) {
 		t.Fatal("legacy account outside the open OU launched")
 	}
 }
-func TestPlatformLegacyAccountViewerSQLite(t *testing.T)   { testPlatformLegacyAccountViewer(t, false) }
-func TestPlatformLegacyAccountViewerPostgres(t *testing.T) { testPlatformLegacyAccountViewer(t, true) }
+func TestPlatformLegacyAccountViewerSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLegacyAccountViewer(t, false)
+}
+func TestPlatformLegacyAccountViewerPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformLegacyAccountViewer(t, true)
+}
 
 // (ii) The OU row is written by the real install activation, from the reviewed open_to_ous.
 func testPlatformLegacyAccountActivationGrant(t *testing.T, pg bool) {
@@ -104,9 +110,11 @@ func testPlatformLegacyAccountActivationGrant(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformLegacyAccountActivationGrantSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformLegacyAccountActivationGrant(t, false)
 }
 func TestPlatformLegacyAccountActivationGrantPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformLegacyAccountActivationGrant(t, true)
 }
 
@@ -122,8 +130,12 @@ func testPlatformLegacyAccountOUGrant(t *testing.T, pg bool) {
 		t.Fatal("OU-granted legacy user refused", err)
 	}
 }
-func TestPlatformLegacyAccountOUGrantSQLite(t *testing.T) { testPlatformLegacyAccountOUGrant(t, false) }
+func TestPlatformLegacyAccountOUGrantSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLegacyAccountOUGrant(t, false)
+}
 func TestPlatformLegacyAccountOUGrantPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformLegacyAccountOUGrant(t, true)
 }
 
@@ -156,8 +168,12 @@ func testPlatformLegacyAccountObjects(t *testing.T, pg bool) {
 		t.Fatalf("legacy object update: %d %s", update.Code, update.Body.String())
 	}
 }
-func TestPlatformLegacyAccountObjectsSQLite(t *testing.T) { testPlatformLegacyAccountObjects(t, false) }
+func TestPlatformLegacyAccountObjectsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLegacyAccountObjects(t, false)
+}
 func TestPlatformLegacyAccountObjectsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformLegacyAccountObjects(t, true)
 }
 
@@ -174,8 +190,14 @@ func testPlatformLegacyAdminSponsor(t *testing.T, pg bool) {
 		t.Fatal("legacy admin plan not consumable", err)
 	}
 }
-func TestPlatformLegacyAdminSponsorSQLite(t *testing.T)   { testPlatformLegacyAdminSponsor(t, false) }
-func TestPlatformLegacyAdminSponsorPostgres(t *testing.T) { testPlatformLegacyAdminSponsor(t, true) }
+func TestPlatformLegacyAdminSponsorSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLegacyAdminSponsor(t, false)
+}
+func TestPlatformLegacyAdminSponsorPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformLegacyAdminSponsor(t, true)
+}
 
 // The writable launch, its document and the repeat launch all go through the
 // cookie reader, so a NULL created_at must work end to end over HTTP.
@@ -210,8 +232,10 @@ func testPlatformLegacyAccountWritableLaunch(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformLegacyAccountWritableLaunchSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformLegacyAccountWritableLaunch(t, false)
 }
 func TestPlatformLegacyAccountWritableLaunchPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformLegacyAccountWritableLaunch(t, true)
 }

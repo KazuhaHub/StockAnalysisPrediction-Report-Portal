@@ -76,6 +76,7 @@ func realImageParts(t *testing.T) platformManagedImageParts {
 }
 
 func TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios(t *testing.T) {
+	t.Parallel()
 	parts := realImageParts(t)
 	pkg := parts.packageBytes(t, nil, "")
 	var total int64

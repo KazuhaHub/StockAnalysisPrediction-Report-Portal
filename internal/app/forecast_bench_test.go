@@ -35,6 +35,7 @@ func indexFixtureBody(t *testing.T, code string) *QuoteResp {
 // TestBenchAllowlistMapsExplicitly is the F01 pin: the only way a benchmark becomes a vendor request
 // is an exact row in the allowlist, and every row is an explicit (market, symbol).
 func TestBenchAllowlistMapsExplicitly(t *testing.T) {
+	t.Parallel()
 	for code, spec := range forecastBenchAllowlist {
 		if spec.Market != "sh" {
 			t.Errorf("%s: market = %q, want sh (indexes are published by Shanghai)", code, spec.Market)
@@ -79,6 +80,7 @@ func TestBenchAllowlistMapsExplicitly(t *testing.T) {
 // and is recognised by the vendor as an index. The routing tests reuse these, so a missing or
 // mis-captured fixture fails here rather than silently weakening them.
 func TestBenchFixturesExistAndParse(t *testing.T) {
+	t.Parallel()
 	for _, code := range forecastBenchCodes() {
 		resp := indexFixtureBody(t, code)
 		if resp.Kind != quoteKindIndex {
@@ -93,6 +95,7 @@ func TestBenchFixturesExistAndParse(t *testing.T) {
 // TestBenchGetListsTheAllowlist: the admin GET advertises the allowed codes so the UI cannot offer one
 // the validator would refuse.
 func TestBenchGetListsTheAllowlist(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	rec := httptest.NewRecorder()
 	s.apiForecastSettings(rec, httptest.NewRequest("GET", "/api/admin/forecast", nil), "admin")
@@ -111,6 +114,7 @@ func TestBenchGetListsTheAllowlist(t *testing.T) {
 // return is measured from its OWN index fixture — asserted against a value computed from that fixture,
 // not merely against "the two differ".
 func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	sh000852 := indexFixtureBody(t, "sh000852")
 	sh000906 := indexFixtureBody(t, "sh000906")
@@ -214,6 +218,7 @@ func expectedBenchRetBp(t *testing.T, resp *QuoteResp, madeOn string) int32 {
 // TestBenchmarkBodyMustBeAnIndex: a body the vendor does not call an index cannot settle a mark.
 // Whatever the stock leg says, the benchmark leg would be a company's close, so the mark waits.
 func TestBenchmarkBodyMustBeAnIndex(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-03-02")
 	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-03-02', made_at='2026-03-02T13:00:00Z', bench_code='sh000852' WHERE id=?", setID); err != nil {
@@ -245,6 +250,7 @@ func TestBenchmarkBodyMustBeAnIndex(t *testing.T) {
 // the group waits rather than scoring against it, and the marks carry the calendar_bad code. (The
 // attempts/finality half of this property is P1's; see TestSourceFailuresAreNotMarkSpecific.)
 func TestZeroVolumeIndexBarDefersTheGroup(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-03-02")
 	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-03-02', made_at='2026-03-02T13:00:00Z', bench_code='sh000852' WHERE id=?", setID); err != nil {
@@ -278,6 +284,7 @@ func TestZeroVolumeIndexBarDefersTheGroup(t *testing.T) {
 // TestBenchFetchFailureIsFetchFailed: a benchmark fetch that errors carries the fetch_failed code,
 // distinct from not_index and calendar_bad.
 func TestBenchFetchFailureIsFetchFailed(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-03-02")
 	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-03-02', made_at='2026-03-02T13:00:00Z', bench_code='sh000852' WHERE id=?", setID); err != nil {
@@ -335,6 +342,7 @@ func assertAllMarksRefusedTo(t *testing.T, st *Store, code string) {
 // evaluator never falls back to reading forecast_bench to rescue it. The counting store proves the
 // absence of the read rather than asserting a value.
 func TestEmptyBenchCodeNeverReadsTheSetting(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.SetSetting(setForecastBench, "sh000852"); err != nil {
 		t.Fatal(err)
@@ -379,6 +387,7 @@ func saveForecastSettings(t *testing.T, s *Server, body string) *httptest.Respon
 }
 
 func TestBenchChangeIsEffectiveDatedAndReconciled(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.applyForecastBenchState("sh000300", "", ""); err != nil {
 		t.Fatal(err)
@@ -423,6 +432,7 @@ func TestBenchChangeIsEffectiveDatedAndReconciled(t *testing.T) {
 }
 
 func TestCSI800ScheduleFromNovember(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	from := nextCohort(shanghaiCohort(time.Now()))
 	rec := saveForecastSettings(t, s, `{"bench_schedule":"sh000906"}`)
@@ -460,6 +470,7 @@ func TestCSI800ScheduleFromNovember(t *testing.T) {
 }
 
 func TestBenchCancel(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.applyForecastBenchState(defaultForecastBench, "sh000906", "2026-11"); err != nil {
 		t.Fatal(err)
@@ -488,6 +499,7 @@ func TestBenchCancel(t *testing.T) {
 }
 
 func TestEnabledAliasesMode(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	satisfyForecastReadiness(t, s)
 	// The switch is already in dry mode (the readiness seed): posting it again is a no-op, not an
@@ -525,6 +537,7 @@ func TestEnabledAliasesMode(t *testing.T) {
 }
 
 func TestOffBenchmarkSetsAreExcludedAndCounted(t *testing.T) {
+	t.Parallel()
 	t.Run("a later set with another index is out and counted", func(t *testing.T) {
 		s := newV1Server(t)
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
@@ -571,6 +584,7 @@ func symbolsOf(sets []*groupSet) []string {
 }
 
 func TestCustomRangeSlicesByBenchmark(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
 	seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-11-12", Bench: "sh000906"})
@@ -599,6 +613,7 @@ func TestCustomRangeSlicesByBenchmark(t *testing.T) {
 }
 
 func TestBenchPromotionAtBoot(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	if err := s.st.applyForecastBenchState("sh000852", "sh000906", "2026-10"); err != nil {
 		t.Fatal(err)
@@ -623,6 +638,7 @@ func TestBenchPromotionAtBoot(t *testing.T) {
 }
 
 func TestIngestFreezesTheCohortsBenchmark(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	benches := func() string {
 		var b string
@@ -655,6 +671,7 @@ func TestIngestFreezesTheCohortsBenchmark(t *testing.T) {
 }
 
 func TestCancelOfADueScheduleKeepsTheCurrentCohort(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// The schedule is effective for the cohort in flight but a boot has not promoted it yet (the
 	// admin's save can be the first request after the boundary). Cancelling must not revert the
@@ -674,6 +691,7 @@ func TestCancelOfADueScheduleKeepsTheCurrentCohort(t *testing.T) {
 }
 
 func TestMalformedScheduleIsIgnored(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	// A restore or an out-of-band edit could leave this behind. It must not apply early or never.
 	s.st.SetSetting(setForecastBenchNext, "sh000906")
@@ -688,6 +706,7 @@ func TestMalformedScheduleIsIgnored(t *testing.T) {
 }
 
 func TestCountedSetIDJudgesEachCohortOnItsOwn(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	octReport, octSet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-10-18", Bench: "sh000852"}, "October decision")
 	novReport, novSet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-11-19", Bench: "sh000906"}, "November decision")

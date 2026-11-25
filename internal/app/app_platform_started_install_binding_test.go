@@ -31,6 +31,7 @@ func (f refusedInstall) rewriteStartReceipt(t *testing.T, edit func(*journal.Wri
 // the preparation would be admitted by the review and then refused by every stop, stranding the installation in
 // removed/pending, so the review must refuse it up front.
 func TestStartedFailedInstallRefusesAStartAtAnotherFenceThanThePreparation(t *testing.T) {
+	t.Parallel()
 	f := newStartedFailedInstall(t, false)
 	fence := scalar[int64](t, f.s.st, `SELECT fence FROM app_platform_operations WHERE id=?`, f.install)
 	next := fence + 1
@@ -44,6 +45,7 @@ func TestStartedFailedInstallRefusesAStartAtAnotherFenceThanThePreparation(t *te
 
 // Every binding the stop stage requires of the running receipt is required by the review too.
 func TestStartedFailedInstallReviewRequiresWhatTheStopRequires(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		edit func(*journal.WritableCandidateRunningReceipt)
@@ -68,6 +70,7 @@ func TestStartedFailedInstallReviewRequiresWhatTheStopRequires(t *testing.T) {
 
 // The close of a started-failed install is audited as such, not as a never-started close.
 func TestStartedFailedInstallCloseIsAuditedAsStarted(t *testing.T) {
+	t.Parallel()
 	f := newStartedFailedInstall(t, false)
 	removal, _ := f.walkStartedRemoval(t, 7460)
 	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.failed_install_closed' AND target_id=? AND detail LIKE ?`, f.install, "%"+removal+"%") != 1 ||

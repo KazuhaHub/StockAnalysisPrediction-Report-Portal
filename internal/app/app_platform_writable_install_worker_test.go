@@ -54,9 +54,11 @@ func testPlatformWritableInstallRunPending(t *testing.T, pg bool) {
 }
 
 func TestPlatformWritableInstallRunPendingSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableInstallRunPending(t, false)
 }
 func TestPlatformWritableInstallRunPendingPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableInstallRunPending(t, true)
 }
 
@@ -115,8 +117,10 @@ func testPlatformWritableInstallRunRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformWritableInstallRunRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableInstallRunRefusals(t, false)
 }
 func TestPlatformWritableInstallRunRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableInstallRunRefusals(t, true)
 }

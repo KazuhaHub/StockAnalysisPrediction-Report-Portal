@@ -7,6 +7,7 @@ import (
 )
 
 func TestEmptyPredictionQueryReturnsAnArray(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	w := httptest.NewRecorder()
 	s.serveQueryPredictions(w, httptest.NewRequest("GET", "/?symbol=699999", nil), nil)
@@ -22,6 +23,7 @@ func TestEmptyPredictionQueryReturnsAnArray(t *testing.T) {
 }
 
 func TestReadMarkSourceAndSharedDirection(t *testing.T) {
+	t.Parallel()
 	eachDriver(t, func(t *testing.T, st *Store) {
 		s := &Server{st: st}
 		for i, tc := range []struct {
@@ -60,6 +62,7 @@ func TestReadMarkSourceAndSharedDirection(t *testing.T) {
 }
 
 func TestReadSettlementPausedTracksEvaluatorMode(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-01-05"}, "Paused settlement")
 	for _, mode := range []string{forecastModeOff, forecastModeDry, forecastModeOn, "invalid"} {

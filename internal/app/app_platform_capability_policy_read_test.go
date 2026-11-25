@@ -35,9 +35,11 @@ func testPlatformCapabilityReadAccepted(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityReadAcceptedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityReadAccepted(t, false)
 }
 func TestPlatformCapabilityReadAcceptedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityReadAccepted(t, true)
 }
 
@@ -129,8 +131,10 @@ func testPlatformCapabilityReadRefusals(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityReadRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityReadRefusals(t, false)
 }
 func TestPlatformCapabilityReadRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityReadRefusals(t, true)
 }

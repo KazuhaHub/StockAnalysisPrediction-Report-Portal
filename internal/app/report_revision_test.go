@@ -66,6 +66,7 @@ func revisionBodies(t *testing.T, s *Server, id int64) []string {
 // stored twice, which is the whole reason a save snapshots the pre-image rather than appending the
 // post-image.
 func TestHistoryHoldsWhatTheReportUsedToSayAndNotWhatItSaysNow(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm) // body "# 手写\n正文"
 
@@ -88,6 +89,7 @@ func TestHistoryHoldsWhatTheReportUsedToSayAndNotWhatItSaysNow(t *testing.T) {
 // A refused save must leave the log exactly as it was. The snapshot sits inside the transaction and
 // after the staleness check precisely so that a conflict cannot deposit a half-history.
 func TestARefusedSaveWritesNoHistory(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	loaded, _ := s.st.GetNew(id, nil)
@@ -107,6 +109,7 @@ func TestARefusedSaveWritesNoHistory(t *testing.T) {
 // Pressing save twice, or editing only the audience, must not bury the version the author wants
 // under identical copies of the one they are looking at.
 func TestASaveThatChangedNothingWritesNoRevision(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "手工补充", "# 手写\n正文") // byte-identical to what is there
@@ -124,6 +127,7 @@ func TestASaveThatChangedNothingWritesNoRevision(t *testing.T) {
 // The identity fields ride along, or a restore recovers the words under the wrong title — a
 // different report wearing the old text.
 func TestARevisionCarriesTheIdentityAndNotOnlyTheBody(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "改过的标题", "新正文")
@@ -150,6 +154,7 @@ func TestARevisionCarriesTheIdentityAndNotOnlyTheBody(t *testing.T) {
 // it would leave the original author's name recoverable from nowhere: the next real edit would file
 // their words under whoever had happened to touch the audience in between.
 func TestTheBylineFollowsTheTextAndNotTheLastPersonToPressSave(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	s.st.UpsertUser(User{Username: "second", PasswordHash: "h", Role: "editor"})
 	id := mustCreateManual(t, s, manualForm) // written by "editor"
@@ -189,6 +194,7 @@ func TestTheBylineFollowsTheTextAndNotTheLastPersonToPressSave(t *testing.T) {
 // ---------- the cap ----------
 
 func TestTheCapBoundsHistoryPerReportAndZeroMeansKeepEverything(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 
@@ -231,6 +237,7 @@ func TestTheCapBoundsHistoryPerReportAndZeroMeansKeepEverything(t *testing.T) {
 }
 
 func TestTheCapIsRefusedRatherThanClampedWhenItMakesNoSense(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	for _, body := range []string{`{"revisions_keep":-1}`, `{"revisions_keep":100000}`,
 		`{"revisions_days":1}`} {
@@ -250,6 +257,7 @@ func TestTheCapIsRefusedRatherThanClampedWhenItMakesNoSense(t *testing.T) {
 // The cap rides the cleanup console's config endpoint, whose per-field merge is the only reason it
 // needed no endpoint of its own — so that property is pinned rather than assumed.
 func TestTheCapSurvivesAnUnrelatedCleanupSave(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	post := func(body string) {
 		t.Helper()
@@ -273,6 +281,7 @@ func TestTheCapSurvivesAnUnrelatedCleanupSave(t *testing.T) {
 // ---------- retention and deletion ----------
 
 func TestTheStorageConsoleAgesRevisionsIndependentlyOfTheirReport(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "手工补充", "第二版")
@@ -315,6 +324,7 @@ func TestTheStorageConsoleAgesRevisionsIndependentlyOfTheirReport(t *testing.T) 
 // log — each one leaves the whole suite green while the console reports work it did not do, or does
 // work it does not report.
 func TestTheConsoleRunsTheRevisionTargetAndRecordsWhatItDid(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "手工补充", "第二版")
@@ -361,6 +371,7 @@ func TestTheConsoleRunsTheRevisionTargetAndRecordsWhatItDid(t *testing.T) {
 // otherwise inherit every version written while the report was addressed to somebody else, which is
 // exactly what "take the internal detail out, then add the client" produces.
 func TestAScopedReaderCannotOpenTheHistoryAtAll(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	root := s.st.EnsureDefaultGroup()
 	ou, _ := s.st.CreateUserGroup("ext", "", 0)
@@ -400,6 +411,7 @@ func TestAScopedReaderCannotOpenTheHistoryAtAll(t *testing.T) {
 
 // The target ships off, like every other one: nothing starts deleting on upgrade.
 func TestTheRevisionTargetShipsDisabled(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	c := s.cleanupConfigLoad()
 	if c.RevisionsEnabled {
@@ -416,6 +428,7 @@ func TestTheRevisionTargetShipsDisabled(t *testing.T) {
 }
 
 func TestDeletingAReportTakesItsHistoryWithIt(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "手工补充", "第二版")
@@ -433,6 +446,7 @@ func TestDeletingAReportTakesItsHistoryWithIt(t *testing.T) {
 
 // The other delete path, which does not go through DeleteReport and is the easy one to miss.
 func TestTheStorageSweepAlsoTakesTheHistory(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "手工补充", "第二版")
@@ -453,6 +467,7 @@ func TestTheStorageSweepAlsoTakesTheHistory(t *testing.T) {
 // Restore is a save, and that is what makes the button safe to press: the version it replaces
 // becomes the newest entry, so restoring is undone by restoring again.
 func TestRestoringIsItselfRecorded(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm) // "# 手写\n正文"
 	save(t, s, id, "手工补充", "误改的版本")
@@ -484,6 +499,7 @@ func TestRestoringIsItselfRecorded(t *testing.T) {
 
 // A restore computed from a history list drawn before somebody else saved must be refused, not win.
 func TestRestoringWithAStaleTokenIsRefused(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	stale, _ := s.st.GetNew(id, nil)
@@ -502,6 +518,7 @@ func TestRestoringWithAStaleTokenIsRefused(t *testing.T) {
 
 // Restoring an old title is a rename, and can collide exactly as a rename can.
 func TestRestoringOntoATakenIdentityReportsTheCollision(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm) // title 手工补充
 	save(t, s, id, "改名了", "正文二")
@@ -530,6 +547,7 @@ func TestRestoringOntoATakenIdentityReportsTheCollision(t *testing.T) {
 // A workflow's report has no history and is not editable, so the endpoints refuse rather than
 // answering with an empty list — an empty list reads as "nothing has been edited yet".
 func TestAMachineReportHasNoHistorySurface(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	machineID, _, _ := s.st.UpsertReport(Rep{
 		Symbol: "600519", Date: "2026-09-02", RType: "深度分析", Title: "工作流产出", MD: "机器正文"})
@@ -547,6 +565,7 @@ func TestAMachineReportHasNoHistorySurface(t *testing.T) {
 // The list endpoint's response shape, which the drawer reads by name. Nothing asserted it, so
 // renaming a key or dropping `keep` left every test green and the drawer blank.
 func TestTheHistoryListSaysWhatTheDrawerReads(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	save(t, s, id, "手工补充", "第二版")
@@ -598,6 +617,7 @@ func TestTheHistoryListSaysWhatTheDrawerReads(t *testing.T) {
 // A revision id is looked up WITH its report, so one report's history cannot be read through
 // another report the caller happens to be allowed to open.
 func TestARevisionCannotBeReadThroughTheWrongReport(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	a := mustCreateManual(t, s, manualForm)
 	save(t, s, a, "手工补充", "甲的第二版")
@@ -614,6 +634,7 @@ func TestARevisionCannotBeReadThroughTheWrongReport(t *testing.T) {
 // The history endpoint answers the question a history is opened to ask, using the same section diff
 // the report comparison uses rather than a second implementation of "what changed".
 func TestOpeningARevisionCarriesBothTheDiffAndTheDocument(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, `{"symbol":"600519","date":"2026-09-02","subtype":"深度分析",
 		"title":"t","body_md":"# 一\n甲\n\n# 二\n乙","audience":"all"}`)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestCreateTokenStoresOnlyDigestAndPrefix(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	const raw = "0123456789abcdef0123456789abcdef0123456789abcdef"
 	if err := st.CreateToken(raw, "test", "query", ""); err != nil {
@@ -31,6 +32,7 @@ func TestCreateTokenStoresOnlyDigestAndPrefix(t *testing.T) {
 }
 
 func TestLegacyPlaintextTokenRemainsUntouchedAndValid(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	const raw = "legacy-token-kept-in-place"
 	if _, err := st.exec(`INSERT INTO api_tokens(token,name,scope,created_at) VALUES(?,?,?,?)`,
@@ -56,6 +58,7 @@ func TestLegacyPlaintextTokenRemainsUntouchedAndValid(t *testing.T) {
 }
 
 func TestTokenValidThrottlesLastUsedWrites(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.CreateToken("token", "test", "query", ""); err != nil {
 		t.Fatal(err)

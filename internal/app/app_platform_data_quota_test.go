@@ -15,6 +15,7 @@ func quotaManifest(quota *appplatform.DataQuota) appplatform.Manifest {
 }
 
 func TestInstallQuotaApprovalDefaultsAndSmallerValues(t *testing.T) {
+	t.Parallel()
 	want := &appplatform.DataQuota{Bytes: 3 << 30, Inodes: 100000}
 	for _, c := range []struct {
 		name     string
@@ -57,6 +58,7 @@ func TestInstallQuotaApprovalDefaultsAndSmallerValues(t *testing.T) {
 }
 
 func TestInstallQuotaCheckRefusesATamperedPlan(t *testing.T) {
+	t.Parallel()
 	manifest := quotaManifest(&appplatform.DataQuota{Bytes: 3 << 30, Inodes: 100000})
 	var p platformInstallProjection
 	if err := platformApplyInstallQuota(&p, platformManagedInstallFormat, manifest, platformQuotaApproval{}); err != nil {
@@ -78,6 +80,7 @@ func TestInstallQuotaCheckRefusesATamperedPlan(t *testing.T) {
 }
 
 func TestFrontendInstallKeepsItsObjectQuota(t *testing.T) {
+	t.Parallel()
 	m := appplatform.Manifest{}
 	m.Capabilities.Required = []string{"storage.files"}
 	var p platformInstallProjection
@@ -93,6 +96,7 @@ func TestFrontendInstallKeepsItsObjectQuota(t *testing.T) {
 }
 
 func TestPlansWrittenBeforeTheQuotaFieldsReadAsToday(t *testing.T) {
+	t.Parallel()
 	var p platformInstallProjection
 	if err := json.Unmarshal([]byte(`{"format":"`+platformManagedInstallFormat+`","data_quota_bytes":268435456}`), &p); err != nil {
 		t.Fatal(err)
@@ -103,6 +107,7 @@ func TestPlansWrittenBeforeTheQuotaFieldsReadAsToday(t *testing.T) {
 }
 
 func TestPrepareDataCommandCarriesTheApprovedQuota(t *testing.T) {
+	t.Parallel()
 	manifest := quotaManifest(&appplatform.DataQuota{Bytes: 3 << 30, Inodes: 100000})
 	var p platformInstallProjection
 	p.Format = platformManagedInstallFormat

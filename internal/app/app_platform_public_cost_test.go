@@ -14,6 +14,7 @@ import (
 // The work an anonymous request costs is bounded: the release is verified and its archive read once
 // per tuple, not per request (doc 179 section 2, "anonymous traffic overloads the backend").
 func TestPublicRequestsReadTheArchiveOncePerRelease(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -48,6 +49,7 @@ func TestPublicRequestsReadTheArchiveOncePerRelease(t *testing.T) {
 }
 
 func TestPublicChangesAreHonouredOnTheNextRequest(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -82,6 +84,7 @@ func TestPublicChangesAreHonouredOnTheNextRequest(t *testing.T) {
 }
 
 func TestPublicWithdrawalWorksInAnyState(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		states := map[string]func(*platformPublicEnv) func(){
 			"disabled installation": func(e *platformPublicEnv) func() {
@@ -121,6 +124,7 @@ func TestPublicWithdrawalWorksInAnyState(t *testing.T) {
 }
 
 func TestPublicUnknownIdentifiersCostNothingToKeep(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -140,6 +144,7 @@ func TestPublicUnknownIdentifiersCostNothingToKeep(t *testing.T) {
 }
 
 func TestPublicStatsAreBoundedWhateverTheIdentifiers(t *testing.T) {
+	t.Parallel()
 	var p platformPublicState
 	now := time.Now()
 	for i := 0; i < 5000; i++ {
@@ -151,6 +156,7 @@ func TestPublicStatsAreBoundedWhateverTheIdentifiers(t *testing.T) {
 }
 
 func TestPublicSummariesAreWrittenOnDisableOnTimerAndOnShutdown(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -192,6 +198,7 @@ func TestPublicSummariesAreWrittenOnDisableOnTimerAndOnShutdown(t *testing.T) {
 }
 
 func TestPublicStatsDetailNeverSpansMoreThanItsWindow(t *testing.T) {
+	t.Parallel()
 	st := &platformPublicStats{start: time.Unix(1_800_000_000, 0), refusals: map[string]int{}}
 	late := st.detail(st.start.Add(3 * time.Hour))
 	if late["window_end"] != st.start.Add(platformPublicSummaryWindow).UTC().Format(time.RFC3339) {
@@ -207,6 +214,7 @@ func TestPublicStatsDetailNeverSpansMoreThanItsWindow(t *testing.T) {
 // binds the digest of a public token, the token binds the route, and the runner's own validation
 // refuses a public token on a write or a private path (generation 1 of the relay).
 func TestPublicRequestSignsAPublicAssertionTheRunnerAccepts(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)

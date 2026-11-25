@@ -10,6 +10,7 @@ import (
 )
 
 func TestUnifiedOUAdminPolicyResultsMatchRuntime(t *testing.T) {
+	t.Parallel()
 	s, org, team, _, _ := ouFixture(t)
 	if _, err := s.st.exec(`UPDATE user_groups SET max_queued=9,totp_enroll=0 WHERE id=?`, org); err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ func TestUnifiedOUAdminPolicyResultsMatchRuntime(t *testing.T) {
 }
 
 func TestUnifiedOUAdminPreviewDoesNotWrite(t *testing.T) {
+	t.Parallel()
 	s, org, team, _, _ := ouFixture(t)
 	if _, err := s.st.exec(`UPDATE user_groups SET max_queued=9 WHERE id=?`, org); err != nil {
 		t.Fatal(err)

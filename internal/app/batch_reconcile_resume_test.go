@@ -33,6 +33,7 @@ func (p reconcileProv) Reconcile(_ context.Context, runID, _ string) (batch.RunR
 // left for reconcile; the one without is requeued for a fresh run. Persisted handles survive and
 // are exposed for the details view.
 func TestSaveDifyRefAndResetScoping(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 2, 0, "admin", []map[string]string{{"c": "a"}, {"c": "b"}}, "normal")
@@ -72,6 +73,7 @@ func TestSaveDifyRefAndResetScoping(t *testing.T) {
 // The core money invariant across a restart: an item that started on Dify (its run id was persisted
 // before the crash) is RECONCILED to its true outcome on resume, and the workflow is never re-run.
 func TestResumeReconcilesStartedRunNoRerun(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"c": "a"}}, "normal")
@@ -142,6 +144,7 @@ func resumeUntrackedCase(t *testing.T, arrange func(st *Store, itemID int64)) {
 // A run that captured ONLY a task_id (started on Dify, no reconcilable run/conversation id) resumes
 // as untracked — never re-run, never reconciled.
 func TestResumeTaskIDOnlyIsUntracked(t *testing.T) {
+	t.Parallel()
 	resumeUntrackedCase(t, func(st *Store, itemID int64) {
 		st.SaveItemDifyRef(itemID, "", "", "task-only")
 	})
@@ -151,6 +154,7 @@ func TestResumeTaskIDOnlyIsUntracked(t *testing.T) {
 // before any id was emitted resumes as untracked — the stream-open stamp proves it reached Dify, so
 // it is not re-run.
 func TestResumeStreamOpenedNoIDIsUntracked(t *testing.T) {
+	t.Parallel()
 	resumeUntrackedCase(t, func(st *Store, itemID int64) {
 		st.MarkItemDifyStarted(itemID) // stream opened (2xx) but no id captured before the crash
 	})
@@ -159,6 +163,7 @@ func TestResumeStreamOpenedNoIDIsUntracked(t *testing.T) {
 // A run with NO evidence it ever reached Dify (no id, no stream-open stamp) resumes by being
 // requeued and re-triggered from scratch — the only bucket that re-runs.
 func TestResumeNeverStartedIsRequeuedAndReRun(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"c": "a"}}, "normal")
@@ -192,6 +197,7 @@ func TestResumeNeverStartedIsRequeuedAndReRun(t *testing.T) {
 // The admin's manual Reconcile settles a row that looks failed in the portal but actually finished
 // on Dify — by reconciling its persisted handle, without re-running.
 func TestManualReconcileEndpoint(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"c": "a"}}, "normal")
@@ -227,6 +233,7 @@ func TestManualReconcileEndpoint(t *testing.T) {
 // An item with no persisted handle can't be manually reconciled — the endpoint refuses rather than
 // silently re-running (which would risk a duplicate charged run).
 func TestManualReconcileRefusesNoHandle(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	tgt := seedTarget(t, st)
 	job, _ := st.CreateBatchJob(tgt, 1, 0, "admin", []map[string]string{{"c": "a"}}, "normal")

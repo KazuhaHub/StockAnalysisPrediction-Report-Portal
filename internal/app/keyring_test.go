@@ -11,6 +11,7 @@ import (
 // re-encrypting every secret sealed under it.
 
 func TestKeyringRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 
@@ -41,6 +42,7 @@ func TestKeyringRoundTrip(t *testing.T) {
 // TestDeletingAProviderDropsItsRules proves a removed provider does not leave rules that a later
 // provider reusing its id would inherit.
 func TestDeletingAProviderDropsItsRules(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.SaveSSORules([]storedRule{
 		{ProviderID: 1, Value: "pinned"},

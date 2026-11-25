@@ -35,6 +35,7 @@ func (m *mailSink) send(to []string, subject, body string) error {
 // TestAlertGoesToBothChannels: one watchdog event reaches the mailbox and the Slack webhook, and the
 // text names the reason. De-duplication is the watchdog's, so exactly one of each arrives.
 func TestAlertGoesToBothChannels(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []string{"stalled", "no_source"} {
 		t.Run(reason, func(t *testing.T) { assertWatchdogAlertChannels(t, reason) })
 	}
@@ -131,6 +132,7 @@ func assertWatchdogAlertChannels(t *testing.T, reason string) {
 // TestSlackURLIsWriteOnlyAndHostLocked: the GET never returns the secret, and only https://hooks.slack.com
 // (plus the test loopback allowance) is accepted.
 func TestSlackURLIsWriteOnlyAndHostLocked(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	secret := "https://hooks.slack.com/services/T000/B000/verysecret"
 	for _, tc := range []struct {
@@ -178,6 +180,7 @@ func strconvQuote(s string) string {
 // TestAlertTestOKOnlyWhenBothSucceed: email disabled is a failure, so the stamp is not written; when
 // both channels answer, it is.
 func TestAlertTestOKOnlyWhenBothSucceed(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -216,6 +219,7 @@ func TestAlertTestOKOnlyWhenBothSucceed(t *testing.T) {
 
 // TestAlertAuditNamesFieldsNotValues: the log says which knob moved, never the secret or the address.
 func TestAlertAuditNamesFieldsNotValues(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.slackHostForTest = "127.0.0.1"
 	secret := "http://127.0.0.1:9999/services/leak"
@@ -345,6 +349,7 @@ func TestStoreFailedAlertsBothChannelsWithoutDelayingTheIngest(t *testing.T) {
 // TestStoreFailedAlertPanicDoesNotReachTheRequest: a channel sender that panics is confined to the
 // alert goroutine; the ingest still answers store_failed.
 func TestStoreFailedAlertPanicDoesNotReachTheRequest(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.mailFn = func([]string, string, string) error { panic("mail boom") }
 	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
@@ -366,6 +371,7 @@ func TestStoreFailedAlertPanicDoesNotReachTheRequest(t *testing.T) {
 // TestSlackTransportErrorDoesNotLeakTheURL: the URL is the secret, and net/http puts it in its
 // error text. The recorded and displayed failure must not carry it.
 func TestSlackTransportErrorDoesNotLeakTheURL(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.slackHostForTest = "127.0.0.1"
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
@@ -392,6 +398,7 @@ func TestSlackTransportErrorDoesNotLeakTheURL(t *testing.T) {
 // TestAlertTestFailsWhenSlackFails is the other half of the contract: email succeeding alone must
 // not write the stamp.
 func TestAlertTestFailsWhenSlackFails(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.mailFn = func([]string, string, string) error { return nil }
 	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
@@ -419,6 +426,7 @@ func TestAlertTestFailsWhenSlackFails(t *testing.T) {
 // alone. The test reaches every configured channel, records nothing for the absent one, and the
 // stamp it writes satisfies readiness item 5.
 func TestAlertTestNeedsOnlyTheConfiguredChannels(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.mailFn = func([]string, string, string) error { return nil }
 	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
@@ -453,6 +461,7 @@ func TestAlertTestNeedsOnlyTheConfiguredChannels(t *testing.T) {
 
 // TestAlertTestSlackOnly: the other single-channel setup, with no email recipients at all.
 func TestAlertTestSlackOnly(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -475,6 +484,7 @@ func TestAlertTestSlackOnly(t *testing.T) {
 // TestAlertTestRefusedWithoutAnyChannel: item 5 still needs somewhere to send an alert. With no
 // channel configured the test is refused, nothing is stamped, and the item names the reason.
 func TestAlertTestRefusedWithoutAnyChannel(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	rec := httptest.NewRecorder()
 	s.apiForecastAlertTest(rec, httptest.NewRequest("POST", "/api/admin/forecast/alert-test", nil), "admin")
@@ -498,6 +508,7 @@ func TestAlertTestRefusedWithoutAnyChannel(t *testing.T) {
 // TestAlertChangeInvalidatesTheVerification: a stamp only covers the configuration it was made
 // with, and only for thirty days.
 func TestAlertChangeInvalidatesTheVerification(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	now := time.Now().UTC()
 	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
@@ -548,6 +559,7 @@ func TestAlertChangeInvalidatesTheVerification(t *testing.T) {
 // TestStoreFailedAlertRunsOutsideTheInsertTransaction: the channel sender can use the connection
 // pool (and meet a deadline) because it runs after the ledger transaction has returned.
 func TestStoreFailedAlertRunsOutsideTheInsertTransaction(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	done := make(chan error, 1)
 	s.mailFn = func([]string, string, string) error {
@@ -590,6 +602,7 @@ func TestStoreFailedAlertRunsOutsideTheInsertTransaction(t *testing.T) {
 // TestSlackRedirectIsNotFollowed: following a redirect would leave the host list, and a 302 would
 // turn the POST into a GET whose 2xx would look like a delivered message.
 func TestSlackRedirectIsNotFollowed(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	var targetHits int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -69,8 +69,14 @@ func testPlatformViewerIdentity(t *testing.T, pg bool) {
 		t.Fatal("viewer output aliases cached data", err)
 	}
 }
-func TestPlatformViewerIdentitySQLite(t *testing.T)   { testPlatformViewerIdentity(t, false) }
-func TestPlatformViewerIdentityPostgres(t *testing.T) { testPlatformViewerIdentity(t, true) }
+func TestPlatformViewerIdentitySQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerIdentity(t, false)
+}
+func TestPlatformViewerIdentityPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerIdentity(t, true)
+}
 
 func testPlatformViewerOUGrant(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
@@ -106,8 +112,11 @@ func testPlatformViewerOUGrant(t *testing.T, pg bool) {
 		t.Fatal("former ancestor retained viewer access")
 	}
 }
-func TestPlatformViewerOUGrantSQLite(t *testing.T)   { testPlatformViewerOUGrant(t, false) }
-func TestPlatformViewerOUGrantPostgres(t *testing.T) { testPlatformViewerOUGrant(t, true) }
+func TestPlatformViewerOUGrantSQLite(t *testing.T) { t.Parallel(); testPlatformViewerOUGrant(t, false) }
+func TestPlatformViewerOUGrantPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerOUGrant(t, true)
+}
 
 func testPlatformViewerRefusals(t *testing.T, pg bool) {
 	for _, mode := range []string{"revoked_session", "expired_session", "account_generation", "inactive", "grant_removed", "missing_ou_creation", "seed_missing", "seed_wrong_aad", "keyring_missing", "keyring_corrupt", "previous_key", "paused", "managed", "cancelled"} {
@@ -170,8 +179,14 @@ func testPlatformViewerRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformViewerRefusalsSQLite(t *testing.T)   { testPlatformViewerRefusals(t, false) }
-func TestPlatformViewerRefusalsPostgres(t *testing.T) { testPlatformViewerRefusals(t, true) }
+func TestPlatformViewerRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerRefusals(t, false)
+}
+func TestPlatformViewerRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerRefusals(t, true)
+}
 
 func testPlatformViewerFinalRecheck(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
@@ -196,5 +211,11 @@ func testPlatformViewerFinalRecheck(t *testing.T, pg bool) {
 		t.Fatal("raw principal exposed")
 	}
 }
-func TestPlatformViewerFinalRecheckSQLite(t *testing.T)   { testPlatformViewerFinalRecheck(t, false) }
-func TestPlatformViewerFinalRecheckPostgres(t *testing.T) { testPlatformViewerFinalRecheck(t, true) }
+func TestPlatformViewerFinalRecheckSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerFinalRecheck(t, false)
+}
+func TestPlatformViewerFinalRecheckPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformViewerFinalRecheck(t, true)
+}

@@ -19,6 +19,7 @@ import (
 // Fails if the console plans a runner-backed install in a format the operation engine does not run, or plans
 // one at all on a runner without the writable sandbox (nothing would ever execute it).
 func TestRunnerInstallFormatFollowsTheWritableSandbox(t *testing.T) {
+	t.Parallel()
 	profile := transport.ManagedRuntimeProfile{SandboxProfile: control.CandidateSandboxProfile}
 	if _, err := platformRunnerInstallFormat(profile); err == nil {
 		t.Fatal("a runner without the writable sandbox got an install format")
@@ -32,6 +33,7 @@ func TestRunnerInstallFormatFollowsTheWritableSandbox(t *testing.T) {
 // Fails if a queued managed-format install (no executor runs that format) stays queued with no trace instead
 // of being closed for review, or if closing it touches a writable install.
 func TestOperationEngineClosesAnUnexecutableManagedFormatInstall(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		s, lease := platformCandidateIntentFixture(t, pg)
 		mustExec(t, s.st, `DELETE FROM app_platform_operation_effects WHERE operation_id=?`, lease.id)

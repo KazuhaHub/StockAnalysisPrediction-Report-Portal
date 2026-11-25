@@ -7,6 +7,7 @@ import (
 )
 
 func TestExternalAllHasNoVolume(t *testing.T) {
+	t.Parallel()
 	n := 42
 	v := .4
 	cell := &forecastCell{State: "mature", N: &n, Resolved: &n, Total: &n, Refused: &n, CorpAction: &n,

@@ -19,6 +19,7 @@ func addEffectRow(t *testing.T, s *Server, operation, kind, stage string, number
 // still refuse any other fourth effect. Fails if the load blocks managed access, or if the exclusion widened to
 // every kind.
 func TestManagedAccessHistoryCountIgnoresALoadImageRowButNotAnotherKind(t *testing.T) {
+	t.Parallel()
 	s, actor, lease := platformManagedAccessFixture(t, false)
 	if a, err := s.preparePlatformManagedBackendAccess(context.Background(), actor, lease.installationID); err != nil {
 		t.Fatal(err)
@@ -41,6 +42,7 @@ func TestManagedAccessHistoryCountIgnoresALoadImageRowButNotAnotherKind(t *testi
 // The candidate intent requires exactly the data effect before it creates its own (effects == 1). Fails if a
 // load_image row blocks the install's first start, or if the exclusion stopped refusing an effect of another kind.
 func TestCandidateIntentEffectCountIgnoresALoadImageRowButNotAnotherKind(t *testing.T) {
+	t.Parallel()
 	s, lease := platformCandidateIntentFixture(t, false)
 	addEffectRow(t, s, lease.id, "load_image", "stage", 1, platformFixtureID(9201))
 	if _, err := s.preparePlatformInstallCandidate(context.Background(), lease); err != nil {
@@ -56,6 +58,7 @@ func TestCandidateIntentEffectCountIgnoresALoadImageRowButNotAnotherKind(t *test
 // The admitted-install check demands no resources at all (resources == 0). Fails if a load_image row counts as a
 // resource, or if another kind stops counting.
 func TestInstallAdmissionResourceCountIgnoresALoadImageRowButNotAnotherKind(t *testing.T) {
+	t.Parallel()
 	check := func(kind string, number int, id string) error {
 		s, _, lease := platformInstallStageFixture(t, false)
 		addEffectRow(t, s, lease.id, kind, "stage", number, id)
@@ -82,6 +85,7 @@ func TestInstallAdmissionResourceCountIgnoresALoadImageRowButNotAnotherKind(t *t
 // stage other than its own. A load_image row of stage "stage" (an enable or restore operation never passes
 // through it) must not hold the operation back, and another kind still must.
 func TestRemovalSelectionAdvanceRuleToleratesALoadImageRowOfStageStageButNotAnotherKind(t *testing.T) {
+	t.Parallel()
 	held := func(kind, state string) bool {
 		s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, false)
 		review, err := s.createPlatformRemovalReview(actor, enabled.installationID, appplatform.ActionDisable)

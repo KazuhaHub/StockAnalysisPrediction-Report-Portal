@@ -10,6 +10,7 @@ import (
 )
 
 func TestQuoteHistoryEndpointIsOptInAndIsolated(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	s.quotes.init()
 	fixture := sohuFixture(t, "sh600081")
@@ -57,6 +58,7 @@ func TestQuoteHistoryEndpointIsOptInAndIsolated(t *testing.T) {
 }
 
 func TestStaleQuoteAPIKeepsVendorClockAndDisablesBrowserCache(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	clock := time.Date(2026, 10, 26, 2, 0, 0, 0, time.UTC)
 	s.quotes.now = func() time.Time { return clock }

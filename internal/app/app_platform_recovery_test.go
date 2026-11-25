@@ -49,9 +49,11 @@ func testPausedPortalRefusesNonRecoveryMutation(t *testing.T, pg bool) {
 }
 
 func TestPausedPortalRefusesNonRecoveryMutationSQLite(t *testing.T) {
+	t.Parallel()
 	testPausedPortalRefusesNonRecoveryMutation(t, false)
 }
 func TestPausedPortalRefusesNonRecoveryMutationPostgres(t *testing.T) {
+	t.Parallel()
 	testPausedPortalRefusesNonRecoveryMutation(t, true)
 }
 
@@ -110,8 +112,12 @@ func testPausedLeaseOnlyRestoreImport(t *testing.T, pg bool) {
 	}
 }
 
-func TestPausedLeaseOnlyRestoreImportSQLite(t *testing.T) { testPausedLeaseOnlyRestoreImport(t, false) }
+func TestPausedLeaseOnlyRestoreImportSQLite(t *testing.T) {
+	t.Parallel()
+	testPausedLeaseOnlyRestoreImport(t, false)
+}
 func TestPausedLeaseOnlyRestoreImportPostgres(t *testing.T) {
+	t.Parallel()
 	testPausedLeaseOnlyRestoreImport(t, true)
 }
 
@@ -170,9 +176,11 @@ func testEndRecoveryRequiresSettledInstallations(t *testing.T, pg bool) {
 }
 
 func TestEndRecoveryRequiresSettledInstallationsSQLite(t *testing.T) {
+	t.Parallel()
 	testEndRecoveryRequiresSettledInstallations(t, false)
 }
 func TestEndRecoveryRequiresSettledInstallationsPostgres(t *testing.T) {
+	t.Parallel()
 	testEndRecoveryRequiresSettledInstallations(t, true)
 }
 
@@ -261,12 +269,13 @@ func testEndRecoveryHTTP(t *testing.T, pg bool) {
 	}
 }
 
-func TestEndRecoveryHTTP(t *testing.T)         { testEndRecoveryHTTP(t, false) }
-func TestEndRecoveryHTTPPostgres(t *testing.T) { testEndRecoveryHTTP(t, true) }
+func TestEndRecoveryHTTP(t *testing.T)         { t.Parallel(); testEndRecoveryHTTP(t, false) }
+func TestEndRecoveryHTTPPostgres(t *testing.T) { t.Parallel(); testEndRecoveryHTTP(t, true) }
 
 // Ending recovery on a Portal that is not in recovery is not a transient pause: it names the inactive
 // recovery, as the other recovery routes do.
 func TestEndRecoveryWhenNotPausedIsInactive(t *testing.T) {
+	t.Parallel()
 	f := platformResumeFixture(t, false)
 	mux := http.NewServeMux()
 	f.s.wireRoutes(mux)

@@ -166,6 +166,7 @@ func newTenancyFixture(t *testing.T, s *Server) tenancyFixture {
 // row and no group row, so a restricted tenant whose chain includes the Default OU cannot read an
 // internal report just because its version is group-visible and granted to them.
 func TestInternalRunAttributesSetButSharesNoGroupPrincipal(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 
@@ -207,6 +208,7 @@ func TestInternalRunAttributesSetButSharesNoGroupPrincipal(t *testing.T) {
 
 // A restricted run keeps sharing within its tenant, and only within it.
 func TestRestrictedRunStillSharesWithinTenant(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 
@@ -392,6 +394,7 @@ func TestOwnerTokenNeverAppearsInLogsAuditOrErrorBodies(t *testing.T) {
 // into every run: the injection happens to a copy at run time and is never written back to the
 // target, the stored rows, or the lists the form and the template are built from.
 func TestInjectionLeavesTheRunFormAndTemplateAlone(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	s.st.EnsureDefaultGroup()
 	s.st.UpsertUser(User{Username: "staff", PasswordHash: "h", Role: "user"})
@@ -431,6 +434,7 @@ func TestInjectionLeavesTheRunFormAndTemplateAlone(t *testing.T) {
 // here goes through a manifest plugin; this one pins the real provider, so a change in how the
 // native provider assembles its request cannot quietly drop the token.
 func TestRunThroughTheDifyNativeProviderCarriesTheToken(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 
@@ -502,6 +506,7 @@ func TestRunThroughTheDifyNativeProviderCarriesTheToken(t *testing.T) {
 // group principal for the admin's runs, handing every tenant member reports the admin never chose to
 // share. The report is still attributed to the OU the admin belongs to; only the sharing is withheld.
 func TestUnrestrictedSubmitterInARestrictedOUSharesNothingWithTheTenant(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 	s.st.UpsertUser(User{Username: "boss", PasswordHash: "h", Role: "admin"})
@@ -542,6 +547,7 @@ func issuedTokenFor(s *Server, ou int64, user string, issued time.Time) string {
 // it must not put the deleted name back on the viewer list, because the next holder of that name
 // would then read a report that was never theirs.
 func TestLateIngestAfterTheSubmitterWasDeletedWritesNoViewerRow(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 
@@ -583,6 +589,7 @@ func TestLateIngestAfterTheSubmitterWasDeletedWritesNoViewerRow(t *testing.T) {
 // The same holds when the name was already taken again by the time the run finished: a token names
 // a person, and an account created after the token was issued is not that person.
 func TestLateIngestIntoARecreatedAccountWritesNoViewerRow(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 	stamp := func(at time.Time) {
@@ -626,6 +633,7 @@ func TestLateIngestIntoARecreatedAccountWritesNoViewerRow(t *testing.T) {
 // A token that names an OU but nobody attributes the report and its set, and puts nobody on the
 // viewer list: there is no "u:" principal for no one.
 func TestTokenNamingNobodyAttributesButWritesNoViewerRow(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	f := newTenancyFixture(t, s)
 

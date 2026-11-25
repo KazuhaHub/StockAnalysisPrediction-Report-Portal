@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 )
@@ -18,10 +17,7 @@ import (
 
 func pgDSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN not set; skipping Postgres integration test")
-	}
+	dsn := testPostgresDSN(t)
 	return dsn
 }
 
@@ -42,6 +38,7 @@ func windBackToThePreviousRelease(t *testing.T, st *Store) {
 // TestPostgresMigrationsCatchUpAndStayPut is the upgrade path on Postgres: a database at the
 // baseline, which the previous release wrote, gains the steps once and is left alone afterwards.
 func TestPostgresMigrationsCatchUpAndStayPut(t *testing.T) {
+	t.Parallel()
 	dsn := pgDSN(t)
 	st := pgStore(t)
 	windBackToThePreviousRelease(t, st)
@@ -73,6 +70,7 @@ func TestPostgresMigrationsCatchUpAndStayPut(t *testing.T) {
 // advisory lock's job, and without it the loser would either duplicate the DDL or fail on a conflict
 // it should have waited out.
 func TestPostgresConcurrentMigrationsSerialise(t *testing.T) {
+	t.Parallel()
 	dsn := pgDSN(t)
 	first := pgStore(t)
 	// Cleanups run last-registered-first, so the ledger is cleaned while the stores are still open
@@ -132,6 +130,7 @@ func TestPostgresConcurrentMigrationsSerialise(t *testing.T) {
 // deployment too. The dump is portable by design, and this is the migration boundary crossed with a
 // driver change on top of it.
 func TestPostgresRestoresADumpFromBeforeAMigration(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	defer st.Close()
 
@@ -157,6 +156,7 @@ func TestPostgresRestoresADumpFromBeforeAMigration(t *testing.T) {
 // A step that fails must not leave a half-applied schema on Postgres either: the DDL is transactional
 // there too, so the rollback takes the column back out.
 func TestPostgresFailedStepRollsBack(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t)
 	defer st.Close()
 	if _, err := st.exec(`ALTER TABLE user_groups DROP COLUMN IF EXISTS mig_probe_col`); err != nil {
@@ -214,6 +214,7 @@ func TestPostgresFailedStepRollsBack(t *testing.T) {
 // SQLite tests. RENAME COLUMN is transactional on both drivers, which is what lets the step stay one
 // transaction.
 func TestPostgresStep0010RenamesAndRestores(t *testing.T) {
+	t.Parallel()
 	dsn := pgDSN(t)
 	st := pgStore(t, "announcement_grants", "announcements")
 	for _, q := range []string{

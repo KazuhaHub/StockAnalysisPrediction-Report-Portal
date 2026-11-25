@@ -13,6 +13,7 @@ import (
 )
 
 func TestPublicDocumentIsSandboxedAndLimitedToPublic(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -54,6 +55,7 @@ func TestPublicDocumentIsSandboxedAndLimitedToPublic(t *testing.T) {
 }
 
 func TestPublicSourceCeilingIsPerClientAndRetryable(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		if w := e.enableWith(t, []string{"status"}, false, 3, 5); w.Code != 200 {
@@ -75,6 +77,7 @@ func TestPublicSourceCeilingIsPerClientAndRetryable(t *testing.T) {
 }
 
 func TestPublicGrantRouteIsAReviewedAdminAction(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		p := e.preview(t)
@@ -160,6 +163,7 @@ func TestPublicGrantRouteIsAReviewedAdminAction(t *testing.T) {
 }
 
 func TestPublicGrantIsRefusedWhileNotReady(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		p := e.preview(t)
@@ -186,6 +190,7 @@ func TestPublicGrantIsRefusedWhileNotReady(t *testing.T) {
 }
 
 func TestPublicGrantWithPolicyDoesNotBlockBackendAccessAndTamperingDoes(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -219,6 +224,7 @@ func TestPublicGrantWithPolicyDoesNotBlockBackendAccessAndTamperingDoes(t *testi
 }
 
 func TestPublicSummaryAuditCountsWithoutClientAddresses(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		e := platformPublicFixture(t, pg)
 		e.enable(t)
@@ -254,6 +260,7 @@ func TestPublicSummaryAuditCountsWithoutClientAddresses(t *testing.T) {
 }
 
 func TestPublicSummaryWindowRollsOver(t *testing.T) {
+	t.Parallel()
 	var p platformPublicState
 	start := time.Unix(1_800_000_000, 0)
 	if p.record("i", start, "request") != nil || p.record("i", start.Add(9*time.Minute), "hit") != nil {
@@ -266,6 +273,7 @@ func TestPublicSummaryWindowRollsOver(t *testing.T) {
 }
 
 func TestPublicLimiterGivesNewSourcesTheirOwnAllowanceWhenFull(t *testing.T) {
+	t.Parallel()
 	var l platformPublicLimiter
 	now := time.Now()
 	// 8192 live attacker keys fill the table. A source that has never been seen still gets
@@ -311,6 +319,7 @@ func TestPublicLimiterGivesNewSourcesTheirOwnAllowanceWhenFull(t *testing.T) {
 }
 
 func TestPublicLimiterSmallCapacityStaysBounded(t *testing.T) {
+	t.Parallel()
 	l := &platformPublicLimiter{capacity: 64}
 	now := time.Now()
 	for i := 0; i < 5000; i++ {
@@ -324,6 +333,7 @@ func TestPublicLimiterSmallCapacityStaysBounded(t *testing.T) {
 }
 
 func TestPublicCacheBoundsAndIdentity(t *testing.T) {
+	t.Parallel()
 	var p platformPublicState
 	now := time.Now()
 	entry := func(inst, key, tuple string, size int) *platformPublicEntry {
@@ -384,6 +394,7 @@ func TestPublicCacheBoundsAndIdentity(t *testing.T) {
 }
 
 func TestPublicBackendFetchIsBoundedByConcurrencyAndRate(t *testing.T) {
+	t.Parallel()
 	var p platformPublicState
 	now := time.Now()
 	var ends []func()
@@ -420,6 +431,7 @@ func TestPublicBackendFetchIsBoundedByConcurrencyAndRate(t *testing.T) {
 }
 
 func TestPublicHandlersNeverTouchCredentials(t *testing.T) {
+	t.Parallel()
 	for _, file := range []string{"app_platform_public_http.go", "app_platform_public_authority.go", "app_platform_public_state.go"} {
 		raw, err := readTestFile(file)
 		if err != nil {

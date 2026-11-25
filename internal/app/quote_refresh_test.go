@@ -25,6 +25,7 @@ func refreshTestTime(t *testing.T, zone string, year int, month time.Month, day,
 }
 
 func TestQuoteRefreshAdviceUsesTheRemainingOpenTTL(t *testing.T) {
+	t.Parallel()
 	now := refreshTestTime(t, "Asia/Shanghai", 2026, time.September, 8, 10, 0)
 	target := refreshTestTarget(t, "sh", "601899")
 	resp := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionOpen}}
@@ -40,6 +41,7 @@ func TestQuoteRefreshAdviceUsesTheRemainingOpenTTL(t *testing.T) {
 }
 
 func TestQuoteRefreshAdviceSleepsAcrossCloseLunchAndWeekend(t *testing.T) {
+	t.Parallel()
 	target := refreshTestTarget(t, "sh", "601899")
 	closed := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionClose}}
 	cases := []struct {
@@ -74,6 +76,7 @@ func TestQuoteRefreshAdviceSleepsAcrossCloseLunchAndWeekend(t *testing.T) {
 }
 
 func TestQuoteRefreshAdviceUsesNewYorkDaylightSavingAtTheNextOpen(t *testing.T) {
+	t.Parallel()
 	target := refreshTestTarget(t, "us", "AAPL")
 	now := refreshTestTime(t, "America/New_York", 2026, time.March, 6, 16, 1)
 	closed := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionClose}}
@@ -84,6 +87,7 @@ func TestQuoteRefreshAdviceUsesNewYorkDaylightSavingAtTheNextOpen(t *testing.T) 
 }
 
 func TestQuoteRefreshAdviceGivesTheOpeningMarkerOneGraceProbe(t *testing.T) {
+	t.Parallel()
 	now := refreshTestTime(t, "Asia/Shanghai", 2026, time.September, 8, 9, 31)
 	target := refreshTestTarget(t, "sh", "601899")
 	closed := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionClose}}
@@ -94,6 +98,7 @@ func TestQuoteRefreshAdviceGivesTheOpeningMarkerOneGraceProbe(t *testing.T) {
 }
 
 func TestQuoteRefreshAdviceUsesVendorTimeForUnknownSessions(t *testing.T) {
+	t.Parallel()
 	now := refreshTestTime(t, "Asia/Shanghai", 2026, time.September, 8, 10, 0)
 	target := refreshTestTarget(t, "sh", "601899")
 	cases := []struct {
@@ -129,6 +134,7 @@ func TestQuoteRefreshAdviceUsesVendorTimeForUnknownSessions(t *testing.T) {
 }
 
 func TestQuoteUnknownCacheCannotHideTheConservativeProbe(t *testing.T) {
+	t.Parallel()
 	cfg := quoteConfigDefault()
 	unknown := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionUnknown}}
 	if got := cfg.ttlFor(unknown, quoteIntervalSnapshot); got != quoteUnknownRefresh {
@@ -140,6 +146,7 @@ func TestQuoteUnknownCacheCannotHideTheConservativeProbe(t *testing.T) {
 }
 
 func TestQuoteAutoRefreshSettingIsWiredThroughTheAdminAPI(t *testing.T) {
+	t.Parallel()
 	s := quoteAdminServer(t)
 	if !s.quoteAutoRefresh() {
 		t.Fatal("automatic refresh is off on a fresh portal")
@@ -162,6 +169,7 @@ func TestQuoteAutoRefreshSettingIsWiredThroughTheAdminAPI(t *testing.T) {
 }
 
 func TestQuoteEndpointsExposeRefreshAdviceAndRetryAdvice(t *testing.T) {
+	t.Parallel()
 	now := refreshTestTime(t, "Asia/Shanghai", 2026, time.September, 8, 10, 0)
 
 	openServer := quoteServer(t)

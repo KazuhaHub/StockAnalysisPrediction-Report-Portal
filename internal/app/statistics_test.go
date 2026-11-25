@@ -12,6 +12,7 @@ import (
 )
 
 func TestStatisticsQueryValidation(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"dataset=secrets", "dataset=reports&group=password_hash", "dataset=reports&from=2026-02-30", "dataset=reports&from=2026-10-26&to=2026-10-25", "dataset=runs&group=kind", "interval=quarter", "view=invalid"} {
 		if _, err := parseStatisticsQuery(httptest.NewRequest("GET", "/?"+raw, nil)); err == nil {
 			t.Fatalf("accepted %s", raw)
@@ -19,6 +20,7 @@ func TestStatisticsQueryValidation(t *testing.T) {
 	}
 }
 func TestStatisticsAggregationPaginationAndExport(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, r := range []Rep{{Symbol: "A", RType: "analysis", Kind: "Research", Date: "2026-10-25"}, {Symbol: "B", RType: "analysis", Kind: "Research", Date: "2026-10-25"}, {Symbol: "C", RType: "analysis", Kind: "=Formula", Date: "2026-10-24"}} {
 		if _, _, err := st.UpsertReport(r); err != nil {
@@ -48,6 +50,7 @@ func TestStatisticsAggregationPaginationAndExport(t *testing.T) {
 }
 
 func TestStatisticsEveryRegisteredDimension(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for dataset, dimensions := range statisticsDimensions {
 		for dimension := range dimensions {
@@ -60,6 +63,7 @@ func TestStatisticsEveryRegisteredDimension(t *testing.T) {
 	}
 }
 func TestStatisticsRequiresAdministrator(t *testing.T) {
+	t.Parallel()
 	s := accountServer(t)
 	mux := http.NewServeMux()
 	s.admin(mux, "GET /api/admin/statistics", s.apiStatistics)
@@ -80,6 +84,7 @@ func TestStatisticsRequiresAdministrator(t *testing.T) {
 	}
 }
 func TestStatisticsPanelDateBoundaries(t *testing.T) {
+	t.Parallel()
 	loc, err := time.LoadLocation("America/Los_Angeles")
 	if err != nil {
 		t.Fatal(err)
@@ -94,6 +99,7 @@ func TestStatisticsPanelDateBoundaries(t *testing.T) {
 }
 
 func TestStatisticsBoundsPageSizeAndStreamsAllGroups(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for i := 0; i < 125; i++ {
 		if _, _, err := st.UpsertReport(Rep{Symbol: fmt.Sprintf("S%03d", i), RType: "analysis", Date: "2026-10-25"}); err != nil {
@@ -122,6 +128,7 @@ func TestStatisticsBoundsPageSizeAndStreamsAllGroups(t *testing.T) {
 }
 
 func TestStatisticsChartUsesAllGroupsInsteadOfTablePage(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for i := 0; i < 25; i++ {
 		st.UpsertReport(Rep{Symbol: fmt.Sprint(i), RType: "analysis", Kind: fmt.Sprintf("K%02d", i), Date: "2026-10-25"})
@@ -140,6 +147,7 @@ func TestStatisticsChartUsesAllGroupsInsteadOfTablePage(t *testing.T) {
 	}
 }
 func TestStatisticsDateChartUsesChronologicalBuckets(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	for _, r := range []Rep{{Symbol: "A", RType: "analysis", Date: "2026-01-03"}, {Symbol: "B", RType: "analysis", Date: "2026-01-04"}, {Symbol: "C", RType: "analysis", Date: "2026-02-01"}} {
 		st.UpsertReport(r)
@@ -156,6 +164,7 @@ func TestStatisticsDateChartUsesChronologicalBuckets(t *testing.T) {
 }
 
 func TestStatisticsDoesNotDrawTruncatedTimeSeries(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	start, _ := time.Parse("2006-01-02", "2025-01-01")
 	for i := 0; i < 401; i++ {

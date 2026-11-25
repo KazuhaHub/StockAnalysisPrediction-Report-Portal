@@ -28,7 +28,10 @@ func bothDrivers(t *testing.T, run func(t *testing.T, pg bool)) {
 	t.Run("postgres", func(t *testing.T) { run(t, true) })
 }
 
-func TestPlatformRetentionReviewPlans(t *testing.T) { bothDrivers(t, testPlatformRetentionReviewPlans) }
+func TestPlatformRetentionReviewPlans(t *testing.T) {
+	t.Parallel()
+	bothDrivers(t, testPlatformRetentionReviewPlans)
+}
 
 func testPlatformRetentionReviewPlans(t *testing.T, pg bool) {
 	f := newRetFixture(t, pg)
@@ -93,7 +96,10 @@ func (s *opSet) check(t *testing.T) {
 	}
 }
 
-func TestPlatformRetentionOperations(t *testing.T) { bothDrivers(t, testPlatformRetentionOperations) }
+func TestPlatformRetentionOperations(t *testing.T) {
+	t.Parallel()
+	bothDrivers(t, testPlatformRetentionOperations)
+}
 
 func testPlatformRetentionOperations(t *testing.T, pg bool) {
 	f := newRetFixture(t, pg)
@@ -243,6 +249,7 @@ func testPlatformRetentionOperations(t *testing.T, pg bool) {
 }
 
 func TestPlatformRetentionHonoursTheConfiguredPeriod(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
@@ -257,7 +264,10 @@ func TestPlatformRetentionHonoursTheConfiguredPeriod(t *testing.T) {
 	}
 }
 
-func TestPlatformRetentionIdempotency(t *testing.T) { bothDrivers(t, testPlatformRetentionIdempotency) }
+func TestPlatformRetentionIdempotency(t *testing.T) {
+	t.Parallel()
+	bothDrivers(t, testPlatformRetentionIdempotency)
+}
 
 func testPlatformRetentionIdempotency(t *testing.T, pg bool) {
 	f := newRetFixture(t, pg)
@@ -286,7 +296,10 @@ func testPlatformRetentionIdempotency(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformRetentionTasks(t *testing.T) { bothDrivers(t, testPlatformRetentionTasks) }
+func TestPlatformRetentionTasks(t *testing.T) {
+	t.Parallel()
+	bothDrivers(t, testPlatformRetentionTasks)
+}
 
 func testPlatformRetentionTasks(t *testing.T, pg bool) {
 	f := newRetFixture(t, pg)
@@ -347,6 +360,7 @@ func retEmptyBlob(st *Store) string {
 }
 
 func TestPlatformRetentionTaskCapPerInstallation(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		crowded, quiet := f.liveInstallation(1), f.liveInstallation(1)
@@ -379,12 +393,14 @@ func TestPlatformRetentionTaskCapPerInstallation(t *testing.T) {
 }
 
 func TestPlatformRetentionDefaultTaskCap(t *testing.T) {
+	t.Parallel()
 	if limits := defaultPlatformRetentionLimits(); limits.TaskCap != 10000 || limits.Batch != 500 {
 		t.Fatalf("default limits = %+v, want a 10000-row cap and 500-row batches", limits)
 	}
 }
 
 func TestPlatformRetentionWorksInBoundedBatches(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	live := f.liveInstallation(1)
 	for i := 0; i < 5; i++ {
@@ -411,6 +427,7 @@ func TestPlatformRetentionWorksInBoundedBatches(t *testing.T) {
 }
 
 func TestPlatformRetentionSweptTaskOccurrenceStaysDeduplicated(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		s, installation := platformServiceIdentityFixtureWithDatabase(t, pg)
 		now, err := platformDatabaseNow(s.st.poolExec())
@@ -453,6 +470,7 @@ func TestPlatformRetentionSweptTaskOccurrenceStaysDeduplicated(t *testing.T) {
 }
 
 func TestPlatformRetentionNeverTouchesRetainedData(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()
@@ -474,6 +492,7 @@ func TestPlatformRetentionNeverTouchesRetainedData(t *testing.T) {
 }
 
 func TestPlatformRetentionWritesOneAuditRowPerSweep(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()
@@ -514,6 +533,7 @@ func TestPlatformRetentionWritesOneAuditRowPerSweep(t *testing.T) {
 }
 
 func TestPlatformRetentionDoesNothingWhilePaused(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()
@@ -542,6 +562,7 @@ func TestPlatformRetentionDoesNothingWhilePaused(t *testing.T) {
 }
 
 func TestPlatformRetentionFailsClosedWhenThePauseIsUnreadable(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
@@ -557,6 +578,7 @@ func TestPlatformRetentionFailsClosedWhenThePauseIsUnreadable(t *testing.T) {
 }
 
 func TestPlatformRetentionConfigClampsOnRead(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	for _, tc := range []struct {
 		days, sets string
@@ -582,6 +604,7 @@ func TestPlatformRetentionConfigClampsOnRead(t *testing.T) {
 }
 
 func TestPlatformRetentionConfigAPIValidatesOnSave(t *testing.T) {
+	t.Parallel()
 	s := &Server{st: newTestStore(t)}
 	save := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -640,6 +663,7 @@ func TestPlatformRetentionConfigAPIValidatesOnSave(t *testing.T) {
 }
 
 func TestPlatformRetentionConfigAPIReportsTheLastSweep(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
@@ -660,6 +684,7 @@ func TestPlatformRetentionConfigAPIReportsTheLastSweep(t *testing.T) {
 // The recovery-set retention is selected on the Portal side and only reported by the sweep: prunePlatformRecoverySets,
 // not the sweep, asks the runner to delete the archives, so the sweep marks nothing deleted.
 func TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	live := f.liveInstallation(1)
 	namespace := f.namespace(live, "active")
@@ -710,6 +735,7 @@ func TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN(t *testing.T) {
 }
 
 func TestPlatformRetentionTickReachesTheSweep(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	// The tick judges by the wall clock, so the fixture is stamped relative to it.
@@ -725,6 +751,7 @@ func TestPlatformRetentionTickReachesTheSweep(t *testing.T) {
 }
 
 func TestPlatformRetentionTickWaitsAnIntervalUnlessThereIsBacklog(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	now := time.Now()
@@ -747,6 +774,7 @@ func TestPlatformRetentionTickWaitsAnIntervalUnlessThereIsBacklog(t *testing.T) 
 
 // The validity of a review plan is one named value, written nowhere else as a literal.
 func TestReviewPlanValidityIsOneNamedConstant(t *testing.T) {
+	t.Parallel()
 	if platformReviewPlanValidityMS != 15*60*1000 {
 		t.Fatalf("review plan validity = %d ms", platformReviewPlanValidityMS)
 	}
@@ -772,6 +800,7 @@ func TestReviewPlanValidityIsOneNamedConstant(t *testing.T) {
 // A closed image record is deleted whole or not at all: while a load of it is kept, its removal is kept too,
 // or platformLoadedImages would report the image as loaded again and reclaim would remove it again, forever.
 func TestPlatformRetentionKeepsTheRemovalOfAnImageWhoseLoadIsPinned(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		live := f.liveInstallation(2)
@@ -799,6 +828,7 @@ func TestPlatformRetentionKeepsTheRemovalOfAnImageWhoseLoadIsPinned(t *testing.T
 
 // A runtime that holds an effect with no verdict is left out of reclaim as a whole, so every image record on it is kept.
 func TestPlatformRetentionKeepsEveryImageRecordOfABusyRuntime(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()
@@ -835,6 +865,7 @@ func TestPlatformRetentionKeepsEveryImageRecordOfABusyRuntime(t *testing.T) {
 
 // Mutation guards: each of these rules once survived its removal.
 func TestPlatformRetentionPlanReferencedBySecretBindingIsKept(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		removed := f.removedInstallation()
@@ -862,6 +893,7 @@ func TestPlatformRetentionPlanReferencedBySecretBindingIsKept(t *testing.T) {
 }
 
 func TestPlatformRetentionKeepsOperationsOfALaterGenerationOnALiveInstallation(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		live := f.liveInstallation(3)
@@ -883,6 +915,7 @@ func TestPlatformRetentionKeepsOperationsOfALaterGenerationOnALiveInstallation(t
 // effects' receipts. Retention must never delete the operation that holds one, even when a later operation of its
 // action has completed: the chain would break and the installation would stop working.
 func TestPlatformRetentionKeepsOperationsHoldingAnAppliedQuotaRaise(t *testing.T) {
+	t.Parallel()
 	bothDrivers(t, func(t *testing.T, pg bool) {
 		f := newRetFixture(t, pg)
 		live := f.liveInstallation(3)
@@ -911,6 +944,7 @@ func TestPlatformRetentionKeepsOperationsHoldingAnAppliedQuotaRaise(t *testing.T
 // The period counts from the moment the operation was resolved: a later recovery reconcile updates updated_ms and
 // leaves completed_ms where it was.
 func TestPlatformRetentionCountsFromTheLatestOfCompletedAndUpdated(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
@@ -927,6 +961,7 @@ func TestPlatformRetentionCountsFromTheLatestOfCompletedAndUpdated(t *testing.T)
 
 // One class failing does not stop the others, and the audit row names the failure.
 func TestPlatformRetentionClassesRunIndependently(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
@@ -951,6 +986,7 @@ func TestPlatformRetentionClassesRunIndependently(t *testing.T) {
 
 // Each class re-checks the pause inside its own transaction.
 func TestPlatformRetentionClassesRecheckThePauseInsideTheirTransaction(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, false)
 	removed := f.removedInstallation()
 	plan := f.plan(removed, "install", retNow-30*retDay, 0)
@@ -973,10 +1009,12 @@ func TestPlatformRetentionClassesRecheckThePauseInsideTheirTransaction(t *testin
 	}
 }
 
-// retWaiters counts backends waiting for a lock the test did not grant.
+// retWaiters counts backends waiting for a lock the test did not grant. pg_locks is cluster wide and
+// other tests run on sibling databases of the same cluster, so only this database's locks count.
 func retWaiters(t *testing.T, st *Store) int {
 	t.Helper()
-	return scalar[int](t, st, `SELECT COUNT(*) FROM pg_locks WHERE NOT granted AND locktype IN ('advisory','relation')`)
+	return scalar[int](t, st, `SELECT COUNT(*) FROM pg_locks WHERE NOT granted AND locktype IN ('advisory','relation')
+		AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`)
 }
 
 // retBlocked starts fn, waits until a backend is waiting for a lock, runs release, and expects fn to finish. It
@@ -1007,6 +1045,7 @@ func retBlocked(t *testing.T, st *Store, fn func(), release func()) {
 
 // The sweep takes the locks the admission paths take, so a decision to delete cannot be overtaken by an admission.
 func TestPlatformRetentionSerializesWithAdmissionOnPostgres(t *testing.T) {
+	t.Parallel()
 	f := newRetFixture(t, true)
 	removed := f.removedInstallation()
 	f.namespace(removed, "deleted")

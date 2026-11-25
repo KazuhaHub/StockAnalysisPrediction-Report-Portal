@@ -9,6 +9,7 @@ import (
 )
 
 func TestPostgresPlatformHTTPDocumentCancelsBlockedQuery(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, true)
 	platformGrantLaunchUser(t, s, reader, id)
 	binding, err := s.inspectPlatformLaunchAccess(reader, id)

@@ -103,9 +103,11 @@ func testPlatformCapabilityPlanSurvivesLifecycle(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityPlanSurvivesLifecycleSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPlanSurvivesLifecycle(t, false)
 }
 func TestPlatformCapabilityPlanSurvivesLifecyclePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPlanSurvivesLifecycle(t, true)
 }
 
@@ -131,9 +133,11 @@ func testPlatformCapabilityPlanRefusedAfterUpdate(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityPlanRefusedAfterUpdateSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPlanRefusedAfterUpdate(t, false)
 }
 func TestPlatformCapabilityPlanRefusedAfterUpdatePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPlanRefusedAfterUpdate(t, true)
 }
 
@@ -221,9 +225,11 @@ func testPlatformCapabilityPrivateRetained(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityPrivateRetainedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPrivateRetained(t, false)
 }
 func TestPlatformCapabilityPrivateRetainedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityPrivateRetained(t, true)
 }
 
@@ -289,8 +295,10 @@ func testPlatformCapabilityRebindAndDiff(t *testing.T, pg bool) {
 }
 
 func TestPlatformCapabilityRebindAndDiffSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityRebindAndDiff(t, false)
 }
 func TestPlatformCapabilityRebindAndDiffPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCapabilityRebindAndDiff(t, true)
 }

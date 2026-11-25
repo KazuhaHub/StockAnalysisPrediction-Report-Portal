@@ -75,6 +75,7 @@ func (e *appsEnv) listed(user string) (apps, builtins, order []string) {
 // ---------- 1. nothing configured: today's behaviour ----------
 
 func TestAppsWithNoRowsEverythingIsOpenInTodaysOrder(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	for _, user := range []string{"rita", "admin"} {
 		apps, builtins, order := e.listed(user)
@@ -93,6 +94,7 @@ func TestAppsWithNoRowsEverythingIsOpenInTodaysOrder(t *testing.T) {
 // ---------- 2. resolution ----------
 
 func TestAppAccessResolution(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	child := seedOU(t, e.s.st, e.ou, nil)
 	grandchild := seedOU(t, e.s.st, child, nil)
@@ -168,6 +170,7 @@ func TestAppAccessResolution(t *testing.T) {
 }
 
 func TestAppAccessRowsAreNotRequiredForAnUnassignedUser(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	mustAddUser(t, e.s, "una", false) // no OU: the Default OU governs
 	e.mustSetAccess("alpha", e.s.st.DefaultGroupID(), "false")
@@ -179,6 +182,7 @@ func TestAppAccessRowsAreNotRequiredForAnUnassignedUser(t *testing.T) {
 // ---------- 3. enforcement ----------
 
 func TestClosedInstalledAppRefusesTokenAndAssetsAndLeavesTheListing(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 
@@ -237,6 +241,7 @@ func TestClosedInstalledAppRefusesTokenAndAssetsAndLeavesTheListing(t *testing.T
 }
 
 func TestAnAnonymousAssetRequestIsStillServed(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 	// Sub-resource requests from the sandboxed frame carry no cookie and cannot be attributed to an
@@ -248,6 +253,7 @@ func TestAnAnonymousAssetRequestIsStillServed(t *testing.T) {
 
 // Quotes has no route of its own, so closing it only hides the entry; nothing is refused by the server.
 func TestClosedBuiltinKeyWithoutOwnedRoutesIsHiddenNotServerGated(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("builtin:quotes", e.ou, "false")
 	_, builtins, order := e.listed("rita")
@@ -267,6 +273,7 @@ func TestClosedBuiltinKeyWithoutOwnedRoutesIsHiddenNotServerGated(t *testing.T) 
 // ---------- 4. order ----------
 
 func TestAppOrderPutValidatesAndReplaces(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	for name, body := range map[string]string{
 		"unknown key":   `{"keys":["alpha","nope"]}`,
@@ -315,6 +322,7 @@ func TestAppOrderPutValidatesAndReplaces(t *testing.T) {
 }
 
 func TestAdminLayoutIsOrderedAndShowsOwnEffectiveAndSource(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	child := seedOU(t, e.s.st, e.ou, nil)
 	e.mustSetAccess("alpha", e.ou, "false")
@@ -368,6 +376,7 @@ func TestAdminLayoutIsOrderedAndShowsOwnEffectiveAndSource(t *testing.T) {
 // ---------- 5. access PUT ----------
 
 func TestAppAccessPutValidation(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	for name, tc := range map[string]struct {
 		key, ou, body string
@@ -392,6 +401,7 @@ func TestAppAccessPutValidation(t *testing.T) {
 }
 
 func TestAppAccessPutIsTriStateAndReplacesTheRow(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 	e.mustSetAccess("alpha", e.ou, "false")
@@ -410,6 +420,7 @@ func TestAppAccessPutIsTriStateAndReplacesTheRow(t *testing.T) {
 }
 
 func TestAppChangesAreAudited(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 	e.mustSetAccess("alpha", e.ou, "false") // unchanged: no second row
@@ -433,6 +444,7 @@ func TestAppChangesAreAudited(t *testing.T) {
 // ---------- 6. cleanup ----------
 
 func TestUninstallingAnAppDeletesItsRows(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 	e.mustSetAccess("beta", e.ou, "false")
@@ -455,6 +467,7 @@ func TestUninstallingAnAppDeletesItsRows(t *testing.T) {
 }
 
 func TestReinstallingAnAppKeepsItsRows(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	e.mustSetAccess("alpha", e.ou, "false")
 	e.install("alpha") // an upgrade replaces the bundle in place; it is the same app
@@ -464,6 +477,7 @@ func TestReinstallingAnAppKeepsItsRows(t *testing.T) {
 }
 
 func TestDeletingAnOUDeletesItsAccessRows(t *testing.T) {
+	t.Parallel()
 	e := newAppsEnv(t)
 	other := seedOU(t, e.s.st, 0, nil)
 	empty := seedOU(t, e.s.st, 0, nil) // an OU with no members, which is what may be deleted
@@ -483,6 +497,7 @@ func TestDeletingAnOUDeletesItsAccessRows(t *testing.T) {
 // ---------- 7. pure ordering ----------
 
 func TestOrderAppKeys(t *testing.T) {
+	t.Parallel()
 	keys := []string{"builtin:batch", "builtin:quotes", "a", "b"}
 	if got := orderAppKeys(keys, nil); !slices.Equal(got, keys) {
 		t.Fatalf("no rows = %v", got)

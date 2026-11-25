@@ -10,6 +10,7 @@ import (
 // done, so a single memo reused across every case has to agree with a fresh projection each time,
 // including after earlier calls have handed out the same session slices.
 func TestPredSessionMemoMatchesFreshProjection(t *testing.T) {
+	t.Parallel()
 	memo := newPredSessionMemo()
 	start := time.Date(2025, 12, 20, 0, 0, 0, 0, chinaZone)
 	for day := 0; day < 760; day += 3 {

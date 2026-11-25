@@ -21,6 +21,7 @@ func trackingGET(t *testing.T, s *Server, user, query string) map[string]any {
 }
 
 func TestTrackingAPIReturnsTheQueueWithItsVocabulary(t *testing.T) {
+	t.Parallel()
 	s, _, _ := trackingFixture(t)
 	mustAddUser(t, s, "admin", true)
 	out := trackingGET(t, s, "admin", "")
@@ -50,6 +51,7 @@ func TestTrackingAPIReturnsTheQueueWithItsVocabulary(t *testing.T) {
 
 // The security property, and the reason this cannot just reuse the v1 handler.
 func TestTrackingAPIRefusesToReviewWhatYouCannotRead(t *testing.T) {
+	t.Parallel()
 	s, internal, external := trackingFixture(t)
 	st := s.st
 	st.UpsertUser(User{Username: "client@corp.example", PasswordHash: "h", Role: "user"})
@@ -98,6 +100,7 @@ func TestTrackingAPIRefusesToReviewWhatYouCannotRead(t *testing.T) {
 
 // 404, not 403: telling someone an id exists but is not theirs is itself a disclosure.
 func TestTrackingAPIDoesNotConfirmIdsExist(t *testing.T) {
+	t.Parallel()
 	s, _, _ := trackingFixture(t)
 	s.st.UpsertUser(User{Username: "client@corp.example", PasswordHash: "h", Role: "user"})
 	s.st.SetUserRestricted("client@corp.example", true)

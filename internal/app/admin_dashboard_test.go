@@ -9,6 +9,7 @@ import (
 )
 
 func TestDashboardLayoutPersistsGloballyAndRejectsStaleChanges(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	original := normalizedDashboard("")
 	original.Blocks[0].Width = 6
@@ -35,6 +36,7 @@ func TestDashboardLayoutPersistsGloballyAndRejectsStaleChanges(t *testing.T) {
 	}
 }
 func TestDashboardLayoutRejectsUnknownDuplicateAndEmptyLayouts(t *testing.T) {
+	t.Parallel()
 	for _, change := range []func(*dashboardLayout){
 		func(c *dashboardLayout) { c.Blocks[0].ID = "unknown" }, func(c *dashboardLayout) { c.Blocks[0].ID = c.Blocks[1].ID }, func(c *dashboardLayout) { c.Blocks[0].Width = 1 }, func(c *dashboardLayout) {
 			for i := range c.Blocks {
@@ -55,6 +57,7 @@ func TestDashboardLayoutRejectsUnknownDuplicateAndEmptyLayouts(t *testing.T) {
 }
 
 func TestDashboardLayoutAcceptsShortcutWidgets(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	in := normalizedDashboard("")
 	in.Blocks = append(in.Blocks, dashboardBlock{ID: "shortcut:types", Visible: true, Width: 1})
@@ -73,6 +76,7 @@ func TestDashboardLayoutAcceptsShortcutWidgets(t *testing.T) {
 }
 
 func TestDashboardMetricSelectionsAreValidatedAndRetained(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	in := normalizedDashboard("")
 	in.Blocks[0].Metrics = []string{"yesterday", "year"}
@@ -106,6 +110,7 @@ func TestDashboardMetricSelectionsAreValidatedAndRetained(t *testing.T) {
 }
 
 func TestDashboardChartOptionsValidation(t *testing.T) {
+	t.Parallel()
 	valid := dashboardBlock{ID: "trend", Width: 3, Visible: true, Chart: &dashboardChart{Range: 365, Interval: "month", ShowValues: false, Cumulative: true, TopN: 5}}
 	if !validDashboardBlock(valid) {
 		t.Fatal("valid annual chart rejected")
@@ -122,6 +127,7 @@ func TestDashboardChartOptionsValidation(t *testing.T) {
 }
 
 func TestDashboardChartTypeCompatibility(t *testing.T) {
+	t.Parallel()
 	for id, allowed := range map[string][]string{"trend": {"", "line", "column"}, "report-bars": {"", "line", "column"}, "kinds": {"", "bar", "donut"}, "report-donut": {"", "bar", "donut"}} {
 		for _, kind := range []string{"", "line", "column", "bar", "donut", "unknown"} {
 			want := false
@@ -137,6 +143,7 @@ func TestDashboardChartTypeCompatibility(t *testing.T) {
 }
 
 func TestDashboardInstancesRetainIndependentOptions(t *testing.T) {
+	t.Parallel()
 	s := userAdminServer(t)
 	in := normalizedDashboard("")
 	in.Blocks = append(in.Blocks,

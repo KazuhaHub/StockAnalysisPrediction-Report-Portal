@@ -31,6 +31,7 @@ func postV1Ingest(t *testing.T, s *Server, body map[string]any) (*httptest.Respo
 }
 
 func TestV1IngestTitleOnlyIdentity(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 
 	t.Run("symbol empty but title present is accepted", func(t *testing.T) {

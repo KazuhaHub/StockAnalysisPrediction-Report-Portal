@@ -136,6 +136,7 @@ func platformServiceIdentityFixtureForAppWithStoreSession(t *testing.T, st *Stor
 }
 
 func TestPlatformServiceIdentityUsesNoUserAndRechecksCurrentState(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	raw, grant, err := s.issuePlatformServiceIdentity(context.Background(), installation, platformFixtureID(5110), []string{"reports.read", "background.run"}, time.Minute)
 	if err == nil {
@@ -166,6 +167,7 @@ func TestPlatformServiceIdentityUsesNoUserAndRechecksCurrentState(t *testing.T) 
 }
 
 func TestPlatformServiceIdentityInvalidatedByLifecycleAndRestore(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"disable", "generation", "policy", "background_grant", "restore"} {
 		t.Run(mode, func(t *testing.T) {
 			s, installation := platformServiceIdentityFixture(t)
@@ -193,6 +195,7 @@ func TestPlatformServiceIdentityInvalidatedByLifecycleAndRestore(t *testing.T) {
 }
 
 func TestPlatformBackgroundProbeCannotSubmitAfterRevocation(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	raw, _, err := s.issuePlatformServiceIdentity(context.Background(), installation, platformFixtureID(5130), []string{"reports.read"}, time.Minute)
 	if err != nil {

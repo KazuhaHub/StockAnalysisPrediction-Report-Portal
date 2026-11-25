@@ -82,9 +82,11 @@ func testReplacementRuntimeAfterRestore(t *testing.T, pg bool) {
 }
 
 func TestReplacementRuntimeAfterRestoreSQLite(t *testing.T) {
+	t.Parallel()
 	testReplacementRuntimeAfterRestore(t, false)
 }
 func TestReplacementRuntimeAfterRestorePostgres(t *testing.T) {
+	t.Parallel()
 	testReplacementRuntimeAfterRestore(t, true)
 }
 
@@ -116,9 +118,11 @@ func testReplacementRefusedWhenOldBindingLive(t *testing.T, pg bool) {
 }
 
 func TestReplacementRefusedWhenOldBindingLiveSQLite(t *testing.T) {
+	t.Parallel()
 	testReplacementRefusedWhenOldBindingLive(t, false)
 }
 func TestReplacementRefusedWhenOldBindingLivePostgres(t *testing.T) {
+	t.Parallel()
 	testReplacementRefusedWhenOldBindingLive(t, true)
 }
 
@@ -165,8 +169,10 @@ func testDataRuntimeIgnoresRetiredBinding(t *testing.T, pg bool) {
 }
 
 func TestDataRuntimeIgnoresRetiredBindingSQLite(t *testing.T) {
+	t.Parallel()
 	testDataRuntimeIgnoresRetiredBinding(t, false)
 }
 func TestDataRuntimeIgnoresRetiredBindingPostgres(t *testing.T) {
+	t.Parallel()
 	testDataRuntimeIgnoresRetiredBinding(t, true)
 }

@@ -48,6 +48,7 @@ func phaseAtStamp(t *testing.T, line string) time.Time {
 }
 
 func TestQuoteMarketPhaseFromRecordedLines(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, market, line, want string
 	}{
@@ -129,6 +130,7 @@ func TestQuoteMarketPhaseFromRecordedLines(t *testing.T) {
 }
 
 func TestQuoteMarketPhaseRefusesAFrozenFeed(t *testing.T) {
+	t.Parallel()
 	m := quoteTestMarket(t, "sh")
 	line := "2026-11-03 10:00:00|SH_open_交易中"
 	at := phaseAtStamp(t, line)
@@ -141,6 +143,7 @@ func TestQuoteMarketPhaseRefusesAFrozenFeed(t *testing.T) {
 }
 
 func TestQuoteMarketPhaseStalenessEdges(t *testing.T) {
+	t.Parallel()
 	m := quoteTestMarket(t, "sh")
 	line := "2026-11-03 10:00:00|SH_open_交易中" // synthetic, one rule
 	at := phaseAtStamp(t, line)
@@ -162,6 +165,7 @@ func TestQuoteMarketPhaseStalenessEdges(t *testing.T) {
 }
 
 func TestQuoteMarketSessionStaysTwoValued(t *testing.T) {
+	t.Parallel()
 	// The cache TTL code reads Session and nothing else; the phase work must not widen it.
 	m := quoteTestMarket(t, "sh")
 	if got := quoteMarketSession(m, phaseLineAuction); got != quoteSessionClose {
@@ -173,6 +177,7 @@ func TestQuoteMarketSessionStaysTwoValued(t *testing.T) {
 }
 
 func TestParseTencentMarketLine(t *testing.T) {
+	t.Parallel()
 	body := `{"code":0,"msg":"","data":{"sh000001":{"day":[["2026-11-02","3614.310","3638.030","3648.130","3594.770","565372836.000"]],"qt":{"sh000001":["1"],"market":["` + phaseLineAuction + `"],"zhishu":[]}}}}`
 	got, err := parseTencentMarketLine([]byte(body))
 	if err != nil || got != phaseLineAuction {
@@ -211,6 +216,7 @@ func primeMarketLine(t *testing.T, s *Server) {
 }
 
 func TestQuoteBatchCardsCarryThePhase(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	tencent.marketLine = phaseLineLaborDay
@@ -243,6 +249,7 @@ func TestQuoteBatchCardsCarryThePhase(t *testing.T) {
 
 // A hanging anchor must not delay a single response, and must not pile up fetches behind it.
 func TestQuoteBatchDoesNotWaitOnAHangingMarketLine(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	release := make(chan struct{})
@@ -282,14 +289,24 @@ func TestQuoteBatchDoesNotWaitOnAHangingMarketLine(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the handler waited on a hanging market-line fetch")
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if started != 1 {
-		t.Errorf("%d concurrent anchor fetches started, want 1 (single flight)", started)
+	// The handler starts the anchor fetch in the background and answers without it, so the three
+	// responses can all be back before that goroutine has run: wait for it to start, then count.
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return started
+	}
+	waitFor(t, "the anchor fetch to start", func() bool { return count() >= 1 })
+	// A broken single flight would have the other two responses start fetches of their own on goroutines
+	// that may not have run yet either; give them a moment to show up before counting.
+	time.Sleep(100 * time.Millisecond)
+	if n := count(); n != 1 {
+		t.Errorf("%d concurrent anchor fetches started, want 1 (single flight)", n)
 	}
 }
 
 func TestQuoteBatchCardsWithoutAMarketLineHaveUnknownPhase(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t) // no market line: the stub's fetcher fails
 	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
@@ -308,6 +325,7 @@ func TestQuoteBatchCardsWithoutAMarketLineHaveUnknownPhase(t *testing.T) {
 // phase: before the open a stock that has not traded yet reports high 0 / low 0, exactly the shape
 // a suspension has, and only the phase tells the two apart.
 func TestQuoteSingleCarriesThePhase(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	tencent.marketLine = phaseLineAuction
@@ -341,6 +359,7 @@ func TestQuoteSingleCarriesThePhase(t *testing.T) {
 // /api/quote started stamping the phase, every quote request starts a refresh). The expiry is
 // computed from the instant the request that started the refresh observed instead.
 func TestQuoteMarketLineRefreshNeverReadsTheClock(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
@@ -410,6 +429,7 @@ func waitMarketLineIdle(t *testing.T, s *Server) {
 // answer now asks the browser to come back shortly; the prices are cached by then, so the second
 // request costs no vendor call and carries the label.
 func TestQuoteBatchAsksAgainSoonWhileTheLabelIsPending(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	tencent.marketLine = phaseLineEvening
@@ -433,6 +453,7 @@ func TestQuoteBatchAsksAgainSoonWhileTheLabelIsPending(t *testing.T) {
 
 // The reading page's strip: a line cached hours ago is not believed, so the same short re-ask.
 func TestQuoteSingleAsksAgainSoonWhenTheCachedLineIsTooOld(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	tencent.marketLine = phaseLineEvening
@@ -455,6 +476,7 @@ func TestQuoteSingleAsksAgainSoonWhenTheCachedLineIsTooOld(t *testing.T) {
 // A vendor that fails the refresh is not asked about in a loop: once the failed refresh has landed
 // there is nothing in flight to wait for, and the answer goes back to the ordinary advice.
 func TestQuoteLabelRetryStopsAfterAFailedRefresh(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t) // no market line: the stub's fetcher fails
 	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
@@ -476,6 +498,7 @@ func TestQuoteLabelRetryStopsAfterAFailedRefresh(t *testing.T) {
 // With automatic refresh switched off the operator asked for no re-asks, and a label is no reason
 // to make one.
 func TestQuoteLabelRetryHonoursAutoRefreshOff(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	tencent.marketLine = phaseLineEvening
@@ -495,6 +518,7 @@ func TestQuoteLabelRetryHonoursAutoRefreshOff(t *testing.T) {
 // A stale answer is never cached, so re-asking for its label would not be served from the cache: it
 // would call the failing vendor for the price again. A stale answer keeps its own, slower advice.
 func TestQuoteStaleAnswerDoesNotAskBackForTheLabel(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	clock := time.Date(2026, 10, 26, 2, 0, 0, 0, time.UTC)
 	s.quotes.now = func() time.Time { return clock }

@@ -34,6 +34,7 @@ func rulesPUT(t *testing.T, s *Server, body string) int {
 // TestSSORulesRoundTripThroughTheAPI proves the rules an admin saves are the rules the login path
 // resolves against. Store-level tests could not catch a rule set that is saved but never consulted.
 func TestSSORulesRoundTripThroughTheAPI(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	ou, _ := s.st.CreateUserGroup("clients", "", 0)
 
@@ -62,6 +63,7 @@ func TestSSORulesRoundTripThroughTheAPI(t *testing.T) {
 // TestSSORulesReportShadowedRules covers the warning the page shows. A rule that can never win looks
 // to an admin exactly like a permission they granted.
 func TestSSORulesReportShadowedRules(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	if code := rulesPUT(t, s, `{"rules":[
 		{"provider_id":0,"enabled":true,"attr":"groups","value":"staff","target_role":"operator"},
@@ -87,6 +89,7 @@ func TestSSORulesReportShadowedRules(t *testing.T) {
 // TestSSORulesSaveReplacesTheWholeSet pins the replace semantics: the array IS the order, and a save
 // that merged instead of replacing would leave a deleted rule still granting access.
 func TestSSORulesSaveReplacesTheWholeSet(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	rulesPUT(t, s, `{"rules":[{"provider_id":0,"enabled":true,"attr":"groups","value":"staff","target_role":"admin"}]}`)
 	if code := rulesPUT(t, s, `{"rules":[]}`); code != http.StatusOK {

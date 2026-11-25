@@ -344,6 +344,7 @@ func TestPlatformTargetBindingEgressPathPostgres(t *testing.T) {
 }
 
 func TestPlatformSecretBindingPolicyV3(t *testing.T) {
+	t.Parallel()
 	sha := platformDigest([]byte("target"))
 	for _, tc := range []struct {
 		principals string
@@ -467,8 +468,10 @@ func TestPlatformTargetBindingNeedsDestinationPostgres(t *testing.T) {
 	testPlatformTargetBindingNeedsDestination(t, true)
 }
 func TestPlatformTargetBindingShowsTargetSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformTargetBindingShowsTarget(t, false)
 }
 func TestPlatformTargetBindingShowsTargetPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformTargetBindingShowsTarget(t, true)
 }

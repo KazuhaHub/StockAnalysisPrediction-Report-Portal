@@ -9,6 +9,7 @@ import (
 )
 
 func TestGroupMetadataRoundTripsThroughTypedResponses(t *testing.T) {
+	t.Parallel()
 	meta := &ForecastGroupsMetadata{Summary: forecastGroupsSummary{Sets: 3, MarksByPhase: forecastPhaseCounts()},
 		MinN: 30, GeneratedAt: "2026-10-22T00:00:00Z", Capabilities: forecastCapabilities{Monthly: true}}
 	for _, reader := range []bool{false, true} {
@@ -35,6 +36,7 @@ func TestGroupMetadataRoundTripsThroughTypedResponses(t *testing.T) {
 }
 
 func TestCapabilitiesMirrorRouteGates(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	for i, tc := range []struct {
 		scope    string
@@ -69,6 +71,7 @@ func TestCapabilitiesMirrorRouteGates(t *testing.T) {
 }
 
 func TestGroupExplainMetadataUsesTheScopedRetainedRange(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	own := seedForecastReader(t, s, "metadata-own", scopeOwn, true)
 	other := seedOU(t, s.st, 0, scopeAll)
@@ -130,6 +133,7 @@ func TestGroupExplainMetadataUsesTheScopedRetainedRange(t *testing.T) {
 }
 
 func TestGroupSummaryReconcilesMatureAndPendingCells(t *testing.T) {
+	t.Parallel()
 	n, corp, refused := 30, 2, 1
 	groups := []forecastGroup{{Cells: map[string]*forecastCell{
 		"d5": {State: "mature", N: &n, CorpAction: &corp, Refused: &refused,
@@ -145,6 +149,7 @@ func TestGroupSummaryReconcilesMatureAndPendingCells(t *testing.T) {
 }
 
 func TestGroupSummaryExcludesPurgedMonthsAndRespectsCustomRange(t *testing.T) {
+	t.Parallel()
 	s := routeTableServer(t)
 	for _, month := range []string{"2025-06", "2025-07", "2025-08"} {
 		seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: month + "-10", S0Fen: ip(10000), HorizonStd: true,
@@ -174,6 +179,7 @@ func TestGroupSummaryExcludesPurgedMonthsAndRespectsCustomRange(t *testing.T) {
 // groups list is not empty there (the open month is a group), so the date cannot depend on a mature
 // or even a closed cell existing.
 func TestSummaryNamesTheFirstResultDateForAnOpenMonthOnlyLedger(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.forecastEval.now = func() time.Time { return time.Date(2026, 10, 22, 4, 0, 0, 0, time.UTC) }
 	if err := s.st.SetSetting(setForecastPopulationFrom, "2026-10-19T00:00:00Z"); err != nil {

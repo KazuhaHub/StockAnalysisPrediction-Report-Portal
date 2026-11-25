@@ -14,6 +14,7 @@ import (
 // is not install evidence any more, so that component is no longer compared and an installation activated
 // before the upgrade must keep launching and keep verifying for an update.
 func TestPlatformLaunchAndUpdateVerifyEvidenceWrittenWithAnOldAudienceDigest(t *testing.T) {
+	t.Parallel()
 	s, actor, id := platformFrontendQueuedFixture(t, false)
 	w, err := newPlatformInstallScheduler(s, platformRuntimeEndpoint{}, platformFixtureID(953), 50*time.Millisecond)
 	if err != nil {
@@ -65,6 +66,7 @@ func TestPlatformLaunchAndUpdateVerifyEvidenceWrittenWithAnOldAudienceDigest(t *
 // An install admitted before the upgrade whose stored plan names a user principal can never activate:
 // the claim finalises it for review instead of failing on every tick.
 func TestAdmittedInstallWithAUserPrincipalIsFinalisedForReview(t *testing.T) {
+	t.Parallel()
 	s, actor, id := platformFrontendQueuedFixture(t, false)
 	if _, err := s.st.claimPlatformOperation(id, platformFixtureID(955)); err != nil {
 		t.Fatal(err)

@@ -28,6 +28,7 @@ var migrationListOrder = []string{"0001", "0002", "0003", "0004", "0005", "0006"
 var reservedMigrationIDs = map[string]string{}
 
 func TestMigrationListKeepsItsMergeOrder(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	var ids []string
 	for _, m := range st.migrations() {
@@ -56,6 +57,7 @@ func reservedMigrationCollisions(ids []string, reserved map[string]string) []str
 }
 
 func TestMigrationListAvoidsReservedIDs(t *testing.T) {
+	t.Parallel()
 	if hits := reservedMigrationCollisions([]string{"0001", "0099"}, map[string]string{"0099": "fixture"}); len(hits) != 1 {
 		t.Fatalf("a list containing a reserved id must report exactly one collision, got %v", hits)
 	}

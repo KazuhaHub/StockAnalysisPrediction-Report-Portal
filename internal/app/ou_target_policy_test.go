@@ -6,6 +6,7 @@ import (
 )
 
 func TestOUTargetPolicyEmptyOverrideAndExplicitInheritance(t *testing.T) {
+	t.Parallel()
 	s, org, team, target, _ := ouFixture(t)
 	if err := s.st.SetGroupTargets(org, []GroupTarget{{TargetID: target}}); err != nil {
 		t.Fatal(err)
@@ -28,6 +29,7 @@ func TestOUTargetPolicyEmptyOverrideAndExplicitInheritance(t *testing.T) {
 }
 
 func TestOUTargetPolicyDeletionPreservesLegacyEmptyOverride(t *testing.T) {
+	t.Parallel()
 	s, org, team, target, other := ouFixture(t)
 	if err := s.st.SetGroupTargets(org, []GroupTarget{{TargetID: other}}); err != nil {
 		t.Fatal(err)
@@ -52,6 +54,7 @@ func TestOUTargetPolicyDeletionPreservesLegacyEmptyOverride(t *testing.T) {
 }
 
 func TestOUTargetPolicyRejectedSaveIsAtomic(t *testing.T) {
+	t.Parallel()
 	s, _, team, target, _ := ouFixture(t)
 	if err := s.st.SetGroupTargets(team, []GroupTarget{{TargetID: target, Surfaces: SurfaceRun}}); err != nil {
 		t.Fatal(err)
@@ -73,6 +76,7 @@ func TestOUTargetPolicyRejectedSaveIsAtomic(t *testing.T) {
 }
 
 func TestOUTargetPolicyOlderDumpKeepsLegacyGrants(t *testing.T) {
+	t.Parallel()
 	dump := preMigrationDump(t,
 		`INSERT INTO group_targets(group_id,target_id,surfaces) VALUES(1,12,'run')`,
 	)
@@ -89,6 +93,7 @@ func TestOUTargetPolicyOlderDumpKeepsLegacyGrants(t *testing.T) {
 }
 
 func TestOUTargetPolicyEmptyHeaderSurvivesBackupRestore(t *testing.T) {
+	t.Parallel()
 	s, _, team, _, _ := ouFixture(t)
 	if err := s.st.SetGroupTargets(team, nil); err != nil {
 		t.Fatal(err)
@@ -107,6 +112,7 @@ func TestOUTargetPolicyEmptyHeaderSurvivesBackupRestore(t *testing.T) {
 }
 
 func TestOUTargetPolicyRejectsDamagedHeaderShape(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.exec(`DROP TABLE group_target_policies`); err != nil {
 		t.Fatal(err)
@@ -120,6 +126,7 @@ func TestOUTargetPolicyRejectsDamagedHeaderShape(t *testing.T) {
 }
 
 func TestPostgresOUTargetPolicyPresenceAndDeletion(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "group_target_policies", "group_targets", "batch_targets", "user_groups", "users")
 	root := st.EnsureDefaultGroup()
 	org, err := st.CreateUserGroup("ou-pg-org", "", 0)

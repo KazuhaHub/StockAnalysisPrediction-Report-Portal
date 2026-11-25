@@ -20,6 +20,7 @@ func sohuFixture(t *testing.T, name string) []byte {
 }
 
 func TestSohuHistoryProvenanceAndUnits(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		code         string
@@ -36,6 +37,7 @@ func TestSohuHistoryProvenanceAndUnits(t *testing.T) {
 }
 
 func TestSohuHistoryRejectsDrift(t *testing.T) {
+	t.Parallel()
 	base := sohuFixture(t, "sh600081")
 	now := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct{ name, old, replacement string }{
@@ -69,6 +71,7 @@ func TestSohuHistoryRejectsDrift(t *testing.T) {
 }
 
 func TestSohuHistoryExcludesUnstampedCurrentDay(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	r, err := parseSohuHistory(sohuFixture(t, "sh600081"), "sh", "600081", "2026-10-22", "2026-10-23", now)
 	if err != nil || r.HistoryThrough != "2026-10-22" || len(r.Bars) != 1 {
@@ -77,6 +80,7 @@ func TestSohuHistoryExcludesUnstampedCurrentDay(t *testing.T) {
 }
 
 func TestSohuHistoryIsolationAndDefaultOff(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{}
 	c.init()
 	cfg := quoteConfigDefault()

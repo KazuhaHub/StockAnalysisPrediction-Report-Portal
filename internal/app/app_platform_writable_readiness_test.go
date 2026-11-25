@@ -160,9 +160,11 @@ func testPlatformWritableReadinessSource(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableReadinessSourceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableReadinessSource(t, false)
 }
 func TestPlatformWritableReadinessSourcePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableReadinessSource(t, true)
 }
 func testPlatformWritableReadinessRefusals(t *testing.T, pg bool) {
@@ -227,8 +229,10 @@ func testPlatformWritableReadinessRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableReadinessRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableReadinessRefusals(t, false)
 }
 func TestPlatformWritableReadinessRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableReadinessRefusals(t, true)
 }

@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestUnifiedOUSSOWritersRejectMissingDestinations(t *testing.T) {
+	t.Parallel()
 	s, org, _, _, _ := ouFixture(t)
 	p := SSOProvider{Slug: "validated-destination", Kind: "oidc", DefaultGroup: org, Name: "original"}
 	if _, err := s.st.SaveSSOProvider(p); err != nil {
@@ -28,6 +29,7 @@ func TestUnifiedOUSSOWritersRejectMissingDestinations(t *testing.T) {
 }
 
 func TestUnifiedOUPopulatedDeleteRequiresExplicitMemberMove(t *testing.T) {
+	t.Parallel()
 	s, _, team, _, _ := ouFixture(t)
 	if _, _, err := s.st.DeleteUserGroup(team); err == nil {
 		t.Fatal("populated deletion silently moved a restricted member to Default")
@@ -44,6 +46,7 @@ func TestUnifiedOUPopulatedDeleteRequiresExplicitMemberMove(t *testing.T) {
 }
 
 func TestUnifiedOUDeleteRefusesSSOReferences(t *testing.T) {
+	t.Parallel()
 	s, org, _, _, _ := ouFixture(t)
 	if _, err := s.st.SaveSSOProvider(SSOProvider{Slug: "ou-lifecycle", Kind: "oidc", DefaultGroup: org}); err != nil {
 		t.Fatal(err)

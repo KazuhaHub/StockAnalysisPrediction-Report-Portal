@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -40,11 +41,11 @@ type forecastSeed struct {
 	entry, term                                  int64 // fen; entry 0 = the producer sent none
 }
 
-var forecastSeq int
+var forecastSeq atomic.Int64
 
 func seedForecast(t *testing.T, st *Store, f forecastSeed) int64 {
 	t.Helper()
-	forecastSeq++
+	seq := forecastSeq.Add(1)
 	if f.rtype == "" {
 		f.rtype = predTestRtype
 	}
@@ -54,7 +55,7 @@ func seedForecast(t *testing.T, st *Store, f forecastSeed) int64 {
 	if f.date == "" {
 		f.date = f.madeAt[:10]
 	}
-	title := "decision " + strconv.Itoa(forecastSeq)
+	title := "decision " + strconv.FormatInt(seq, 10)
 	rid, _, err := st.UpsertReport(Rep{Symbol: f.symbol, Name: "Name" + f.symbol, Date: f.date, RType: f.rtype, Kind: "K", Title: title, Version: f.version, MD: "b"})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func seedForecast(t *testing.T, st *Store, f forecastSeed) int64 {
 	id, _, err := st.InsertPredictionSet(rid, &predSetRow{
 		Symbol: f.symbol, Rtype: f.rtype, Version: f.version, Title: title, ReportDate: f.date,
 		MadeAt: f.madeAt, MadeOn: f.madeAt[:10], Cohort: f.madeAt[:7], Zone: "Asia/Shanghai",
-		State: predStateAccepted, PayloadSHA: fmt.Sprintf("sha-%d", forecastSeq), HorizonStd: 1,
+		State: predStateAccepted, PayloadSHA: fmt.Sprintf("sha-%d", seq), HorizonStd: 1,
 	}, claims)
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +110,7 @@ func exportRowSymbols(rows []map[string]any) []string {
 // ---------- the source ----------
 
 func TestExportForecastsSourceDeclaresFieldsColumnsAndDefaultFormat(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	w := e.do("admin", "GET", "/api/admin/exports/sources", "")
 	var out struct {
@@ -154,6 +156,7 @@ func TestExportForecastsSourceDeclaresFieldsColumnsAndDefaultFormat(t *testing.T
 }
 
 func TestExportForecastsQuotesOffRemovesTheFieldAndTheColumns(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedForecast(t, e.s.st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", entry: 1000, term: 1200})
 	v := e.vendor(map[string]int64{"600519": 900})
@@ -211,6 +214,7 @@ func TestExportForecastsQuotesOffRemovesTheFieldAndTheColumns(t *testing.T) {
 // ---------- rendering ----------
 
 func TestExportForecastsRenderYuanAndPercent(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedForecast(t, e.s.st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", entry: 1000, term: 1250, stance: "no_position"})
 	seedForecast(t, e.s.st, forecastSeed{symbol: "000001", madeAt: "2026-10-15T14:40:12Z", term: 705}) // no entry price
@@ -247,6 +251,7 @@ func TestExportForecastsRenderYuanAndPercent(t *testing.T) {
 }
 
 func TestPctChangeRoundsHalfAwayFromZeroToTwoDecimals(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		latest, entry int64
 		want          string
@@ -264,6 +269,7 @@ func TestPctChangeRoundsHalfAwayFromZeroToTwoDecimals(t *testing.T) {
 }
 
 func TestExportForecastsCSVAndJSONLExports(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedForecast(t, e.s.st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", entry: 1000, term: 1200})
 	e.vendor(map[string]int64{"600519": 900})
@@ -286,6 +292,7 @@ func TestExportForecastsCSVAndJSONLExports(t *testing.T) {
 // ---------- the screen ----------
 
 func TestExportForecastsBelowEntryScreen(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	st := e.s.st
 	seedForecast(t, st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", entry: 1000, term: 1200}) // 9.00 < 10.00
@@ -324,6 +331,7 @@ func TestExportForecastsBelowEntryScreen(t *testing.T) {
 }
 
 func TestExportForecastsWithoutEntryPriceNeverMatchesBelowEntry(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedForecast(t, e.s.st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", term: 1200}) // no entry
 	e.vendor(map[string]int64{"600519": 1})
@@ -334,6 +342,7 @@ func TestExportForecastsWithoutEntryPriceNeverMatchesBelowEntry(t *testing.T) {
 }
 
 func TestExportForecastsBelowEntryUnderOrAndNot(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedForecast(t, e.s.st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", entry: 1000, term: 1})
 	seedForecast(t, e.s.st, forecastSeed{symbol: "000001", madeAt: "2026-10-15T14:40:12Z", entry: 1000, term: 1})
@@ -353,6 +362,7 @@ func TestExportForecastsBelowEntryUnderOrAndNot(t *testing.T) {
 }
 
 func TestExportForecastsOneUpstreamBatchPerChunkRegardlessOfRows(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	prices := map[string]int64{}
 	// 120 symbols, 4 sets each: 480 rows, and 3 chunks of at most 50 symbols.
@@ -380,6 +390,7 @@ func TestExportForecastsOneUpstreamBatchPerChunkRegardlessOfRows(t *testing.T) {
 }
 
 func TestExportForecastsPriceColumnsFetchPerBatchNotPerRow(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.batchSize = 100
 	prices := map[string]int64{}
@@ -409,6 +420,7 @@ func TestExportForecastsPriceColumnsFetchPerBatchNotPerRow(t *testing.T) {
 }
 
 func TestExportForecastsLatestPerSymbolPicksTheNewestMadeAt(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	st := e.s.st
 	seedForecast(t, st, forecastSeed{symbol: "600519", madeAt: "2026-10-10T10:00:00Z", term: 1, version: "old"})
@@ -445,6 +457,7 @@ func TestExportForecastsLatestPerSymbolPicksTheNewestMadeAt(t *testing.T) {
 func rtypeIs(v string) string { return `{"field":"rtype","operator":"is","values":["` + v + `"]}` }
 
 func TestExportForecastsLatestIsAmongTheSetsMatchingTheRestOfTheFilter(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	st := e.s.st
 	// 600519: the newest set overall is another rtype; its newest DECISION set is the 10-12 one.
@@ -467,6 +480,7 @@ func TestExportForecastsLatestIsAmongTheSetsMatchingTheRestOfTheFilter(t *testin
 }
 
 func TestExportForecastsLatestInsideOrGroupsAndCountPreviewExportAgree(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	st := e.s.st
 	e.s.exports.batchSize = 2
@@ -504,6 +518,7 @@ func TestExportForecastsLatestInsideOrGroupsAndCountPreviewExportAgree(t *testin
 }
 
 func TestExportForecastsOtherFieldsFilter(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	st := e.s.st
 	seedForecast(t, st, forecastSeed{symbol: "600519", madeAt: "2026-10-10T10:00:00Z", term: 1, stance: "long", rtype: "A", version: "ext"})
@@ -523,6 +538,7 @@ func TestExportForecastsOtherFieldsFilter(t *testing.T) {
 }
 
 func TestExportForecastsCandidateCapIs400(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	e.s.exports.maxCandidates = 5
 	prices := map[string]int64{}
@@ -555,6 +571,7 @@ func TestExportForecastsCandidateCapIs400(t *testing.T) {
 }
 
 func TestExportForecastsOnlyAcceptedSetsAreExported(t *testing.T) {
+	t.Parallel()
 	e := newExportEnv(t)
 	seedForecast(t, e.s.st, forecastSeed{symbol: "600519", madeAt: "2026-10-10T10:00:00Z", term: 1})
 	if _, err := e.s.st.exec(`UPDATE prediction_sets SET state=?`, predStateRejected); err != nil {

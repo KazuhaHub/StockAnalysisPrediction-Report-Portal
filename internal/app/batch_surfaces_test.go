@@ -8,6 +8,7 @@ import (
 // An empty column must mean "every surface". Every target created before the setting
 // existed has one, and they must keep behaving exactly as they did.
 func TestTargetSurfacesEmptyMeansAll(t *testing.T) {
+	t.Parallel()
 	got := TargetSurfaces("")
 	want := []string{SurfaceRun, SurfaceBatch, SurfaceRecurring, SurfaceChat}
 	if !reflect.DeepEqual(got, want) {
@@ -19,6 +20,7 @@ func TestTargetSurfacesEmptyMeansAll(t *testing.T) {
 }
 
 func TestTargetSurfacesParsesList(t *testing.T) {
+	t.Parallel()
 	got := TargetSurfaces("recurring")
 	if !reflect.DeepEqual(got, []string{SurfaceRecurring}) {
 		t.Fatalf("got %v", got)
@@ -32,6 +34,7 @@ func TestTargetSurfacesParsesList(t *testing.T) {
 // An unknown surface must not survive parsing. If it did, a typo would persist and quietly
 // exclude the target from a surface nobody could see named anywhere in the UI.
 func TestTargetSurfacesDropsUnknown(t *testing.T) {
+	t.Parallel()
 	got := TargetSurfaces("recurring,teleport,run")
 	if !reflect.DeepEqual(got, []string{SurfaceRecurring, SurfaceRun}) {
 		t.Fatalf("unknown surface survived: %v", got)
@@ -42,6 +45,7 @@ func TestTargetSurfacesDropsUnknown(t *testing.T) {
 }
 
 func TestAllowsSurface(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		surfaces, surface string
 		want              bool
@@ -64,6 +68,7 @@ func TestAllowsSurface(t *testing.T) {
 // "All four ticked" and "unset" are the same state; storing them differently would leave two
 // representations of no-restriction and a UI that has to explain the difference.
 func TestSetTargetSurfacesRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	id, err := s.CreateTarget("dify", "scheduled only", "{}")
 	if err != nil {
@@ -90,6 +95,7 @@ func TestSetTargetSurfacesRoundTrip(t *testing.T) {
 }
 
 func TestSetTargetSurfacesRejectsUnknown(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	id, _ := s.CreateTarget("dify", "t", "{}")
 	if err := s.SetTargetSurfaces(id, []string{"recurring", "teleport"}); err != nil {
@@ -103,6 +109,7 @@ func TestSetTargetSurfacesRejectsUnknown(t *testing.T) {
 
 // ListTargets carries the column too — the surfaces UI reads the list endpoint, not GetTarget.
 func TestListTargetsCarriesSurfaces(t *testing.T) {
+	t.Parallel()
 	s := newTestStore(t)
 	id, _ := s.CreateTarget("dify", "t", "{}")
 	if err := s.SetTargetSurfaces(id, []string{SurfaceRecurring}); err != nil {
@@ -119,6 +126,7 @@ func TestListTargetsCarriesSurfaces(t *testing.T) {
 // means "every surface" — the exact opposite of what the admin just asked for. Storing it
 // would silently invert the intent.
 func TestSurfacesAPIRejectsEmptySelection(t *testing.T) {
+	t.Parallel()
 	if len(TargetSurfaces("")) != 4 {
 		t.Fatal("precondition: empty means all")
 	}

@@ -17,6 +17,7 @@ import (
 )
 
 func TestManagedInstallRequiresOpaqueRuntimeFacts(t *testing.T) {
+	t.Parallel()
 	s, session, release := platformInstallFixture(t, false)
 	if _, err := s.createPlatformManagedInstallReview(context.Background(), session, release.sha256, 1, nil, platformRuntimeEndpoint{}); err == nil {
 		t.Fatal("missing runtime minted managed review")
@@ -96,9 +97,16 @@ func testManagedInstallTargetValidation(t *testing.T, pg bool) {
 		t.Fatal("disabled target accepted")
 	}
 }
-func TestManagedInstallTargetSQLite(t *testing.T)   { testManagedInstallTargetValidation(t, false) }
-func TestManagedInstallTargetPostgres(t *testing.T) { testManagedInstallTargetValidation(t, true) }
+func TestManagedInstallTargetSQLite(t *testing.T) {
+	t.Parallel()
+	testManagedInstallTargetValidation(t, false)
+}
+func TestManagedInstallTargetPostgres(t *testing.T) {
+	t.Parallel()
+	testManagedInstallTargetValidation(t, true)
+}
 func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)
@@ -151,19 +159,19 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 
 // platformManagedFixtureOptional lists optional capabilities the managed release fixture declares.
 // A test sets it before building a fixture and restores it afterwards.
-var platformManagedFixtureOptional []string
+var platformManagedFixtureOptional testScoped[[]string]
 
 // platformManagedFixturePublic is the public projection block the managed release fixture declares
 // (it needs "public.projection" in platformManagedFixtureOptional too).
-var platformManagedFixturePublic *appplatform.Public
+var platformManagedFixturePublic testScoped[*appplatform.Public]
 
 // platformManagedFixtureMachine is the machine read block the managed release fixture declares (it
 // needs "machine.read" in platformManagedFixtureOptional too).
-var platformManagedFixtureMachine *appplatform.Machine
+var platformManagedFixtureMachine testScoped[*appplatform.Machine]
 
 // platformManagedFixtureIngress is the ingress block the managed release fixture declares (it needs
 // "ingress.webhook" in platformManagedFixtureOptional too).
-var platformManagedFixtureIngress *appplatform.Ingress
+var platformManagedFixtureIngress testScoped[*appplatform.Ingress]
 
 func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byte) {
 	t.Helper()
@@ -176,10 +184,10 @@ func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byt
 	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
 	m.Capabilities.Required = []string{}
-	m.Capabilities.Optional = append(m.Capabilities.Optional, platformManagedFixtureOptional...)
-	m.Public = platformManagedFixturePublic
-	m.Machine = platformManagedFixtureMachine
-	m.Ingress = platformManagedFixtureIngress
+	m.Capabilities.Optional = append(m.Capabilities.Optional, platformManagedFixtureOptional.get(t)...)
+	m.Public = platformManagedFixturePublic.get(t)
+	m.Machine = platformManagedFixtureMachine.get(t)
+	m.Ingress = platformManagedFixtureIngress.get(t)
 	m.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{platform}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
 	raw, err := json.Marshal(m)
 	if err != nil {
@@ -234,6 +242,7 @@ func scheduledDigestManagedImage() string {
 }
 
 func TestManagedInstallSignedRelease(t *testing.T) {
+	t.Parallel()
 	s, session := platformTrustTestServer(t, false)
 	platformRegisterTestPublisher(t, s, session)
 	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
@@ -312,14 +321,17 @@ func testLegacyAppContinuesWhenManagedReleaseIsRejected(
 }
 
 func TestLegacyAppContinuesWhenManagedReleaseIsRejectedSQLite(t *testing.T) {
+	t.Parallel()
 	testLegacyAppContinuesWhenManagedReleaseIsRejected(t, false)
 }
 
 func TestLegacyAppContinuesWhenManagedReleaseIsRejectedPostgres(t *testing.T) {
+	t.Parallel()
 	testLegacyAppContinuesWhenManagedReleaseIsRejected(t, true)
 }
 
 func TestScheduledDigestCandidateRelease(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE") == "" {
 		t.Skip("scheduled digest candidate not supplied")
 	}
@@ -358,6 +370,7 @@ func TestScheduledDigestCandidateRelease(t *testing.T) {
 }
 
 func TestManagedPackageStagingDefersOnlyRunnerCompatibility(t *testing.T) {
+	t.Parallel()
 	raw, _ := platformManagedReleaseFixture(t, "linux/amd64")
 	parsed, err := appplatform.ParseDescriptor(raw)
 	if err != nil {

@@ -14,6 +14,7 @@ func historyEntry(user string) AuditEntry {
 }
 
 func TestLoginHistoryRetentionDeletesPersonalRowsWithoutAuditOrSessionLoss(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "admin"})
 	s.st.UpsertUser(User{Username: "bob", PasswordHash: "h", Role: "user"})
@@ -89,6 +90,7 @@ func TestLoginHistoryRetentionDeletesPersonalRowsWithoutAuditOrSessionLoss(t *te
 }
 
 func TestLegacyHistoryBackfillRunsOnceAndUsesNewestIDs(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	for i := 0; i < 5; i++ {
@@ -142,10 +144,12 @@ func testConcurrentHistoryCap(t *testing.T, st *Store) {
 }
 
 func TestConcurrentPersonalHistoryWritesRespectTheCap(t *testing.T) {
+	t.Parallel()
 	testConcurrentHistoryCap(t, newTestStore(t))
 }
 
 func TestPostgresConcurrentPersonalHistoryWritesRespectTheCap(t *testing.T) {
+	t.Parallel()
 	testConcurrentHistoryCap(t, pgStore(t))
 }
 
@@ -187,9 +191,11 @@ func testGlobalPolicyDuringSignIns(t *testing.T, st *Store) {
 }
 
 func TestGlobalHistoryPolicyDuringSignIns(t *testing.T) {
+	t.Parallel()
 	testGlobalPolicyDuringSignIns(t, newTestStore(t))
 }
 
 func TestPostgresGlobalHistoryPolicyDuringSignIns(t *testing.T) {
+	t.Parallel()
 	testGlobalPolicyDuringSignIns(t, pgStore(t))
 }

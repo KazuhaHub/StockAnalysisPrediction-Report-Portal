@@ -8,6 +8,7 @@ import (
 
 // Below the budget nothing changes, and every exit path gives the installation's slots back.
 func TestPlatformServiceTaskUnderBudgetBehaviourIsUnchangedAndSlotsAreReleased(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceIdentityFixture(t)
 	assertFree := func(step string) {
 		t.Helper()

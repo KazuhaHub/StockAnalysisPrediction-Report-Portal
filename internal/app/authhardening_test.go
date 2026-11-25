@@ -34,6 +34,7 @@ func hardeningServer(t *testing.T) *Server {
 // whoever it was fetched from; using it after the issuer changed would leave the OLD identity
 // provider minting tokens the portal still accepts — the new one is configured but never consulted.
 func TestOIDCDiscoveryCacheIsBoundToTheIssuer(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	cached := `{"issuer":"https://old-idp.example","authorization_endpoint":"https://old-idp.example/a",` +
 		`"token_endpoint":"https://old-idp.example/t","jwks_uri":"https://old-idp.example/jwks"}`
@@ -55,6 +56,7 @@ func TestOIDCDiscoveryCacheIsBoundToTheIssuer(t *testing.T) {
 // TestSavingANewIssuerDropsTheCachedDiscovery proves the admin save path does not carry a stale
 // document forward, so the very next login refetches instead of relying on the guard above alone.
 func TestSavingANewIssuerDropsTheCachedDiscovery(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	s.st.SaveSSOProvider(SSOProvider{Slug: "acme", Kind: "oidc", Issuer: "https://old-idp.example",
 		Provisioning: "off", DefaultRole: "user"})
@@ -84,6 +86,7 @@ func TestSavingANewIssuerDropsTheCachedDiscovery(t *testing.T) {
 // code or a single-use recovery code — is not carried where it would be written to every
 // reverse-proxy access log, kept in browser history, and sent in the Referer of any subresource.
 func TestStepUpProofIsNotInTheQueryString(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: mustHash("correct-horse"), Role: "user"})
 
@@ -102,6 +105,7 @@ func TestStepUpProofIsNotInTheQueryString(t *testing.T) {
 // or a 6-digit TOTP code. Step-up is an online guessing oracle exactly like the login form, so it
 // must share the login form's lockout.
 func TestStepUpIsThrottled(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: mustHash("correct-horse"), Role: "user"})
 	try := func(proof string) bool {
@@ -124,6 +128,7 @@ func TestStepUpIsThrottled(t *testing.T) {
 // a factor even inside a valid session". Enrolling a fresh second factor and revoking a registered
 // one are both credential changes; a stolen cookie must not be able to do either.
 func TestStepUpGuardsEveryCredentialChange(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: mustHash("correct-horse"), Role: "user"})
 	s.st.AddPasskey("alice", "A", fakeCred("cred-a", 0))
@@ -159,6 +164,7 @@ func TestStepUpGuardsEveryCredentialChange(t *testing.T) {
 // DEFAULT role, not only a role coming from a matched rule. The default is applied to every user
 // the rules do not speak about, which is the larger population.
 func TestDefaultRoleCannotBypassAllowAdminRole(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	gid, _ := s.st.CreateUserGroup("Externals", "", 0)
 	s.st.SetGroupParent(gid, s.st.EnsureDefaultGroup())
@@ -189,6 +195,7 @@ func TestDefaultRoleCannotBypassAllowAdminRole(t *testing.T) {
 // pre-existing, so the keep-on-miss branch runs instead of the new-user branch and the deny that
 // protected the first attempt no longer applies.
 func TestRefusedJITLoginLeavesNoAccount(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	// jit with NO default group and no rules: the engine must deny a brand-new user rather than
 	// leave them unscoped.
@@ -217,6 +224,7 @@ func TestRefusedJITLoginLeavesNoAccount(t *testing.T) {
 // a limit that only shortened MaxAge would be no limit at all — and until SCIM exists, a short
 // session is the portal's only answer to an IdP-side disable.
 func TestSessionHoursShortensTheSignedToken(t *testing.T) {
+	t.Parallel()
 	s := hardeningServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	u := *s.st.GetUser("alice")
@@ -268,6 +276,7 @@ func mustHash(pw string) string {
 // rawxml.go), so an unsigned-in-substance document that merely DECLARES a weak algorithm is enough
 // to reach it without hand-building a real signature.
 func TestSAMLProviderRejectsWeakSignatureAlgorithm(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	provider, _, err := s.samlProvider(p)
@@ -299,6 +308,7 @@ func TestSAMLProviderRejectsWeakSignatureAlgorithm(t *testing.T) {
 // decryption-oracle surface ADR 0023 chose not to take on. Like the weak-algorithm check, this runs
 // before any signature verification, so an intentionally-unsigned document reaches it.
 func TestSAMLProviderRejectsEncryptedAssertion(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	provider, _, err := s.samlProvider(p)
@@ -325,6 +335,7 @@ func TestSAMLProviderRejectsEncryptedAssertion(t *testing.T) {
 // RequireDestination (on by default, left unset here — see samlConfig) closes that independently of
 // crewjam, and this reaches it the same way the two tests above do: before any signature check.
 func TestSAMLProviderRequiresDestination(t *testing.T) {
+	t.Parallel()
 	s := samlTestServer(t)
 	p := samlTestProvider(t, s)
 	provider, _, err := s.samlProvider(p)

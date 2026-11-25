@@ -12,6 +12,7 @@ import (
 // 11. Every run_batch route that takes a job or recurring-task id answers a non-admin non-owner with
 // 404, the same answer as an unknown id, so ids do not leak existence.
 func TestRunBatchRoutesAnswer404ToNonOwners(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.addOperator("op2")
@@ -54,6 +55,7 @@ func TestRunBatchRoutesAnswer404ToNonOwners(t *testing.T) {
 
 // 12. Finished tasks are ranked by finish time before the limit cut.
 func TestMyTasksTerminalRankedByFinishTime(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	old := e.run("op")
@@ -78,6 +80,7 @@ func TestMyTasksTerminalRankedByFinishTime(t *testing.T) {
 
 // 13. A non-admin's queue summary reports their own counts; an administrator's stays global.
 func TestBatchQueueSummaryIsOwnForNonAdmins(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	e.addOperator("op")
 	e.addOperator("op2")
@@ -122,6 +125,7 @@ func TestBatchQueueSummaryIsOwnForNonAdmins(t *testing.T) {
 
 // 14. A run item carries cancel and link only for a caller who holds run_batch.
 func TestMyTasksRunActionsNeedRunBatch(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	id := e.run("bob") // bob holds the plain user role: no run_batch
 	g := find(e.tasks("bob", ""), "run", fmt.Sprint(id))
@@ -136,6 +140,7 @@ func TestMyTasksRunActionsNeedRunBatch(t *testing.T) {
 // 15. A reader export is downloadable only while the caller's policy allows export; an
 // administrator's own admin export keeps its download.
 func TestMyTasksReaderDownloadNeedsExportPolicy(t *testing.T) {
+	t.Parallel()
 	e := newTasksEnv(t)
 	done := e.export("rita", true, exportDone, 100)
 	adminDone := e.export("admin", false, exportDone, 101)

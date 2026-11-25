@@ -39,6 +39,7 @@ func (p *platformPrincipalEnv) granted(t *testing.T) int {
 // Doc 181 section 4: the grant is off after install, an administrator enables it, and withdrawal
 // takes effect on the very next directory call.
 func TestPlatformPrincipalsGrantEnableAndWithdrawAreImmediateAndAudited(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		mustExec(t, p.s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='principals.read'`, p.installation)
@@ -79,6 +80,7 @@ func TestPlatformPrincipalsGrantEnableAndWithdrawAreImmediateAndAudited(t *testi
 }
 
 func TestPlatformPrincipalsGrantRefusesEveryOtherCaller(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		p := platformPrincipalEnvironment(t, pg)
 		mustExec(t, p.s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='principals.read'`, p.installation)
@@ -122,9 +124,9 @@ func TestPlatformPrincipalsGrantRefusesEveryOtherCaller(t *testing.T) {
 // frontend activation checks and the grants digest), so the grant may only change while the
 // installation is ready and nothing is unfinished.
 func TestPlatformPrincipalsGrantIsRefusedMidInstallAndTheInstallStillCompletes(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
-		platformManagedFixtureOptional = []string{"principals.read"}
-		t.Cleanup(func() { platformManagedFixtureOptional = nil })
+		platformManagedFixtureOptional.set(t, []string{"principals.read"})
 		s, actor, lease := platformActivationFixture(t, pg, true)
 		for _, enabled := range []bool{true, false} {
 			if err := s.setPlatformPrincipalsGrant(context.Background(), actor, lease.installationID, enabled, "1"); !errors.Is(err, errPlatformPrincipalsGrantBusy) {
@@ -145,6 +147,7 @@ func TestPlatformPrincipalsGrantIsRefusedMidInstallAndTheInstallStillCompletes(t
 }
 
 func TestPlatformPrincipalsGrantIsRefusedWhileAnOperationIsUnfinishedOrNotReady(t *testing.T) {
+	t.Parallel()
 	for name, arrange := range map[string]func(t *testing.T, p *platformPrincipalEnv){
 		"install in flight": func(t *testing.T, p *platformPrincipalEnv) {
 			mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='activate',completed_ms=NULL WHERE installation_id=?`, p.installation)
@@ -184,6 +187,7 @@ func TestPlatformPrincipalsGrantIsRefusedWhileAnOperationIsUnfinishedOrNotReady(
 }
 
 func TestPlatformInstallationSettingsReportAPendingOperation(t *testing.T) {
+	t.Parallel()
 	p := platformPrincipalEnvironment(t, false)
 	read := func() bool {
 		settings, err := p.s.platformInstallationSettings(p.admin, p.installation)

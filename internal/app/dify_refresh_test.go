@@ -11,6 +11,7 @@ import (
 )
 
 func TestPreserveInputPresentationKeepsPortalMetadata(t *testing.T) {
+	t.Parallel()
 	local := []dify.Input{{Variable: "symbol", Label: "Old label", DisplayLabel: "Portal label", Description: "Local help"}}
 	remote := []dify.Input{
 		{Variable: "symbol", Label: "New label", DisplayLabel: "Remote label", Description: "Remote help"},
@@ -33,6 +34,7 @@ func in(v string, req bool) dify.Input {
 // submitted, so each kind of change has to be named separately: "it differs" is not a thing anybody
 // can approve.
 func TestDiffInputsNamesEachKindOfChange(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		local      []dify.Input
@@ -106,6 +108,7 @@ func TestDiffInputsNamesEachKindOfChange(t *testing.T) {
 // same-day reuse (ADR 0022) silently stops working — the target keeps running, it just regenerates
 // a report it already has. That has to be said out loud, not left for somebody to notice in a bill.
 func TestRefreshFlagsALostSymbolInput(t *testing.T) {
+	t.Parallel()
 	d := diffInputs([]dify.Input{in("symbol", true), in("report_date", false)}, []dify.Input{in("code", true)})
 	if !contains(d.Removed, "symbol") {
 		t.Fatalf("removed = %v, want it to contain symbol", d.Removed)
@@ -126,6 +129,7 @@ func TestRefreshFlagsALostSymbolInput(t *testing.T) {
 // parameter list and NOTHING else. The name an admin chose, the report type, the stock-code column
 // and the credential are local decisions that Dify has no say in.
 func TestRefreshApplyWritesOnlyTheInputs(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	cfg, _ := json.Marshal(difyTargetConfig{
 		BaseURL: "https://dify.example/v1", APIKey: "app-secret", Mode: "workflow",
@@ -170,6 +174,7 @@ func TestRefreshApplyWritesOnlyTheInputs(t *testing.T) {
 // writing it would wipe a list the admin may have built by hand. Refusing costs nothing: a workflow
 // with genuinely no inputs has nothing to refresh either.
 func TestRefreshApplyRefusesToEmptyTheInputs(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: "https://dify.example/v1", APIKey: "app-secret",
 		Inputs: []dify.Input{in("symbol", true)}})

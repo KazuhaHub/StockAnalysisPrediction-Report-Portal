@@ -9,6 +9,7 @@ import (
 // the same answer for every name the shape checks ask about, and for the names they must say no to: a
 // missing table, a missing column of a present table, a column of a missing table, a different case.
 func TestSchemaCatalogAnswersLikeTheProbes(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		st := platformTestStore(t, pg)
 		plain := st.poolExec()
@@ -83,6 +84,7 @@ func TestSchemaCatalogAnswersLikeTheProbes(t *testing.T) {
 // A step's products are verified inside its own transaction, so a catalog read through that transaction
 // must see the step's uncommitted DDL, and a catalog read before the DDL must not be what answers after it.
 func TestSchemaCatalogReadsThroughTheTransaction(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
 		st := platformTestStore(t, pg)
 		tx, err := st.db.Begin()
@@ -121,6 +123,7 @@ func TestSchemaCatalogReadsThroughTheTransaction(t *testing.T) {
 // The per-name probes only ever looked at declared tables, so an unrelated view that no longer resolves
 // (SQLite lets a view outlive its table) never stopped a start-up. The catalog read must not either.
 func TestSchemaCatalogIgnoresABrokenUnrelatedViewSQLite(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, false)
 	plain := st.poolExec()
 	for _, stmt := range []string{

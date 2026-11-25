@@ -50,6 +50,7 @@ func (h *platformImageHTTP) releases() int {
 
 // Fails if the release row is written without its blobs, or if a blob is stored under a name it does not hash to.
 func TestOfflineManagedPackageStoresEveryBlobAndLeavesNoPartialFile(t *testing.T) {
+	t.Parallel()
 	h := newPlatformImageHTTP(t, true)
 	parts := newPlatformManagedImageParts(t, "2.0.0", "offline")
 	code, body := h.upload(parts.packageBytes(t, nil, ""))
@@ -83,6 +84,7 @@ func TestOfflineManagedPackageStoresEveryBlobAndLeavesNoPartialFile(t *testing.T
 
 // Fails if a package over the blob cap writes a release row or a blob.
 func TestOfflineManagedPackageOverTheBlobCapLeavesNoReleaseRowAndNoBlob(t *testing.T) {
+	t.Parallel()
 	h := newPlatformImageHTTP(t, true)
 	store, _ := h.s.platformImages()
 	store.blobCap = 100
@@ -104,6 +106,7 @@ func TestOfflineManagedPackageOverTheBlobCapLeavesNoReleaseRowAndNoBlob(t *testi
 // Fails if a second release is staged while its blobs would push the store over the cap, even when the first
 // release's blobs are the ones that fill it: stored blobs must not be evicted to make room.
 func TestOfflineManagedPackageCapRefusalNeverEvictsAnotherReleasesBlobs(t *testing.T) {
+	t.Parallel()
 	h := newPlatformImageHTTP(t, true)
 	first := newPlatformManagedImageParts(t, "2.1.0", "first")
 	if code, body := h.upload(first.packageBytes(t, nil, "")); code != http.StatusOK {
@@ -129,6 +132,7 @@ func TestOfflineManagedPackageCapRefusalNeverEvictsAnotherReleasesBlobs(t *testi
 
 // Fails if any crafted package writes a release row or a blob.
 func TestOfflineManagedPackagesWithCraftedLayoutsAreRefusedAndStoreNothing(t *testing.T) {
+	t.Parallel()
 	parts := newPlatformManagedImageParts(t, "2.2.0", "crafted")
 	someBlob := parts.imageBlobList()[2].Digest
 	cases := map[string][]byte{
@@ -155,6 +159,7 @@ func TestOfflineManagedPackagesWithCraftedLayoutsAreRefusedAndStoreNothing(t *te
 
 // Fails if blobs of a package whose signature or publisher is not trusted stay in the store.
 func TestOfflineManagedPackageFromAnUntrustedPublisherLeavesNoBlobs(t *testing.T) {
+	t.Parallel()
 	h := newPlatformImageHTTP(t, false)
 	parts := newPlatformManagedImageParts(t, "2.3.0", "untrusted")
 	code, _ := h.upload(parts.packageBytes(t, nil, ""))
@@ -168,6 +173,7 @@ func TestOfflineManagedPackageFromAnUntrustedPublisherLeavesNoBlobs(t *testing.T
 
 // Fails if re-uploading a package does not replace a blob that has gone bad, which is how PKG-08 recovers.
 func TestOfflineReuploadReplacesACorruptedBlobAndTheReleaseIsReused(t *testing.T) {
+	t.Parallel()
 	h := newPlatformImageHTTP(t, true)
 	parts := newPlatformManagedImageParts(t, "2.4.0", "heal")
 	raw := parts.packageBytes(t, nil, "")
@@ -201,6 +207,7 @@ func TestOfflineReuploadReplacesACorruptedBlobAndTheReleaseIsReused(t *testing.T
 // Fails if the active release's blobs are removed by a sweep, a cache-pressure eviction or a restart, or if a
 // release nothing pins keeps its blobs for ever.
 func TestPinnedBlobsOfActiveAndRetainedReleasesSurviveEverySweepAndOthersDoNot(t *testing.T) {
+	t.Parallel()
 	b := platformBundleFixture(t)
 	b.s.platformImageDir = t.TempDir()
 	store, err := b.s.platformImages()

@@ -26,6 +26,7 @@ const (
 )
 
 func TestPlatformTaskWorkerCrashChild(t *testing.T) {
+	t.Parallel()
 	if os.Getenv(taskCrashChildEnv) != "1" {
 		t.Skip("crash child runs only under the parent test")
 	}
@@ -87,6 +88,7 @@ func TestPlatformTaskWorkerCrashChild(t *testing.T) {
 }
 
 func TestPlatformTaskWorkerCrashLeaseRecovery(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGKILL semantics differ on Windows")
 	}

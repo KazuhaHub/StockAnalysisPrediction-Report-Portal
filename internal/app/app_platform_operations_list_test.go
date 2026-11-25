@@ -30,6 +30,7 @@ func platformOperationListRead(t *testing.T, mux *http.ServeMux, cookie, query s
 // The history lists an installation's operations newest first, with the versions of the plan's two releases, and
 // the latest-per-installation form answers with the newest one only.
 func TestPlatformOperationListHTTP(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	sourceVersion := scalar[string](t, s.st, `SELECT version FROM app_platform_releases WHERE sha256=?`, source)
@@ -96,6 +97,7 @@ func TestPlatformOperationListHTTP(t *testing.T) {
 }
 
 func TestPlatformOperationListRefusesBadRequests(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, _ := platformUpdateFixture(t, []int{1})
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -122,6 +124,7 @@ func TestPlatformOperationListRefusesBadRequests(t *testing.T) {
 
 // Only a Portal administrator reads the history: neither a reader of the app nor a delegated app administrator does.
 func TestPlatformOperationListIsForPortalAdministrators(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	_, delegateCookie := e.newUser("app-delegate", "user")
 	if w := e.grant(e.adminCookie, "app-delegate"); w.Code != 200 {
@@ -141,6 +144,7 @@ func TestPlatformOperationListIsForPortalAdministrators(t *testing.T) {
 
 // An installation that is gone does not appear in the latest-per-installation list, so it cannot eat its cap.
 func TestPlatformOperationListLatestOnlyHasLiveInstallations(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, _ := platformUpdateFixture(t, []int{1})
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

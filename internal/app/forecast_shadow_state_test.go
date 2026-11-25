@@ -18,6 +18,7 @@ func shadowStateFixture(at time.Time) forecastShadowRun {
 }
 
 func TestForecastShadowDiagnosticsSurviveRestartAndRetain14Days(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "shadow.db")
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -48,6 +49,7 @@ func TestForecastShadowDiagnosticsSurviveRestartAndRetain14Days(t *testing.T) {
 }
 
 func TestForecastShadowDiagnosticsTransactionAndNoLostCounts(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertShadowDiagnosticCounts(t, newTestStore(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t)
@@ -68,6 +70,7 @@ func TestForecastShadowDiagnosticsTransactionAndNoLostCounts(t *testing.T) {
 }
 
 func TestForecastShadowDiagnosticsSecondWriteFailureRollsBackPair(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if _, err := st.exec(`CREATE TRIGGER fail_shadow_update BEFORE UPDATE ON meta WHEN NEW.k='forecast_state_shadow' BEGIN SELECT RAISE(ABORT,'diagnostic write fault'); END`); err != nil {
 		t.Fatal(err)
@@ -82,6 +85,7 @@ func TestForecastShadowDiagnosticsSecondWriteFailureRollsBackPair(t *testing.T) 
 }
 
 func TestForecastShadowDiagnosticsCancelledReadDoesNotInventEmptyHistory(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -94,6 +98,7 @@ func TestForecastShadowDiagnosticsCancelledReadDoesNotInventEmptyHistory(t *test
 }
 
 func TestForecastShadowDiagnosticsAcrossSQLiteConnections(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "diagnostics.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -140,6 +145,7 @@ func assertShadowDiagnosticCounts(t *testing.T, st *Store, peers ...*Store) {
 }
 
 func TestForecastShadowDiagnosticsRefusesCorruptionWithoutOverwrite(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"broken", `{"version":999}`, "null", `{}`, `{"version":1}`} {
 		st := newTestStore(t)
 		if err := st.SetSetting(setForecastStateCalls, raw); err != nil {
@@ -156,6 +162,7 @@ func TestForecastShadowDiagnosticsRefusesCorruptionWithoutOverwrite(t *testing.T
 }
 
 func TestForecastShadowDiagnosticsEmptyOrNullPairIsNotReset(t *testing.T) {
+	t.Parallel()
 	for _, sqlNull := range []bool{false, true} {
 		st := newTestStore(t)
 		for _, key := range []string{setForecastStateCalls, setForecastStateShadow} {
@@ -185,6 +192,7 @@ func TestForecastShadowDiagnosticsEmptyOrNullPairIsNotReset(t *testing.T) {
 }
 
 func TestForecastShadowDiagnosticsOutOfOrderPreservesLatestEvidence(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	at := time.Date(2026, time.October, 22, 16, 0, 0, 0, time.UTC)
 	for i := range 24 {
@@ -208,6 +216,7 @@ func TestForecastShadowDiagnosticsOutOfOrderPreservesLatestEvidence(t *testing.T
 }
 
 func TestForecastShadowDiagnosticsValidJSONCorruptionAndOverflow(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"negative", "overflow", "duplicate_day", "missing_comparison", "null_pair", "missing_version", "missing_days", "counter_balance"} {
 		t.Run(kind, func(t *testing.T) {
 			st := newTestStore(t)
@@ -282,6 +291,7 @@ func TestForecastShadowDiagnosticsValidJSONCorruptionAndOverflow(t *testing.T) {
 }
 
 func TestForecastShadowDiagnosticsBoundsStoredDifferences(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	run := shadowStateFixture(time.Date(2026, time.October, 22, 16, 0, 0, 0, time.UTC))
 	run.Results[0].Status = "mismatch"

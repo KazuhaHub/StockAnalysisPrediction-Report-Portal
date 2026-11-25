@@ -208,12 +208,13 @@ func testRecoveryThroughHTTP(t *testing.T, pg bool) {
 	}
 }
 
-func TestRecoveryThroughHTTP(t *testing.T)         { testRecoveryThroughHTTP(t, false) }
-func TestRecoveryThroughHTTPPostgres(t *testing.T) { testRecoveryThroughHTTP(t, true) }
+func TestRecoveryThroughHTTP(t *testing.T)         { t.Parallel(); testRecoveryThroughHTTP(t, false) }
+func TestRecoveryThroughHTTPPostgres(t *testing.T) { t.Parallel(); testRecoveryThroughHTTP(t, true) }
 
 // A replacement is never enrolled beside a binding that is still in force: the refusal is its own
 // typed error, not a generic outage, and it changes nothing.
 func TestReplacementRuntimeRouteRefusedBesideLiveBinding(t *testing.T) {
+	t.Parallel()
 	s, session := runtimeRegistrationFixture(t, false)
 	first, err := s.preparePlatformRuntimeBinding(session, platformFixtureID(400))
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 )
 
 func TestManagedRuntimeProfileDoesNotCreateAuthority(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)

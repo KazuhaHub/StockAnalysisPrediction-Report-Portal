@@ -64,10 +64,17 @@ func testPlatformStagedCatalogueHTTP(t *testing.T, pg bool) {
 	}
 }
 
-func TestPlatformStagedCatalogueHTTPSQLite(t *testing.T)   { testPlatformStagedCatalogueHTTP(t, false) }
-func TestPlatformStagedCatalogueHTTPPostgres(t *testing.T) { testPlatformStagedCatalogueHTTP(t, true) }
+func TestPlatformStagedCatalogueHTTPSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformStagedCatalogueHTTP(t, false)
+}
+func TestPlatformStagedCatalogueHTTPPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformStagedCatalogueHTTP(t, true)
+}
 
 func TestPlatformStagedCatalogueAdvertisesReviewedUpdateCandidate(t *testing.T) {
+	t.Parallel()
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	mux := http.NewServeMux()
@@ -101,6 +108,7 @@ func TestPlatformStagedCatalogueAdvertisesReviewedUpdateCandidate(t *testing.T) 
 }
 
 func TestPlatformStagedCatalogueAdvertisesDisabledFrontendAsEnableable(t *testing.T) {
+	t.Parallel()
 	s, actor, _, installation := platformFrontendDisabledFixture(t, false)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -131,6 +139,7 @@ func TestPlatformStagedCatalogueAdvertisesDisabledFrontendAsEnableable(t *testin
 }
 
 func TestPlatformSubjectDirectoryPaginationSQLite(t *testing.T) {
+	t.Parallel()
 	s, mux, _, _, cookie := platformManagementFixture(t, false)
 	for i := 0; i < 35; i++ {
 		if err := s.st.UpsertUser(User{Username: fmt.Sprintf("subject-%02d", i), DisplayName: "Subject", Role: "user", PasswordHash: "fixture"}); err != nil {

@@ -15,6 +15,7 @@ import (
 // version (doc 191, section 9); every other transport still goes through audience-gated reader endpoints,
 // so the admin launch must not offer what the admin frame cannot use.
 func TestPlatformLaunchCapabilitiesBySurface(t *testing.T) {
+	t.Parallel()
 	granted := []string{"network.http", "storage.files"}
 	if got := platformLaunchCapabilities(true, granted); got == nil || len(got) != 0 {
 		t.Fatalf("admin surface capabilities = %#v, want an empty list", got)
@@ -42,6 +43,7 @@ func TestPlatformLaunchCapabilitiesBySurface(t *testing.T) {
 // Fails if the reader launch does not say whether the viewer can manage the app, if it says so for a
 // viewer who is not an app administrator, or if a release without an admin page is ever manageable.
 func TestPlatformReaderLaunchManageable(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	_, delegateCookie := e.newUser("app-delegate", "user")
 	platformOpenDefault(t, e.s, e.id)
@@ -85,6 +87,7 @@ func TestPlatformReaderLaunchManageable(t *testing.T) {
 // Fails if the "release declares admin_routes" bit is parsed again for a release that was already seen,
 // or if the cache is unbounded. Releases are immutable, so the SHA-256 is a sound key.
 func TestPlatformAdminRoutesCache(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	sha := e.releaseSHA()
 	platformAdminRoutesCacheReset()
@@ -116,6 +119,7 @@ func TestPlatformAdminRoutesCache(t *testing.T) {
 // Fails if a delegate with a broken OU chain still opens the admin surface (the reader path refuses a
 // viewer whose chain is broken, and so must the admin path).
 func TestPlatformAppAdminDelegateNeedsAccessChain(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	_, delegateCookie := e.newUser("app-delegate", "user")
 	if w := e.grant(e.adminCookie, "app-delegate"); w.Code != 200 {
@@ -139,6 +143,7 @@ func TestPlatformAppAdminDelegateNeedsAccessChain(t *testing.T) {
 // Fails if the writer of the admin_request row loses the outcome: ok records the app's status, uncertain
 // records 502 and no backend status, refused records the Portal's status.
 func TestPlatformAdminRequestAuditWriter(t *testing.T) {
+	t.Parallel()
 	e := platformAdminPageFixture(t, true)
 	r := httptest.NewRequest("POST", "/api/app-platform/installations/"+e.id+"/admin/backend", nil)
 	detail := func() map[string]any {
@@ -177,6 +182,7 @@ func TestPlatformAdminRequestAuditWriter(t *testing.T) {
 // signing function the runner round trip would call; the assertion must carry no surface. The admin
 // endpoint is the control: the same sessions arrive with surface=admin.
 func TestPlatformReaderBackendEndpointNeverSignsAdmin(t *testing.T) {
+	t.Parallel()
 	withAdminRoutesHook(t)
 	s, actor, lease := platformWritableAccessFixture(t, false)
 	installation := lease.installationID
@@ -236,6 +242,7 @@ func TestPlatformReaderBackendEndpointNeverSignsAdmin(t *testing.T) {
 // Fails if a pre-existing table of the wrong shape is accepted by step 0025, or if the verifier rejects
 // the table the step creates.
 func TestMigration0025VerifiesTheTableShape(t *testing.T) {
+	t.Parallel()
 	step := migration0025()
 	if step.verify == nil {
 		t.Fatal("step 0025 has no shape check")

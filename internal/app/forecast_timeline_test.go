@@ -9,6 +9,7 @@ import (
 )
 
 func TestStockTimelinePredictionsUseReadableAcceptedReports(t *testing.T) {
+	t.Parallel()
 	t.Run("sqlite", func(t *testing.T) { assertForecastTimeline(t, newV1Server(t)) })
 	t.Run("postgres", func(t *testing.T) {
 		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users")
@@ -110,6 +111,7 @@ func assertForecastTimeline(t *testing.T, s *Server) {
 }
 
 func TestStockTimelineLedgerFailureLeavesReportReadable(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	seedForecastReader(t, s, "timeline-reader", scopeAll, false)
 	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {

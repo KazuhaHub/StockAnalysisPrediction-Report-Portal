@@ -29,6 +29,7 @@ func platformReplacementRootSeams(s *Server, registered *platformRuntimeRegistra
 // recorded, so abandoning that runtime remembers its root even when no import was ever applied on it:
 // an import in flight, or lost, may still have landed there.
 func TestAbandonRecordsTheReplacementRootWithoutAnAppliedImport(t *testing.T) {
+	t.Parallel()
 	f, _ := unknownImportFixture(t)
 	root := platformFixtureID(77) + "/555"
 	registered := f.replacement
@@ -54,6 +55,7 @@ func TestAbandonRecordsTheReplacementRootWithoutAnAppliedImport(t *testing.T) {
 // A replacement whose runner reports an abandoned root is refused when it is confirmed, and its import
 // is not reviewed either; a replacement on another root is accepted.
 func TestReplacementOnAnAbandonedRootIsRefusedAtConfirm(t *testing.T) {
+	t.Parallel()
 	f, _ := unknownImportFixture(t)
 	registered := f.replacement
 	pending := f.replacement
@@ -95,6 +97,7 @@ func TestReplacementOnAnAbandonedRootIsRefusedAtConfirm(t *testing.T) {
 // confirm through the route completes the missing record instead of conflicting, and until the root is
 // recorded no import is reviewed for the runtime.
 func TestReplacementConfirmIsRetryableAfterAFailedProfileCall(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	mustExec(t, f.s.st, `DELETE FROM meta WHERE k=?`, platformReplacementRootKey)
 	endpoint := platformUpdateStartEndpointFixture()

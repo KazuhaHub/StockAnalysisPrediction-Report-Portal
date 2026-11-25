@@ -90,6 +90,7 @@ func withSQLiteConn(db *sql.DB, f func(sqliteImageConn) error) error {
 // Links carry an optional icon name (chosen in the admin UI) that must survive
 // add + edit round-trips.
 func TestLinkIconRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 
 	if err := st.AddLink("GitHub", "https://github.com", "github", true, 0, 0); err != nil {
@@ -119,6 +120,7 @@ func TestLinkIconRoundTrip(t *testing.T) {
 // Entry-button groups: create/list/update, assign links to a group + order, and deleting a
 // group returns its links to the top level (ungrouped).
 func TestLinkGroups(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	gid, err := st.AddLinkGroup("决策分析", "popover", true, "bulb", 0)
 	if err != nil {
@@ -165,6 +167,7 @@ func TestLinkGroups(t *testing.T) {
 // A link added without an icon reads back with an empty icon (not an error), so
 // the frontend can fall back to the default link glyph.
 func TestLinkEmptyIcon(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.AddLink("Docs", "https://docs", "", true, 0, 0); err != nil {
 		t.Fatalf("AddLink: %v", err)
@@ -180,6 +183,7 @@ func TestLinkEmptyIcon(t *testing.T) {
 // write lock must wait for it rather than fail at once with SQLITE_BUSY ("database is locked"),
 // which is what TestForecastShadowDiagnosticsAcrossSQLiteConnections hit on a loaded CI runner.
 func TestSQLiteWriterWaitsForAnotherConnectionsLock(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "locked.db")
 	holder, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -218,6 +222,7 @@ func TestSQLiteWriterWaitsForAnotherConnectionsLock(t *testing.T) {
 // Every connection carries the timeout, the in-memory test store included, and an operator's own
 // busy_timeout in the source is kept.
 func TestSQLiteSourceCarriesTheBusyTimeout(t *testing.T) {
+	t.Parallel()
 	for _, src := range []string{":memory:", filepath.Join(t.TempDir(), "a.db")} {
 		st, err := connectStore("sqlite", src)
 		if err != nil {

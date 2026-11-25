@@ -30,8 +30,10 @@ func testPlatformPostgresReviewDoesNotHoldLocksWhileAskingTheRunner(t *testing.T
 }
 
 func TestPlatformPostgresReviewDoesNotHoldLocksWhileAskingTheRunnerSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresReviewDoesNotHoldLocksWhileAskingTheRunner(t, false)
 }
 func TestPlatformPostgresReviewDoesNotHoldLocksWhileAskingTheRunnerPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformPostgresReviewDoesNotHoldLocksWhileAskingTheRunner(t, true)
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,12 +17,11 @@ import (
 // /v1, GET), with an administrator who may launch it.
 func platformCapabilityFixture(t *testing.T, pg bool) (*Server, platformActorSession, string) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		m.Capabilities.Required = []string{"background.run", "network.http", "notifications.publish"}
 		m.Capabilities.Optional = nil
-	}
-	platformFixtureNetworkTarget = true
-	t.Cleanup(func() { platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false })
+	})
+	platformFixtureNetworkTarget.set(t, true)
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=?`, lease.installationID)
 	return s, actor, lease.installationID
@@ -51,7 +51,7 @@ func platformV2ExtraTarget() appplatform.HTTPTarget {
 	return platformTestTarget("extra", "https://other.example.com", "public", []string{"/v2"}, []string{"GET"})
 }
 
-var platformCapabilitySeedCounter int
+var platformCapabilitySeedCounter atomic.Int64
 
 type platformCapabilitySeed struct {
 	// policy is the v2 policy the plan carries (default: default + extra).
@@ -132,8 +132,7 @@ func platformCapabilitySeedPlan(t *testing.T, s *Server, installation string, o 
 	}
 	id := o.id
 	if id == "" {
-		platformCapabilitySeedCounter++
-		id = platformFixtureID(7000 + platformCapabilitySeedCounter)
+		id = platformFixtureID(7000 + int(platformCapabilitySeedCounter.Add(1)))
 	}
 	source, epoch := o.source, o.epoch
 	if source == "" {

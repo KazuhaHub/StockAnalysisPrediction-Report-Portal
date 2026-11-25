@@ -80,6 +80,7 @@ func (e *platformAccessEnv) request(cookie, method, path, body string) string {
 // A7: a new installation is closed for everyone, administrators included; built-in features with no
 // rows stay open; an edit through the admin endpoint opens it at once; nothing touches the legacy table.
 func TestPlatformInstallationStartsClosedForEveryoneAndOpensByPolicyEdit(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testPlatformInstallationStartsClosedForEveryoneAndOpensByPolicyEdit)
 }
 
@@ -120,6 +121,7 @@ func testPlatformInstallationStartsClosedForEveryoneAndOpensByPolicyEdit(t *test
 
 // A7: an OU opened at install time is open the moment activation commits, and only that OU's members.
 func TestPlatformInstallOpenToOUIsOpenRightAfterActivation(t *testing.T) {
+	t.Parallel()
 	s, actor, release := platformInstallFixture(t, false)
 	actor0 := actor.username
 	group, err := s.st.CreateUserGroup("Open at install", "", 0)
@@ -173,6 +175,7 @@ func TestPlatformInstallOpenToOUIsOpenRightAfterActivation(t *testing.T) {
 // A7a: launch, directory and status agree for the same user across the policy scenarios. The
 // principal directory joins them in TestPlatformPrincipalDirectoryAgreesWithLaunch.
 func TestPlatformLaunchDirectoryAndStatusAgreeAcrossPolicyScenarios(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testPlatformLaunchDirectoryAndStatusAgreeAcrossPolicyScenarios)
 }
 
@@ -235,6 +238,7 @@ func testPlatformLaunchDirectoryAndStatusAgreeAcrossPolicyScenarios(t *testing.T
 
 // A7a: for every user the principal directory lists exactly the users launch admits, across scenarios.
 func TestPlatformPrincipalDirectoryAgreesWithLaunch(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testPlatformPrincipalDirectoryAgreesWithLaunch)
 }
 
@@ -294,6 +298,7 @@ func testPlatformPrincipalDirectoryAgreesWithLaunch(t *testing.T, pg bool) {
 // A5: the admin list holds the built-in features and every platform installation in the saved order,
 // the reader list follows the same order, and reorder accepts platform keys only for live installations.
 func TestAppListsMergeBuiltinAndPlatformInOrder(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testAppListsMergeBuiltinAndPlatformInOrder)
 }
 
@@ -392,6 +397,7 @@ func testAppListsMergeBuiltinAndPlatformInOrder(t *testing.T, pg bool) {
 
 // The install plan names OUs only: the retired audience field and user principals are refused by code.
 func TestPlatformInstallPlanOpenToOUsHTTP(t *testing.T) {
+	t.Parallel()
 	s, mux, _, release, cookie := platformManagementFixture(t, false)
 	post := func(body string) (int, string) {
 		w := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
@@ -423,6 +429,7 @@ func TestPlatformInstallPlanOpenToOUsHTTP(t *testing.T) {
 // Deleting an OU deletes its access rows and nothing else: it must not move the installation's policy
 // revision, which would orphan the capability grants and refuse every user until a capability review.
 func TestDeletingAnOUWithAPlatformRowKeepsTheInstallationLaunchable(t *testing.T) {
+	t.Parallel()
 	e := newPlatformAccessEnv(t, false)
 	a, err := e.s.st.CreateUserGroup("Keep A", "", 0)
 	if err != nil {

@@ -34,6 +34,7 @@ func rep(rtype, title, version, at string) Rep {
 }
 
 func TestTabsNameTheWrittenFormAndNumberTheReport(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 
@@ -109,6 +110,7 @@ func TestTabsNameTheWrittenFormAndNumberTheReport(t *testing.T) {
 // The suffix is the version's own label from the registry, so renaming 人工 in 管理 → 报告版本 renames
 // it on the strip too — rather than a second copy of the name living here.
 func TestTheFormSuffixFollowsTheVersionRegistry(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	v, _ := st.Version(st.ManualVersion())
@@ -128,6 +130,7 @@ func TestTheFormSuffixFollowsTheVersionRegistry(t *testing.T) {
 // A version nobody has labelled falls back to its own name rather than to an empty suffix, which
 // would read as a trailing separator and say nothing.
 func TestAnUnlabelledVersionFallsBackToItsName(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	if err := st.SaveVersion(ReportVersion{Name: "外部版", Ord: 9}); err != nil {

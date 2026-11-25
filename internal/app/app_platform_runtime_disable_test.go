@@ -75,8 +75,14 @@ func testPlatformRuntimeRevocation(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformRuntimeRevocationSQLite(t *testing.T)   { testPlatformRuntimeRevocation(t, false) }
-func TestPlatformRuntimeRevocationPostgres(t *testing.T) { testPlatformRuntimeRevocation(t, true) }
+func TestPlatformRuntimeRevocationSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeRevocation(t, false)
+}
+func TestPlatformRuntimeRevocationPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformRuntimeRevocation(t, true)
+}
 func testPlatformRuntimeRevocationRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"bad_id", "stale_revision", "zero_revision", "revision_overflow", "control_overflow", "epoch", "paused", "demoted", "foreign_revocation"} {
 		t.Run(kind, func(t *testing.T) {
@@ -115,9 +121,11 @@ func testPlatformRuntimeRevocationRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeRevocationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeRevocationRefusals(t, false)
 }
 func TestPlatformRuntimeRevocationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeRevocationRefusals(t, true)
 }
 func testPlatformRuntimeRevocationConcurrent(t *testing.T, pg bool) {
@@ -151,9 +159,11 @@ func testPlatformRuntimeRevocationConcurrent(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeRevocationConcurrentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeRevocationConcurrent(t, false)
 }
 func TestPlatformRuntimeRevocationConcurrentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeRevocationConcurrent(t, true)
 }
 
@@ -180,13 +190,16 @@ func testPlatformRuntimeRevocationAuditRollback(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformRuntimeRevocationRollbackSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeRevocationAuditRollback(t, false)
 }
 func TestPlatformRuntimeRevocationRollbackPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformRuntimeRevocationAuditRollback(t, true)
 }
 
 func TestPostgresRuntimeRevocationExpiryAfterAuditWait(t *testing.T) {
+	t.Parallel()
 	s, session, expected := runtimeConfirmedFixture(t, true)
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {
@@ -245,6 +258,7 @@ func TestPostgresRuntimeRevocationExpiryAfterAuditWait(t *testing.T) {
 }
 
 func TestPlatformRuntimeRevocationNearCounterLimit(t *testing.T) {
+	t.Parallel()
 	s, session, expected := runtimeConfirmedFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET revision=?,control_revision=?`, int64(math.MaxInt64-1), int64(math.MaxInt64-1))
 	first, err := s.revokePlatformRuntimeControl(session, expected.id, math.MaxInt64-1)
@@ -257,6 +271,7 @@ func TestPlatformRuntimeRevocationNearCounterLimit(t *testing.T) {
 	}
 }
 func TestPlatformRuntimeRevocationDoesNotNeedHealthySigningEnvelope(t *testing.T) {
+	t.Parallel()
 	s, session, expected := runtimeConfirmedFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET sealed_control_key='corrupt-envelope'`)
 	if _, err := s.revokePlatformRuntimeControl(session, expected.id, expected.revision); err != nil {
@@ -265,6 +280,7 @@ func TestPlatformRuntimeRevocationDoesNotNeedHealthySigningEnvelope(t *testing.T
 }
 
 func TestPlatformRuntimeRevocationSurvivesSQLiteReopen(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "revocation.db")
 	first, err := OpenStore("sqlite", path)
 	if err != nil {

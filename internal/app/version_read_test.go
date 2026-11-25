@@ -82,6 +82,7 @@ func (f readFixture) canRead(t *testing.T, user string, id int64) bool {
 // TestVisibilityOwnerSeesOnlyWhatTheyAskedFor is the narrowest mode, and the default for a new
 // version.
 func TestVisibilityOwnerSeesOnlyWhatTheyAskedFor(t *testing.T) {
+	t.Parallel()
 	f := seedReadFixture(t, VisibilityOwner)
 	if !f.canRead(t, "alice", f.pub) {
 		t.Error("alice must read the report she asked for")
@@ -101,6 +102,7 @@ func TestVisibilityOwnerSeesOnlyWhatTheyAskedFor(t *testing.T) {
 // TestVisibilityGroupSharesWithinTheOU covers the company-client case, where colleagues are expected
 // to see each other's requests but other tenants are not.
 func TestVisibilityGroupSharesWithinTheOU(t *testing.T) {
+	t.Parallel()
 	f := seedReadFixture(t, VisibilityGroup)
 	if !f.canRead(t, "alice", f.pub) || !f.canRead(t, "alice", f.mateReport) {
 		t.Error("group visibility must share within the OU")
@@ -116,6 +118,7 @@ func TestVisibilityGroupSharesWithinTheOU(t *testing.T) {
 // TestVisibilityAllIsABrowsableLibrary covers the widest mode: every report of the version, whoever
 // asked — a client onboarded today sees the back catalogue.
 func TestVisibilityAllIsABrowsableLibrary(t *testing.T) {
+	t.Parallel()
 	f := seedReadFixture(t, VisibilityAll)
 	for _, id := range []int64{f.pub, f.mateReport, f.strangerReport} {
 		if !f.canRead(t, "alice", id) {
@@ -130,6 +133,7 @@ func TestVisibilityAllIsABrowsableLibrary(t *testing.T) {
 // TestUngrantedAccountReadsNothing proves default-deny end to end: being restricted with no grant is
 // not "see the internal pool", it is "see nothing".
 func TestUngrantedAccountReadsNothing(t *testing.T) {
+	t.Parallel()
 	f := seedReadFixture(t, VisibilityAll)
 	f.s.st.SetVersionGrants("对外版", nil) // revoke
 	for _, id := range []int64{f.pub, f.internal, f.mateReport} {
@@ -146,6 +150,7 @@ func TestUngrantedAccountReadsNothing(t *testing.T) {
 // TestInternalReadersAreUnaffected is the property that keeps this deployable: an unrestricted user
 // gets a nil scope, so their SQL is byte-for-byte what it was and the money path does not change.
 func TestInternalReadersAreUnaffected(t *testing.T) {
+	t.Parallel()
 	f := seedReadFixture(t, VisibilityOwner)
 	f.s.st.UpsertUser(User{Username: "staff", PasswordHash: "h", Role: "user"}) // Default OU, unrestricted
 	if sc := f.s.viewerScope("staff"); sc != nil {
@@ -161,6 +166,7 @@ func TestInternalReadersAreUnaffected(t *testing.T) {
 // TestAccountScopedWithNoOU proves the whole rule works for a lone account, with no OU tree at all —
 // grants addressed to the person, ownership recorded against the person.
 func TestAccountScopedWithNoOU(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})
 	s.st.UpsertUser(User{Username: "solo", PasswordHash: "h", Role: "user"})
@@ -188,6 +194,7 @@ func TestAccountScopedWithNoOU(t *testing.T) {
 // report they paid for. The attribution token therefore carries the PERSON, not only their OU —
 // under per-person visibility the OU alone is not enough to identify a reader.
 func TestOwnRunBecomesReadable(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ou, _ := s.st.CreateUserGroup("client-A", "", 0)
@@ -236,6 +243,7 @@ func TestOwnRunBecomesReadable(t *testing.T) {
 // workflow, so two forms of one analysis will almost never carry a byte-identical title, and
 // requiring that would make the switcher silently fail to group exactly the reports it exists for.
 func TestVersionSwitcherListsOnlyGeneratedAndPermittedForms(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	root := s.st.EnsureDefaultGroup()
 	ou, _ := s.st.CreateUserGroup("client-A", "", 0)

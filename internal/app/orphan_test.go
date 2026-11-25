@@ -25,6 +25,7 @@ func viewerRows(t *testing.T, st *Store, where string, args ...any) int {
 // retention purge (ADR 0017), which deletes reports by its own path and would otherwise leave the
 // list growing forever.
 func TestDeletingAReportTakesItsViewers(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	old := time.Now().Add(-90 * 24 * time.Hour).Format("2006-01-02 15:04:05")
@@ -70,6 +71,7 @@ func TestDeletingAReportTakesItsViewers(t *testing.T) {
 // the account and the same address may register — so a surviving `u:<name>` row would grant the NEW
 // holder of that name everything the previous one could read.
 func TestDeletingAnAccountTakesItsViewers(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityOwner})
@@ -105,6 +107,7 @@ func TestDeletingAnAccountTakesItsViewers(t *testing.T) {
 // register that address picks up what the last one left. A passkey is the worst of them — it is a
 // credential, so the previous holder could sign in AS the new account, with no time limit.
 func TestDeletingAnAccountTakesEverythingKeyedToTheName(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	const name = "alice@corp.example"
@@ -176,6 +179,7 @@ func TestDeletingAnAccountTakesEverythingKeyedToTheName(t *testing.T) {
 // version grants and run allow-list go with it rather than lingering to be inherited by a new OU
 // that happens to reuse the id.
 func TestDeletingAnOUTakesItsGrantsAndViewers(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	root := st.EnsureDefaultGroup()
@@ -210,6 +214,7 @@ func TestDeletingAnOUTakesItsGrantsAndViewers(t *testing.T) {
 // active-run count; and jobs left queued were still dispatched to Dify, and billed, on behalf of an
 // account that no longer exists.
 func TestDeletingAnAccountDoesNotLeaveItsRunsLive(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	const name = "alice@corp.example"
@@ -269,6 +274,7 @@ func TestDeletingAnAccountDoesNotLeaveItsRunsLive(t *testing.T) {
 // outlive the account and be inherited by the next holder of the username. On Postgres the
 // statements could even run on different pooled connections.
 func TestDeletingAnAccountIsAllOrNothing(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	st := s.st
 	const name = "alice@corp.example"

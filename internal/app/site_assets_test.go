@@ -16,6 +16,7 @@ import (
 )
 
 func TestSiteAssetUploadStoresFileAndReturnsPath(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{DBPath: filepath.Join(t.TempDir(), "portal.db")}
 
@@ -49,6 +50,7 @@ func TestSiteAssetUploadStoresFileAndReturnsPath(t *testing.T) {
 }
 
 func TestSiteAssetUploadRejectsDisguisedImage(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{DBPath: filepath.Join(t.TempDir(), "portal.db")}
 
@@ -59,6 +61,7 @@ func TestSiteAssetUploadRejectsDisguisedImage(t *testing.T) {
 }
 
 func TestSiteAssetUploadReplacesPreviousKindFiles(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.cfg = &config.Config{DBPath: filepath.Join(t.TempDir(), "portal.db")}
 

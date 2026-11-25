@@ -13,6 +13,7 @@ import "testing"
 // leaves a well-formed value behind.
 
 func TestTabLabelNamesTheTypeNotTheTitle(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		in   Rep
 		want string
@@ -68,6 +69,7 @@ func TestTabLabelNamesTheTypeNotTheTitle(t *testing.T) {
 }
 
 func TestExportNameKeepsTheTitleItIsNamedFor(t *testing.T) {
+	t.Parallel()
 	// An exported file is named for the report, not for its type: two reports of one type in the
 	// same ZIP are told apart by what they say, and only the running NN_ prefix guarantees
 	// uniqueness. The old 14-rune clamp cut this title one rune short of its version suffix, turning
@@ -79,6 +81,7 @@ func TestExportNameKeepsTheTitleItIsNamedFor(t *testing.T) {
 }
 
 func TestExportNameStaysWithinAFilesystemSafeLength(t *testing.T) {
+	t.Parallel()
 	// The clamp that remains is a filesystem limit, not a display one: a path component must fit in
 	// 255 BYTES on every platform we ship. The cap counts runes, so the binding case is the widest
 	// rune a title can hold, not the common one — a CJK Extension B character (U+20000 and up, used
@@ -108,6 +111,7 @@ func TestExportNameStaysWithinAFilesystemSafeLength(t *testing.T) {
 }
 
 func TestTabsAndExportsAreNamedByDifferentThings(t *testing.T) {
+	t.Parallel()
 	// The whole point of the split. One report, two names: the strip says what KIND of report this
 	// is, the ZIP entry says WHICH report it is. Pointing either call site at the other function
 	// leaves every other test in this package green — day_export's own tests use fixtures whose
@@ -125,6 +129,7 @@ func TestTabsAndExportsAreNamedByDifferentThings(t *testing.T) {
 }
 
 func TestConfiguredTypeLabelKeepsGeneratorVersion(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	if err := st.UpsertTypeConfig("投资决策建议", "投资决策", "决策", 0, false); err != nil {
 		t.Fatalf("save type config: %v", err)

@@ -76,9 +76,11 @@ func testPlatformDisableInvalidatesActiveTask(
 }
 
 func TestPlatformDisableInvalidatesActiveTaskSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformDisableInvalidatesActiveTask(t, false)
 }
 
 func TestPlatformDisableInvalidatesActiveTaskPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformDisableInvalidatesActiveTask(t, true)
 }

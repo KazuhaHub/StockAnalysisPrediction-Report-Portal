@@ -9,6 +9,7 @@ import (
 // A database error while reading the host operation is not evidence about the operation: it must not be typed as the
 // stage-evidence verdict that closes a removal. Only a missing or unsettleable operation is.
 func TestHostOperationReadErrorsAreTypedOnlyWhenTheOperationCannotSettle(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testHostOperationReadErrors)
 }
 
@@ -39,6 +40,7 @@ func testHostOperationReadErrors(t *testing.T, pg bool) {
 // The guard that runs in the signing transaction follows the same rule: a failed read is neither the lease conflict nor
 // the evidence verdict.
 func TestSettlementGuardKeepsATransientReadErrorUntyped(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testSettlementGuardTransient)
 }
 
@@ -63,6 +65,7 @@ func testSettlementGuardTransient(t *testing.T, pg bool) {
 // An open removal whose host operation can no longer settle it is closed abandoned; one that merely could not be
 // read this time stays open and is tried again.
 func TestResolveOpenRemovalAbandonsOnlyOnTypedErrors(t *testing.T) {
+	t.Parallel()
 	eachPlatformDriver(t, testResolveOpenRemovalTyped)
 }
 

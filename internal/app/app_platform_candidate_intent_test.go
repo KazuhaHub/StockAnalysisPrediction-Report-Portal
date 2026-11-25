@@ -18,9 +18,9 @@ import (
 // platformFixtureManifestHook and platformFixtureNetworkTarget let one test change what the shared install
 // fixtures declare (capabilities) and review (a reviewed network target, writable installs only) without a
 // fixture of its own. platformServiceEgressFixture sets and restores them; nothing else may touch them, and
-// tests that set them do not run in parallel.
-var platformFixtureManifestHook func(*appplatform.Manifest)
-var platformFixtureNetworkTarget bool
+// each test sees only its own (testScoped).
+var platformFixtureManifestHook testScoped[func(*appplatform.Manifest)]
+var platformFixtureNetworkTarget testScoped[bool]
 
 func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
 	t.Helper()
@@ -46,8 +46,8 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 		t.Fatal(err)
 	}
 	manifest.ID = p.AppID
-	if platformFixtureManifestHook != nil {
-		platformFixtureManifestHook(&manifest)
+	if platformFixtureManifestHook.get(t) != nil {
+		platformFixtureManifestHook.get(t)(&manifest)
 	}
 	raw, err = json.Marshal(manifest)
 	if err != nil {
@@ -59,14 +59,14 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 	}
 	p.Format, p.ReleaseSHA256 = platformManagedInstallFormat, release.sha256
 	p.Runtime = &platformManagedInstallTarget{RuntimeID: runtime.id, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, BindingRevision: runtime.revision, ControlRevision: runtime.controlRevision, Fingerprint: runtime.fingerprint, Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol, SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: platformFixtureID(999), RootInode: "10"}}
-	if platformFixtureNetworkTarget {
+	if platformFixtureNetworkTarget.get(t) {
 		// Only a writable install carries a network target, so the review is writable from here on.
 		network := platformNetworkTargetFixture(t)
 		p.Format = platformWritableInstallFormat
 		p.Runtime.Profile.WritableSandboxProfile = control.WritableCandidateSandboxProfile
 		p.Runtime.NetworkPolicy, p.Runtime.NetworkProfile = network.NetworkPolicy, network.NetworkProfile
 	}
-	if platformFixtureManifestHook != nil {
+	if platformFixtureManifestHook.get(t) != nil {
 		// The review lists what the declaration leaves ungranted; keep it exact.
 		selection, err := platformInstallCapabilitySelection(manifest, p.Runtime)
 		if err != nil {
@@ -159,8 +159,14 @@ func testPlatformCandidateIntent(t *testing.T, pg bool) {
 		t.Fatal("invalid candidate proof mutated state")
 	}
 }
-func TestPlatformCandidateIntentSQLite(t *testing.T)   { testPlatformCandidateIntent(t, false) }
-func TestPlatformCandidateIntentPostgres(t *testing.T) { testPlatformCandidateIntent(t, true) }
+func TestPlatformCandidateIntentSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformCandidateIntent(t, false)
+}
+func TestPlatformCandidateIntentPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformCandidateIntent(t, true)
+}
 
 func testPlatformCandidateIntentRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"runtime", "key", "sponsor", "pause", "lease", "takeover", "namespace", "data_receipt", "candidate", "effect", "partial"} {
@@ -204,13 +210,16 @@ func testPlatformCandidateIntentRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformCandidateIntentRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformCandidateIntentRefusals(t, false)
 }
 func TestPlatformCandidateIntentRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformCandidateIntentRefusals(t, true)
 }
 
 func TestPlatformCandidateRefusesStaticInstall(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformDataIntentFixture(t, false)
 	endpoint := platformRuntimeEndpoint{}
 	if _, err := s.dispatchPlatformInstallCandidate(context.Background(), lease, endpoint); err == nil {

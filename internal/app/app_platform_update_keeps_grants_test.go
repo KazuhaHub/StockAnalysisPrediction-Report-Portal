@@ -61,12 +61,10 @@ func grantProxyLikeAdministrator(t *testing.T, kept *keptProxyGrant) func(*testi
 
 func useUpdateKeepFixtures(t *testing.T, install, target func(*appplatform.Manifest), after func(*testing.T, *Server, string)) {
 	t.Helper()
-	platformFixtureManifestHook, platformFixtureNetworkTarget = install, true
-	platformUpdateFixtureTargetHook, platformUpdateFixtureAfterInstall = target, after
-	t.Cleanup(func() {
-		platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false
-		platformUpdateFixtureTargetHook, platformUpdateFixtureAfterInstall = nil, nil
-	})
+	platformFixtureManifestHook.set(t, install)
+	platformFixtureNetworkTarget.set(t, true)
+	platformUpdateFixtureTargetHook.set(t, target)
+	platformUpdateFixtureAfterInstall.set(t, after)
 	platformWritableUpdateFixtures(t)
 }
 
@@ -83,6 +81,7 @@ func updateProjectionFor(t *testing.T, f platformManagedUpdateReviewFixture) pla
 }
 
 func TestPlatformUpdateReviewKeepsGrantedOptionalProxySQLite(t *testing.T) {
+	t.Parallel()
 	var kept keptProxyGrant
 	useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
 	f := platformManagedUpdateProjectionFixtureWith(t, false, declareProxyOptional)
@@ -109,6 +108,7 @@ func TestPlatformUpdateReviewKeepsGrantedOptionalProxySQLite(t *testing.T) {
 
 // A network.http policy that differs from the release default is not kept: the review lists it as reset.
 func TestPlatformUpdateReviewListsResetNetworkPolicySQLite(t *testing.T) {
+	t.Parallel()
 	var kept keptProxyGrant
 	useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
 	f := platformManagedUpdateProjectionFixtureWith(t, false, declareProxyOptional)
@@ -125,6 +125,7 @@ func TestPlatformUpdateReviewListsResetNetworkPolicySQLite(t *testing.T) {
 // A carried proxy grant must pass the checks a real approval runs: a pin the runner no longer lists, or a
 // runner that fails, refuses the review instead of carrying the grant.
 func TestPlatformUpdateReviewRefusesProxyThatTheRunnerNoLongerVouchesForSQLite(t *testing.T) {
+	t.Parallel()
 	var kept keptProxyGrant
 	useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
 	f := platformManagedUpdateProjectionFixtureWith(t, false, declareProxyOptional)
@@ -149,6 +150,7 @@ func TestPlatformUpdateReviewRefusesProxyThatTheRunnerNoLongerVouchesForSQLite(t
 }
 
 func TestPlatformUpdateReviewRemovesOptionalProxyTheReleaseDropsSQLite(t *testing.T) {
+	t.Parallel()
 	var kept keptProxyGrant
 	useUpdateKeepFixtures(t, declareProxyOptional, declareNoProxy, grantProxyLikeAdministrator(t, &kept))
 	f := platformManagedUpdateProjectionFixtureWith(t, false, declareNoProxy)
@@ -159,6 +161,7 @@ func TestPlatformUpdateReviewRemovesOptionalProxyTheReleaseDropsSQLite(t *testin
 }
 
 func TestPlatformUpdateReviewDeclinesNewlyDeclaredOptionalSQLite(t *testing.T) {
+	t.Parallel()
 	useUpdateKeepFixtures(t, declareNoProxy, declareNewOptional, nil)
 	f := platformManagedUpdateProjectionFixtureWith(t, false, declareNewOptional)
 	p := updateProjectionFor(t, f)
@@ -168,6 +171,7 @@ func TestPlatformUpdateReviewDeclinesNewlyDeclaredOptionalSQLite(t *testing.T) {
 }
 
 func TestPlatformUpdateKeepsOptionalProxyGrantAcrossActivationSQLite(t *testing.T) {
+	t.Parallel()
 	var kept keptProxyGrant
 	useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))
 	s, lease, intent, endpoint, observation := platformWritableUpdateStartRegistrationCommitFixture(t, false)
@@ -238,6 +242,7 @@ func TestPlatformUpdateKeepsOptionalProxyGrantAcrossActivationSQLite(t *testing.
 // A static app that declares principals.read, with the grant on: every update keeps it, the updated app
 // launches, and the next update (which verifies the previous generation's activation proof) succeeds too.
 func TestPlatformStaticUpdateKeepsPrincipalsReadAcrossTwoUpdatesSQLite(t *testing.T) {
+	t.Parallel()
 	s, admin, reader, id := platformPrincipalsFixtureAdmin(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	for n, version := range []string{"1.0.0-beta.2", "1.0.0-beta.3"} {
@@ -287,6 +292,7 @@ func TestPlatformStaticUpdateKeepsPrincipalsReadAcrossTwoUpdatesSQLite(t *testin
 
 // A decline list may omit only what the update's own plan says it kept; an install plan keeps nothing.
 func TestPlatformDeclinedMatchesRequiresTheKeptListSQLite(t *testing.T) {
+	t.Parallel()
 	s, _, _, id := platformPrincipalsFixtureAdmin(t, false)
 	e := s.st.poolExec()
 	install := []string{"principals.read"}
@@ -310,6 +316,7 @@ func TestPlatformDeclinedMatchesRequiresTheKeptListSQLite(t *testing.T) {
 // The runner check is wired into the scheduler's activation path, and asked before the boot probe so its
 // time cannot use up the freshness window of the boot evidence.
 func TestPlatformActivateUpdateStartChecksTheRunnerBeforeTheBootProbeSQLite(t *testing.T) {
+	t.Parallel()
 	for _, listed := range []bool{false, true} {
 		var kept keptProxyGrant
 		useUpdateKeepFixtures(t, declareProxyOptional, declareProxyOptional, grantProxyLikeAdministrator(t, &kept))

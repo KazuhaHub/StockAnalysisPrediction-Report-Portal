@@ -137,8 +137,11 @@ func testPlatformManagedAccess(t *testing.T, pg bool) {
 		t.Fatal("fresh independent signed reference", err)
 	}
 }
-func TestPlatformManagedAccessSQLite(t *testing.T)   { testPlatformManagedAccess(t, false) }
-func TestPlatformManagedAccessPostgres(t *testing.T) { testPlatformManagedAccess(t, true) }
+func TestPlatformManagedAccessSQLite(t *testing.T) { t.Parallel(); testPlatformManagedAccess(t, false) }
+func TestPlatformManagedAccessPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformManagedAccess(t, true)
+}
 
 func testPlatformManagedAccessRefusals(t *testing.T, pg bool) {
 	for _, mode := range []string{"pending", "candidate", "unfinished", "lease", "fence", "grant", "session", "publisher", "runtime", "policy", "namespace", "effect", "receipt", "plan", "keyring", "seed", "future"} {
@@ -197,8 +200,10 @@ func testPlatformManagedAccessRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformManagedAccessRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedAccessRefusals(t, false)
 }
 func TestPlatformManagedAccessRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformManagedAccessRefusals(t, true)
 }

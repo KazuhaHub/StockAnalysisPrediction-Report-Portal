@@ -219,6 +219,7 @@ const (
 // native acceptance: one request on the broker socket, its status and body
 // printed. In an ordinary run the environment is empty and it does nothing.
 func TestPlatformServiceEgressNativeClientProcess(t *testing.T) {
+	t.Parallel()
 	socket := os.Getenv(platformServiceEgressClientSocket)
 	if socket == "" {
 		return
@@ -621,6 +622,7 @@ func platformServiceEgressEventIDsErr(s *Server) ([]string, error) {
 // parent's run function, a rejected request, a run failure, the parent never
 // answering (a bounded, clear failure), and the end of the loop at EOF.
 func TestPlatformServiceEgressNativeChannelPlumbing(t *testing.T) {
+	t.Parallel()
 	reqR, reqW, _ := os.Pipe()
 	repR, repW, _ := os.Pipe()
 	var seen []platformServiceEgressRequest
@@ -681,6 +683,7 @@ func TestPlatformServiceEgressNativeChannelPlumbing(t *testing.T) {
 // on a unix socket, so the process plumbing, the result parsing and the error
 // code reader are exercised before the acceptance depends on them.
 func TestPlatformServiceEgressNativeClientDryRun(t *testing.T) {
+	t.Parallel()
 	dir, err := os.MkdirTemp("/tmp", "egress-dry-")
 	if err != nil {
 		t.Fatal(err)
@@ -722,6 +725,7 @@ func TestPlatformServiceEgressNativeClientDryRun(t *testing.T) {
 // The restore helper puts back exactly what the egress test changes, leaves what
 // it did not add, is idempotent, and notices a difference it cannot undo.
 func TestPlatformServiceEgressNativeStateRestore(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressFixture(t, false, true)
 	// The unit fixture already grants background.run; take it away so the helper
 	// adds it the way the native fixture needs.

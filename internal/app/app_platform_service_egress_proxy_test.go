@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,19 +13,18 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
-var proxySeedCounter int
+var proxySeedCounter atomic.Int64
 
 // platformServiceEgressProxyFixture is the writable egress fixture whose release also declares network.proxy
 // with the grant off, as after install.
 func platformServiceEgressProxyFixture(t *testing.T, pg bool) (*Server, string) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		m.Capabilities.Required = []string{"background.run", "network.http", "notifications.publish"}
 		m.Capabilities.Optional = []string{"network.proxy"}
 		m.NetworkProxy = &appplatform.NetworkProxy{Hosts: []string{"qt.gtimg.cn"}}
-	}
-	platformFixtureNetworkTarget = true
-	t.Cleanup(func() { platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false })
+	})
+	platformFixtureNetworkTarget.set(t, true)
 	s, _, lease := platformWritableAccessFixture(t, pg)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability<>'network.proxy'`, lease.installationID)
 	return s, lease.installationID
@@ -75,8 +75,7 @@ func platformProxySeedPolicy(t *testing.T, s *Server, installation, policy strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxySeedCounter++
-	id := platformFixtureID(8000 + proxySeedCounter)
+	id := platformFixtureID(8000 + int(proxySeedCounter.Add(1)))
 	now := time.Now().UnixMilli()
 	mustExec(t, s.st, `INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
 		VALUES(?,?,?,?,'update',?,NULL,?,?,?,?,?,NULL,'',0,?,?,?,?,?,?,?)`,
@@ -131,9 +130,11 @@ func testPlatformServiceEgressProxySessionCarriesTheReviewedPolicy(t *testing.T,
 }
 
 func TestPlatformServiceEgressProxySessionCarriesTheReviewedPolicy(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressProxySessionCarriesTheReviewedPolicy(t, false)
 }
 func TestPlatformServiceEgressProxySessionCarriesTheReviewedPolicyPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressProxySessionCarriesTheReviewedPolicy(t, true)
 }
 
@@ -157,10 +158,12 @@ func testPlatformServiceEgressProxyDriftOnPolicyChange(t *testing.T, pg bool) {
 }
 
 func TestPlatformServiceEgressProxyDriftOnPolicyChange(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressProxyDriftOnPolicyChange(t, false)
 }
 
 func TestPlatformServiceEgressProxyGrantNeedsAReviewThatBacksIt(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	// A grant row nobody reviewed is no resource: the session is a plain one.
 	policy, _ := appplatform.CanonicalProxyPolicy(appplatform.ProxyPolicy{Hosts: []string{"qt.gtimg.cn"}, DailyBytes: appplatform.ProxyDailyBytesMax})
@@ -213,6 +216,7 @@ func TestPlatformServiceEgressProxyGrantNeedsAReviewThatBacksIt(t *testing.T) {
 }
 
 func TestPlatformServiceEgressProxyOldRunnerGetsNoProxy(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	platformProxySeedGrant(t, s, installation, []string{"qt.gtimg.cn"}, appplatform.ProxyDailyBytesMax)
 	f := newFakeEgressRunner()
@@ -247,6 +251,7 @@ func TestPlatformServiceEgressProxyOldRunnerGetsNoProxy(t *testing.T) {
 }
 
 func TestPlatformServiceEgressProxyOnlyInstallationWithOldRunnerOpensNothing(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability IN ('network.http','notifications.publish')`, installation)
 	platformProxySeedGrant(t, s, installation, []string{"qt.gtimg.cn"}, appplatform.ProxyDailyBytesMax)
@@ -268,6 +273,7 @@ func TestPlatformServiceEgressProxyOnlyInstallationWithOldRunnerOpensNothing(t *
 }
 
 func TestPlatformServiceEgressProxyReportsBecomeAuditRows(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	platformProxySeedGrant(t, s, installation, []string{"qt.gtimg.cn"}, appplatform.ProxyDailyBytesMax)
 	f := newFakeEgressRunner()
@@ -319,6 +325,7 @@ func TestPlatformServiceEgressProxyReportsBecomeAuditRows(t *testing.T) {
 }
 
 func TestPlatformProxyRefusalLimiter(t *testing.T) {
+	t.Parallel()
 	var l platformProxyRefusalLimiter
 	now := time.Now()
 	a, b := platformFixtureID(1), platformFixtureID(2)
@@ -352,6 +359,7 @@ func TestPlatformProxyRefusalLimiter(t *testing.T) {
 }
 
 func TestPlatformServiceEgressProxyReportsAreIgnoredWithoutTheResource(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressProxyFixture(t, false)
 	f := newFakeEgressRunner()
 	c, _ := newEgressTestCoordinator(t, s, f)

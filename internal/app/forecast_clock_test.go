@@ -15,6 +15,7 @@ import (
 )
 
 func TestForecastDemoClockValidation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, build, raw string
 		present, allowed bool
@@ -114,6 +115,7 @@ func TestForecastDemoReadClockDoesNotDriveReceipt(t *testing.T) {
 
 // Exercise the real linked executable: refusal must precede config generation and every DB write.
 func TestDemoClockRefusedInReleaseBuilds(t *testing.T) {
+	t.Parallel()
 	executable := filepath.Join(t.TempDir(), "portal-release")
 	build := exec.Command("go", "build", "-o", executable, "-ldflags",
 		"-X github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/version.Version=v2026.42", "./cmd/report-portal")

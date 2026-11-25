@@ -76,8 +76,12 @@ func testPlatformRemovalControlStages(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformRemovalControlStages(t *testing.T) { testPlatformRemovalControlStages(t, false) }
+func TestAppPlatformRemovalControlStages(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalControlStages(t, false)
+}
 func TestPostgresAppPlatformRemovalControlStages(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalControlStages(t, true)
 }
 
@@ -101,9 +105,11 @@ func testPlatformRemovalControlActorGone(t *testing.T, postgres bool) {
 }
 
 func TestAppPlatformRemovalControlActorGone(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalControlActorGone(t, false)
 }
 func TestPostgresAppPlatformRemovalControlActorGone(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalControlActorGone(t, true)
 }
 
@@ -144,8 +150,14 @@ func testPlatformRemovalStageGuards(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformRemovalStageGuards(t *testing.T)         { testPlatformRemovalStageGuards(t, false) }
-func TestPostgresAppPlatformRemovalStageGuards(t *testing.T) { testPlatformRemovalStageGuards(t, true) }
+func TestAppPlatformRemovalStageGuards(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalStageGuards(t, false)
+}
+func TestPostgresAppPlatformRemovalStageGuards(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalStageGuards(t, true)
+}
 
 func testPlatformRemovalStageConcurrent(t *testing.T, postgres bool) {
 	s, _, lease := platformRemovalStageFixture(t, postgres, true, appplatform.ActionUninstall)
@@ -170,9 +182,11 @@ func testPlatformRemovalStageConcurrent(t *testing.T, postgres bool) {
 }
 
 func TestAppPlatformRemovalStageConcurrent(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalStageConcurrent(t, false)
 }
 func TestPostgresAppPlatformRemovalStageConcurrent(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalStageConcurrent(t, true)
 }
 
@@ -202,9 +216,11 @@ func testPlatformRemovalStageAuditRollback(t *testing.T, postgres bool) {
 }
 
 func TestAppPlatformRemovalStageAuditRollback(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalStageAuditRollback(t, false)
 }
 func TestPostgresAppPlatformRemovalStageAuditRollback(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalStageAuditRollback(t, true)
 }
 
@@ -235,12 +251,17 @@ func testPlatformRemovalControlNoData(t *testing.T, postgres bool) {
 	}
 }
 
-func TestAppPlatformRemovalControlNoData(t *testing.T) { testPlatformRemovalControlNoData(t, false) }
+func TestAppPlatformRemovalControlNoData(t *testing.T) {
+	t.Parallel()
+	testPlatformRemovalControlNoData(t, false)
+}
 func TestPostgresAppPlatformRemovalControlNoData(t *testing.T) {
+	t.Parallel()
 	testPlatformRemovalControlNoData(t, true)
 }
 
 func TestPostgresAppPlatformRemovalStagePauseWhileWaiting(t *testing.T) {
+	t.Parallel()
 	s, _, lease := platformRemovalStageFixture(t, true, true, appplatform.ActionDisable)
 	holder, err := s.st.db.Begin()
 	if err != nil {

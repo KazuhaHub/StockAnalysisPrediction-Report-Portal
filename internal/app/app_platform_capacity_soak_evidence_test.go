@@ -18,6 +18,7 @@ import (
 )
 
 func TestSoakRecorderWritesEveryUpdateAtomicallyAndKeepsPartialEvidence(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "child-evidence.json")
 	r := newSoakRecorder(path)
 	r.SetBudgets(soakBudgets{MemoryMiB: 3993, CPUMillis: 2000, DiskBytes: 8 << 30, ImageStoreBytes: 10 << 30, RunningBackends: 8})
@@ -45,6 +46,7 @@ func TestSoakRecorderWritesEveryUpdateAtomicallyAndKeepsPartialEvidence(t *testi
 }
 
 func TestSoakRecorderIsSafeForConcurrentWindows(t *testing.T) {
+	t.Parallel()
 	r := newSoakRecorder(filepath.Join(t.TempDir(), "e.json"))
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -61,6 +63,7 @@ func TestSoakRecorderIsSafeForConcurrentWindows(t *testing.T) {
 }
 
 func TestSoakProbeResultPassesOnlyOnTheExpectedCode(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		expected, observed string
 		want               bool
@@ -665,6 +668,7 @@ func (r *soakRecorder) SetLoad(startedMS, finishedMS int64, minutes int) {
 }
 
 func TestSoakUnitLevelProbeIsRecordedWithNoObservationAndTheTestsThatProveIt(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "e.json")
 	r := newSoakRecorder(path)
 	r.AddProbe(soakProbeResult{Name: "task_over_application_quota", Expected: "task_capacity", Level: soakProbeUnit, Tests: []string{"TestTaskQuotasRefuseAtTheirOwnBoundary"},
@@ -693,6 +697,7 @@ func TestSoakUnitLevelProbeIsRecordedWithNoObservationAndTheTestsThatProveIt(t *
 }
 
 func TestSoakNativeProbesAreTheOnlyOnesAnExcessRequestIsJudgedOn(t *testing.T) {
+	t.Parallel()
 	rec := newSoakRecorder(filepath.Join(t.TempDir(), "e.json"))
 	rec.AddProbe(soakProbeResult{Name: "task_over_application_quota", Expected: "task_capacity", Level: soakProbeUnit, Tests: []string{"T"}})
 	rec.AddProbe(soakProbeResult{Name: "ninth_backend", Expected: "x", Observed: "x", Level: soakProbeNative})
@@ -706,6 +711,7 @@ func TestSoakNativeProbesAreTheOnlyOnesAnExcessRequestIsJudgedOn(t *testing.T) {
 }
 
 func TestSoakSessionOutlivesTheRun(t *testing.T) {
+	t.Parallel()
 	// The session of the first smokes lasted an hour; a 120 minute run and its installs and baseline outlast that.
 	for _, tc := range []struct{ minutes, baseline int }{{5, 30}, {120, 180}, {140, 180}} {
 		lifetime := soakSessionLifetime(tc.minutes, tc.baseline)
@@ -720,6 +726,7 @@ func TestSoakSessionOutlivesTheRun(t *testing.T) {
 }
 
 func TestSoakFloodClassNamesStatusAndCode(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		status int
 		body   string
@@ -740,6 +747,7 @@ func TestSoakFloodClassNamesStatusAndCode(t *testing.T) {
 }
 
 func TestSoakFloodWindowIsTheDeltaOfTheCountersWithItsClassesAndLiveness(t *testing.T) {
+	t.Parallel()
 	previous := soakFloodCounters{Requests: 100, Classes: map[string]int64{"200": 10, "429:app_platform_busy": 90}, HeartbeatMS: 1000}
 	current := soakFloodCounters{Requests: 1100, Classes: map[string]int64{"200": 70, "429:app_platform_busy": 1020, "502:x": 10}, HeartbeatMS: 61_000}
 	window := soakFloodWindow(previous, current, true, time.UnixMilli(62_500))
@@ -760,6 +768,7 @@ func TestSoakFloodWindowIsTheDeltaOfTheCountersWithItsClassesAndLiveness(t *test
 }
 
 func TestSoakSamplesAreSpreadEvenlyAcrossTheirWindow(t *testing.T) {
+	t.Parallel()
 	start := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 	times := soakSampleTimes(start, time.Minute, 100)
 	if len(times) != 100 || !times[0].Equal(start) {
@@ -779,6 +788,7 @@ func TestSoakSamplesAreSpreadEvenlyAcrossTheirWindow(t *testing.T) {
 }
 
 func TestSoakProbeEveryNthIterationSpacesTheBatchProbes(t *testing.T) {
+	t.Parallel()
 	// One batch job every few seconds: a probe per minute is a job in the table, and the queue's fair-share reads them all.
 	perMinute := 0
 	for i := 0; i < soakSamplesPerWindow; i++ {
@@ -792,6 +802,7 @@ func TestSoakProbeEveryNthIterationSpacesTheBatchProbes(t *testing.T) {
 }
 
 func TestSoakRunnerServiceOutlastsTheRun(t *testing.T) {
+	t.Parallel()
 	// The runner service is a test process with its own timeout, ten minutes by default; the first smokes with a three
 	// minute baseline found it killed mid-load, and a 120 minute run would have lost it after ten.
 	for _, tc := range []struct{ minutes, baseline int }{{5, 180}, {120, 180}, {140, 180}} {
@@ -807,6 +818,7 @@ func TestSoakRunnerServiceOutlastsTheRun(t *testing.T) {
 }
 
 func TestSoakVariantIsADiagnosticSwitchAndNeverEvidence(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		env                  string
 		memoryDB, batchProbe bool
@@ -829,6 +841,7 @@ func TestSoakVariantIsADiagnosticSwitchAndNeverEvidence(t *testing.T) {
 }
 
 func TestSoakVariantsRemoveTheBackendFloodOrTheTaskWorkerAndKeepTheOtherOnByDefault(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		env                      string
 		backendFlood, taskWorker bool
@@ -841,6 +854,7 @@ func TestSoakVariantsRemoveTheBackendFloodOrTheTaskWorkerAndKeepTheOtherOnByDefa
 }
 
 func TestSoakImageStoreProbeAsksForOneMiBMoreThanTheBudgetSoNoContainerIsEverCreatedFromAFourGiBImage(t *testing.T) {
+	t.Parallel()
 	// The images load before the start is admitted, so a start refused for memory leaves the 4 GiB image loaded, reserved
 	// and unused. Starting a container from it timed out in the daemon on one of three smokes.
 	for _, budget := range []int64{3925, 3995, 4000} {
@@ -860,6 +874,7 @@ func TestSoakImageStoreProbeAsksForOneMiBMoreThanTheBudgetSoNoContainerIsEverCre
 }
 
 func TestSoakDatabaseIsPostgresByDefaultAndSQLiteIsTheNamedVariant(t *testing.T) {
+	t.Parallel()
 	const dsn = "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
 	driver, source, err := soakDatabase("", dsn, "/tmp/child")
 	if err != nil || driver != "postgres" || source != dsn {
@@ -880,6 +895,7 @@ func TestSoakDatabaseIsPostgresByDefaultAndSQLiteIsTheNamedVariant(t *testing.T)
 }
 
 func TestSoakPostgresIsOnlyEverResetOnTheJobsOwnLoopbackService(t *testing.T) {
+	t.Parallel()
 	for _, dsn := range []string{"postgres://portal:portal@localhost:5432/reports_test?sslmode=disable", "postgres://portal@127.0.0.1/x", "postgres://u@[::1]:5432/x"} {
 		if !soakPostgresLocal(dsn) {
 			t.Errorf("%s is the job's own service", dsn)
@@ -893,6 +909,7 @@ func TestSoakPostgresIsOnlyEverResetOnTheJobsOwnLoopbackService(t *testing.T) {
 }
 
 func TestSoakCPUPercentIsEmptyOrAnIntegerFromOneToOneHundred(t *testing.T) {
+	t.Parallel()
 	if got, err := soakParseCPUPercent(""); err != nil || got != nil {
 		t.Fatalf("empty = %v, %v", got, err)
 	}
@@ -910,6 +927,7 @@ func TestSoakCPUPercentIsEmptyOrAnIntegerFromOneToOneHundred(t *testing.T) {
 }
 
 func TestSoakScopeCommandRunsTheProcessInItsOwnSystemSliceScopeAtTheDefaultWeight(t *testing.T) {
+	t.Parallel()
 	got := soakScopeCommand("soak-runner", "", 0, -1, "/t/portal.test", "-test.run=^X$")
 	want := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-runner", "-p", "CPUWeight=100", "--",
 		"/t/portal.test", "-test.run=^X$"}
@@ -934,6 +952,7 @@ func TestSoakScopeCommandRunsTheProcessInItsOwnSystemSliceScopeAtTheDefaultWeigh
 }
 
 func TestSoakReservedCPUsIsEmptyOrASmallNonNegativeInteger(t *testing.T) {
+	t.Parallel()
 	if got, err := soakParseReservedCPUs(""); err != nil || got != nil {
 		t.Fatalf("empty = %v, %v", got, err)
 	}
@@ -951,6 +970,7 @@ func TestSoakReservedCPUsIsEmptyOrASmallNonNegativeInteger(t *testing.T) {
 }
 
 func TestSoakPinnedCPUSetIsTheReservedRange(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		reserved int
 		want     string
@@ -965,6 +985,7 @@ func TestSoakPinnedCPUSetIsTheReservedRange(t *testing.T) {
 }
 
 func TestSoakPlatformCPUWeightIsEmptyOrOneToTenThousand(t *testing.T) {
+	t.Parallel()
 	if got, err := soakParsePlatformWeight(""); err != nil || got != 0 {
 		t.Fatalf("empty = %d, %v", got, err)
 	}
@@ -981,6 +1002,7 @@ func TestSoakPlatformCPUWeightIsEmptyOrOneToTenThousand(t *testing.T) {
 }
 
 func TestSoakRunnerProfileSummaryCountsTheRelayedRequestsOfTheProfiledMinute(t *testing.T) {
+	t.Parallel()
 	before := soakFloodCounters{Requests: 1000, Classes: map[string]int64{"200": 100, "429:app_platform_busy": 900}}
 	after := soakFloodCounters{Requests: 8900, Classes: map[string]int64{"200": 700, "429:app_platform_busy": 8200}}
 	got := soakRunnerProfileSummary(before, after, 60*time.Second)
@@ -993,6 +1015,7 @@ func TestSoakRunnerProfileSummaryCountsTheRelayedRequestsOfTheProfiledMinute(t *
 }
 
 func TestSoakBackendStatusParsesWhatTheFixtureReports(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`{"soak":"status","held_bytes":364904448,"threads":41,"burners":1,"log_bytes":900000,"storage_bytes":268435456,"storage_full":3,"data_present":true,"requests":12,"goroutines":50}`)
 	status := soakParseBackendStatus("installation-1", raw)
 	want := soakBackendStatus{Installation: "installation-1", Answered: true, HeldBytes: 364904448, Threads: 41, Burners: 1, LogBytes: 900000,
@@ -1008,6 +1031,7 @@ func TestSoakBackendStatusParsesWhatTheFixtureReports(t *testing.T) {
 }
 
 func TestSoakRecorderKeepsThePooledLoadedP95OfEveryWindowTogether(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "e.json")
 	r := newSoakRecorder(path)
 	var pooled soakSamples
@@ -1042,6 +1066,7 @@ func TestSoakRecorderKeepsThePooledLoadedP95OfEveryWindowTogether(t *testing.T) 
 }
 
 func TestSoakPortalDescriptionNamesTheDatabaseTheRunUsed(t *testing.T) {
+	t.Parallel()
 	notExercised := func(p soakPortalEvidence) string { return strings.Join(p.NotExercised, "\n") }
 
 	pg := soakPortalOf("postgres", "16.15", false)

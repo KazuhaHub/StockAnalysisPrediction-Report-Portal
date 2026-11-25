@@ -34,6 +34,7 @@ func dispatchLostAndTakeOver(t *testing.T, f *platformImportFixtureState, operat
 }
 
 func TestRestoreImportTakeoverSettlesViaReconcile(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	lease, admitted := dispatchLostAndTakeOver(t, f, commit.OperationID)
@@ -57,6 +58,7 @@ func TestRestoreImportTakeoverSettlesViaReconcile(t *testing.T) {
 }
 
 func TestRestoreImportDefiniteNoRowRevokesGrantAndAllowsRetry(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	lease, _ := dispatchLostAndTakeOver(t, f, commit.OperationID)
@@ -87,6 +89,7 @@ func TestRestoreImportDefiniteNoRowRevokesGrantAndAllowsRetry(t *testing.T) {
 }
 
 func TestRestoreImportUnknownStaysUnknownAndIsReRead(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	lease, _ := dispatchLostAndTakeOver(t, f, commit.OperationID)
@@ -106,6 +109,7 @@ func TestRestoreImportUnknownStaysUnknownAndIsReRead(t *testing.T) {
 
 // One installation is imported at most once per controller epoch, whichever recovery set was used.
 func TestRestoreImportRefusedAfterAnyImportInTheEpoch(t *testing.T) {
+	t.Parallel()
 	t.Run("consumed grant on another recovery set", func(t *testing.T) {
 		f := platformRestoreImportFixture(t, false)
 		mustExec(t, f.s.st, `INSERT INTO app_platform_recovery_sets(id,installation_id,data_namespace_id,operation_id,release_sha256,data_format,checkpoint_id,manifest_sha256,bytes,state,controller_epoch,writer_fence,verified_ms,deleted_ms,created_ms,updated_ms)
@@ -134,6 +138,7 @@ func TestRestoreImportRefusedAfterAnyImportInTheEpoch(t *testing.T) {
 // The runner bounds a bulk data action at two minutes, so the attempt that drives it must outlive that
 // bound, and still end before its lease does.
 func TestRestoreImportAttemptOutlivesTheRunnerBound(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5302), time.Second)
@@ -220,6 +225,7 @@ func TestRestoreImportAttemptThatRunsOutOfTimeIsNotAFailedAttempt(t *testing.T) 
 // A review is refused while the installation holds any live claim on an import: an issued grant on any
 // of its recovery sets, or an import effect the runner has not settled.
 func TestRestoreImportRefusedWhileAnyGrantOrEffectIsLive(t *testing.T) {
+	t.Parallel()
 	t.Run("issued grant on another recovery set", func(t *testing.T) {
 		f := platformRestoreImportFixture(t, false)
 		mustExec(t, f.s.st, `INSERT INTO app_platform_recovery_sets(id,installation_id,data_namespace_id,operation_id,release_sha256,data_format,checkpoint_id,manifest_sha256,bytes,state,controller_epoch,writer_fence,verified_ms,deleted_ms,created_ms,updated_ms)
@@ -252,6 +258,7 @@ func TestRestoreImportRefusedWhileAnyGrantOrEffectIsLive(t *testing.T) {
 // The runner lets a claimed import run past the connection that carried it, up to a bound sized from
 // the archive. The Portal polls by read-receipt, so its polling window must cover the longest bound.
 func TestRestoreImportPollingWindowCoversTheRunnerBound(t *testing.T) {
+	t.Parallel()
 	window := time.Duration(platformBusyWaitLimit) * platformImportAttemptTimeout
 	if bound := journal.ImportCheckpointBound(512 << 20); window < bound {
 		t.Fatalf("the Portal polls for %s but a claimed import may run for %s", window, bound)
@@ -264,6 +271,7 @@ func TestRestoreImportPollingWindowCoversTheRunnerBound(t *testing.T) {
 // An absence is definite only once every command signed for the effect has expired: until then the
 // runner may still claim one that is in flight, so the effect, its grant and the operation are kept.
 func TestRestoreImportAbsenceIsDefiniteOnlyAfterTheSignedIntentExpired(t *testing.T) {
+	t.Parallel()
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	lease, _ := dispatchLostAndTakeOver(t, f, commit.OperationID)

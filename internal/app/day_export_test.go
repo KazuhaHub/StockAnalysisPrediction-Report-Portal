@@ -9,6 +9,7 @@ import (
 // (category order, summary tabs first, then by time) and give each a numbered,
 // unique base name so the ZIP lists them in that order without filename collisions.
 func TestDayExportEntriesOrdersAndNumbers(t *testing.T) {
+	t.Parallel()
 	// Scrambled input; expected reading order is r3, r2, r1, r4.
 	r1 := Rep{Kind: "投资决策", RType: "财务分析", Title: "财务分析", Time: "09:00"}
 	r2 := Rep{Kind: "投资决策", RType: "投资决策建议", Title: "投资决策建议", Time: "08:00"}   // summary (建议)
@@ -39,6 +40,7 @@ func TestDayExportEntriesOrdersAndNumbers(t *testing.T) {
 
 // A running index makes even identical labels produce distinct entries.
 func TestDayExportEntriesUniqueOnDuplicateLabels(t *testing.T) {
+	t.Parallel()
 	dup := Rep{Kind: "重组决策", RType: "交易分析", Title: "交易分析", Time: "01:00"}
 	got := dayExportEntries([]Rep{dup, dup, dup})
 	seen := map[string]bool{}
@@ -54,6 +56,7 @@ func TestDayExportEntriesUniqueOnDuplicateLabels(t *testing.T) {
 }
 
 func TestSanitizeFilename(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		`a/b:c*d`:      "a_b_c_d",
 		`研报/分析`:        "研报_分析",

@@ -67,6 +67,7 @@ func (h migrationHTTP) launch() int {
 // Through the HTTP routes an administrator uses, a roll back is refused until the migration settles, and the
 // application does not launch meanwhile.
 func TestMigrationRollbackRefusedBeforeSettlementHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settleAfterEnd(t, false, orphanedScript)
 	h := newMigrationHTTP(t, f)
@@ -149,6 +150,7 @@ func rollBackFailedOverHTTP(t *testing.T, f *settleFixture, h migrationHTTP, fai
 // C3 -> settle -> roll back, through the HTTP routes: the roll back is offered after settlement, takes its
 // restore on the settlement's evidence, and leaves nothing unresolved.
 func TestMigrationC3RollbackAfterSettlementHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settleOrphaned(t, false)
 	h := newMigrationHTTP(t, f)
@@ -174,6 +176,7 @@ func TestMigrationC3RollbackAfterSettlementHTTP(t *testing.T) {
 // A rolled back installation launches only on the evidence its roll back recorded: a start effect whose payload no
 // longer matches the command rebuilt from the checkpoint is not served.
 func TestMigrationRollbackLaunchRefusesAlteredStartEvidenceHTTP(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := settleOrphaned(t, false)
 	h := newMigrationHTTP(t, f)
@@ -192,6 +195,7 @@ func TestMigrationRollbackLaunchRefusesAlteredStartEvidenceHTTP(t *testing.T) {
 // C7: once the migration has been discarded or has failed, no start can be built on it. The start binds an
 // applied migration receipt, and neither a reverted migration nor an absent one is that.
 func TestMigrationC7StartAfterDiscardRefused(t *testing.T) {
+	t.Parallel()
 	f := settleOrphaned(t, false)
 	var plan platformManagedUpdatePlan
 	raw := scalar[string](t, f.s.st, `SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, f.op)

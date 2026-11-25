@@ -100,8 +100,14 @@ func testPlatformLaunchUserAccess(t *testing.T, pg bool) {
 		t.Fatal("a closed installation stayed launchable")
 	}
 }
-func TestPlatformLaunchUserAccessSQLite(t *testing.T)   { testPlatformLaunchUserAccess(t, false) }
-func TestPlatformLaunchUserAccessPostgres(t *testing.T) { testPlatformLaunchUserAccess(t, true) }
+func TestPlatformLaunchUserAccessSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLaunchUserAccess(t, false)
+}
+func TestPlatformLaunchUserAccessPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformLaunchUserAccess(t, true)
+}
 
 func testPlatformLaunchRefusals(t *testing.T, pg bool) {
 	for _, kind := range []string{"disabled", "pending", "retired", "generation", "policy", "bad_namespace", "retained", "data_format", "expired", "revoked_session", "inactive", "bad_account", "bad_frontend", "bad_descriptor", "publisher_disabled", "publisher_key_revoked", "paused", "epoch", "unfinished_operation", "granted_capability", "zero_writer_fence", "unobserved", "future_observed", "recovery_operation", "pending_effect", "stale_capability_policy", "wrong_app", "account_expired", "session_revision", "missing_control", "invalid_id"} {
@@ -190,8 +196,14 @@ func testPlatformLaunchRefusals(t *testing.T, pg bool) {
 		})
 	}
 }
-func TestPlatformLaunchRefusalsSQLite(t *testing.T)   { testPlatformLaunchRefusals(t, false) }
-func TestPlatformLaunchRefusalsPostgres(t *testing.T) { testPlatformLaunchRefusals(t, true) }
+func TestPlatformLaunchRefusalsSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLaunchRefusals(t, false)
+}
+func TestPlatformLaunchRefusalsPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformLaunchRefusals(t, true)
+}
 
 func testPlatformResolvedRestoreUnblocksLaunchState(t *testing.T, pg bool) {
 	s, restore, _ := platformRestoreStartActivatedFixture(t, pg)
@@ -221,10 +233,12 @@ func testPlatformResolvedRestoreUnblocksLaunchState(t *testing.T, pg bool) {
 }
 
 func TestPlatformResolvedRestoreUnblocksLaunchStateSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformResolvedRestoreUnblocksLaunchState(t, false)
 }
 
 func TestPlatformResolvedRestoreUnblocksLaunchStatePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformResolvedRestoreUnblocksLaunchState(t, true)
 }
 
@@ -304,10 +318,17 @@ func testPlatformLaunchOUAccess(t *testing.T, pg bool) {
 	// Restore topology before lifecycle cleanup.
 	mustExec(t, s.st, `UPDATE user_groups SET parent_id=NULL WHERE id=?`, child)
 }
-func TestPlatformLaunchOUAccessSQLite(t *testing.T)   { testPlatformLaunchOUAccess(t, false) }
-func TestPlatformLaunchOUAccessPostgres(t *testing.T) { testPlatformLaunchOUAccess(t, true) }
+func TestPlatformLaunchOUAccessSQLite(t *testing.T) {
+	t.Parallel()
+	testPlatformLaunchOUAccess(t, false)
+}
+func TestPlatformLaunchOUAccessPostgres(t *testing.T) {
+	t.Parallel()
+	testPlatformLaunchOUAccess(t, true)
+}
 
 func TestPlatformLaunchAdministratorNeedsAudienceGrant(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, reader.username)
 	if result, err := s.inspectPlatformLaunchAccess(reader, id); err == nil || result != (platformLaunchAccess{}) {
@@ -316,6 +337,7 @@ func TestPlatformLaunchAdministratorNeedsAudienceGrant(t *testing.T) {
 }
 
 func TestPlatformLaunchDecimalCounterBinding(t *testing.T) {
+	t.Parallel()
 	s, reader, id := platformLaunchFixture(t, false)
 	platformGrantLaunchUser(t, s, reader, id)
 	const value int64 = 9007199254740993
@@ -329,6 +351,7 @@ func TestPlatformLaunchDecimalCounterBinding(t *testing.T) {
 }
 
 func TestPostgresPlatformLaunchExpiryAfterReleaseWait(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"reader", "signing_key"} {
 		t.Run(kind, func(t *testing.T) {
 			s, reader, id := platformLaunchFixture(t, true)

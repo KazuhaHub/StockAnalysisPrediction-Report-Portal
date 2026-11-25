@@ -106,9 +106,11 @@ func testMigratedStartUsesFencePlus2AndTargetFormat(t *testing.T, pg bool) {
 }
 
 func TestMigratedStartUsesFencePlus2AndTargetFormatSQLite(t *testing.T) {
+	t.Parallel()
 	testMigratedStartUsesFencePlus2AndTargetFormat(t, false)
 }
 func TestMigratedStartUsesFencePlus2AndTargetFormatPostgres(t *testing.T) {
+	t.Parallel()
 	testMigratedStartUsesFencePlus2AndTargetFormat(t, true)
 }
 
@@ -141,9 +143,11 @@ func testMigratedActivationSetsWriterFenceAndFormat(t *testing.T, pg bool) {
 }
 
 func TestMigratedActivationSetsWriterFenceAndFormatSQLite(t *testing.T) {
+	t.Parallel()
 	testMigratedActivationSetsWriterFenceAndFormat(t, false)
 }
 func TestMigratedActivationSetsWriterFenceAndFormatPostgres(t *testing.T) {
+	t.Parallel()
 	testMigratedActivationSetsWriterFenceAndFormat(t, true)
 }
 
@@ -159,8 +163,10 @@ func testMigratedLaunchAfterActivation(t *testing.T, pg bool) {
 }
 
 func TestMigratedLaunchAfterActivationSQLite(t *testing.T) {
+	t.Parallel()
 	testMigratedLaunchAfterActivation(t, false)
 }
 func TestMigratedLaunchAfterActivationPostgres(t *testing.T) {
+	t.Parallel()
 	testMigratedLaunchAfterActivation(t, true)
 }

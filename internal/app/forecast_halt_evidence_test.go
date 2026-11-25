@@ -45,6 +45,7 @@ func insertCapturedForecast(t *testing.T, s *Server, symbol, price string, recei
 // Current, independently announced suspensions: neither body prints a candle during its halt.
 // A short halt must resolve on current vendor evidence, not pretend three sessions have elapsed.
 func TestCapturedShortHaltNeedsCurrentEvidence(t *testing.T) {
+	t.Parallel()
 	stock, index := capturedHaltBody(t, "sh601326"), capturedHaltBody(t, "sh000852")
 	now := shanghai(2026, time.October, 22, 17, 0)
 	sessions := completedSessions(forecastSeries{Bars: index.Bars}, now)
@@ -136,6 +137,7 @@ func TestCapturedHaltOnS0SettlesThroughEvaluator(t *testing.T) {
 }
 
 func TestCapturedDelistedSnapshotCannotBecomeABaseline(t *testing.T) {
+	t.Parallel()
 	now := shanghai(2026, time.October, 22, 17, 0)
 	load := func(suffix string) *QuoteResp {
 		t.Helper()

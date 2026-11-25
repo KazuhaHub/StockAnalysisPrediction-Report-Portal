@@ -44,6 +44,7 @@ func postFrom(h http.HandlerFunc, path, body, ip string) *httptest.ResponseRecor
 // A security log that records only successes answers half the question. This is the half that was
 // missing entirely: nothing anywhere recorded a failed sign-in.
 func TestFailedAndSuccessfulSignInsAreBothRecorded(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 
 	bad := postFrom(s.apiLogin, "/api/login", `{"username":"kazuha","password":"wrong"}`, "203.0.113.9")
@@ -83,6 +84,7 @@ func TestFailedAndSuccessfulSignInsAreBothRecorded(t *testing.T) {
 }
 
 func TestAuthenticationAuditCapturesClientDetailsWithoutMutatingCallerDetail(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	detail := map[string]any{"method": "password"}
 	req := httptest.NewRequest(http.MethodPost, "/api/login", nil)
@@ -119,6 +121,7 @@ func TestAuthenticationAuditCapturesClientDetailsWithoutMutatingCallerDetail(t *
 // hide exactly the enumeration sweep the log exists to reveal, and the row is not an oracle: it is
 // only visible to an admin who can already list the accounts.
 func TestFailedSignInForAnUnknownNameIsRecorded(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	postFrom(s.apiLogin, "/api/login", `{"username":"nobody","password":"x"}`, "203.0.113.9")
 	rows := auditRows(t, s, AuditLoginFailed)
@@ -133,6 +136,7 @@ func TestFailedSignInForAnUnknownNameIsRecorded(t *testing.T) {
 // The IP is an equality dimension, not a substring: "which host tried nine accounts" is the query
 // that turns a pile of failures into one incident.
 func TestAuditFiltersByIP(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	for _, n := range []string{"a", "b", "c"} {
 		postFrom(s.apiLogin, "/api/login", `{"username":"`+n+`","password":"x"}`, "203.0.113.9")
@@ -153,6 +157,7 @@ func TestAuditFiltersByIP(t *testing.T) {
 // Signing out is the other end of a session, and "when did this session end" is part of the same
 // question as "when did it start".
 func TestSignOutIsRecorded(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/logout", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: s.signUserFor(*s.st.GetUser("kazuha"), 0)})
@@ -165,6 +170,7 @@ func TestSignOutIsRecorded(t *testing.T) {
 // An admin changing somebody else's password is user.change, not auth.password_change: the actor
 // and the subject are different people, and the account's timeline has to show both.
 func TestPasswordChangesRecordWhoChangedWhose(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 
@@ -193,6 +199,7 @@ func TestPasswordChangesRecordWhoChangedWhose(t *testing.T) {
 // not only through the store. This is the shape of defect e2e_check.py exists for: correct in the
 // store, unreachable from the page.
 func TestAuditEndpointFiltersByIP(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 	postFrom(s.apiLogin, "/api/login", `{"username":"a","password":"x"}`, "203.0.113.9")
@@ -232,6 +239,7 @@ func TestAuditEndpointFiltersByIP(t *testing.T) {
 // only ever return nothing, which reads as "this never happens" rather than "this is not recorded".
 // A constant nobody writes is worse than a missing one.
 func TestEveryDeclaredActionIsEmittedSomewhere(t *testing.T) {
+	t.Parallel()
 	dir := "."
 	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
@@ -274,6 +282,7 @@ func TestEveryDeclaredActionIsEmittedSomewhere(t *testing.T) {
 // it wrong has no way to find out. The status was written and then reachable from nowhere, which
 // is the same defect as a declared action nobody emits.
 func TestAuditResponseSaysWhetherAnIPDatabaseIsLoaded(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 
@@ -307,6 +316,7 @@ func TestAuditResponseSaysWhetherAnIPDatabaseIsLoaded(t *testing.T) {
 // document the vocabulary. Actions present in the data still appear, so rows written by an older
 // build keep filtering even for actions this build no longer writes.
 func TestActionFilterOffersTheWholeVocabularyNotJustWhatHappened(t *testing.T) {
+	t.Parallel()
 	s := auditServer(t)
 	s.st.UpsertUser(User{Username: "admin", PasswordHash: mustHash("admin-password-here"), Role: "admin"})
 	// One row, of one action — the state a freshly upgraded portal is in.
@@ -345,6 +355,7 @@ func TestActionFilterOffersTheWholeVocabularyNotJustWhatHappened(t *testing.T) {
 // would be written and then not offered as a filter — invisible in the console for as long as
 // nobody noticed.
 func TestVocabularyCoversEveryDeclaredAction(t *testing.T) {
+	t.Parallel()
 	decls, err := os.ReadFile("audit.go")
 	if err != nil {
 		t.Fatal(err)

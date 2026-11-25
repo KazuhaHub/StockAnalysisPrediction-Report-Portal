@@ -16,6 +16,7 @@ import (
 // An ABSENT symbol still means "any": that is how thematic reports (which have no code) are
 // legitimately queried, so the two cases must stay distinguishable.
 func TestQueryReportsRejectsBlankSymbol(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	s.st.CreateToken("tok-query", "dify-query", "query", "")
 	if _, _, err := s.st.UpsertReport(Rep{Symbol: "688116", Title: "688116 股权分析", RType: "股权分析", Date: "2026-07-16", MD: "other company"}); err != nil {

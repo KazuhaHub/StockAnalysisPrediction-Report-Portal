@@ -23,6 +23,7 @@ import (
 // scopes an admin is asked to approve) must be what the bundle's manifest declares. The bundle
 // is rebuilt by hand (apps/README.md), so it must also still be exactly apps/<id>/.
 func TestPublishedAppMarketMatchesItsBundles(t *testing.T) {
+	t.Parallel()
 	const appsDir = "../../apps"
 	raw, err := os.ReadFile(filepath.Join(appsDir, "index.json"))
 	if err != nil {

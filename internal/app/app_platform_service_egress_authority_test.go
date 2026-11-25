@@ -19,7 +19,7 @@ import (
 // otherwise it is the generation-1 managed install, which does not (doc 174 F13).
 func platformServiceEgressFixture(t *testing.T, pg, writable bool) (*Server, string) {
 	t.Helper()
-	platformFixtureManifestHook = func(m *appplatform.Manifest) {
+	platformFixtureManifestHook.set(t, func(m *appplatform.Manifest) {
 		if writable {
 			m.Capabilities.Required = []string{"background.run", "network.http", "notifications.publish"}
 			m.Capabilities.Optional = nil
@@ -29,9 +29,8 @@ func platformServiceEgressFixture(t *testing.T, pg, writable bool) (*Server, str
 		// optional and ungranted.
 		m.Capabilities.Required = []string{"background.run", "notifications.publish"}
 		m.Capabilities.Optional = []string{"network.http"}
-	}
-	platformFixtureNetworkTarget = writable
-	t.Cleanup(func() { platformFixtureManifestHook, platformFixtureNetworkTarget = nil, false })
+	})
+	platformFixtureNetworkTarget.set(t, writable)
 	var s *Server
 	var lease platformOperationLease
 	if writable {
@@ -268,6 +267,7 @@ func testPlatformServiceEgressManagedInitialInstallHasNoNetwork(t *testing.T, pg
 // Two of them must not serialise: one that is held open (before its commit)
 // does not stop another from loading, so a slow load never queues the rest.
 func TestPlatformServiceEgressConcurrentLoadsDoNotSerializePostgres(t *testing.T) {
+	t.Parallel()
 	s, installation := platformServiceEgressFixture(t, true, true)
 	state := platformServiceEgressState(t, s, installation, "network.http", "notifications.publish")
 	held, release := make(chan struct{}), make(chan struct{})
@@ -340,44 +340,58 @@ func testPlatformServiceEgressNotificationOnlyFallbackIsScoped(t *testing.T, pg 
 }
 
 func TestPlatformServiceEgressNotificationOnlyFallbackIsScopedSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressNotificationOnlyFallbackIsScoped(t, false)
 }
 func TestPlatformServiceEgressNotificationOnlyFallbackIsScopedPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressNotificationOnlyFallbackIsScoped(t, true)
 }
 func TestPlatformServiceEgressRequiresBackgroundAndNetworkGrantSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressRequiresBackgroundAndNetworkGrant(t, false)
 }
 func TestPlatformServiceEgressRequiresBackgroundAndNetworkGrantPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressRequiresBackgroundAndNetworkGrant(t, true)
 }
 func TestPlatformServiceEgressRefusesAfterRevokeDisableUninstallEpochRestoreSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressRefusesAfterRevokeDisableUninstallEpochRestore(t, false)
 }
 func TestPlatformServiceEgressRefusesAfterRevokeDisableUninstallEpochRestorePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressRefusesAfterRevokeDisableUninstallEpochRestore(t, true)
 }
 func TestPlatformServiceEgressFenceDriftRefusesSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressFenceDriftRefuses(t, false)
 }
 func TestPlatformServiceEgressFenceDriftRefusesPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressFenceDriftRefuses(t, true)
 }
 func TestPlatformServiceEgressActorScopeIsServiceNotViewerSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressActorScopeIsServiceNotViewer(t, false)
 }
 func TestPlatformServiceEgressActorScopeIsServiceNotViewerPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressActorScopeIsServiceNotViewer(t, true)
 }
 func TestPlatformServiceEgressRefusesAdmitWhenAssertionNearExpirySQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressRefusesAdmitWhenAssertionNearExpiry(t, false)
 }
 func TestPlatformServiceEgressRefusesAdmitWhenAssertionNearExpiryPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressRefusesAdmitWhenAssertionNearExpiry(t, true)
 }
 func TestPlatformServiceEgressManagedInitialInstallHasNoNetworkSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressManagedInitialInstallHasNoNetwork(t, false)
 }
 func TestPlatformServiceEgressManagedInitialInstallHasNoNetworkPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressManagedInitialInstallHasNoNetwork(t, true)
 }

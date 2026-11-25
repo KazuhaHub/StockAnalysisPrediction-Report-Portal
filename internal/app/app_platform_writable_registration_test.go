@@ -126,9 +126,11 @@ func testPlatformWritableRegistrationIntent(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableRegistrationIntentSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableRegistrationIntent(t, false)
 }
 func TestPlatformWritableRegistrationIntentPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableRegistrationIntent(t, true)
 }
 
@@ -202,13 +204,16 @@ func testPlatformWritableRegistrationRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformWritableRegistrationRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableRegistrationRefusals(t, false)
 }
 func TestPlatformWritableRegistrationRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformWritableRegistrationRefusals(t, true)
 }
 
 func TestPlatformWritableRegistrationFreshness(t *testing.T) {
+	t.Parallel()
 	var i platformWritableStartIntent
 	i.writer.activationObserved = sql.NullInt64{Int64: 10000, Valid: true}
 	if !freshPlatformWritableRegistrationSourceAt(i, 10000) || !freshPlatformWritableRegistrationSourceAt(i, 13000) || freshPlatformWritableRegistrationSourceAt(i, 13001) || freshPlatformWritableRegistrationSourceAt(i, 9999) {

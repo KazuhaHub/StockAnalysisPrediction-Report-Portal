@@ -18,6 +18,7 @@ import (
 // signed cookie can name, and costs no schema change.
 
 func TestASessionDiesWithTheAccountNotTheName(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 
@@ -46,6 +47,7 @@ func TestASessionDiesWithTheAccountNotTheName(t *testing.T) {
 
 // A profile save must not log anyone out: created_at is stamped on INSERT only.
 func TestAnUpsertOfALiveAccountKeepsItsSessions(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
 	before := s.st.GetUser("alice").CreatedAt
@@ -61,6 +63,7 @@ func TestAnUpsertOfALiveAccountKeepsItsSessions(t *testing.T) {
 // An account that predates the stamping keeps its sessions, so upgrading does not sign the world
 // out. It gains the protection the moment it is recreated, which is the case that matters.
 func TestSessionsPredatingTheStampStillWork(t *testing.T) {
+	t.Parallel()
 	s := tenancyServer(t)
 	s.st.UpsertUser(User{Username: "old", PasswordHash: "h", Role: "user"})
 	s.st.exec("UPDATE users SET created_at='' WHERE username=?", "old")

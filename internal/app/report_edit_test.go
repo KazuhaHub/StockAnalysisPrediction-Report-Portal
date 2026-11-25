@@ -86,6 +86,7 @@ const manualForm = `{"symbol":"600519","date":"2026-09-02","subtype":"深度分�
 // The reason the manual version exists. An author writes a report; the workflow that was supposed
 // to produce it catches up and pushes its own — and must not land on the author's row.
 func TestWorkflowIngestCannotOverwriteAHandWrittenReport(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 
@@ -109,6 +110,7 @@ func TestWorkflowIngestCannotOverwriteAHandWrittenReport(t *testing.T) {
 // ...and it is a mechanism, not a convention: an ingest that NAMES the manual version is refused,
 // rather than being allowed to write the one place a person's words are supposed to be safe.
 func TestIngestRefusesTheManualVersion(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	for _, name := range []string{"manual", "  manual  "} {
 		body := fmt.Sprintf(`{"symbol":"600519","date":"2026-09-02","subtype":"深度分析",
@@ -130,6 +132,7 @@ func TestIngestRefusesTheManualVersion(t *testing.T) {
 // Editing a machine report never modifies it: the editor form seeds a NEW hand-written report from
 // its text, and the record of the run keeps saying what the run said.
 func TestEditingAMachineReportLeavesItAlone(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	machineID, _, _ := s.st.UpsertReport(Rep{
 		Symbol: "600519", Date: "2026-09-02", RType: "深度分析", Title: "工作流产出",
@@ -175,6 +178,7 @@ func TestEditingAMachineReportLeavesItAlone(t *testing.T) {
 // Retitling has to MOVE the row. The identity index includes the title, so writing the edit through
 // the upsert path would insert a second row and leave the original behind, in every list, forever.
 func TestRetitlingAHandWrittenReportMovesItRatherThanCopyingIt(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	before, _ := s.st.GetNew(id, nil)
@@ -197,6 +201,7 @@ func TestRetitlingAHandWrittenReportMovesItRatherThanCopyingIt(t *testing.T) {
 // sent_at is the concurrency token, so a save computed against a stale one must change nothing —
 // two editors on one report otherwise means the second silently discards the first's words.
 func TestASaveAgainstAStaleReportIsRefused(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	loaded, _ := s.st.GetNew(id, nil)
@@ -222,6 +227,7 @@ func TestASaveAgainstAStaleReportIsRefused(t *testing.T) {
 // token and neither is detected as stale. This is the assertion that manualInstant's precision is
 // load-bearing rather than incidental.
 func TestTheConcurrencyTokenDistinguishesSavesWithinOneSecond(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	first, _ := s.st.GetNew(id, nil)
@@ -241,6 +247,7 @@ func TestTheConcurrencyTokenDistinguishesSavesWithinOneSecond(t *testing.T) {
 // A hand-written report cannot take an identity another one already holds, and the refusal names
 // the occupant: the author almost always wants to open that one rather than invent a title.
 func TestACollisionNamesTheReportItCollidedWith(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	first := mustCreateManual(t, s, manualForm)
 	rec := editorCall(t, s, http.MethodPost, "", manualForm)
@@ -262,6 +269,7 @@ func TestACollisionNamesTheReportItCollidedWith(t *testing.T) {
 // ---------- what the editor may not touch ----------
 
 func TestTheEditorCannotWriteOrDeleteAMachineReport(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	machineID, _, _ := s.st.UpsertReport(Rep{
 		Symbol: "600519", Date: "2026-09-02", RType: "深度分析", Title: "工作流产出", MD: "机器正文"})
@@ -282,6 +290,7 @@ func TestTheEditorCannotWriteOrDeleteAMachineReport(t *testing.T) {
 // The store refuses it too, not only the handler: the handler's check tells the editor what is
 // wrong, the UPDATE's own `AND version=?` is what makes it true regardless of the caller.
 func TestTheStoreRefusesToUpdateANonManualRow(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	machineID, _, _ := s.st.UpsertReport(Rep{
 		Symbol: "600519", Date: "2026-09-02", RType: "深度分析", Title: "t", MD: "机器正文"})
@@ -296,6 +305,7 @@ func TestTheStoreRefusesToUpdateANonManualRow(t *testing.T) {
 }
 
 func TestDeletingAHandWrittenReportTakesItsAudienceWithIt(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	id := mustCreateManual(t, s, manualForm)
 	if len(s.st.ReportViewers(id)) == 0 {
@@ -317,6 +327,7 @@ func TestDeletingAHandWrittenReportTakesItsAudienceWithIt(t *testing.T) {
 // ---------- validation ----------
 
 func TestTheEditorRefusesFormsItCannotPublish(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	for name, body := range map[string]string{
 		"no subject": `{"date":"2026-09-02","subtype":"深度分析","body_md":"x","audience":"all"}`,
@@ -348,6 +359,7 @@ func TestTheEditorRefusesFormsItCannotPublish(t *testing.T) {
 // The version grant decides who may read hand-written reports at all; the per-report audience
 // decides which ones. A reader needs both.
 func TestBothGatesAreNeededToReadAHandWrittenReport(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	root := s.st.EnsureDefaultGroup()
 	ouA, _ := s.st.CreateUserGroup("ext-A", "", 0)
@@ -390,6 +402,7 @@ func TestBothGatesAreNeededToReadAHandWrittenReport(t *testing.T) {
 // "所有人" is stored as the Default OU principal — every account's chain ends there — so it needs no
 // column of its own, and reads back as "all" rather than as a group somebody has to recognise.
 func TestEveryoneIsStoredAsThePrincipalEveryReaderAlreadyHas(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	root := s.st.EnsureDefaultGroup()
 	ou, _ := s.st.CreateUserGroup("ext", "", 0)
@@ -420,6 +433,7 @@ func TestEveryoneIsStoredAsThePrincipalEveryReaderAlreadyHas(t *testing.T) {
 // as well as by report — a row left on the old date matches nothing and the report silently becomes
 // readable by no one it was addressed to.
 func TestChangingTheDateCarriesTheAudienceAlong(t *testing.T) {
+	t.Parallel()
 	s := editorFixture(t)
 	root := s.st.EnsureDefaultGroup()
 	ou, _ := s.st.CreateUserGroup("ext", "", 0)
@@ -446,6 +460,7 @@ func TestChangingTheDateCarriesTheAudienceAlong(t *testing.T) {
 // ---------- the permission itself ----------
 
 func TestOnlyTheEditingPermissionOpensTheseEndpoints(t *testing.T) {
+	t.Parallel()
 	for role, want := range map[string]bool{
 		"admin": true, "editor": true, "operator": false, "user": false,
 	} {
@@ -467,6 +482,7 @@ func TestOnlyTheEditingPermissionOpensTheseEndpoints(t *testing.T) {
 // one that makes the per-report audience mean anything: under VisibilityAll the audience list is
 // never consulted and every granted reader sees every hand-written report.
 func TestTheManualVersionIsSeededAsTheAudienceMechanismNeeds(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	v, ok := st.Version(st.ManualVersion())
 	if !ok {

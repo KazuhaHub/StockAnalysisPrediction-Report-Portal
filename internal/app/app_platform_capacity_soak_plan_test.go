@@ -20,6 +20,7 @@ import (
 // app_platform_capacity_soak_native_linux_test.go; these tests run in the ordinary suite.
 
 func TestSoakSizingFitsEightBackendsAndLeavesRoomForAMinimumNinth(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                      string
 		memory, cpu               int64
@@ -52,6 +53,7 @@ func TestSoakSizingFitsEightBackendsAndLeavesRoomForAMinimumNinth(t *testing.T) 
 }
 
 func TestSoakSizingRefusesHostsItCannotSize(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		memory, cpu int64
@@ -72,6 +74,7 @@ func TestSoakSizingRefusesHostsItCannotSize(t *testing.T) {
 }
 
 func TestSoakExcessProbesNameTheDimensionEachMustBeRefusedWith(t *testing.T) {
+	t.Parallel()
 	s, err := soakBackendSizing(3993, 2000, soakBackends)
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +105,7 @@ func TestSoakExcessProbesNameTheDimensionEachMustBeRefusedWith(t *testing.T) {
 }
 
 func TestSoakTaskFloodPlanReachesTheGlobalQuotaBeforeEveryInstallationIsFull(t *testing.T) {
+	t.Parallel()
 	plan := soakTaskFloodPlan(50)
 	if plan.PerInstallation != appplatform.MaxInstallationActiveTasks || plan.Global != appplatform.MaxGlobalActiveTasks {
 		t.Fatalf("plan = %+v", plan)
@@ -121,6 +125,7 @@ func TestSoakTaskFloodPlanReachesTheGlobalQuotaBeforeEveryInstallationIsFull(t *
 }
 
 func TestSoakSummarizeUsesTheNearestRankP95(t *testing.T) {
+	t.Parallel()
 	var samples []time.Duration
 	for i := 1; i <= 100; i++ {
 		samples = append(samples, time.Duration(i)*time.Millisecond)
@@ -239,6 +244,7 @@ func soakSummarize(samples []time.Duration) soakStats {
 // prove the refusal at the production cap without writing a byte, and the soak repeats the sum probe against
 // the real store in the Portal child.
 func TestStagingCapIsTwoGiBAndRefusesTheOneThatDoesNotFit(t *testing.T) {
+	t.Parallel()
 	s, _ := platformTrustTestServer(t, false)
 	s.platformImageDir = t.TempDir()
 	store, err := s.platformImages()
@@ -267,6 +273,7 @@ func TestStagingCapIsTwoGiBAndRefusesTheOneThatDoesNotFit(t *testing.T) {
 }
 
 func TestStagingCapCountsPackagesInFlightTogether(t *testing.T) {
+	t.Parallel()
 	s, _ := platformTrustTestServer(t, false)
 	s.platformImageDir = t.TempDir()
 	store, err := s.platformImages()
@@ -300,6 +307,7 @@ func TestStagingCapCountsPackagesInFlightTogether(t *testing.T) {
 
 // Each task quota refuses at exactly its boundary and independently of the other two.
 func TestTaskQuotasRefuseAtTheirOwnBoundary(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		quota appplatform.TaskQuota
@@ -349,6 +357,7 @@ func soakQueuedItems(s *Server, limit int) []queue.Item {
 }
 
 func TestSoakQueuedItemsLimitedToTheWholeBacklogIsTheQueuesOwnDecision(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	target := seedTarget(t, st)
@@ -377,6 +386,7 @@ func TestSoakQueuedItemsLimitedToTheWholeBacklogIsTheQueuesOwnDecision(t *testin
 }
 
 func TestSoakDispatchBacklogs(t *testing.T) {
+	t.Parallel()
 	if soakQueueBacklog != 200 || soakQueueBacklogShallow != 50 {
 		t.Fatalf("backlogs = %d and %d", soakQueueBacklog, soakQueueBacklogShallow)
 	}

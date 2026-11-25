@@ -20,6 +20,7 @@ import (
 // hollow: replacing its body with `return nil` broke nothing. It matters most on the Sina path,
 // where Change is multiplied by 10,000 to derive a percentage — a multiply that wraps.
 func TestQuoteSnapshotPriceCeilingCoversEveryFieldTheIdentityDoesNot(t *testing.T) {
+	t.Parallel()
 	// last and prevClose are deliberately sane: they are the pair quoteCheckIdentity already bounds,
 	// so a test that moved them would pass with this function deleted.
 	for _, tc := range []struct {
@@ -49,6 +50,7 @@ func TestQuoteSnapshotPriceCeilingCoversEveryFieldTheIdentityDoesNot(t *testing.
 // End to end, through the real parser: an open past the ceiling must fail the response even though
 // last, prevClose and the percentage all agree with each other perfectly.
 func TestQuoteCeilingFailsAResponseWhoseIdentityIsPerfect(t *testing.T) {
+	t.Parallel()
 	doc := tencentDoc(t, fixTencentSH)
 	arr := tencentQtArray(t, doc, "sh601899")
 	arr[5] = "99999999999999.99" // 今开, far past the ceiling; last/prevClose/pct untouched
@@ -63,6 +65,7 @@ func TestQuoteCeilingFailsAResponseWhoseIdentityIsPerfect(t *testing.T) {
 // by 10^6 wraps int64, which is the bug the ceiling exists to close; too low and it refuses real
 // quotes. Shrinking it by three orders of magnitude — the reviewer's mutation — must fail here.
 func TestQuotePriceCeilingIsBoundedOnBothSides(t *testing.T) {
+	t.Parallel()
 	// Upper: every multiply the package performs on a bounded price must stay inside int64.
 	for _, factor := range []int64{1_000_000, 10_000} { // the identity, and Sina's percentage
 		if quotePriceCeiling > math.MaxInt64/factor {
@@ -102,6 +105,7 @@ func TestQuotePriceCeilingIsBoundedOnBothSides(t *testing.T) {
 // comparisons for exactly this reason; turning either into its non-strict form reports the most
 // newsworthy day a stock can have as a source failure. Nothing pinned that until now.
 func TestQuoteChecksAcceptALockedLimitDay(t *testing.T) {
+	t.Parallel()
 	locked := QuoteSnapshot{Last: 3664, PrevClose: 3331, Open: 3664, High: 3664, Low: 3664, Change: 333}
 	if err := quoteCheckRange(&locked); err != nil {
 		t.Errorf("quoteCheckRange refused a locked limit-up day: %v", err)
@@ -129,6 +133,7 @@ func TestQuoteChecksAcceptALockedLimitDay(t *testing.T) {
 // Amount was the one money field with no guard, and the strip that renders it groups digits off the
 // absolute value — so a negative reached a reader as a plausible positive.
 func TestQuoteTurnoverIsNeverNegative(t *testing.T) {
+	t.Parallel()
 	t.Run("tencent", func(t *testing.T) {
 		doc := tencentDoc(t, fixTencentSH)
 		arr := tencentQtArray(t, doc, "sh601899")
@@ -158,6 +163,7 @@ func TestQuoteTurnoverIsNeverNegative(t *testing.T) {
 // The replacement deadline is therefore the entire safety story, and replacing WithTimeout with
 // WithCancel left the suite green.
 func TestQuoteUpstreamLoadCarriesItsOwnDeadline(t *testing.T) {
+	t.Parallel()
 	var deadline time.Time
 	var hadDeadline bool
 	c := &quoteCache{sources: []quoteSource{{
@@ -186,6 +192,7 @@ func TestQuoteUpstreamLoadCarriesItsOwnDeadline(t *testing.T) {
 // The leader's own handler is NOT released by its client hanging up — it is released by the deadline
 // above. This pins the sentence in quote_cache.go that used to claim the opposite.
 func TestQuoteAbandonedLeaderIsReleasedByTheDeadlineNotTheClient(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	started := make(chan struct{})
 	c := &quoteCache{sources: []quoteSource{{

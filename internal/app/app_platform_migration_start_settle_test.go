@@ -64,6 +64,7 @@ func makeStartWindowPassed(t *testing.T, f *settleFixture) {
 }
 
 func TestSettlementReadsAPreparedStartAndNeverSendsIt(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, false)
 	reads, sends := 0, 0
 	f.s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
@@ -100,6 +101,7 @@ func TestSettlementReadsAPreparedStartAndNeverSendsIt(t *testing.T) {
 }
 
 func TestSettlementAppliedStartTakesTheRemoveTargetPath(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, true)
 	f.s.platformReadStartReceipt = func(_ context.Context, endpoint platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		if i.reservation == nil {
@@ -116,6 +118,7 @@ func TestSettlementAppliedStartTakesTheRemoveTargetPath(t *testing.T) {
 }
 
 func TestSettlementAbsentStartWithAReservationIsNotReverted(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, true)
 	f.s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		return nil, errPlatformStartAbsent
@@ -130,6 +133,7 @@ func TestSettlementAbsentStartWithAReservationIsNotReverted(t *testing.T) {
 }
 
 func TestSettlementStartReadAnswerMustBeTheStartsOwn(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, true)
 	f.s.platformReadStartReceipt = func(_ context.Context, endpoint platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		o := platformUpdateStartRunningFixture(i, *i.reservation, f.endpoint)
@@ -191,7 +195,7 @@ func (h *heldStartRunner) retryLaunches(t *testing.T) {
 	f := h.f
 	f.fake.calls = nil
 	hh := newMigrationHTTP(t, f)
-	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.get(t).target.Profile)
 	if hh.launch() == 200 {
 		t.Fatal("an application launched while its failed update was unresolved")
 	}
@@ -219,6 +223,7 @@ func (h *heldStartRunner) settle(t *testing.T, ticks int) {
 // Reserved: the runner holds a pending target and no claim was ever made. Once the removal stopped it the runner
 // reads the start as never run, which does not end the removal: the target is still to be removed.
 func TestSettlementOfAReservedStartThatNeverRanEndsSettledAndALaunchingRetry(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -243,6 +248,7 @@ func TestSettlementOfAReservedStartThatNeverRanEndsSettledAndALaunchingRetry(t *
 // Orphaned and nothing exists: the runner settles the start as not run. Nothing is removed, the checkpoint is
 // restored, and a retry runs to a launching application.
 func TestSettlementOfAnOrphanedStartWithNoContainerGoesThroughTheRunnersSettlement(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -266,6 +272,7 @@ func TestSettlementOfAnOrphanedStartWithNoContainerGoesThroughTheRunnersSettleme
 // Orphaned and a container exists: the runner settles the start as applied, the read then shows its running receipt,
 // and the ordinary removal, bound to that receipt, takes the target away before the checkpoint is restored.
 func TestSettlementOfAnOrphanedStartWithAContainerRemovesItLikeARunningTarget(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -289,6 +296,7 @@ func TestSettlementOfAnOrphanedStartWithAContainerRemovesItLikeARunningTarget(t 
 // The start gets its running receipt after the reserved removal began being recorded: the next read shows it, and
 // settlement goes the ordinary way instead of removing a reservation that is no longer one.
 func TestSettlementFollowsAStartThatBecameRunningAfterItWasHeld(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -312,6 +320,7 @@ func TestSettlementFollowsAStartThatBecameRunningAfterItWasHeld(t *testing.T) {
 
 // A start the runner may be executing is waited for: nothing is removed and nothing is recorded.
 func TestSettlementWaitsForAStartThatMayBeExecuting(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, true)
 	h := newHeldStartRunner(f, func(*heldStartRunner, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		return nil, held("pending")
@@ -329,6 +338,7 @@ func TestSettlementWaitsForAStartThatMayBeExecuting(t *testing.T) {
 // The settlement reads a finished update's start for a read: no execute-capable start command is signed after the
 // update ended, and the signature made is not one for an execute.
 func TestSettlementStartReadSignsOnlyTheReadPurpose(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, true)
 	lease, err := platformSettlementLease(f.s.st.poolExec(), f.op)
 	if err != nil {
@@ -367,6 +377,7 @@ func TestSettlementStartReadSignsOnlyTheReadPurpose(t *testing.T) {
 // may still be carried out all have to pass before anything is done to a start the runner holds: until then a claim may
 // arrive, and a reserved start is not yet known to stay reserved.
 func TestSettlementDoesNotActOnAHeldStartBeforeItsWindowAndCreateGraceHavePassed(t *testing.T) {
+	t.Parallel()
 	if platformCreateGraceMS < driver.DockerRequestTimeout.Milliseconds() {
 		t.Fatalf("the create grace %dms is shorter than the driver's Docker request timeout", platformCreateGraceMS)
 	}
@@ -404,6 +415,7 @@ func TestSettlementDoesNotActOnAHeldStartBeforeItsWindowAndCreateGraceHavePassed
 // refused by the runner, is closed as not applied, and the runner's own settlement of the orphan ends the start: its
 // target is already gone, so the reserved stop is never retried and the update settles.
 func TestSettlementOfAReservedStartClaimedAfterTheReadIsSettledAsAnOrphan(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -439,6 +451,7 @@ func TestSettlementOfAReservedStartClaimedAfterTheReadIsSettledAsAnOrphan(t *tes
 // A claim that arrives after the Portal wrote its reserved stop makes the start run. The stop is closed as not applied
 // and the running target is removed by the ordinary removal, a new effect bound to the running receipt.
 func TestSettlementOfAReservedStopThatTheStartOutranIsClosedAndTheTargetRemovedOrdinarily(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -485,6 +498,7 @@ func TestSettlementOfAReservedStopThatTheStartOutranIsClosedAndTheTargetRemovedO
 // The checkpoint is not restored while a container of the namespace may survive: the sweep is an effect of its own,
 // sent again under the same identity until the runner answers it.
 func TestSettlementSweepsTheNamespaceBeforeTheRestore(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
@@ -532,6 +546,7 @@ func TestSettlementSweepsTheNamespaceBeforeTheRestore(t *testing.T) {
 // skew, so the time after which the Portal acts on the start is later than that, by the absence margin and the create
 // grace as well.
 func TestSettlementWindowAllowsForARunnerClockThatLags(t *testing.T) {
+	t.Parallel()
 	f := startPendingFixture(t, true)
 	lease, err := platformSettlementLease(f.s.st.poolExec(), f.op)
 	if err != nil {
@@ -553,6 +568,7 @@ func TestSettlementWindowAllowsForARunnerClockThatLags(t *testing.T) {
 // A container of the namespace that is not the runner's blocks the sweep with a reason the settlement projection
 // shows. Nothing is skipped and the checkpoint is not restored; once the runner can sweep again the settlement goes on.
 func TestSettlementShowsWhyASweepIsBlockedByAForeignContainer(t *testing.T) {
+	t.Parallel()
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)

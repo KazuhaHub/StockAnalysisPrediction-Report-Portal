@@ -325,6 +325,7 @@ func wireQuoteSources(s *Server, tencent, sina *quoteVendorStub) {
 // ---------- the gate ----------
 
 func TestQuoteAPIRequiresASession(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	wireQuoteSources(s, tencentStub(readQuoteFixture(t, fixTencentSH)), sinaStub(t))
 
@@ -356,6 +357,7 @@ func TestQuoteAPIRequiresASession(t *testing.T) {
 // all: a ServeMux wildcard does not match an empty path segment, so /api/quote/ is a 404 from the
 // router and the handler's own answer to an empty symbol would never be exercised.
 func TestQuoteAPIRefusesABadSymbol(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -385,6 +387,7 @@ func TestQuoteAPIRefusesABadSymbol(t *testing.T) {
 // ---------- the happy path ----------
 
 func TestQuoteAPIServesTencent(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -437,6 +440,7 @@ func TestQuoteAPIServesTencent(t *testing.T) {
 // range= decides how many sessions come back, and an unknown value falls back rather than failing:
 // a stale bookmark should still draw a chart.
 func TestQuoteAPIRangeSelectsTheBarCount(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	wireQuoteSources(s, tencentStub(readQuoteFixture(t, fixTencentSH)), sinaStub(t))
 
@@ -477,6 +481,7 @@ func TestQuoteAPIRangeSelectsTheBarCount(t *testing.T) {
 // ---------- failover ----------
 
 func TestQuoteAPIFailsOverToSina(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := failingStub("tencent is down")
 	sina := sinaStub(t)
@@ -508,6 +513,7 @@ func TestQuoteAPIFailsOverToSina(t *testing.T) {
 // real prices in the wrong fields, and the endpoint has to treat that as a DOWN source and fail
 // over — not serve it, and not 503 while a working fallback sits behind it.
 func TestQuoteAPIFailsOverWhenTheDriftGateTrips(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(quoteInsertedColumn(t))
 	sina := sinaStub(t)
@@ -559,6 +565,7 @@ func quoteInsertedColumn(t *testing.T) []byte {
 }
 
 func TestQuoteAPIReportsEveryStrategyExhausted(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := failingStub("tencent is down")
 	sina := failingStub("sina is down")
@@ -607,6 +614,7 @@ func TestQuoteAPIReportsEveryStrategyExhausted(t *testing.T) {
 // served; bars is an empty ARRAY (never null, or the SPA's QuoteBar[] blows up) and the UI is told
 // why in a code it can translate.
 func TestQuoteAPIBeijingServesSnapshotWithoutBars(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentBJ))
 	sina := sinaStub(t)
@@ -643,6 +651,7 @@ func TestQuoteAPIBeijingServesSnapshotWithoutBars(t *testing.T) {
 // ---------- the cache ----------
 
 func TestQuoteAPICachesTheSecondRequest(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -717,6 +726,7 @@ func quoteMaxAge(t *testing.T, rec *httptest.ResponseRecorder) int {
 // WHICH TTL applies comes from the vendor's own session field. Unknown is capped by ADR 0032's
 // conservative probe so the longer closed cache cannot hand every probe the same stale answer.
 func TestQuoteTTLFollowsTheVendorSession(t *testing.T) {
+	t.Parallel()
 	def := quoteConfigDefault()
 	open := &QuoteResp{Snapshot: QuoteSnapshot{Session: quoteSessionOpen}}
 	if got := def.ttlFor(open, quoteIntervalDaily); got != quoteTTLOpen {
@@ -771,6 +781,7 @@ func TestQuoteTTLFollowsTheVendorSession(t *testing.T) {
 // An entry past its TTL is a miss, and it is dropped rather than merely ignored, so a symbol nobody
 // asks for again stops occupying the byte budget.
 func TestQuoteCacheExpires(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -795,6 +806,7 @@ func TestQuoteCacheExpires(t *testing.T) {
 // Both bounds are live. The entry count is what binds when the ranges are short, and the byte
 // budget is what stops a caller who only ever asks for 1y from turning the same 256 keys into 5 MB.
 func TestQuoteCacheIsBoundedOnEntriesAndBytes(t *testing.T) {
+	t.Parallel()
 	var c quoteCache
 	small := &QuoteResp{Symbol: "601899", Snapshot: QuoteSnapshot{Session: quoteSessionClose}}
 	for i := 0; i < quoteCacheMaxEntries*3; i++ {
@@ -832,6 +844,7 @@ func TestQuoteCacheIsBoundedOnEntriesAndBytes(t *testing.T) {
 // Twenty browsers opening the same stock in the same millisecond all miss the cache together. Without
 // a single-flight that is twenty identical requests aimed at one vendor; with it, one.
 func TestQuoteAPISingleFlightsConcurrentReaders(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	tencent.gate = make(chan struct{})
@@ -890,6 +903,7 @@ func TestQuoteAPISingleFlightsConcurrentReaders(t *testing.T) {
 // A failure is shared with the waiters too, rather than each of them starting its own retry against
 // a vendor that has just proved it is down.
 func TestQuoteSingleFlightSharesAFailure(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := failingStub("tencent is down")
 	tencent.gate = make(chan struct{})
@@ -927,6 +941,7 @@ func TestQuoteSingleFlightSharesAFailure(t *testing.T) {
 // amplifier: however many symbols are asked for at once, only a few conversations with a vendor are
 // open at a time.
 func TestQuoteUpstreamConcurrencyIsBounded(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	// The captured sh601899 response with exactly one thing changed — its code — so that each of the
 	// symbols below gets a real vendor body that passes the code-echo gate.
@@ -990,6 +1005,7 @@ func quoteBeijingBodyWithBars(t *testing.T) []byte {
 }
 
 func TestQuoteAPIStripsBarsAVendorStartsSendingForBeijing(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(quoteBeijingBodyWithBars(t))
 	sina := sinaStub(t)
@@ -1032,6 +1048,7 @@ func TestQuoteAPIStripsBarsAVendorStartsSendingForBeijing(t *testing.T) {
 // and the vendor was never down: a link shared into a group chat used to answer nine healthy
 // readers with 503 quote_unavailable because the tenth pressed Escape.
 func TestQuoteLeaderCancellationStillServesItsFollowers(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	tencent.gate = make(chan struct{})
@@ -1099,6 +1116,7 @@ func TestQuoteLeaderCancellationStillServesItsFollowers(t *testing.T) {
 // detached one has a deadline of its own — and a failure that arrives because THIS side stopped
 // waiting is not evidence about the vendor.
 func TestQuoteLoadDoesNotBlameAVendorForACancelledCaller(t *testing.T) {
+	t.Parallel()
 	var c quoteCache
 	ctx, cancel := context.WithCancel(context.Background())
 	// The cancellation happens INSIDE the first vendor call, which is where a browser closing a tab
@@ -1141,6 +1159,7 @@ func TestQuoteLoadDoesNotBlameAVendorForACancelledCaller(t *testing.T) {
 // load reports the FIRST error, not the last: the primary's reason is the one worth reporting, and
 // the fallback's is usually the less interesting "and that one too".
 func TestQuoteLoadReportsTheFirstError(t *testing.T) {
+	t.Parallel()
 	var c quoteCache
 	c.sources = []quoteSource{
 		{name: quoteSourceTencent, fetch: failingStub("tencent is down").fetch},
@@ -1171,6 +1190,7 @@ func TestQuoteLoadReportsTheFirstError(t *testing.T) {
 // That window is microseconds wide in production, so the test holds it open with flightMu — which is
 // exactly the lock such an arrival has to wait on — and fills the cache while the arrival is parked.
 func TestQuoteFlightRechecksTheCacheBeforeCallingAVendor(t *testing.T) {
+	t.Parallel()
 	body := readQuoteFixture(t, fixTencentSH)
 	vendor := &quoteVendorStub{parse: func(market, code string, bars int) (*QuoteResp, error) {
 		return parseTencentQuote(market, code, body, bars)
@@ -1246,6 +1266,7 @@ func TestQuoteFlightRechecksTheCacheBeforeCallingAVendor(t *testing.T) {
 // The order is observable by holding flightMu: with the delete first, endFlight blocks on the lock
 // before it can close anything, so no waiter can be woken while the entry is still in the map.
 func TestQuoteEndFlightDeletesBeforeItCloses(t *testing.T) {
+	t.Parallel()
 	vendor := failingStub("tencent is down")
 	vendor.gate = make(chan struct{})
 	var c quoteCache
@@ -1293,6 +1314,7 @@ func TestQuoteEndFlightDeletesBeforeItCloses(t *testing.T) {
 // max-age is floored at one second. Zero tells the browser to revalidate immediately, which turns
 // the last moment of every cache entry's life into the stampede the header exists to prevent.
 func TestQuoteMaxAgeNeverAdvertisesZero(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		ttl  time.Duration
 		want int
@@ -1315,6 +1337,7 @@ func TestQuoteMaxAgeNeverAdvertisesZero(t *testing.T) {
 // An expired entry is DROPPED, not merely reported as a miss: the byte budget is the claim, and a
 // symbol nobody asks for again has to stop occupying it the moment anyone notices it has expired.
 func TestQuoteCacheDropsTheEntryItReportsAsAMiss(t *testing.T) {
+	t.Parallel()
 	var c quoteCache
 	now := time.Now()
 	c.now = func() time.Time { return now }
@@ -1345,6 +1368,7 @@ func TestQuoteCacheDropsTheEntryItReportsAsAMiss(t *testing.T) {
 // bars is QuoteBar[] in the TypeScript contract, and a JSON null there is a runtime error in the
 // chart rather than an empty chart.
 func TestQuoteVisibleBarsIsNeverNull(t *testing.T) {
+	t.Parallel()
 	empty := quoteVisibleBars("sh", nil)
 	if empty == nil {
 		t.Fatal("a nil slice reached the encoder; it marshals to null, and the SPA maps over it")
@@ -1403,6 +1427,7 @@ func TestQuoteBarsForRangeClampsWhateverTheMapHolds(t *testing.T) {
 // parser) because the handler is what serves them, and a handler that dropped Currency would leave
 // 319.97 next to a Chinese report reading as yuan to every reader.
 func TestQuoteAPIServesEveryMarketsOwnLabels(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		path                             string
 		fixture                          string
@@ -1440,6 +1465,7 @@ func TestQuoteAPIServesEveryMarketsOwnLabels(t *testing.T) {
 // matters is the CALL COUNT: two spellings that each got their own cache key would be two vendor
 // calls for one stock, and the second reader would be told they had paid for a fresh fetch.
 func TestQuoteAPICanonicalisesAUSTicker(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentUS))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -1469,6 +1495,7 @@ func TestQuoteAPICanonicalisesAUSTicker(t *testing.T) {
 // is the handler's job, and this is the market where that is observable, because the captured body
 // really does carry bars (unlike bj, whose fixture is already empty).
 func TestQuoteAPIStripsTheTwoBarsTheVendorSendsForTheUS(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentUS))
 	sina := sinaStub(t)
@@ -1539,6 +1566,7 @@ const (
 // what the READER asked for, and 3个月 asks the same question in every market. What this deployment
 // can do about it is the resolver's answer, asserted in the two tests below.
 func TestQuoteRangeCarriesItsOwnInterval(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		key  string
 		bars int
@@ -1579,6 +1607,7 @@ func TestQuoteRangeCarriesItsOwnInterval(t *testing.T) {
 // 请稍后再试" over a gap that no amount of retrying closes, and takes the price, the name and the
 // market badge off the screen with it.
 func TestQuoteUnservableIntervalDegradesToTheSnapshotRatherThanA503(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	cfg := quoteConfigDefault()
 	for _, tc := range []struct {
@@ -1693,6 +1722,7 @@ func intradayStub(t *testing.T) *quoteVendorStub {
 // is told which it is handed rather than sniffing the string. This is the endpoint keeping that
 // contract, asserted on both sides of it in one test so that the difference is the assertion.
 func TestQuoteIntradayBarsCarryTimestampsAndDailyBarsCarryDates(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	wireQuoteSources(s, intradayStub(t), sinaStub(t))
 
@@ -1760,6 +1790,7 @@ func TestQuoteIntradayBarsCarryTimestampsAndDailyBarsCarryDates(t *testing.T) {
 // fqkline fixture and a minute fixture from the same afternoon — so this is the one symbol whose two
 // series can be asked for in turn without a synthesised body standing in for either.
 func TestQuoteIntradayAndDailyDoNotShareACacheSlot(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	daily := readQuoteFixture(t, fixTencentHK)
 	minute := readQuoteFixture(t, fixTencentMinuteHK)
@@ -1832,6 +1863,7 @@ func TestQuoteIntradayAndDailyDoNotShareACacheSlot(t *testing.T) {
 
 // The rows of one captured session, read against the bytes the vendor sent.
 func TestTencentMinuteParserReadsTheCapturedSession(t *testing.T) {
+	t.Parallel()
 	resp, err := parseTencentMinute("sh", "600519", readQuoteFixture(t, fixTencentMinuteSH), 0)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -1864,6 +1896,7 @@ func TestTencentMinuteParserReadsTheCapturedSession(t *testing.T) {
 // date at all. A parser that shrugged and used today's date would stamp a row from last Friday's
 // close as this morning.
 func TestTencentMinuteRefusesAPayloadWithNoTradingDate(t *testing.T) {
+	t.Parallel()
 	_, err := parseTencentMinute("us", "AAPL", readQuoteFixture(t, fixTencentMinuteUS), 0)
 	if err == nil {
 		t.Fatal("a payload with an empty date parsed; a bar with no day is an instant this parser invented")
@@ -1887,6 +1920,7 @@ func TestTencentMinuteRefusesAPayloadWithNoTradingDate(t *testing.T) {
 // a row carrying one price. Each is verified by breaking the captured body in exactly the way an
 // inserted column would break it.
 func TestTencentMinuteGateCatchesAShiftedRow(t *testing.T) {
+	t.Parallel()
 	body := string(readQuoteFixture(t, fixTencentMinuteSH))
 	// Each case names the SENTENCE the reader gets, not merely that something failed. A shifted row
 	// eventually dies somewhere whatever the gate says — a price does not parse as a timestamp — so
@@ -1970,6 +2004,7 @@ func batchStub(t *testing.T) *quoteVendorStub {
 // The claim the whole endpoint exists for, asserted as a NUMBER: a page of cards spanning five
 // markets is ONE conversation with a vendor, not one per card.
 func TestQuoteBatchIsOneUpstreamCallForManySymbols(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	sina := failingStub("sina must not be asked: it has no batch endpoint")
@@ -2037,6 +2072,7 @@ func TestQuoteBatchIsOneUpstreamCallForManySymbols(t *testing.T) {
 // A batch is not all-or-nothing. One code this build refuses and one the vendor does not know are
 // both named in `missing`, and neither costs the others their price.
 func TestQuoteBatchAnswersPerSymbol(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -2067,6 +2103,7 @@ func TestQuoteBatchAnswersPerSymbol(t *testing.T) {
 // Over the cap the request is REFUSED, not truncated. A truncated batch is a tail of cards whose
 // prices never arrive and never will, and nothing on the page can tell that from a slow vendor.
 func TestQuoteBatchRefusesMoreSymbolsThanTheCap(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -2100,6 +2137,7 @@ func TestQuoteBatchRefusesMoreSymbolsThanTheCap(t *testing.T) {
 // home_quotes off means the home page sends NOTHING to a vendor, which is the disclosure the switch
 // exists to prevent — so the assertion is the call count and not merely the empty body.
 func TestQuoteBatchSendsNothingWhenHomeCardsAreOff(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -2138,6 +2176,7 @@ func TestQuoteBatchSendsNothingWhenHomeCardsAreOff(t *testing.T) {
 // The other direction cannot work and is not claimed: a card's answer carries no series, so it can
 // never satisfy a request for sixty-six daily bars.
 func TestQuoteBatchIsServedByWhateverTheReadingPageWarmed(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -2181,6 +2220,7 @@ func TestQuoteBatchIsServedByWhateverTheReadingPageWarmed(t *testing.T) {
 // it. The payload of a v_<code> line is the SAME positional array fqkline sends, so it goes through
 // the same gate — and this is where that is verified rather than assumed.
 func TestTencentBatchParserReadsOneLinePerSymbol(t *testing.T) {
+	t.Parallel()
 	body := string(readQuoteFixture(t, fixTencentBatch))
 	targets := make([]quoteTarget, 0, 6)
 	for _, spec := range []string{"sh:601899", "sz:000001", "hk:00700", "us:AAPL", "bj:830799", "sh:000001"} {
@@ -2289,6 +2329,7 @@ func batchFieldEdited(t *testing.T, body, sym string, index int, value string) s
 // Checks 1, 2 and 3 all still pass — the field count is unchanged, the code echo is untouched, and
 // the identity reads last, prevClose and the percentage, none of which move.
 func TestTencentBatchRunsTheDayRangeCheckOnEveryLine(t *testing.T) {
+	t.Parallel()
 	body := string(readQuoteFixture(t, fixTencentBatch))
 	targets := make([]quoteTarget, 0, 6)
 	for _, spec := range []string{"sh:601899", "sz:000001", "hk:00700", "us:AAPL", "bj:830799", "sh:000001"} {
@@ -2330,6 +2371,7 @@ func TestTencentBatchRunsTheDayRangeCheckOnEveryLine(t *testing.T) {
 // perfectly. It also contradicted this endpoint's own promise that a per-symbol failure costs only
 // that symbol: it cost the vendor's reputation instead.
 func TestQuoteBatchGateRefusalIsNotAVendorFailure(t *testing.T) {
+	t.Parallel()
 	body := string(readQuoteFixture(t, fixTencentBatch))
 	// The same edit the parser test uses: a percentage a whole point away from the one the prices
 	// imply, which is the drift the identity check exists for.
@@ -2404,6 +2446,7 @@ func TestQuoteBatchGateRefusalIsNotAVendorFailure(t *testing.T) {
 // ordering its own comment calls delicate. Nothing exercised it — disabling only its follower branch
 // left the whole suite green — and this is the busiest page in the portal.
 func TestQuoteBatchSingleFlightsConcurrentPages(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := batchStub(t)
 	tencent.gate = make(chan struct{})
@@ -2467,6 +2510,7 @@ func TestQuoteBatchSingleFlightsConcurrentPages(t *testing.T) {
 // handler's dedupe actually shapes is the ANSWER — `missing` is built by walking `targets`, so a code
 // on three cards that no vendor answers for would be named three times in a list the page renders.
 func TestQuoteBatchSetsNoStoreAndNamesARepeatedSymbolOnce(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	var handed []string
 	tencent := batchStub(t)
@@ -2531,6 +2575,7 @@ func TestQuoteBatchSetsNoStoreAndNamesARepeatedSymbolOnce(t *testing.T) {
 //
 // The key-equality unit test in quote_cache_claims_test.go states this; this one is what it costs.
 func TestEveryRangeOnAMarketWithNoHistoryIsOneCallAndOneEntry(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentBJ))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -2563,6 +2608,7 @@ func TestEveryRangeOnAMarketWithNoHistoryIsOneCallAndOneEntry(t *testing.T) {
 // SHIPPED order, `5d` degraded to a snapshot in every market including the A-shares, so the 5日
 // button was dead for every deployment that had not enabled an undocumented third-party endpoint.
 func TestTencentFiveDayWindowIsFiveSessionsOldestFirst(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		market, code, fixture string
 		days, buckets         int
@@ -2618,6 +2664,7 @@ func TestTencentFiveDayWindowIsFiveSessionsOldestFirst(t *testing.T) {
 // The two markets day/query does not serve, and they fail differently — which is the point, because
 // only one of them is a statement about the market.
 func TestTencentFiveDayWindowRefusesTheMarketsItDoesNotServe(t *testing.T) {
+	t.Parallel()
 	// The US is refused by the VENDOR: {"code":-1,"msg":"param error"}. It must arrive as an error
 	// and never as an empty series, or a market Tencent does not serve here reads as a quiet week.
 	if _, err := parseTencentDays("us", "AAPL", readQuoteFixture(t, fixTencentDaysUS), 0); err == nil {
@@ -2656,6 +2703,7 @@ func TestTencentFiveDayWindowRefusesTheMarketsItDoesNotServe(t *testing.T) {
 // The regression this whole change exists for: with the SHIPPED order and no third-party source
 // enabled, every market's 5日 degraded to a snapshot, so the button drew nothing for anybody.
 func TestFiveDayWindowIsServedOutOfTheBoxOnTheMarketsItWasMeasuredFor(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{}
 	c.init()
 	cfg := quoteConfig{Order: quoteShippedOrder()}
@@ -2697,6 +2745,7 @@ const (
 // quoteParseWindow is the allowlist for two strings that reach a vendor URL, so it is asserted the
 // way quoteRanges is: what it accepts, and — mostly — what it refuses.
 func TestQuoteWindowRefusesEverythingButAWellFormedPair(t *testing.T) {
+	t.Parallel()
 	// Accepted, and NORMALISED: what comes out is a string this code formatted, never the caller's.
 	got, err := quoteParseWindow("  2026-03-02 ", "2026-04-10")
 	if err != nil {
@@ -2747,6 +2796,7 @@ func TestQuoteWindowRefusesEverythingButAWellFormedPair(t *testing.T) {
 // The window is part of the cache key, and an ABSENT one contributes nothing — so every key written
 // before this existed is byte-identical to the one written now.
 func TestQuoteWindowIsPartOfTheCacheKeyAndAnAbsentOneIsNot(t *testing.T) {
+	t.Parallel()
 	plain := quoteCacheKey("sh", "600519", 66, quoteIntervalDaily, quoteWindow{})
 	if got := quoteCacheKey("sh", "600519", 66, quoteIntervalDaily, quoteWindow{from: "", to: ""}); got != plain {
 		t.Errorf("an empty window changed the key: %q vs %q", got, plain)
@@ -2766,6 +2816,7 @@ func TestQuoteWindowIsPartOfTheCacheKeyAndAnAbsentOneIsNot(t *testing.T) {
 // End to end: the reader's dates reach the vendor, and what comes back is the sessions in that
 // window rather than the last N ending today.
 func TestQuoteCustomWindowAnswersTheSessionsInIt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		market, code, fixture string
 		bars                  int
@@ -2817,6 +2868,7 @@ func TestQuoteCustomWindowAnswersTheSessionsInIt(t *testing.T) {
 // A malformed window is REFUSED, and refused before any vendor is called: quietly falling back to
 // the default range would draw the default window under the reader's own dates.
 func TestQuoteMalformedWindowIsRefusedBeforeAnyVendorCall(t *testing.T) {
+	t.Parallel()
 	s := quoteServer(t)
 	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
 	wireQuoteSources(s, tencent, sinaStub(t))
@@ -2845,6 +2897,7 @@ func TestQuoteMalformedWindowIsRefusedBeforeAnyVendorCall(t *testing.T) {
 // A source that has not declared the window is SKIPPED rather than called with the count it would
 // otherwise fall back to — which would answer the last N sessions under the reader's own dates.
 func TestQuoteWindowSkipsASourceThatCannotTakeDates(t *testing.T) {
+	t.Parallel()
 	c := quoteShippedCache()
 	cfg := quoteConfigDefault()
 	for _, id := range []string{"sh", "sz", "hk"} {

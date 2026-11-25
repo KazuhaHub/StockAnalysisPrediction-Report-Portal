@@ -245,6 +245,7 @@ func writePlatformNetworkFixtureFile(path string, value []byte, mode os.FileMode
 }
 
 func TestPlatformNetworkFixtureFilePublishesAtomically(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ack")
 	if err := writePlatformNetworkFixtureFile(path, []byte("first"), 0444); err != nil {

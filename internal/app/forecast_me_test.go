@@ -12,6 +12,7 @@ import (
 // record route (200 for all and own, 403 forecast_unavailable for none), and with the strict
 // resolver the gate itself uses.
 func TestMeForecastMatchesTheGate(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -69,6 +70,7 @@ func TestMeForecastMatchesTheGate(t *testing.T) {
 // ancestor that happened to decide the scope: naming the ancestor would claim a wider population
 // than the one the statistics cover.
 func TestMeForecastHintNamesTheOwnPopulationRoot(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	parent := seedOU(t, s.st, 0, scopeOwn)
 	child := seedOU(t, s.st, parent, nil)
@@ -94,6 +96,7 @@ func TestMeForecastHintNamesTheOwnPopulationRoot(t *testing.T) {
 
 // An unassigned own reader sits in the Default OU, which is the root of their population.
 func TestMeForecastHintNamesDefaultForUnassignedOwnReader(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	def := s.st.DefaultGroupID()
 	if _, err := s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE id=?", scopeOwn, def); err != nil {

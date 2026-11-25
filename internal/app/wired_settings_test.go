@@ -29,6 +29,7 @@ func wiredFixture(t *testing.T) *Server {
 // The authenticator entry an enrolment lands under. It asked for `site_name`, a key nothing in the
 // repository has ever written, so the branding an operator set was silently ignored.
 func TestTheAuthenticatorLabelFollowsTheSiteTitle(t *testing.T) {
+	t.Parallel()
 	s := wiredFixture(t)
 	if got := s.totpIssuer(); got != "Report Portal" {
 		t.Fatalf("unbranded portal issued %q", got)
@@ -42,6 +43,7 @@ func TestTheAuthenticatorLabelFollowsTheSiteTitle(t *testing.T) {
 }
 
 func TestTheConcurrencyCeilingCanBeSetAndIsWhatClamps(t *testing.T) {
+	t.Parallel()
 	s := wiredFixture(t)
 	// The shipped ceiling, and the run form's own maximum before this was writable.
 	if got := s.batchMaxConcurrency(); got != 10 {
@@ -85,6 +87,7 @@ func TestTheConcurrencyCeilingCanBeSetAndIsWhatClamps(t *testing.T) {
 // The SSRF escape hatch safefetch's own comment calls "a setting". It had no writer, so a portal
 // whose IdP is genuinely on the intranet could not be configured at all.
 func TestTheSSOPrivateAddressSwitchIsReachableAndFailsClosed(t *testing.T) {
+	t.Parallel()
 	s := wiredFixture(t)
 	if s.ssoAllowPrivate() {
 		t.Fatal("private addresses are allowed on a fresh portal")
@@ -115,6 +118,7 @@ func TestTheSSOPrivateAddressSwitchIsReachableAndFailsClosed(t *testing.T) {
 
 // The market index the constant has promised was repointable since the market shipped.
 func TestTheAppMarketIndexCanBeRepointedAndReset(t *testing.T) {
+	t.Parallel()
 	s := wiredFixture(t)
 	if got := s.appMarketIndexURL(); got != defaultAppMarketIndexURL {
 		t.Fatalf("default index = %q", got)
@@ -157,6 +161,7 @@ func TestTheAppMarketIndexCanBeRepointedAndReset(t *testing.T) {
 // Chinese, and nothing fails until somebody looks. Same shape as the audit-vocabulary check, and
 // derived the same way: from the server side, which is the source of truth.
 func TestEveryErrorCodeIsTranslatedInEveryLanguage(t *testing.T) {
+	t.Parallel()
 	codes := map[string]string{} // code -> the file it is answered from
 	entries, err := os.ReadDir(".")
 	if err != nil {

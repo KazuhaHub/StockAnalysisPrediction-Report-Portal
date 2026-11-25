@@ -8,6 +8,7 @@ import "testing"
 // operation will ever clean up.
 
 func TestUnifiedOUGrantWritersRejectMissingOU(t *testing.T) {
+	t.Parallel()
 	s, org, _, _, _ := ouFixture(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityGroup})
@@ -40,6 +41,7 @@ func TestUnifiedOUGrantWritersRejectMissingOU(t *testing.T) {
 // A grant row must not survive the OU it names. Deleting the OU sweeps the grants, and a writer that
 // runs afterwards re-validates against the tree rather than resurrecting the name.
 func TestUnifiedOUGrantWritersFailAfterDeletion(t *testing.T) {
+	t.Parallel()
 	s, _, team, _, _ := ouFixture(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityGroup})
@@ -59,6 +61,7 @@ func TestUnifiedOUGrantWritersFailAfterDeletion(t *testing.T) {
 
 // Rejected and no-op saves write nothing, so a refusal cannot be mistaken for a grant of access.
 func TestUnifiedOUGrantWritersLeaveStateOnRefusal(t *testing.T) {
+	t.Parallel()
 	s, org, _, _, _ := ouFixture(t)
 	st := s.st
 	st.SaveVersion(ReportVersion{Name: "对外版", Ord: 1, Visibility: VisibilityGroup})

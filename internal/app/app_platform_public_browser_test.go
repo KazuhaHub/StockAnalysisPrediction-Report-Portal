@@ -17,19 +17,19 @@ import (
 // not be able to read that cookie, and a credentialed request it makes to the Portal's API must not
 // carry it (doc 179 test 5). Set PUBLIC_PROJECTION_CHROME to a Chrome binary to run it.
 func TestPublicDocumentCannotReachThePortalSessionInABrowser(t *testing.T) {
+	t.Parallel()
 	chrome := os.Getenv("PUBLIC_PROJECTION_CHROME")
 	if chrome == "" {
 		t.Skip("PUBLIC_PROJECTION_CHROME not set")
 	}
-	platformPublicFixtureFiles = map[string]string{
+	platformPublicFixtureFiles.set(t, map[string]string{
 		"public/index.html": `<!doctype html><title>start</title><script src="app.js"></script>`,
 		"public/app.js": `const out = {};
 try { out.cookie = document.cookie; } catch (e) { out.cookieError = e.name; }
 fetch('/api/me', {credentials: 'include'}).then(r => { out.me = r.status }).catch(e => { out.meError = e.name }).finally(() => {
   fetch('data/status').then(r => r.text()).then(x => { out.data = x }).catch(e => { out.dataError = e.name }).finally(() => { new Image().src = '/__report?r=' + encodeURIComponent(JSON.stringify(out)) })
 })`,
-	}
-	t.Cleanup(func() { platformPublicFixtureFiles = nil })
+	})
 	e := platformPublicFixture(t, false)
 	e.enable(t)
 	reports := make(chan string, 4)

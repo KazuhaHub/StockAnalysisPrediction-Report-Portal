@@ -14,6 +14,7 @@ func mkUser(t *testing.T, st *Store, name, role string) {
 // A user with no profile row reads as enabled with an empty display name; setting
 // the profile, active flag, and last login all round-trip via the join.
 func TestUserProfileDefaultsAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	mkUser(t, st, "alice", "user")
 
@@ -47,6 +48,7 @@ func TestUserProfileDefaultsAndRoundTrip(t *testing.T) {
 }
 
 func TestUserGroupsCRUDAndMembership(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	mkUser(t, st, "alice", "user")
 	mkUser(t, st, "bob", "operator")
@@ -154,6 +156,7 @@ func ptrInt(v int) *int { return &v }
 // The Default group is created once and reused; a concrete override on a user's
 // primary group beats the Default baseline, and clearing the primary falls back.
 func TestGroupModelResolution(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	mkUser(t, st, "u", "user")
 

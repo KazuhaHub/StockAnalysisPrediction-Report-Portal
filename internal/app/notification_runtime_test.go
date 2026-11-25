@@ -17,6 +17,7 @@ func startNotificationRuntimeForTest(t *testing.T, s *Server) {
 }
 
 func TestNotificationRuntimeDeliversAndStops(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	enableEmail(s)
@@ -51,6 +52,7 @@ func TestNotificationRuntimeDeliversAndStops(t *testing.T) {
 }
 
 func TestNotificationRuntimeHonorsRestorePause(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	s := &Server{st: st}
 	st.SetSetting("notification_dispatch_paused", "1")

@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestPostgresOUAccountAndSSOAtomicWrites(t *testing.T) {
+	t.Parallel()
 	st := pgStore(t, "sso_providers", "users", "user_groups")
 	root := st.EnsureDefaultGroup()
 	if err := st.createOUAccount("atomic-pg", "h", "user", "", "", "", root); err != nil {

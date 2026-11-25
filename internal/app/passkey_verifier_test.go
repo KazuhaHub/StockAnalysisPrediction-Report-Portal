@@ -176,6 +176,7 @@ func verifierLoginAttempt(t *testing.T, s *Server, username, pendingTok string, 
 // It rebuilds a v0.17.4-shaped record by explicit field allow-list rather than by deleting a key
 // from a v0.18.1 record, and drives the login entirely through this file's own HTTP helpers.
 func TestVerifierLegacyCredentialJSONAuthenticates(t *testing.T) {
+	t.Parallel()
 	s := verifierServer(t, "frank", "verifier-passphrase-one")
 	liveJSON, rp, auth, cred := verifierRegister(t, s, "frank", "verifier-passphrase-one")
 
@@ -260,6 +261,7 @@ func TestVerifierLegacyCredentialJSONAuthenticates(t *testing.T) {
 // this test exists because diffing passkey.go against main surfaced it independently, and it must
 // be verified rather than assumed benign.
 func TestVerifierRejectedLoginDoesNotBurnPendingToken(t *testing.T) {
+	t.Parallel()
 	s := verifierServer(t, "grace", "verifier-passphrase-two")
 	// Register a real passkey so BeginLogin has something to build an allow-list from — otherwise
 	// the ceremony never starts and this test would not actually exercise FinishLogin at all.
@@ -390,6 +392,7 @@ func verifierRegisterSecondDevice(t *testing.T, s *Server, username string) (raw
 // so this checks passkeyService() itself, through an actual handler, not the retained-for-tests
 // twin.
 func TestVerifierPasskeyServiceRejectsUnconfiguredPublicURL(t *testing.T) {
+	t.Parallel()
 	s := verifierServer(t, "henry", "verifier-passphrase-three")
 	s.st.SetSetting("public_url", "")
 

@@ -17,6 +17,7 @@ const approvedAppAdminsDDL = `CREATE TABLE IF NOT EXISTS app_platform_app_admins
   PRIMARY KEY(installation_id, username))`
 
 func TestMigration0025MatchesTheApprovedTable(t *testing.T) {
+	t.Parallel()
 	norm := func(s string) string { return strings.Join(strings.Fields(s), "") }
 	if norm(platformAppAdminsDDL) != norm(approvedAppAdminsDDL) {
 		t.Fatalf("DDL differs from the approved table:\n got %s", platformAppAdminsDDL)
@@ -28,6 +29,7 @@ func TestMigration0025MatchesTheApprovedTable(t *testing.T) {
 }
 
 func TestMigration0025UpgradeAndOlderDump(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	step := migration0025()
 	mustExec(t, st, `DROP TABLE app_platform_app_admins`)

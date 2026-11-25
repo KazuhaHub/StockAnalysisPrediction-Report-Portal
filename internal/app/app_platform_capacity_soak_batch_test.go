@@ -201,6 +201,7 @@ func newSoakBatchServer(t *testing.T) *Server {
 }
 
 func TestSoakBatchProbeIsStartedByTheRealSchedulerAndLeavesTheBacklogQueued(t *testing.T) {
+	t.Parallel()
 	s := newSoakBatchServer(t)
 	b := newSoakBatch(t, s, "admin")
 	defer b.close()
@@ -234,6 +235,7 @@ func TestSoakBatchProbeIsStartedByTheRealSchedulerAndLeavesTheBacklogQueued(t *t
 }
 
 func TestSoakBatchProbeReportsAScheduleThatNeverStarts(t *testing.T) {
+	t.Parallel()
 	s := newSoakBatchServer(t)
 	b := newSoakBatch(t, s, "admin")
 	defer b.close()

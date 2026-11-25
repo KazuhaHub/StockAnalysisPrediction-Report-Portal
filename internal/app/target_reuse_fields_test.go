@@ -14,6 +14,7 @@ import (
 // name/inputs edit — quietly disabling same-day reuse (ADR 0022 R1). Editing must round-trip
 // output_subtype / symbol_input, and be able to set them.
 func TestDifyTargetEditKeepsReuseFields(t *testing.T) {
+	t.Parallel()
 	s := batchServer(t)
 	st := s.st
 	if err := st.UpsertPlugin(difyPluginSlug, "Dify", "1.0.0", "{}", "bundled"); err != nil {

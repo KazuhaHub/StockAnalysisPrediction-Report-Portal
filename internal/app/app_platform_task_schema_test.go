@@ -7,6 +7,7 @@ import (
 )
 
 func TestAppPlatformTaskSchemaProducts(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	step := migration0019()
 	if got, want := strings.Join(step.tables, ","), "app_platform_tasks,app_platform_task_attempts"; got != want {
@@ -27,6 +28,7 @@ func TestAppPlatformTaskSchemaProducts(t *testing.T) {
 }
 
 func TestPostgresAppPlatformTaskSchemaProducts(t *testing.T) {
+	t.Parallel()
 	st := platformTestStore(t, true)
 	if err := migration0019().verify(st.poolExec()); err != nil {
 		t.Fatal(err)
@@ -34,6 +36,7 @@ func TestPostgresAppPlatformTaskSchemaProducts(t *testing.T) {
 }
 
 func TestAppPlatformTaskSnapshotsDoNotReferencePublisherOrReleaseRows(t *testing.T) {
+	t.Parallel()
 	for _, postgres := range []bool{false, true} {
 		name := "sqlite"
 		if postgres {
@@ -57,6 +60,7 @@ func TestAppPlatformTaskSnapshotsDoNotReferencePublisherOrReleaseRows(t *testing
 }
 
 func TestAppPlatformTaskOlderDumpRestoresWithEmptyTables(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	tables := append(migration0019().tables, migration0020().tables...)
 	tables = append(tables, migration0021().tables...)
@@ -84,6 +88,7 @@ func TestAppPlatformTaskOlderDumpRestoresWithEmptyTables(t *testing.T) {
 }
 
 func TestAppPlatformTaskBackupRoundTrip(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	e := src.poolExec()
 	platformSeedPublisher(t, e, "task-publisher")
@@ -109,6 +114,7 @@ func TestAppPlatformTaskBackupRoundTrip(t *testing.T) {
 }
 
 func TestAppPlatformTaskRestoreRequiresReviewAndStopsInFlightAttempts(t *testing.T) {
+	t.Parallel()
 	src := newTestStore(t)
 	e := src.poolExec()
 	platformSeedPublisher(t, e, "task-publisher")

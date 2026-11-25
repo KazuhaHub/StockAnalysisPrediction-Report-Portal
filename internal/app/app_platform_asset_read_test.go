@@ -57,9 +57,10 @@ func testPlatformAssetRead(t *testing.T, pg bool) {
 		t.Fatal("revoked reader reused prior binding")
 	}
 }
-func TestPlatformAssetReadSQLite(t *testing.T)   { testPlatformAssetRead(t, false) }
-func TestPlatformAssetReadPostgres(t *testing.T) { testPlatformAssetRead(t, true) }
+func TestPlatformAssetReadSQLite(t *testing.T)   { t.Parallel(); testPlatformAssetRead(t, false) }
+func TestPlatformAssetReadPostgres(t *testing.T) { t.Parallel(); testPlatformAssetRead(t, true) }
 func TestPostgresPlatformAssetReadExpiryAfterReleaseWait(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"reader", "signing_key"} {
 		t.Run(kind, func(t *testing.T) {
 			s, reader, id := platformLaunchFixture(t, true)

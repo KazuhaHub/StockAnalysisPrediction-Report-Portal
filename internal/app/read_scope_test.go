@@ -83,6 +83,7 @@ func readScopeFixture(t *testing.T) (*Store, *Server, string, int64, scopeIDs) {
 }
 
 func TestViewerScopeGating(t *testing.T) {
+	t.Parallel()
 	st, s, _, ouA, _ := readScopeFixture(t)
 	// Restricted external user → non-nil scope pinned to their OU.
 	sc := s.viewerScope("ext")
@@ -104,6 +105,7 @@ func TestViewerScopeGating(t *testing.T) {
 }
 
 func TestNewBySymbolScoped(t *testing.T) {
+	t.Parallel()
 	st, s, _, _, ids := readScopeFixture(t)
 	sc := s.viewerScope("ext")
 
@@ -134,6 +136,7 @@ func TestNewBySymbolScoped(t *testing.T) {
 }
 
 func TestGetNewScopedFailsClosed(t *testing.T) {
+	t.Parallel()
 	_, s, _, _, ids := readScopeFixture(t)
 	st := s.st
 	sc := s.viewerScope("ext")
@@ -162,6 +165,7 @@ func TestGetNewScopedFailsClosed(t *testing.T) {
 }
 
 func TestListSymbolsScoped(t *testing.T) {
+	t.Parallel()
 	_, s, _, _, ids := readScopeFixture(t)
 	st := s.st
 	sc := s.viewerScope("ext")
@@ -189,6 +193,7 @@ func TestListSymbolsScoped(t *testing.T) {
 }
 
 func TestNewTypesKindsScoped(t *testing.T) {
+	t.Parallel()
 	_, s, _, _, _ := readScopeFixture(t)
 	st := s.st
 	sc := s.viewerScope("ext")
@@ -216,6 +221,7 @@ func TestNewTypesKindsScoped(t *testing.T) {
 // for a restricted viewer's own session — while a machine Bearer(query) token stays unscoped. Without
 // the fix a restricted user reads any OU's report by id enumeration or bulk query via /api/v1.
 func TestV1ReadSurfaceScopedForRestrictedSession(t *testing.T) {
+	t.Parallel()
 	st, s, _, _, ids := readScopeFixture(t)
 	st.CreateToken("machine-tok", "test", "query", "") // machine query token → unscoped
 	cookie := s.sign("ext")                            // restricted viewer's browser session

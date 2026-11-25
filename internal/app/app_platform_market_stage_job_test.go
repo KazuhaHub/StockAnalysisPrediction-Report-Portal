@@ -123,6 +123,7 @@ func TestMarketStageAnswersAcceptedThenPollingReachesStaged(t *testing.T) {
 
 // Fails if a second click starts a second download instead of joining the running one.
 func TestMarketStageJoinsARunningDownload(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	h.remote.gate = make(chan struct{})
 	for range 2 {
@@ -144,6 +145,7 @@ func TestMarketStageJoinsARunningDownload(t *testing.T) {
 // Fails if a failed background download is not readable by every poller with a public code, or if a later request
 // cannot restart it from the partial.
 func TestMarketStageFailureStaysReadableAndRestartable(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	h.remote.gate, h.remote.failAfterGate = make(chan struct{}), true
 	if code, _ := h.post(t); code != 202 {
@@ -161,6 +163,11 @@ func TestMarketStageFailureStaysReadableAndRestartable(t *testing.T) {
 	h.remote.gate, h.remote.failAfterGate, h.remote.ranges = nil, false, nil
 	h.remote.mu.Unlock()
 	code, body := h.post(t)
+	if code == 202 {
+		// The request waits only briefly (150ms here) before answering 202; a slow or loaded host can take
+		// longer than that for the rest of the package, which then finishes in the background.
+		code, body = h.until(t, "the restarted download", func(_ int, b platformStageBody) bool { return b.State == "staged" })
+	}
 	if code != 200 || body.Release != platformDigest(h.parts.descriptor) {
 		t.Fatal(code, body)
 	}
@@ -174,6 +181,7 @@ func TestMarketStageFailureStaysReadableAndRestartable(t *testing.T) {
 
 // Fails if staging after a long download trusts the authority checked when the click was made.
 func TestMarketStageRechecksAuthorityWhenTheDownloadFinishes(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	h.remote.gate = make(chan struct{})
 	if code, _ := h.post(t); code != 202 {
@@ -205,6 +213,7 @@ func TestMarketStageRechecksAuthorityWhenTheDownloadFinishes(t *testing.T) {
 
 // Fails if a quick package still goes through the 202 path.
 func TestMarketStageFastPathAnswersOK(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	h.s.platformStageWaitFor = 15 * time.Second
 	code, body := h.post(t)
@@ -218,6 +227,7 @@ func TestMarketStageFastPathAnswersOK(t *testing.T) {
 }
 
 func TestMarketStageStatusUnknownAndInvalid(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	if code, body := h.status(t); code != 404 || body.Code != "app_platform_stage_unknown" {
 		t.Fatal(code, body)
@@ -235,6 +245,7 @@ func TestMarketStageStatusUnknownAndInvalid(t *testing.T) {
 
 // Fails if a server shutdown leaves a download running or lets it stage afterwards.
 func TestMarketStageJobsStopAtShutdown(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	h.remote.gate = make(chan struct{})
 	if code, _ := h.post(t); code != 202 {
@@ -254,6 +265,7 @@ func TestMarketStageJobsStopAtShutdown(t *testing.T) {
 
 // Fails if the finished download is thrown away because both document slots were busy when it was time to stage.
 func TestMarketStageWaitsForADocumentSlotInsteadOfFailingBusy(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	h.remote.gate = make(chan struct{})
 	if code, _ := h.post(t); code != 202 {
@@ -283,6 +295,7 @@ func TestMarketStageWaitsForADocumentSlotInsteadOfFailingBusy(t *testing.T) {
 
 // Fails if a joined request's authority is ignored when the first requester has lost theirs by the end.
 func TestMarketStageFinishesAsAJoinedRequesterWhenTheFirstLostAuthority(t *testing.T) {
+	t.Parallel()
 	h := newPlatformStageHarness(t)
 	second := platformSecondAdminActor(t, h.s, "second-admin")
 	secondCookie := h.s.managedCookie(*h.s.st.GetUser(second.username), second.sessionID, second.expires.Unix())
@@ -313,6 +326,7 @@ func TestMarketStageFinishesAsAJoinedRequesterWhenTheFirstLostAuthority(t *testi
 
 // Fails if more downloads than the bound run at once, or a join counts against it.
 func TestMarketStageJobsBoundRunningDownloads(t *testing.T) {
+	t.Parallel()
 	var jobs platformMarketStageJobs
 	block := make(chan struct{})
 	run := func(ctx context.Context, _ *platformMarketStageJob) (platformStagedRelease, error) {
@@ -338,6 +352,7 @@ func TestMarketStageJobsBoundRunningDownloads(t *testing.T) {
 
 // Fails if one session joining twice is remembered twice, which would crowd other requesters out of the bound.
 func TestMarketStageJobsRememberEachSessionOnce(t *testing.T) {
+	t.Parallel()
 	var jobs platformMarketStageJobs
 	block := make(chan struct{})
 	t.Cleanup(func() { close(block); jobs.stop(context.Background()) })

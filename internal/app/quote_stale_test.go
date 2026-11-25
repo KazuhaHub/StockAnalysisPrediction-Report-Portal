@@ -8,6 +8,7 @@ import (
 )
 
 func TestQuoteStaleFallbackPreservesStampAndDoesNotRenewGrace(t *testing.T) {
+	t.Parallel()
 	clock := time.Now()
 	fail := false
 	c := &quoteCache{now: func() time.Time { return clock }, sources: []quoteSource{{name: "tencent", fetch: func(context.Context, string, string, int) (*QuoteResp, error) {
@@ -39,6 +40,7 @@ func TestQuoteStaleFallbackPreservesStampAndDoesNotRenewGrace(t *testing.T) {
 }
 
 func TestStaleDisplayEvidenceIsNeverAnEvaluatorInput(t *testing.T) {
+	t.Parallel()
 	c := &quoteCache{}
 	c.put(quoteCacheKey("sh", "600081", 66, quoteIntervalDaily, quoteWindow{}), &QuoteResp{Stale: true, Snapshot: QuoteSnapshot{Last: 1013}}, time.Minute)
 	if _, _, _, err := c.fetchUnder(context.Background(), quoteConfigDefault(), "sh", "600081", 66, quoteIntervalSettled, quoteWindow{}); !errors.Is(err, errQuoteLedgerInterval) {
@@ -47,6 +49,7 @@ func TestStaleDisplayEvidenceIsNeverAnEvaluatorInput(t *testing.T) {
 }
 
 func TestQuoteStaleGraceIsCheckedAfterTheFailedRefresh(t *testing.T) {
+	t.Parallel()
 	clock := time.Now()
 	c := &quoteCache{now: func() time.Time { return clock }}
 	c.sources = []quoteSource{{name: "tencent", fetch: func(context.Context, string, string, int) (*QuoteResp, error) {

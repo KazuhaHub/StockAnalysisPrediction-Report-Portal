@@ -13,6 +13,7 @@ import (
 // submitter stays unattributed, a caller-supplied reserved value never survives, and the caller's
 // map is never mutated.
 func TestRunInputsInjectsOwnerTokenForEveryRun(t *testing.T) {
+	t.Parallel()
 	st := newTestStore(t)
 	root := st.EnsureDefaultGroup()
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
@@ -100,6 +101,7 @@ func TestRunInputsInjectsOwnerTokenForEveryRun(t *testing.T) {
 // its prediction set unattributed. A restricted submitter is included because that is the case the
 // pre-change code did mint for, with an empty key.
 func TestTokenMintFailureLeavesRunUnattributed(t *testing.T) {
+	t.Parallel()
 	s := tokenServer(t)
 	newTenancyFixture(t, s)
 	s.cfg.SecretKey = "" // the secret goes missing after the portal started

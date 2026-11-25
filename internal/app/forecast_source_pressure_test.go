@@ -22,6 +22,7 @@ import (
 // vendor budget on a plan that the single write door then discards, because dry mode never writes the
 // state that would make the same set not-due next minute.
 func TestDryTickerDoesNotTouchVendors(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeDry); err != nil {
@@ -61,6 +62,7 @@ func TestDryTickerDoesNotTouchVendors(t *testing.T) {
 // The manual pass is the ONLY way a dry pass happens now, and it must still fetch and still write
 // nothing. Without this positive control the test above passes on an evaluator that stopped running.
 func TestDryManualPassStillFetchesAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	if err := s.st.SetSetting(setForecastAuto, forecastModeDry); err != nil {
@@ -93,6 +95,7 @@ func TestDryManualPassStillFetchesAndWritesNothing(t *testing.T) {
 // row to fail a seventh — which is the request amplification that got the egress blocked. The
 // cooldown is process state, escalates while the source stays down, and clears on a success.
 func TestLedgerBreakerSurvivesPassesAndRecoversAfterCooldown(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.October, 24, 10, 0, 0, 0, time.UTC)
 	failure := errors.New("vendor web.ifzq.gtimg.cn returned 501 Not Implemented")
 	calls := 0
@@ -174,6 +177,7 @@ func TestLedgerBreakerSurvivesPassesAndRecoversAfterCooldown(t *testing.T) {
 // budget. This is the shape the 2026-10-24 deployment was in — dry mode in front of a failing vendor,
 // a tick a minute, nothing written to make a set not-due.
 func TestEvaluatorStopsFetchingASourceThatKeepsFailing(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	now := shanghai(2026, time.November, 20, 16, 0)
@@ -221,6 +225,7 @@ func TestEvaluatorStopsFetchingASourceThatKeepsFailing(t *testing.T) {
 // A dry mode tick no longer runs a pass at all, which also means it no longer spends the vendor
 // budget that the pass would have spent. Pinned through step, because that is where the decision is.
 func TestDryTickerSpendsNothingOnAFailingVendor(t *testing.T) {
+	t.Parallel()
 	s := newV1Server(t)
 	_, e := opsFixture(t, s)
 	e.fetch = nil
@@ -241,6 +246,7 @@ func TestDryTickerSpendsNothingOnAFailingVendor(t *testing.T) {
 }
 
 func TestVendorGetNon2xxLeavesEvidence(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Server", "tencent-cos")
 		w.Header().Set("Retry-After", "120")
@@ -279,6 +285,7 @@ func TestVendorGetNon2xxLeavesEvidence(t *testing.T) {
 // The evidence is bounded, and a vendor that answers with a huge error page costs the same fixed
 // number of bytes as any other: the summary is read from the same bound the caller set.
 func TestVendorGetNon2xxSummaryIsBounded(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = io.WriteString(w, strings.Repeat("x", 64*1024))

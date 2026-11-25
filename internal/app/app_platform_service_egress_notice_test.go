@@ -52,9 +52,11 @@ func testPlatformServiceEgressNoticeIdempotentConflictNamespace(t *testing.T, pg
 }
 
 func TestPlatformServiceEgressNoticeIdempotentConflictNamespaceSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressNoticeIdempotentConflictNamespace(t, false)
 }
 func TestPlatformServiceEgressNoticeIdempotentConflictNamespacePostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformServiceEgressNoticeIdempotentConflictNamespace(t, true)
 }
 

@@ -39,14 +39,17 @@ func testPlatformInstallAudienceReview(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallAudienceReviewSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallAudienceReview(t, false)
 }
 func TestPlatformInstallAudienceReviewPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallAudienceReview(t, true)
 }
 
 // Install access is per OU only: a user principal is refused with its own error, nothing is written.
 func TestPlatformInstallPlanRefusesUserPrincipalsSQLite(t *testing.T) {
+	t.Parallel()
 	s, session, release := platformInstallFixture(t, false)
 	before := dumpOf(t, s.st)
 	_, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
@@ -107,8 +110,10 @@ func testPlatformInstallAudienceRefusals(t *testing.T, pg bool) {
 	}
 }
 func TestPlatformInstallAudienceRefusalsSQLite(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallAudienceRefusals(t, false)
 }
 func TestPlatformInstallAudienceRefusalsPostgres(t *testing.T) {
+	t.Parallel()
 	testPlatformInstallAudienceRefusals(t, true)
 }

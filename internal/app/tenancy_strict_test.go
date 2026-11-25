@@ -82,6 +82,7 @@ func (f p31Fixture) readList(user string) []any {
 }
 
 func TestScopeOnUnreadableRestrictedFlag(t *testing.T) {
+	t.Parallel()
 	// Control: a readable restriction lets the tenant read its own report AND its list row.
 	f := newP31Fixture(t)
 	if code := f.readReport("ext"); code != http.StatusOK {
@@ -107,6 +108,7 @@ func TestScopeOnUnreadableRestrictedFlag(t *testing.T) {
 }
 
 func TestScopeOnUnreadableOURow(t *testing.T) {
+	t.Parallel()
 	f := newP31Fixture(t) // "ext" is not account-restricted; the OU carries the flag
 	if _, err := f.s.st.exec(`ALTER TABLE user_groups RENAME TO user_groups_away`); err != nil {
 		t.Fatal(err)
@@ -120,6 +122,7 @@ func TestScopeOnUnreadableOURow(t *testing.T) {
 }
 
 func TestScopeOnABrokenOUChain(t *testing.T) {
+	t.Parallel()
 	f := newP31Fixture(t)
 	// Move the tenant under a parent that does not exist: the walk cannot be trusted.
 	if _, err := f.s.st.exec(`UPDATE user_groups SET parent_id=999999 WHERE id=?`, f.tenant); err != nil {
@@ -135,6 +138,7 @@ func TestScopeOnABrokenOUChain(t *testing.T) {
 
 // TestInternalUsersAreStillUnrestricted: the strict path must not scope an ordinary account.
 func TestInternalUsersAreStillUnrestricted(t *testing.T) {
+	t.Parallel()
 	f := newP31Fixture(t)
 	f.s.st.UpsertUser(User{Username: "staff", PasswordHash: "h", Role: "user"})
 	if sc := f.s.viewerScope("staff"); sc != nil {
