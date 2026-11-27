@@ -201,3 +201,28 @@ func TestLaterRollbackKeepsAnEarlierOneWithAnImageLoadInDoubt(t *testing.T) {
 	t.Parallel()
 	testLaterRollbackWithEarlierImage(t, false, true, "prepared")
 }
+
+// After an ordinary roll back the capability rows are judged against the operation that completed the restored
+// generation, not only the install: a roll back past a completed update reads that update's review. The install is
+// recast here as such an update, which the install branch no longer matches.
+func TestCapabilitySnapshotAfterARollbackReadsTheRestoredOperation(t *testing.T) {
+	t.Parallel()
+	f := unstartedUpdateFixture(t, false)
+	h := newMigrationHTTP(t, f)
+	rollBackFailedOverHTTP(t, f, h, f.op)
+	s := f.s
+	installation := f.lease.installationID
+	install := scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='install'`, installation)
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch FROM app_platform_installations WHERE id=?`, installation)
+	release := scalar[string](t, s.st, `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, install)
+	mustExec(t, s.st, `UPDATE app_platform_operations SET action='update' WHERE id=?`, install)
+	planID, _, _, action, err := platformCapabilitySnapshotSource(s.st.poolExec(), installation, epoch, release)
+	if err != nil || action != "update" || planID != scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, install) {
+		t.Fatalf("the snapshot source after the roll back is %q %q: %v", planID, action, err)
+	}
+	// With no roll back on the current generation an update of an earlier generation is not the source.
+	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='recovery_required' WHERE action='restore' AND installation_id=? AND stage='complete'`, installation)
+	if _, _, _, _, err := platformCapabilitySnapshotSource(s.st.poolExec(), installation, epoch, release); err == nil {
+		t.Fatal("an update of an earlier generation was read without a roll back onto the current one")
+	}
+}
