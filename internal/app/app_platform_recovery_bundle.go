@@ -521,6 +521,14 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 	return manifest, nil
 }
 
+// platformRuntimeImagePinReason reports whether a pin reason keeps a release's image loaded on the runner. Every
+// reason does except pinned and recovery_set, which name every retained or live recovery set however old: those keep
+// the release's blobs in the Portal (the bundle and the blob sweep), and only the newest retained set and the
+// unsettled ones keep the image on the runner as well.
+func platformRuntimeImagePinReason(reason string) bool {
+	return reason != "pinned" && reason != "recovery_set"
+}
+
 // loadPlatformReleasePins is the one computation of which releases must keep their content. The recovery bundle
 // and the image blob sweep both use it, so the sweep can never remove what the bundle would need. It returns each
 // release with the reasons that pin it:
@@ -533,10 +541,15 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 //   - unsettled_load: an operation (completed or not) holds a load with no verdict;
 //   - unrecovered: an operation ended recovery_required and no later start-bearing operation of the installation
 //     completed;
-//   - plan: an open review plan names it.
+//   - plan: an open review plan names it;
+//   - newest_set: the newest retained recovery set of an installation that still exists restores it;
+//   - unsettled_set: a recovery set of an installation that still exists is neither verified nor deleted (being
+//     prepared, restored or held for review, however long the review takes).
 //
-// The sweep uses every reason, the bundle only the first two. nowMS bounds which plans are open; zero ignores
-// plans, which the bundle does not need.
+// The blob sweep uses every reason, the bundle only the first two. The runner image reclaim uses every reason but
+// pinned and recovery_set (platformRuntimeImagePinReason): an older retained set keeps its release's blobs in the
+// Portal, and a restore of it loads the image again from them, so it need not keep the image on the runner. nowMS
+// bounds which plans are open; zero ignores plans, which the bundle does not need.
 func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool, error) {
 	pins := map[string]map[string]bool{}
 	collect := func(reason, query string, args ...any) error {
@@ -563,11 +576,12 @@ func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool
 		AND a.generation=(SELECT MAX(b.generation) FROM app_platform_activations b WHERE b.installation_id=a.installation_id)`); err != nil {
 		return nil, err
 	}
-	retained, err := platformRetainedPredicate(e, "app_platform_recovery_sets")
+	retained, err := platformRetainedPredicates(e, "app_platform_recovery_sets", "r", "n")
 	if err != nil {
 		return nil, err
 	}
-	if err := collect("pinned", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE `+retained); err != nil {
+	retainedR, retainedN := retained[1], retained[2]
+	if err := collect("pinned", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE `+retained[0]); err != nil {
 		return nil, err
 	}
 	if nowMS == 0 {
@@ -579,6 +593,10 @@ func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool
 	steps := []struct{ reason, query string }{
 		{"candidate", `SELECT release_sha256 FROM app_platform_activations WHERE state IN ('candidate','active') AND ` + live},
 		{"recovery_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted' AND ` + live},
+		{"newest_set", `SELECT r.release_sha256 FROM app_platform_recovery_sets r WHERE ` + retainedR + ` AND r.` + live + `
+			AND NOT EXISTS (SELECT 1 FROM app_platform_recovery_sets n WHERE ` + retainedN + ` AND n.installation_id=r.installation_id
+				AND (n.created_ms>r.created_ms OR (n.created_ms=r.created_ms AND n.id>r.id)))`},
+		{"unsettled_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state NOT IN ('verified','deleted') AND ` + live},
 		{"operation", `SELECT p.source_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.source_release_sha256 IS NOT NULL`},
 		{"operation", `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.target_release_sha256 IS NOT NULL`},
 	}
