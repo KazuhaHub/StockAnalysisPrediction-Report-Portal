@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
 // unstartedUpdateFixture leaves an update that failed after it stopped and removed the source and took its
@@ -169,6 +172,23 @@ func expectRolledBack(t *testing.T, f *settleFixture, h migrationHTTP) {
 	}
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.lease.installationID) != "ready" {
 		t.Fatal("the installation is not ready after the roll back")
+	}
+	// Its backend is reachable: the root check of the operation that started it admits the roll back.
+	actor := platformManagedFixtureSession(t, s)
+	access, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, f.lease.installationID)
+	if err != nil {
+		t.Fatalf("backend access after the roll back: %v", err)
+	}
+	defer access.Close()
+	restore := scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='restore' AND stage='complete' ORDER BY completed_ms DESC LIMIT 1`, f.lease.installationID)
+	verified, err := control.VerifyUpdateStartRegistration(access.intent.raw, access.intent.signature, access.intent.start.writer.authority, time.Now().UnixMilli())
+	if err != nil || verified.Start().Command().OperationID != restore {
+		t.Fatalf("the backend's signed start does not name the roll back: %v", err)
+	}
+	// The live runtime read after the gate needs a real runner socket; what matters here is that the gate on the
+	// starting operation admits a roll back instead of refusing it as missing evidence.
+	if err := s.checkPlatformManagedUpdateBackendRoot(context.Background(), restore, access.intent.start.writer.runtime, access.intent.start.writer.authority, f.endpoint); errors.Is(err, errAppPlatformStageEvidence) {
+		t.Fatalf("the backend root check refuses the roll back that started it: %v", err)
 	}
 	// The apps directory offers it to open again, not only the launch route.
 	runtime := scalar[string](t, s.st, `SELECT runtime_id FROM app_platform_installations WHERE id=?`, f.lease.installationID)
