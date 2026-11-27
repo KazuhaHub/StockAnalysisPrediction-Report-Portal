@@ -170,6 +170,12 @@ func expectRolledBack(t *testing.T, f *settleFixture, h migrationHTTP) {
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.lease.installationID) != "ready" {
 		t.Fatal("the installation is not ready after the roll back")
 	}
+	// The apps directory offers it to open again, not only the launch route.
+	runtime := scalar[string](t, s.st, `SELECT runtime_id FROM app_platform_installations WHERE id=?`, f.lease.installationID)
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch FROM app_platform_installations WHERE id=?`, f.lease.installationID)
+	if ok, err := platformWritableLaunchEligible(s.st.poolExec(), f.lease.installationID, runtime, epoch); err != nil || !ok {
+		t.Fatalf("the rolled back installation is not eligible to open from the directory: %v", err)
+	}
 }
 
 // Only an update whose every effect is settled, whose source removal applied and that started nothing takes the
@@ -224,5 +230,67 @@ func TestCapabilitySnapshotAfterARollbackReadsTheRestoredOperation(t *testing.T)
 	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='recovery_required' WHERE action='restore' AND installation_id=? AND stage='complete'`, installation)
 	if _, _, _, _, err := platformCapabilitySnapshotSource(s.st.poolExec(), installation, epoch, release); err == nil {
 		t.Fatal("an update of an earlier generation was read without a roll back onto the current one")
+	}
+}
+
+// seedRollbackOnto records an ordinary roll back that restored the generation the completed update reached and landed
+// on the next one, running the update's release again under its own fence: the shape a roll back past a completed
+// update leaves.
+func seedRollbackOnto(t *testing.T, s *Server, update string) (installation, restore string) {
+	t.Helper()
+	installation = scalar[string](t, s.st, `SELECT installation_id FROM app_platform_operations WHERE id=?`, update)
+	plan, restore := platformFixtureID(7501), platformFixtureID(7502)
+	raw := `{"format":"` + platformManagedRestoreFormat + `","installation_id":"` + installation + `"}`
+	mustExec(t, s.st, `INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
+		SELECT ?,installation_id,app_id,publisher_id,'restore',target_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,?,?,expires_ms,consumed_ms,created_ms,updated_ms
+		FROM app_platform_review_plans WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, plan, platformDigest([]byte(raw)), raw, update)
+	mustExec(t, s.st, `INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
+		SELECT ?,installation_id,?,actor_scope,?,?,'restore',managed,target_generation,target_generation+1,'complete',state_revision,row_revision,NULL,NULL,fence+1,controller_epoch,NULL,completed_ms+1,created_ms+1,updated_ms+1
+		FROM app_platform_operations WHERE id=?`, restore, plan, platformDigest([]byte(restore)), platformDigest([]byte(plan)), update)
+	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(effect_id,operation_id,stage,effect_number,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+		SELECT ?,?,stage,effect_number,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence+1,observed_fence+1,state,receipt_json,created_ms,updated_ms
+		FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate' AND state='applied'`, platformFixtureID(7503), restore, update)
+	mustExec(t, s.st, `UPDATE app_platform_installations SET generation=generation+1,control_fence=control_fence+1 WHERE id=?`, installation)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET generation=generation+1 WHERE installation_id=? AND state='active'`, installation)
+	return installation, restore
+}
+
+// The apps directory opens an installation rolled back past a completed update: the update's reviewed target runs
+// again on the roll back's generation. It refuses when the roll back is not the installation's fence or another
+// release is active.
+func TestDirectoryOpensAnInstallationRolledBackPastACompletedUpdate(t *testing.T) {
+	t.Parallel()
+	for _, refusal := range []string{"", "fence", "release", "not activated"} {
+		t.Run("refusal="+refusal, func(t *testing.T) {
+			t.Parallel()
+			s, lease, intent, endpoint, obs := platformWritableUpdateStartRegistrationCommitFixture(t, false)
+			next, err := s.commitPlatformUpdateStartRegistration(context.Background(), lease, intent, endpoint, obs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
+			defer applied.registration.Close()
+			if _, err := s.commitPlatformUpdateStartActivation(context.Background(), next, applied, boot); err != nil {
+				t.Fatal(err)
+			}
+			runtime := scalar[string](t, s.st, `SELECT runtime_id FROM app_platform_installations WHERE id=?`, lease.installationID)
+			if ok, err := platformWritableLaunchEligible(s.st.poolExec(), lease.installationID, runtime, lease.controllerEpoch); err != nil || !ok {
+				t.Fatalf("fixture: the updated installation is not eligible: %v", err)
+			}
+			installation, restore := seedRollbackOnto(t, s, lease.id)
+			switch refusal {
+			case "fence":
+				mustExec(t, s.st, `UPDATE app_platform_installations SET control_fence=control_fence+1 WHERE id=?`, installation)
+			case "release":
+				other := scalar[string](t, s.st, `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.installation_id=? AND o.action='install'`, installation)
+				mustExec(t, s.st, `UPDATE app_platform_activations SET release_sha256=? WHERE installation_id=? AND state='active'`, other, installation)
+			case "not activated":
+				mustExec(t, s.st, `DELETE FROM app_platform_operation_effects WHERE operation_id=?`, restore)
+			}
+			ok, err := platformWritableLaunchEligible(s.st.poolExec(), installation, runtime, lease.controllerEpoch)
+			if err != nil || ok != (refusal == "") {
+				t.Fatalf("eligible=%v, want %v: %v", ok, refusal == "", err)
+			}
+		})
 	}
 }
