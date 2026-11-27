@@ -47,7 +47,11 @@ func TestRollbackOfAnUnstartedUpdatePostgres(t *testing.T) {
 
 // A roll back that ended for review before it did anything does not keep the installation closed once a later
 // roll back of the same update completes.
-func testLaterRollbackResolvesAnEarlierOneThatDidNothing(t *testing.T, pg bool) {
+func testLaterRollbackResolvesAnEarlierOneThatDidNothing(t *testing.T, pg, withImage bool) {
+	testLaterRollbackWithEarlierImage(t, pg, withImage, "applied")
+}
+
+func testLaterRollbackWithEarlierImage(t *testing.T, pg, withImage bool, imageState string) {
 	f := unstartedUpdateFixture(t, pg)
 	h := newMigrationHTTP(t, f)
 	ctx := context.Background()
@@ -66,8 +70,35 @@ func testLaterRollbackResolvesAnEarlierOneThatDidNothing(t *testing.T, pg bool) 
 		t.Fatal(err)
 	}
 	first := selected.lease.id
+	if withImage {
+		// The earlier roll back loaded its image and its start was refused: neither is work on the installation.
+		mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(effect_id,operation_id,stage,effect_number,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+			SELECT ?,?,'stage',1,'load_image',payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,?,receipt_json,created_ms,updated_ms
+			FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce' AND effect_number=1`,
+			platformFixtureID(7413), first, imageState, f.op)
+		mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(effect_id,operation_id,stage,effect_number,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+			SELECT ?,?,'start',1,'restore-start',payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,'reverted',receipt_json,created_ms,updated_ms
+			FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce' AND effect_number=1`,
+			platformFixtureID(7414), first, f.op)
+	}
 	if n, err := platformUnresolvedOperationCount(f.s.st.poolExec(), f.lease.installationID); err != nil || n != 2 {
 		t.Fatalf("fixture: %d unresolved operations: %v", n, err)
+	}
+	if imageState != "applied" {
+		// An image load in doubt is not settled: no later roll back is admitted over it, and the earlier one stays
+		// unresolved.
+		again := h.post(plans, `{"action":"restore","installation_id":"`+f.lease.installationID+`","recovery_set_id":"`+set+`"}`)
+		if again.Code == 200 {
+			plan := h.json(again, 200)
+			again = h.post(operations, `{"plan_id":"`+h.str(plan, "plan_id")+`","plan_sha256":"`+h.str(plan, "plan_sha256")+`","idempotency_key":"`+platformFixtureID(7415)+`"}`)
+		}
+		if again.Code == 202 {
+			t.Fatalf("a roll back was admitted over a %s image load", imageState)
+		}
+		if n, err := platformUnresolvedOperationCount(f.s.st.poolExec(), f.lease.installationID); err != nil || n != 2 {
+			t.Fatalf("%d unresolved operations with a %s image load, want 2: %v", n, imageState, err)
+		}
+		return
 	}
 	rollBackFailedOverHTTP(t, f, h, f.op)
 	expectRolledBack(t, f, h)
@@ -78,12 +109,22 @@ func testLaterRollbackResolvesAnEarlierOneThatDidNothing(t *testing.T, pg bool) 
 
 func TestLaterRollbackResolvesAnEarlierOneThatDidNothingSQLite(t *testing.T) {
 	t.Parallel()
-	testLaterRollbackResolvesAnEarlierOneThatDidNothing(t, false)
+	testLaterRollbackResolvesAnEarlierOneThatDidNothing(t, false, false)
+}
+
+func TestLaterRollbackResolvesAnEarlierOneThatOnlyLoadedItsImageSQLite(t *testing.T) {
+	t.Parallel()
+	testLaterRollbackResolvesAnEarlierOneThatDidNothing(t, false, true)
+}
+
+func TestLaterRollbackResolvesAnEarlierOneThatOnlyLoadedItsImagePostgres(t *testing.T) {
+	t.Parallel()
+	testLaterRollbackResolvesAnEarlierOneThatDidNothing(t, true, true)
 }
 
 func TestLaterRollbackResolvesAnEarlierOneThatDidNothingPostgres(t *testing.T) {
 	t.Parallel()
-	testLaterRollbackResolvesAnEarlierOneThatDidNothing(t, true)
+	testLaterRollbackResolvesAnEarlierOneThatDidNothing(t, true, false)
 }
 
 // An earlier roll back that applied an effect is not resolved by a later one: what it did is not the later
@@ -154,4 +195,9 @@ func TestPlatformUpdateNeverStartedRefusesAnythingInDoubt(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLaterRollbackKeepsAnEarlierOneWithAnImageLoadInDoubt(t *testing.T) {
+	t.Parallel()
+	testLaterRollbackWithEarlierImage(t, false, true, "prepared")
 }

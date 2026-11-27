@@ -20,11 +20,13 @@ func platformResolvedRecoveryPredicate(e migExec) string {
 		return `json_extract(` + plan + `.plan_json,'$.` + name + `')`
 	}
 	planFormat := field("rp", "format")
-	// An ordinary roll back that ended for review having applied nothing is settled by a later ordinary roll back
-	// of the same checkpoint: there is nothing of its own to undo.
+	// An ordinary roll back that ended for review having applied nothing to the installation is settled by a later
+	// ordinary roll back of the same checkpoint: there is nothing of its own to undo. Applied neutral effects are not
+	// installation work: an image it loaded, or a reclaim or prune that used it as host.
 	restoreReference := `(` + field("rp", "checkpoint_operation_id") + `=o.id OR (o.action='restore' AND o.managed=1
 		AND ` + planFormat + `='` + platformManagedRestoreFormat + `'
-		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects fx WHERE fx.operation_id=o.id AND fx.state<>'reverted')
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects fx WHERE fx.operation_id=o.id AND fx.state<>'reverted'
+			AND NOT (fx.state='applied' AND fx.kind IN (` + platformInstallationNeutralEffectKinds + `)))
 		AND EXISTS (SELECT 1 FROM app_platform_review_plans op WHERE op.id=o.review_plan_id
 			AND ` + field("op", "format") + `='` + platformManagedRestoreFormat + `'
 			AND ` + field("op", "checkpoint_operation_id") + `=` + field("rp", "checkpoint_operation_id") + `)))`
