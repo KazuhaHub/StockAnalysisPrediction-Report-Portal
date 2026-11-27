@@ -129,10 +129,11 @@ func readPlatformUpdateStartRegistrationRows(e migExec, lease platformOperationL
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
 		r.baseEffects = 4
-		if settled, err := platformRestoreSettledByMigration(e, lease); err != nil {
+		if settled, err := platformRestoreNeedsOnlyStart(e, lease); err != nil {
 			return r, err
 		} else if settled {
-			// The failed update's settlement did the stop, removal and restore; this operation only starts.
+			// The failed update's settlement did the stop, removal and restore, or the update left none to do; this
+			// operation only starts.
 			r.baseEffects = 1
 		}
 		// A resume has only the start effect before this one: the import already ran the data

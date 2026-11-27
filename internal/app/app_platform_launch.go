@@ -13,12 +13,21 @@ import (
 var errAppPlatformLaunchUnavailable = errors.New("application launch is unavailable")
 
 func platformResolvedRecoveryPredicate(e migExec) string {
-	restoreReference := `json_extract(rp.plan_json,'$.checkpoint_operation_id')=o.id`
-	planFormat := `json_extract(rp.plan_json,'$.format')`
-	if e.s.driver == "postgres" {
-		restoreReference = `(rp.plan_json::jsonb->>'checkpoint_operation_id')=o.id`
-		planFormat = `(rp.plan_json::jsonb->>'format')`
+	field := func(plan, name string) string {
+		if e.s.driver == "postgres" {
+			return `(` + plan + `.plan_json::jsonb->>'` + name + `')`
+		}
+		return `json_extract(` + plan + `.plan_json,'$.` + name + `')`
 	}
+	planFormat := field("rp", "format")
+	// An ordinary roll back that ended for review having applied nothing is settled by a later ordinary roll back
+	// of the same checkpoint: there is nothing of its own to undo.
+	restoreReference := `(` + field("rp", "checkpoint_operation_id") + `=o.id OR (o.action='restore' AND o.managed=1
+		AND ` + planFormat + `='` + platformManagedRestoreFormat + `'
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects fx WHERE fx.operation_id=o.id AND fx.state<>'reverted')
+		AND EXISTS (SELECT 1 FROM app_platform_review_plans op WHERE op.id=o.review_plan_id
+			AND ` + field("op", "format") + `='` + platformManagedRestoreFormat + `'
+			AND ` + field("op", "checkpoint_operation_id") + `=` + field("rp", "checkpoint_operation_id") + `)))`
 	// An ordinary restore lands on the generation of the operation it settles. A recovery resume
 	// settles the operation its imported checkpoint came from one generation later: it starts from the
 	// generation the failed operation had reached, or from a later one when abandoning a replacement

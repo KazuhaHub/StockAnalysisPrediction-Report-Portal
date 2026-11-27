@@ -206,7 +206,7 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 			return zero, err
 		}
 	}
-	settled, err := platformRestoreSettledByMigration(e, lease)
+	settled, err := platformRestoreNeedsOnlyStart(e, lease)
 	if err != nil {
 		return zero, err
 	}

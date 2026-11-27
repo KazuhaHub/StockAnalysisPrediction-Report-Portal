@@ -131,10 +131,10 @@ func platformRequireSettledMigration(e migExec, operation string) error {
 	return nil
 }
 
-// platformRestoreSettledByMigration reports whether the restore operation's checkpoint belongs to a failed
-// update whose migration settlement already restored it. A checkpoint restores once, so the roll back takes
-// its restore stage on that evidence alone.
-func platformRestoreSettledByMigration(e migExec, lease platformOperationLease) (bool, error) {
+// platformRestoreNeedsOnlyStart reports whether the restore operation's checkpoint belongs to a failed
+// update whose migration settlement already restored it, or to one that never changed the data or started a
+// target. A checkpoint restores once, so the roll back takes its restore stage on that evidence alone.
+func platformRestoreNeedsOnlyStart(e migExec, lease platformOperationLease) (bool, error) {
 	if lease.snapshot.Action != appplatform.ActionRestore {
 		return false, nil
 	}
@@ -146,7 +146,48 @@ func platformRestoreSettledByMigration(e migExec, lease platformOperationLease) 
 		return false, err
 	}
 	state, err := platformMigrationSettlementState(e, checkpoint.OperationID)
-	return state == "settled", err
+	if err != nil || state == "settled" {
+		return state == "settled", err
+	}
+	if state != "" {
+		return false, nil
+	}
+	return platformUpdateNeverStarted(e, checkpoint.OperationID)
+}
+
+// platformUpdateNeverStarted reports whether a failed update with no migration left nothing for a roll back to
+// stop or remove and nothing in doubt: every effect it issued is settled (applied or reverted), its removal of
+// the source is applied, and it has no effect that starts a backend, in any state, nor any past the start
+// stage. The data is then the checkpoint's, so the roll back only starts.
+func platformUpdateNeverStarted(e migExec, operation string) (bool, error) {
+	rows, err := e.query(`SELECT stage,effect_number,kind,state FROM app_platform_operation_effects
+		WHERE operation_id=?`, operation)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	removed := false
+	for rows.Next() {
+		var stage, kind, state string
+		var number int64
+		if err := rows.Scan(&stage, &number, &kind, &state); err != nil {
+			return false, err
+		}
+		if state != "applied" && state != "reverted" {
+			return false, nil
+		}
+		if platformStartBearingKinds[kind] || stage == string(appplatform.StageStart) ||
+			stage == string(appplatform.StageProbe) || stage == string(appplatform.StageActivate) {
+			return false, nil
+		}
+		if stage == string(appplatform.StageMigrate) && number == 1 && kind == "remove-code" && state == "applied" {
+			removed = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return removed, nil
 }
 
 func jsonUnmarshalString(raw string, v any) error { return json.Unmarshal([]byte(raw), v) }
