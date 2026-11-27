@@ -17,7 +17,7 @@ func (s *Server) advancePlatformRestoreStage(ctx context.Context, expected platf
 	} else if resume {
 		return s.advancePlatformResumeStage(ctx, expected, next)
 	}
-	settled, err := platformRestoreSettledByMigration(s.st.poolExec(), expected)
+	settled, err := platformRestoreNeedsOnlyStart(s.st.poolExec(), expected)
 	if err != nil {
 		return zero, err
 	}
@@ -67,7 +67,7 @@ func (s *Server) advancePlatformRestoreStage(ctx context.Context, expected platf
 			expected.snapshot.Stage, err)
 	}
 	if settled && effects != 0 {
-		// Nothing was stopped or removed by this operation: the settlement already did.
+		// Nothing was stopped or removed by this operation: the settlement already did, or the update left nothing.
 		return zero, fmt.Errorf("restore settled stage %s effects=%d: %w", expected.snapshot.Stage, effects, errAppPlatformStageEvidence)
 	}
 	if !settled && expected.snapshot.Stage == appplatform.StageQuiesce && effects != 2 {
@@ -149,13 +149,13 @@ func (s *Server) runPlatformManagedRestore(ctx context.Context, expected platfor
 			return lease, err
 		}
 	}
-	settled, err := platformRestoreSettledByMigration(s.st.poolExec(), expected)
+	settled, err := platformRestoreNeedsOnlyStart(s.st.poolExec(), expected)
 	if err != nil {
 		return platformOperationLease{}, err
 	}
 	if settled {
-		// The failed update's settlement removed the target and restored the checkpoint; the stages that
-		// repeat that advance on its evidence and send nothing.
+		// The failed update's settlement removed the target and restored the checkpoint, or the update never started
+		// one nor changed the data; the stages that repeat that advance on its evidence and send nothing.
 		switch expected.snapshot.Stage {
 		case appplatform.StageQuiesce:
 			return s.advancePlatformRestoreStage(ctx, expected, appplatform.StageSnapshot)
