@@ -7,6 +7,27 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
+// platformCapabilitySnapshotSource is the completed operation whose consumed review the capability rows are judged
+// against: the install, a lifecycle or resume that landed on the current generation, or, once an ordinary roll back
+// landed on it, the operation that completed the generation the roll back restored. An ordinary roll back grants
+// nothing of its own: the rows it keeps are the restored operation's.
+func platformCapabilitySnapshotSource(e migExec, installation, epoch, release string) (planID, raw, digest, action string, err error) {
+	err = e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,o.action FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable' OR o.action='repair' OR o.action='import_data') AND o.target_generation=i.generation) OR
+			(o.action='restore' AND o.managed=1 AND o.target_generation=i.generation AND p.plan_json LIKE ?) OR
+			(o.action IN ('install','update','enable','repair','import_data') AND o.managed=1 AND o.target_generation=(SELECT r.source_generation
+				FROM app_platform_operations r JOIN app_platform_review_plans rp ON rp.id=r.review_plan_id
+				WHERE r.installation_id=o.installation_id AND r.action='restore' AND r.managed=1 AND r.stage='complete'
+				AND r.completed_ms IS NOT NULL AND r.target_generation=i.generation AND r.controller_epoch=o.controller_epoch
+				AND r.error_code IS NULL AND r.lease_owner IS NULL AND r.lease_until_ms IS NULL
+				AND rp.action='restore' AND rp.plan_json LIKE ? AND rp.consumed_ms IS NOT NULL
+				AND EXISTS (SELECT 1 FROM app_platform_operation_effects ra WHERE ra.operation_id=r.id AND ra.stage='activate' AND ra.state='applied')
+				ORDER BY r.completed_ms DESC,r.id DESC LIMIT 1)))
+		AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
+		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation, platformResumePlanPrefix(), platformOrdinaryRestorePlanPrefix(), epoch, release).Scan(&planID, &raw, &digest, &action)
+	return planID, raw, digest, action, err
+}
+
 // Capability rows must exactly match the signed declaration and consumed review,
 // including explicit network restrictions. A grant bit alone proves no scope.
 // This read grants no authority and does not repair inconsistent records.
@@ -19,11 +40,8 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	// section 2.5); everything else is judged against the signed declaration and the
 	// operation's own review exactly as before.
 	overlay := platformCapabilityOverlay(e, installation, release, epoch)
-	var planID, raw, digest, action string
-	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,o.action FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_installations i ON i.id=o.installation_id
-		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable' OR o.action='repair' OR o.action='import_data') AND o.target_generation=i.generation) OR
-			(o.action='restore' AND o.managed=1 AND o.target_generation=i.generation AND p.plan_json LIKE ?)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
-		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation, platformResumePlanPrefix(), epoch, release).Scan(&planID, &raw, &digest, &action); err != nil {
+	planID, raw, digest, action, err := platformCapabilitySnapshotSource(e, installation, epoch, release)
+	if err != nil {
 		return fail
 	}
 	if len(raw) > 65536 || platformDigest([]byte(raw)) != digest {
@@ -202,4 +220,10 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		return fail
 	}
 	return verifyPlatformCapabilityRowsOf(e, installation, m, projection, keptCapabilities, isUpdate, true, policy, planID, overlay, fail)
+}
+
+// platformOrdinaryRestorePlanPrefix matches the plan of an ordinary roll back, as platformResumePlanPrefix matches a
+// resume's.
+func platformOrdinaryRestorePlanPrefix() string {
+	return `{"format":"` + platformManagedRestoreFormat + `",%`
 }
