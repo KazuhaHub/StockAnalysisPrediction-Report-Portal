@@ -3488,6 +3488,7 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-app-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; min-width: 0; }
 .rp-update-tag.ant-tag { margin: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rp-app-card-foot .rp-app-controls { margin: 0; flex-wrap: wrap; }
+.rp-app-card-update { display: flex; margin-top: 4px; min-width: 0; }
 .rp-op-line.ant-btn {
   position: relative; z-index: 1; display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: calc(100% + 12px);
   height: auto; margin: 6px -6px 0; padding: 3px 6px; text-align: start; white-space: normal; font-size: 12px; line-height: 18px;

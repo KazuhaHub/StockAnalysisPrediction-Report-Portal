@@ -338,8 +338,13 @@ describe('Switch version loads on demand', () => {
     const card = await notesCard()
     // The cards are there before the read answers; the tag joins them.
     expect(within(card).getByRole('button', { name: 'appStore.switchVersion' })).toBeTruthy()
-    expect(await within(card).findByText('appStore.updateAvailable:{"version":"1.1.0"}')).toBeTruthy()
+    const tag = await within(card).findByText('appStore.updateAvailable:{"version":"1.1.0"}')
     expect(marketCalls()).toEqual([`${root}/market/sources`, `${root}/market/catalogue`])
+    // The same order as the list's status column: state, then the update tag, then the controls; never down among the buttons.
+    expect(tag.closest('.rp-app-card-foot')).toBeNull()
+    const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(follows(card.querySelector('.rp-app-card-meta')!, tag)).toBe(true)
+    expect(follows(tag, within(card).getByRole('button', { name: 'appStore.switchVersion' }))).toBe(true)
   })
 
   it('shows no tag and no error when the app has nothing newer, and when the catalogue cannot be read', async () => {
