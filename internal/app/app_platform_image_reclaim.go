@@ -246,9 +246,10 @@ type platformLoadedImage struct {
 }
 
 // platformReferencedConfigDigests is every config digest a release the Portal still needs carries. A release is
-// needed when loadPlatformReleasePins pins it (the active release of every installation that still exists, every
-// release a retained recovery checkpoint or bundle could restore, candidates, recovery sets, releases of
-// unfinished operations, unsettled loads, unrecovered failures and open review plans) or when it is the previous
+// needed when loadPlatformReleasePins pins it for the runner (platformRuntimeImagePinReason: the active release of
+// every installation that still exists, candidates, the release of each installation's newest retained recovery set
+// and of every unsettled one, releases of unfinished operations, unsettled loads, unrecovered failures and open
+// review plans; an older retained set keeps only its blobs, from which a restore loads it again) or when it is the previous
 // release of an installation that still exists: the release its latest completed update moved away from, kept for
 // rollback. Any failure to read a release returns an error and no set: removal must never run on a partial set.
 func (s *Server) platformReferencedConfigDigests(ctx context.Context) (map[string]bool, error) {
@@ -265,9 +266,20 @@ func (s *Server) platformReferencedConfigDigests(ctx context.Context) (map[strin
 // platformReferencedConfigDigestsIn is the same computation on any executor, so the removal row can be inserted in
 // the transaction that computed it, under the lock operation admission also takes.
 func platformReferencedConfigDigestsIn(e migExec) (map[string]bool, error) {
-	pins, err := loadPlatformReleasePins(e, time.Now().UnixMilli())
+	all, err := loadPlatformReleasePins(e, time.Now().UnixMilli())
 	if err != nil {
 		return nil, err
+	}
+	pins := map[string]map[string]bool{}
+	for sha, reasons := range all {
+		for reason := range reasons {
+			if platformRuntimeImagePinReason(reason) {
+				if pins[sha] == nil {
+					pins[sha] = map[string]bool{}
+				}
+				pins[sha][reason] = true
+			}
+		}
 	}
 	rows, err := e.query(`SELECT DISTINCT p.source_release_sha256 FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id

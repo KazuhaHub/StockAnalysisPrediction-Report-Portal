@@ -940,28 +940,37 @@ func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) 
 // (platformDecidedSets), never by the length of the effect ledger. An applied deletion normally retires its set in the transaction that settles it, so the list is the
 // open effects; an applied effect beside a live set is a ledger that disagrees with itself, and the set is excluded.
 func platformRetainedPredicate(e migExec, alias string) (string, error) {
-	predicate := alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
-	rows, err := e.query(`SELECT id,checkpoint_id FROM app_platform_recovery_sets WHERE deleted_ms IS NULL AND manifest_sha256 IS NOT NULL`)
+	predicates, err := platformRetainedPredicates(e, alias)
 	if err != nil {
 		return "", err
+	}
+	return predicates[0], nil
+}
+
+// platformRetainedPredicates is platformRetainedPredicate for several aliases from one read, so every alias sees
+// the same decided sets.
+func platformRetainedPredicates(e migExec, aliases ...string) ([]string, error) {
+	rows, err := e.query(`SELECT id,checkpoint_id FROM app_platform_recovery_sets WHERE deleted_ms IS NULL AND manifest_sha256 IS NOT NULL`)
+	if err != nil {
+		return nil, err
 	}
 	var live []platformSetRef
 	for rows.Next() {
 		var ref platformSetRef
 		if err := rows.Scan(&ref.id, &ref.checkpoint); err != nil {
 			rows.Close()
-			return "", err
+			return nil, err
 		}
 		live = append(live, ref)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	decided, err := platformDecidedSets(e, live)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var ids []string
 	for _, ref := range live {
@@ -970,10 +979,15 @@ func platformRetainedPredicate(e migExec, alias string) (string, error) {
 		}
 	}
 	sort.Strings(ids)
-	if len(ids) > 0 {
-		predicate += ` AND ` + alias + `.id NOT IN (` + platformUUIDList(ids) + `)`
+	predicates := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		predicate := alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
+		if len(ids) > 0 {
+			predicate += ` AND ` + alias + `.id NOT IN (` + platformUUIDList(ids) + `)`
+		}
+		predicates = append(predicates, predicate)
 	}
-	return predicate, nil
+	return predicates, nil
 }
 
 // platformRetentionTick runs the sweep from the cleanup ticker. It waits platformRetentionInterval between sweeps

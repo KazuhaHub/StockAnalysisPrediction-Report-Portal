@@ -304,12 +304,12 @@ func TestReclaimComputesOnlyTheImagesNothingReferences(t *testing.T) {
 	// The release a completed update moved the installation away from is kept for rollback.
 	mustExec(t, f.s.st, `UPDATE app_platform_review_plans SET action='update',source_release_sha256=? WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, f.shas["previous"], f.hostOp)
 	mustExec(t, f.s.st, `UPDATE app_platform_operations SET action='update' WHERE id=?`, f.hostOp)
-	// A retained recovery checkpoint could restore this release.
+	// The installation's newest retained recovery checkpoint could restore this release.
 	namespace := scalar[string](t, f.s.st, `SELECT data_namespace_id FROM app_platform_activations WHERE installation_id=? AND state='active'`, f.installation)
 	platformTestInsert(t, f.s.st.poolExec(), "recovery_sets", map[string]any{
 		"id": platformFixtureID(8901), "installation_id": f.installation, "data_namespace_id": namespace, "operation_id": f.hostOp,
 		"release_sha256": f.shas["restorable"], "data_format": 1, "checkpoint_id": platformFixtureID(8902), "manifest_sha256": platformDigest([]byte("x")),
-		"bytes": 1, "state": "verified", "controller_epoch": f.epoch, "writer_fence": 1, "verified_ms": int64(1), "deleted_ms": nil, "created_ms": 1, "updated_ms": 1,
+		"bytes": 1, "state": "verified", "controller_epoch": f.epoch, "writer_fence": 1, "verified_ms": int64(1), "deleted_ms": nil, "created_ms": int64(9_999_999_999_999), "updated_ms": 1,
 	})
 	// Another installation that still exists keeps its release, whatever the first one moved on to.
 	other := platformFixtureID(8910)
