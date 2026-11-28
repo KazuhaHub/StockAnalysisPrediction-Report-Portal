@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -272,6 +273,11 @@ func (s *Server) matchExistingAccount(p SSOProvider, id ssoIdentity) (string, er
 			// empty email" would adopt an unrelated account on a missing attribute.
 			return "", errNoEmailToMatch
 		}
+		if id.Provider == "oidc" && !oidcEmailVerified(id, email) {
+			// Decided before the lookup, from the token alone, so naming it reveals nothing about
+			// which accounts exist.
+			return "", errEmailUnverified
+		}
 		names := s.st.UsersByEmail(email)
 		if len(names) == 0 {
 			return "", nil
@@ -287,7 +293,64 @@ func (s *Server) matchExistingAccount(p SSOProvider, id ssoIdentity) (string, er
 	if u == nil || !u.Active {
 		return "", errInactiveAccount
 	}
+	// Never move an account off an identity it is already bound to. LinkIdentity replaces the one
+	// binding, so adopting here would pass the account to whoever a second IdP says shares its
+	// email or name, and lock its owner out of SSO. Rebinding is the admin's unlink, then a login.
+	// The identity it is bound to may match: SSO step-up re-proves a linked account through here.
+	for _, bound := range s.st.IdentitiesOf(u.Username) {
+		if bound.Provider != id.Provider || bound.Issuer != id.Issuer || bound.Subject != id.Subject {
+			return "", errBoundElsewhere
+		}
+	}
 	return u.Username, nil
+}
+
+// oidcEmailVerified reports whether the OP vouches for email, the value about to be matched. Matching on an
+// address the OP does not vouch for is the nOAuth account-takeover class.
+//
+// Entra never sends email_verified, and its email is a directory field the tenant's admin can set
+// to any address. Its signal is xms_edov (the email's domain is verified as owned by the tenant),
+// an optional claim the app registration must request; for an Entra issuer that is the ONLY claim
+// accepted. Everyone else uses the standard email_verified. Some OPs send either as a string.
+//
+// Both flags vouch for the standard email claim and nothing else, so the matched value must BE that
+// claim: one mapped from preferred_username or upn, or taken from an email-shaped subject, is only
+// accepted when it equals the vouched address.
+func oidcEmailVerified(id ssoIdentity, email string) bool {
+	if vouched, _ := id.Claims["email"].(string); !strings.EqualFold(strings.TrimSpace(vouched), email) {
+		return false
+	}
+	name := "email_verified"
+	if isEntraIssuer(id.Issuer) {
+		name = "xms_edov"
+	}
+	switch v := id.Claims[name].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true") || strings.TrimSpace(v) == "1"
+	}
+	return false
+}
+
+// entraIssuerHosts are the Microsoft identity platform's token issuers: the v2.0 endpoint and the
+// v1.0 sts.windows.net form, in the public and sovereign clouds.
+var entraIssuerHosts = map[string]bool{
+	"login.microsoftonline.com":        true,
+	"sts.windows.net":                  true,
+	"login.microsoftonline.us":         true,
+	"sts.microsoftonline.us":           true,
+	"login.partner.microsoftonline.cn": true,
+	"sts.chinacloudapi.cn":             true,
+	"login.chinacloudapi.cn":           true,
+}
+
+func isEntraIssuer(issuer string) bool {
+	u, err := url.Parse(issuer)
+	if err != nil {
+		return false
+	}
+	return entraIssuerHosts[strings.ToLower(u.Hostname())]
 }
 
 // resolveFailCode decides what the login page is told.
@@ -304,6 +367,9 @@ func (s *Server) matchExistingAccount(p SSOProvider, id ssoIdentity) (string, er
 func resolveFailCode(err error) string {
 	if errors.Is(err, errNoEmailToMatch) {
 		return "sso_no_email_claim"
+	}
+	if errors.Is(err, errEmailUnverified) {
+		return "sso_email_unverified"
 	}
 	return "not_provisioned"
 }
@@ -329,6 +395,8 @@ func looksLikeEmail(v string) bool {
 var (
 	errNoEmailToMatch  = ssoError("the assertion carried no email to match an account with")
 	errInactiveAccount = ssoError("that account is disabled")
+	errEmailUnverified = ssoError("the identity provider does not vouch for this email, so it cannot match an account")
+	errBoundElsewhere  = ssoError("that account is already bound to another external identity")
 )
 
 var (
