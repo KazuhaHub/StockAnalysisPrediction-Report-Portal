@@ -55,9 +55,10 @@ export function InstalledControls({ app, uninstallable, busy, blocked = '', onRe
 }
 
 /** The "Update available" tag of an installed platform app, once the shared catalogue read has found a newer release; nothing before or without it. */
-export function InstalledUpdateTag({ app }: { app: AdminApp }) {
+export function InstalledUpdateTag({ app, className }: { app: AdminApp; className?: string }) {
   const update = useUpdateHint(app.platform ? app : null)
-  return update ? <UpdateAvailableTag version={update} /> : null
+  if (!update) return null
+  return className ? <div className={className}><UpdateAvailableTag version={update} /></div> : <UpdateAvailableTag version={update} />
 }
 
 /** An app's newest operation as the progress line or result badge it is shown as, or nothing before it has had one. */
@@ -115,8 +116,10 @@ export function InstalledCard({ name, description, publisher, source, ...actions
           </div>
           {description && <div className="rp-app-card-desc">{description}</div>}
           <div className="rp-app-card-meta"><InstalledState app={app} /><ServiceStatus app={app} compact /></div>
+          {/* State, update tag, operation: the order the list's status column uses. */}
+          <InstalledUpdateTag app={app} className="rp-app-card-update" />
           <InstalledOperation operation={actions.operation} onOpenOperation={actions.onOpenOperation} />
-          {app.platform && !!app.installationId && <div className="rp-app-card-foot"><InstalledControls {...actions} /><InstalledUpdateTag app={app} /></div>}
+          {app.platform && !!app.installationId && <div className="rp-app-card-foot"><InstalledControls {...actions} /></div>}
         </div>
       </div>
     </Card>
